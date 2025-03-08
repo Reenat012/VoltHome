@@ -32,13 +32,7 @@ class RoomRepositoryImpl @Inject constructor(
             .flowOn(dispatchers)
     }
 
-    private fun List<RoomEntity>.toDomainModel(): List<Room> {
-        return map { entity -> Room(
-            id = entity.id,
-            name = entity.name,
-            createdAt = entity.createdAt
-        ) }
-    }
+
 
     override suspend fun addRoom(name: String) {
         //запускаем в фоновом потоке, используя корутину
@@ -64,4 +58,33 @@ class RoomRepositoryImpl @Inject constructor(
             }
         }
     }
-}
+
+    override suspend fun getRoomById(roomId: Int) : Room? = withContext(dispatchers) {
+            return@withContext try {
+                //ищем комнату в БД
+                val entity = roomDao.getRoomById(roomId)
+
+                //преобразовываем из Entity в модель удобную для чтения
+                entity?.toDomain()
+            } catch (e: Exception) {
+                throw RoomNotFoundException()
+            }
+        }
+    }
+
+//преобразования объектов из Entity в Domain
+    private fun List<RoomEntity>.toDomainModel(): List<Room> {
+        return map { entity -> Room(
+            id = entity.id,
+            name = entity.name,
+            createdAt = entity.createdAt
+        ) }
+    }
+
+
+    private fun RoomEntity.toDomain() = Room(
+        id = id,
+        name = name,
+        createdAt = createdAt
+    )
+

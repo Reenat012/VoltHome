@@ -6,11 +6,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavGraph
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.navArgument
 import ru.mugalimov.volthome.ui.screens.AddRoomScreen
 import ru.mugalimov.volthome.ui.screens.ExploitationScreen
 import ru.mugalimov.volthome.ui.screens.LoadsScreen
+import ru.mugalimov.volthome.ui.screens.RoomDetailScreen
 import ru.mugalimov.volthome.ui.screens.RoomsScreen
 
 /**
@@ -42,8 +45,31 @@ fun NavGraphApp(
                         Screen.RoomDetail.createRoute(roomId)
 
                     )
-                })
+                }
+            )
         }
+
+        composable(
+            //Определяет уникальный "адрес" экрана
+            route = Screen.RoomDetail.route,
+            //Определяет параметры, которые можно передать на экран.
+            arguments = listOf(
+                //создаём аргумент с именем "roomId"
+                navArgument("roomId") {
+                    type = NavType.IntType //указываем, что это целое число
+                    defaultValue = 0 //значение по умолчанию, если параметр не передан
+                }
+            )
+        ) { backStackEntry -> //объект, содержащий информацию о текущем состоянии навигации.
+            //получаем все аргументы экрана по roomId
+            val roomId = backStackEntry.arguments?.getInt("roomId") ?: 0
+            //Создаём экран RoomDetailScreen
+            RoomDetailScreen(
+                roomId = roomId, //Передаём ему полученный roomId
+                onBack = { navController.popBackStack()}
+            )
+        }
+
         composable(Screen.AddRoom.route) {
             AddRoomScreen(onBack = { navController.popBackStack() })
         }

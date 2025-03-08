@@ -13,4 +13,8 @@ interface RoomRepository {
 
     //удалить комнату
     suspend fun deleteRoom(roomId: Int)
+
+    //получить комнату по roomId
+    suspend fun getRoomById(roomId: Int) : Room?
+
 }
