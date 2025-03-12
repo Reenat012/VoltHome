@@ -16,5 +16,4 @@ interface RoomRepository {
 
     //получить комнату по roomId
     suspend fun getRoomById(roomId: Int) : Room?
-
 }

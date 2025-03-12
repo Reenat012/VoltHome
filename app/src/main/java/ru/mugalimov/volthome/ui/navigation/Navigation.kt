@@ -35,9 +35,10 @@ sealed class Screen(val route: String) {
     object AddRoom : Screen("add_room")
     object LoadsScreen : Screen("loads_screen")
     object ExploitationScreen : Screen("exploitation_screen")
-    object RoomDetail : Screen("room_detail/{roomId}") {
+    object RoomDetailScreen: Screen("room_detail/{roomId}") {
         fun createRoute(roomId: Int) = "room_detail/$roomId"
     }
+    object AddDeviceScreen: Screen("add_device")
 }
 
 /**

@@ -1,14 +1,16 @@
-package ru.mugalimov.volthome.ui.screens
+package ru.mugalimov.volthome.ui.screens.room
 
 import android.os.Build
 import androidx.annotation.RequiresApi
-import androidx.compose.foundation.MutatePriority
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material3.Card
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -18,8 +20,12 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
+import ru.mugalimov.volthome.ui.components.ErrorView
+import ru.mugalimov.volthome.ui.components.LoadingView
+import ru.mugalimov.volthome.ui.screens.rooms.RoomList
 
 import ru.mugalimov.volthome.viewmodel.RoomDetailViewModel
+import ru.mugalimov.volthome.viewmodel.RoomViewModel
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
@@ -28,11 +34,16 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun RoomDetailScreen(
     roomId: Int,
+    onClickDevice: (Int) -> Unit,  // Обработчик клика на устройство
+    onAddDevice: () -> Unit, // Обработчик клика на кнопку "Добавить устройство"
     onBack: () -> Unit,
     viewModel: RoomDetailViewModel = hiltViewModel()
 ) {
     //подлкючаем наблюдателя за комнатами
     val room by viewModel.room.collectAsState()
+
+    //подлкючаем наблюдателя за комнатами
+    val uiState by viewModel.uiState.collectAsState()
 
     //рисуем интерфейс
     Scaffold(
@@ -46,16 +57,22 @@ fun RoomDetailScreen(
                     }
                 }
             )
+        },
+        floatingActionButton = {
+            FloatingActionButton(onClick = onAddDevice) {
+                Icon(Icons.Default.Add, "Добавить")
+            }
         }
     ) { padding ->
         when {
-            room == null -> Text("Комната не найдена")
-            else -> Column(
-                modifier = Modifier.padding(padding)
-            ) {
-                Text("ID: ${room!!.id}")
-                Text("Создана: ${room!!.createdAt}")
-            }
+            uiState.isLoading -> LoadingView()
+            uiState.error != null -> ErrorView(uiState.error!!)
+            else -> DeviceList(
+                devices = uiState.devices,
+                onDelete = viewModel::deleteDevice,
+                modifier = Modifier.padding(padding),
+                onClickDevice = onClickDevice
+            )
         }
     }
 }

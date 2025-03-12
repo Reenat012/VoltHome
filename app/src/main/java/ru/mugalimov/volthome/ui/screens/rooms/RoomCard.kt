@@ -1,4 +1,4 @@
-package ru.mugalimov.volthome.ui.screens
+package ru.mugalimov.volthome.ui.screens.rooms
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Row
