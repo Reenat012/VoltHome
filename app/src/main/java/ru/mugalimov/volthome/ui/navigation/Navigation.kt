@@ -22,24 +22,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
  * @param icon Иконка из Material Icons
  */
 sealed class BottomNavItem(val title: String, val icon: ImageVector) {
-    object Rooms : BottomNavItem("Комнаты", Icons.Default.Home)
-    object Loads : BottomNavItem("Нагрузки", Icons.Default.Speed)
-    object Exploitation : BottomNavItem("Экспликация", Icons.Default.List)
+    data object Rooms : BottomNavItem("Комнаты", Icons.Default.Home)
+    data object Loads : BottomNavItem("Нагрузки", Icons.Default.Speed)
+    data object Exploitation : BottomNavItem("Экспликация", Icons.Default.List)
 }
 
-/**
-    Навигационные маршруты
- */
-sealed class Screen(val route: String) {
-    object RoomsList : Screen("rooms_list")
-    object AddRoom : Screen("add_room")
-    object LoadsScreen : Screen("loads_screen")
-    object ExploitationScreen : Screen("exploitation_screen")
-    object RoomDetailScreen: Screen("room_detail/{roomId}") {
-        fun createRoute(roomId: Int) = "room_detail/$roomId"
-    }
-    object AddDeviceScreen: Screen("add_device")
-}
+
 
 /**
  * Верхняя панель приложения (AppBar).

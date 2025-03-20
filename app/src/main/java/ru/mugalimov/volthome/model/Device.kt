@@ -8,5 +8,6 @@ data class Device(
     val power: Int, //мощность
     val voltage: Int, //Класс напряжения
     val demandRatio: Double, //к-т спроса
+    val roomId: Int,
     val createdAt: Date
 )

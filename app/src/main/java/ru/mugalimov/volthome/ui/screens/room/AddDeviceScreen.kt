@@ -1,4 +1,4 @@
-package ru.mugalimov.volthome.ui.screens
+package ru.mugalimov.volthome.ui.screens.room
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -24,7 +24,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import ru.mugalimov.volthome.viewmodel.RoomDetailViewModel
+import ru.mugalimov.volthome.entity.DeviceEntity
+import ru.mugalimov.volthome.ui.viewmodel.RoomDetailViewModel
+import java.util.Date
 
 /**
  * Экран добавления нового устройства.
@@ -32,13 +34,18 @@ import ru.mugalimov.volthome.viewmodel.RoomDetailViewModel
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddDeviceScreen(onBack: () -> Unit, viewModel: RoomDetailViewModel = hiltViewModel()) {
+fun AddDeviceScreen(
+    roomId: Int, // Получаем roomId из аргументов навигации
+    onBack: () -> Unit,
+    viewModel: RoomDetailViewModel = hiltViewModel()
+) {
 
     // Состояние для хранения названия комнаты
     var deviceName by remember { mutableStateOf("") }
     var devicePower by remember { mutableStateOf("") }
     var deviceVoltage by remember { mutableStateOf("") }
     var deviceDemandRatio by remember { mutableStateOf("") }
+
 
     // Scaffold — это базовый макет для экрана, который включает TopAppBar и контент.
     Scaffold(
@@ -55,15 +62,16 @@ fun AddDeviceScreen(onBack: () -> Unit, viewModel: RoomDetailViewModel = hiltVie
                     IconButton(
                         onClick = {
                             if (deviceName.isNotBlank()
-                                || devicePower.isNotBlank()
-                                || deviceVoltage.isNotBlank()
-                                || deviceDemandRatio.isNotBlank()
+                                && devicePower.isNotBlank()
+                                && deviceVoltage.isNotBlank()
+                                && deviceDemandRatio.isNotBlank()
                             ) {
                                 viewModel.addDevice(
                                     name = deviceName,
                                     power = devicePower.toInt(),
                                     voltage = deviceVoltage.toInt(),
-                                    demandRatio = deviceDemandRatio.toDouble()
+                                    demandRatio = deviceDemandRatio.toDouble(),
+                                    roomId = roomId // Используем переданный roomId, а не id из viewmodel
                                 )
                                 onBack()
                             }

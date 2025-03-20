@@ -6,7 +6,9 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
+import ru.mugalimov.volthome.entity.DeviceEntity
 import ru.mugalimov.volthome.entity.RoomEntity
+import ru.mugalimov.volthome.model.Device
 
 @Dao
 interface RoomDao {

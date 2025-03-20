@@ -1,7 +1,8 @@
 package ru.mugalimov.volthome.repository.impl
 
+import android.content.ContentValues.TAG
+import android.util.Log
 import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -9,20 +10,16 @@ import kotlinx.coroutines.withContext
 import ru.mugalimov.volthome.dao.DeviceDao
 import ru.mugalimov.volthome.dao.RoomDao
 import ru.mugalimov.volthome.entity.DeviceEntity
-import ru.mugalimov.volthome.entity.RoomEntity
 import ru.mugalimov.volthome.error.DeviceNotFoundException
-import ru.mugalimov.volthome.error.RoomAlreadyExistsException
-import ru.mugalimov.volthome.error.RoomNotFoundException
 import ru.mugalimov.volthome.model.Device
-import ru.mugalimov.volthome.model.Room
 import ru.mugalimov.volthome.module.IoDispatcher
 import ru.mugalimov.volthome.repository.DeviceRepository
-import ru.mugalimov.volthome.repository.RoomRepository
 import java.util.Date
 import javax.inject.Inject
 
 class DeviceRepositoryImpl @Inject constructor(
     private val deviceDao: DeviceDao,
+    private val roomDao: RoomDao,
     //свойство dispatchers, которое хранит диспетчер для запуска корутин
     //в фоновых потоках, подходящих для IO-задач
     @IoDispatcher private val dispatchers: CoroutineDispatcher
@@ -30,28 +27,39 @@ class DeviceRepositoryImpl @Inject constructor(
 
     //получение списка комнат через DAO
     //используется для получения изменения данных
-    override fun observeDevices(): Flow<List<Device>> {
-        return deviceDao.observeAllDevice()
+    override suspend fun observeDevicesByIdRoom(roomId: Int): Flow<List<Device>> {
+        return deviceDao.observeDevicesByIdRoom(roomId)
             //преобразуем список DeviceEntity в список Device
-            .map { entities -> entities.toDomainModel() }
+            .map { entities -> entities.toDomainModelListDevice() }
             .flowOn(dispatchers)
     }
 
-
-    override suspend fun addDevice(name: String, power: Int, voltage: Int, demandRatio: Double) {
+    override suspend fun addDevice(name: String, power: Int, voltage: Int, demandRatio: Double, roomId: Int) {
+        Log.d(TAG, "Заходим в репо")
         //запускаем в фоновом потоке, используя корутину
-        withContext(dispatchers) {
+        try {
+            withContext(dispatchers) {
+                val isRoomExist = roomDao.getRoomById(roomId)
+                if (isRoomExist == null) {
+                    throw IllegalArgumentException("Комната с ID $roomId не найдена")
+                }
 
-            //добавляем устройство в БД
-            deviceDao.addDevices(
-                DeviceEntity(
-                    name = name,
-                    power = power,
-                    voltage = voltage,
-                    demandRatio = demandRatio,
-                    createdAt = Date()
+                Log.d(TAG, "Заходим в корутину")
+                deviceDao.addDevice(
+                    DeviceEntity(
+                        name = name,
+                        power = power,
+                        voltage = voltage,
+                        demandRatio = demandRatio,
+                        roomId = roomId,
+                        createdAt = Date()
+                    )
                 )
-            )
+                Log.d(TAG, "Успех")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка при добавлении устройства: ${e.message}", e)
+            throw e // Перебрасываем исключение дальше
         }
     }
 
@@ -73,7 +81,7 @@ class DeviceRepositoryImpl @Inject constructor(
             val entity = deviceDao.getDeviceById(deviceId)
 
             //преобразовываем из Entity в модель удобную для чтения
-            entity?.toDomain()
+            entity?.toDomainModelDevice()
         } catch (e: Exception) {
             throw DeviceNotFoundException()
         }
@@ -81,7 +89,7 @@ class DeviceRepositoryImpl @Inject constructor(
 }
 
 //преобразования объектов из Entity в Domain
-private fun List<DeviceEntity>.toDomainModel(): List<Device> {
+private fun List<DeviceEntity>.toDomainModelListDevice(): List<Device> {
     return map { entity ->
         Device(
             id = entity.id,
@@ -89,17 +97,19 @@ private fun List<DeviceEntity>.toDomainModel(): List<Device> {
             power = entity.power,
             voltage = entity.voltage,
             demandRatio = entity.demandRatio,
+            roomId = entity.roomId,
             createdAt = entity.createdAt
         )
     }
 }
 
 
-private fun DeviceEntity.toDomain() = Device(
+private fun DeviceEntity.toDomainModelDevice() = Device(
     id = id,
     name = name,
     power = power,
     demandRatio = demandRatio,
     voltage = voltage,
+    roomId = roomId,
     createdAt = createdAt
 )

@@ -2,10 +2,19 @@ package ru.mugalimov.volthome.entity
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.ForeignKey
 import androidx.room.PrimaryKey
 import java.util.Date
 
-@Entity(tableName = "devices")
+@Entity(
+    tableName = "devices",
+    foreignKeys = [ForeignKey(
+        entity = RoomEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["room_id"],
+        onDelete = ForeignKey.CASCADE //удаление устройств при удалении комнаты
+    )]
+)
 data class DeviceEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Int = 0,
@@ -24,5 +33,9 @@ data class DeviceEntity(
     val demandRatio: Double,
 
     @ColumnInfo(name = "created_at")
-    val createdAt: Date //временная метка создания
+    val createdAt: Date, //временная метка создания
+
+    //связь с комнатой через id
+    @ColumnInfo(name = "room_id")
+    val roomId: Int
 )

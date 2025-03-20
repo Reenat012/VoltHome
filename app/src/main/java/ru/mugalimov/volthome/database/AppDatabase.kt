@@ -5,6 +5,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import androidx.sqlite.db.SupportSQLiteDatabase
 import ru.mugalimov.volthome.dao.DeviceDao
 import ru.mugalimov.volthome.dao.RoomDao
 import ru.mugalimov.volthome.entity.DeviceEntity
@@ -15,7 +16,7 @@ import kotlin.synchronized
 @TypeConverters(Converters::class)
 @Database(
     entities = [RoomEntity::class, DeviceEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -36,6 +37,13 @@ abstract class AppDatabase : RoomDatabase() {
                 ).build()
                 INSTANCE = instance
                 instance
+            }
+        }
+
+        private val callback = object : Callback() {
+            override fun onCreate(db: SupportSQLiteDatabase) {
+                super.onCreate(db)
+                db.execSQL("PRAGMA foreign_keys = ON") // Активируем FK
             }
         }
     }

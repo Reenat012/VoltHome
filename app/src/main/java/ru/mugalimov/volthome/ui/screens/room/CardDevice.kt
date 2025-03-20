@@ -21,14 +21,14 @@ import ru.mugalimov.volthome.model.Device
 @Composable
 fun CardDevice(
     device: Device,
-    onClickDevice: () -> Unit,
+//    onClickDevice: () -> Unit,
     onDelete: () -> Unit
 ) {
     Card(
         modifier = Modifier
             .padding(8.dp)
             .fillMaxWidth()
-            .clickable { onClickDevice() } // Обработчик клика на карточку
+//            .clickable { onClickDevice() } // Обработчик клика на карточку
     ) {
         Row (
             modifier = Modifier.padding(16.dp),

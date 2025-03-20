@@ -17,7 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import ru.mugalimov.volthome.ui.components.ErrorView
 import ru.mugalimov.volthome.ui.components.LoadingView
-import ru.mugalimov.volthome.viewmodel.RoomViewModel
+import ru.mugalimov.volthome.ui.viewmodel.RoomViewModel
 
 /**
  * Экран отображения списка комнат.

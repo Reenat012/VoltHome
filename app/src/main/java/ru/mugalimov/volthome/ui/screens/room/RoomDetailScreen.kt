@@ -24,8 +24,8 @@ import ru.mugalimov.volthome.ui.components.ErrorView
 import ru.mugalimov.volthome.ui.components.LoadingView
 import ru.mugalimov.volthome.ui.screens.rooms.RoomList
 
-import ru.mugalimov.volthome.viewmodel.RoomDetailViewModel
-import ru.mugalimov.volthome.viewmodel.RoomViewModel
+import ru.mugalimov.volthome.ui.viewmodel.RoomDetailViewModel
+import ru.mugalimov.volthome.ui.viewmodel.RoomViewModel
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
@@ -33,11 +33,11 @@ import java.time.format.DateTimeFormatter
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RoomDetailScreen(
-    roomId: Int,
+    roomId: Int, // Получаем roomId из аргументов навигации
     onClickDevice: (Int) -> Unit,  // Обработчик клика на устройство
     onAddDevice: () -> Unit, // Обработчик клика на кнопку "Добавить устройство"
     onBack: () -> Unit,
-    viewModel: RoomDetailViewModel = hiltViewModel()
+    viewModel: RoomDetailViewModel = hiltViewModel<RoomDetailViewModel>()
 ) {
     //подлкючаем наблюдателя за комнатами
     val room by viewModel.room.collectAsState()
@@ -50,7 +50,7 @@ fun RoomDetailScreen(
         topBar = {
             //Создаем верхнее меню
             TopAppBar(
-                title = { Text(room?.name ?: "Загрузка...") },
+                title = { Text("${room?.name} Комната $roomId" ?: "Загрузка... ") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, "Назад")
@@ -59,7 +59,7 @@ fun RoomDetailScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onAddDevice) {
+            FloatingActionButton(onClick = onAddDevice) { //onAddDevice содержит логику навигации с roomId
                 Icon(Icons.Default.Add, "Добавить")
             }
         }
@@ -71,7 +71,7 @@ fun RoomDetailScreen(
                 devices = uiState.devices,
                 onDelete = viewModel::deleteDevice,
                 modifier = Modifier.padding(padding),
-                onClickDevice = onClickDevice
+//                onClickDevice = onClickDevice
             )
         }
     }

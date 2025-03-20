@@ -1,5 +1,7 @@
-package ru.mugalimov.volthome.viewmodel
+package ru.mugalimov.volthome.ui.viewmodel
 
+import android.content.ContentValues.TAG
+import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -11,12 +13,18 @@ import ru.mugalimov.volthome.model.Room
 import ru.mugalimov.volthome.repository.RoomRepository
 import javax.inject.Inject
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import ru.mugalimov.volthome.entity.DeviceEntity
 import ru.mugalimov.volthome.model.Device
 import ru.mugalimov.volthome.repository.DeviceRepository
+import java.util.Date
+import java.util.Random
 
 @HiltViewModel
 class RoomDetailViewModel @Inject constructor(
@@ -25,7 +33,9 @@ class RoomDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle // Конверт с запросом (ID комнаты)
 ) : ViewModel() {
 
-    private val roomId = savedStateHandle.get<Int>("roomId") ?: 0
+    private val _roomId = savedStateHandle.get<Int>("roomId") ?: 0
+
+    val roomId = _roomId
 
     //хранилище комнат
     private val _room = MutableStateFlow<Room?>(null)
@@ -38,7 +48,21 @@ class RoomDetailViewModel @Inject constructor(
     //публичное свойство, предоставляющее доступ к _uiState
     val uiState: StateFlow<DeviceUiState> = _uiState.asStateFlow()
 
+    // Устройства только для этой комнаты
+//    val devices: Flow<List<DeviceEntity>> = deviceRepository.observeDevicesByIdRoom(roomId)
+//        .stateIn(
+//            scope = viewModelScope,
+//            started = SharingStarted.WhileSubscribed(5000),
+//            initialValue = emptyList()
+//        )
+
+
     init {
+        if (roomId == 0) {
+            Log.e(TAG, "Ошибка: roomId не передан или равен 0")
+            // Можно выбросить исключение или показать ошибку в UI
+        }
+
         loadRooms()
         observeDevices()
     }
@@ -59,12 +83,10 @@ class RoomDetailViewModel @Inject constructor(
     }
 
 
-
-
     //наблюдение за данными
     private fun observeDevices() {
         viewModelScope.launch {
-            deviceRepository.observeDevices()
+            deviceRepository.observeDevicesByIdRoom(roomId)
                 .onStart { _uiState.update { it.copy(isLoading = true) } }
                 .catch { e ->
                     _uiState.update {
@@ -82,36 +104,66 @@ class RoomDetailViewModel @Inject constructor(
                             error = null
                         )
                     }
+
+                    //TODO потом удалить
+                    Log.d(TAG, "Received ${devices.size} devices")
                 } // Обновляем список комнат
         }
     }
 
     //добавление комнаты
-    fun addDevice(name: String, power: Int, voltage: Int, demandRatio: Double) {
+    fun addDevice(name: String, power: Int, voltage: Int, demandRatio: Double, roomId: Int) {
         viewModelScope.launch {
-            executeOperation {
-                try {
-                    _uiState.update {
-                        it.copy(isLoading = true)
-                    }
+            //TODO удалить после отладки
+            Log.d(TAG, "Заходим в метод")
+            try {
+                _uiState.update {
 
-                    // Проверяем валидность параметров
-                    validateName(name)
-                    validatePower(power)
-                    validateVoltage(voltage)
-                    validateDemandRatio(demandRatio)
+                    //TODO удалить после отладки
+                    Log.d(TAG, "loading")
 
-                    // Добавляем комнату через репозиторий
-                    deviceRepository.addDevice(name, power, voltage, demandRatio)
-                } catch (e: Exception) {
-                    _uiState.update {
-                        it.copy(
-                            error = e,
-                            isLoading = false
-                        )
-                    }
+                    it.copy(isLoading = true)
+                }
+
+                // Проверяем валидность параметров
+                validateName(name)
+                //TODO удалить после отладки
+                Log.d(TAG, "name")
+
+                validatePower(power)
+
+                Log.d(TAG, "power")
+
+                validateVoltage(voltage)
+
+                Log.d(TAG, "voltage")
+
+                validateDemandRatio(demandRatio)
+
+                Log.d(TAG, "ratio")
+
+                // Добавляем комнату через репозиторий
+                deviceRepository.addDevice( //судя по логам мы застреваем здесь
+                    name = name,
+                    power = power,
+                    voltage = voltage,
+                    demandRatio = demandRatio,
+                    roomId = this@RoomDetailViewModel.roomId
+                )
+
+                //TODO удалить после отладки
+                Log.d(TAG, "Add device")
+
+
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        error = e,
+                        isLoading = false
+                    )
                 }
             }
+
         }
     }
 

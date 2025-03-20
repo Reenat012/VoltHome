@@ -10,7 +10,7 @@ import ru.mugalimov.volthome.model.Device
 @Composable
 fun DeviceList(
     devices: List<Device>,
-    onClickDevice: (Int) -> Unit,
+//    onClickDevice: (Int) -> Unit,
     onDelete: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -18,8 +18,8 @@ fun DeviceList(
         items(devices, key = { it.id }) { device ->
             CardDevice (
                 device = device,
-                onDelete = { onDelete(device.id) },
-                onClickDevice = { onClickDevice(device.id) } // Передаем ID устройства
+                onDelete = { onDelete(device.id) }
+//                onClickDevice = { onClickDevice(device.id) } // Передаем ID устройства
             )
         }
     }

@@ -1,14 +1,15 @@
 package ru.mugalimov.volthome.repository
 
 import kotlinx.coroutines.flow.Flow
+import ru.mugalimov.volthome.entity.DeviceEntity
 import ru.mugalimov.volthome.model.Device
 
 interface DeviceRepository {
-    //поток данных с актуальным списком устройств
-    fun observeDevices(): Flow<List<Device>>
+    //получаем список устройств по id комнаты
+    suspend fun observeDevicesByIdRoom(roomId: Int) : Flow<List<Device>>
 
-    //добавить новую комнату
-    suspend fun addDevice(name: String, power: Int, voltage: Int, demandRatio: Double)
+    //добавить устройство в комнату
+    suspend fun addDevice(name: String, power: Int, voltage: Int, demandRatio: Double, roomId: Int)
 
     //удалить комнату
     suspend fun deleteDevice(deviceId: Int)

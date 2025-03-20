@@ -11,25 +11,25 @@ import ru.mugalimov.volthome.entity.DeviceEntity
 interface DeviceDao {
     //получение потока данных со списком устройств и сортировкой по дате создания
     //возвращает flow для автоматического обновления при изменениях в БД
-    @Query("SELECT * FROM devices ORDER BY created_at DESC")
-    fun observeAllDevice(): Flow<List<DeviceEntity>>
+    @Query("SELECT * FROM devices WHERE room_id = :roomId")
+    fun observeDevicesByIdRoom(roomId: Int): Flow<List<DeviceEntity>>
 
-    //добавление новой комнаты
+    //добавить устройство в комнату
     //onConflict = OnConflictStrategy.ABORT - если запись с таким же PrimeryKey существует
     //то запись прервывается
     @Insert(onConflict = OnConflictStrategy.ABORT)
-    suspend fun addDevices(device: DeviceEntity)
+    suspend fun addDevice(device: DeviceEntity)
 
     //удаление устройства по id
     //возращает количество удаленных строк 0 или 1
     @Query("DELETE FROM devices WHERE id = :deviceId")
     suspend fun deleteDeviceById(deviceId: Int): Int
 
-    //проверить существует ли устройство с таким именем
-    @Query("SELECT EXISTS(SELECT 1 FROM devices WHERE name = :name LIMIT 1)")
-    suspend fun existsByName(name: String): Boolean
-
     //получить устройство по deviceId
     @Query("SELECT * FROM devices WHERE id = :deviceId")
     suspend fun getDeviceById(deviceId: Int): DeviceEntity?
+
+
+
+
 }

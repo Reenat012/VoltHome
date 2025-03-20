@@ -4,17 +4,20 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
-import ru.mugalimov.volthome.ui.screens.AddDeviceScreen
-import ru.mugalimov.volthome.ui.screens.AddRoomScreen
+import ru.mugalimov.volthome.ui.screens.room.AddDeviceScreen
+import ru.mugalimov.volthome.ui.screens.rooms.AddRoomScreen
 import ru.mugalimov.volthome.ui.screens.ExploitationScreen
 import ru.mugalimov.volthome.ui.screens.LoadsScreen
+import ru.mugalimov.volthome.ui.screens.room.DeviceList
 import ru.mugalimov.volthome.ui.screens.room.RoomDetailScreen
 import ru.mugalimov.volthome.ui.screens.rooms.RoomsScreen
+import ru.mugalimov.volthome.ui.viewmodel.RoomDetailViewModel
 
 /**
  * Контентная область приложения с навигационным графом.
@@ -31,27 +34,34 @@ fun NavGraphApp(
     // Навигационный граф приложения
     NavHost(
         navController = navController,
-        startDestination = Screen.RoomsList.route, //домашний экран
+        startDestination = Screens.RoomsList.route, //домашний экран
         modifier = Modifier.padding(padding)
     ) {
         // Маршруты для раздела "Комнаты"
-        composable(Screen.RoomsList.route) {
+        composable(Screens.RoomsList.route) {
             RoomsScreen(
                 //маршрут добавления новой комнаты
-                onAddRoom = { navController.navigate(Screen.AddRoom.route) },
+                onAddRoom = { navController.navigate(Screens.AddRoom.route) },
                 //маршрут для перехода в комнату
                 onClickRoom = { roomId ->
                     navController.navigate(
-                        Screen.RoomDetailScreen.createRoute(roomId)
-
+                        Screens.RoomDetailScreen.createRoute(roomId)
                     )
                 }
             )
         }
 
+//        composable(Screens.DeviceList.route) {
+//            RoomDetailScreen(
+//                onAddDevice = { navController.navigate(Screens.AddDeviceScreen.route) },
+//                onBack = { navController.popBackStack() }
+//            )
+//        }
+        
+
         composable(
             //Определяет уникальный "адрес" экрана
-            route = Screen.RoomDetailScreen.route,
+            route = Screens.RoomDetailScreen.route,
             //Определяет параметры, которые можно передать на экран.
             arguments = listOf(
                 //создаём аргумент с именем "roomId"
@@ -61,28 +71,49 @@ fun NavGraphApp(
                 }
             )
         ) { backStackEntry -> //объект, содержащий информацию о текущем состоянии навигации.
-            //получаем все аргументы экрана по roomId
+
+            val viewModel: RoomDetailViewModel = hiltViewModel<RoomDetailViewModel>(
+                backStackEntry // Ключевое исправление!
+            )
+
+            // Извлекаем roomId из аргументов навигации
             val roomId = backStackEntry.arguments?.getInt("roomId") ?: 0
-            //Создаём экран RoomDetailScreen
+
             RoomDetailScreen(
-                roomId = roomId, //Передаём ему полученный roomId
-                onBack = { navController.popBackStack()},
-                onClickDevice =  {navController.navigate(Screen.AddDeviceScreen.route)},
-                onAddDevice = {navController.navigate(Screen.AddDeviceScreen.route)}
+                roomId = backStackEntry.arguments?.getInt("roomId") ?: 0,
+                onBack = { navController.popBackStack() },
+                onClickDevice = { deviceId ->
+                    navController.navigate("device_detail/$deviceId")
+                },
+                onAddDevice = {
+                    // Передаем roomId в обработчик добавления устройства
+                    navController.navigate(Screens.AddDeviceScreen.createRoute(roomId))
+                },
+                viewModel = viewModel
+            )
+    }
+
+        composable(
+            route = Screens.AddDeviceScreen.route,
+            arguments = listOf(
+                navArgument("roomId") {
+                    type = NavType.IntType
+                    defaultValue = 0
+                }
+            )
+        ) { backStackEntry ->
+            // Извлекаем roomId из аргументов навигации
+            val roomId = backStackEntry.arguments?.getInt("roomId") ?: 0
+            AddDeviceScreen(
+                roomId = roomId,
+                onBack = { navController.popBackStack() }
             )
         }
 
-        composable(Screen.AddRoom.route) {
-            AddRoomScreen(onBack = { navController.popBackStack() })
-        }
-
-        composable(Screen.AddDeviceScreen.route) {
-            AddDeviceScreen(onBack = { navController.popBackStack() })
-        }
 
 
-        // Маршруты для других разделов
-        composable(Screen.LoadsScreen.route) { LoadsScreen() }
-        composable(Screen.ExploitationScreen.route) { ExploitationScreen() }
-    }
+    // Маршруты для других разделов
+    composable(Screens.LoadsScreen.route) { LoadsScreen() }
+    composable(Screens.ExploitationScreen.route) { ExploitationScreen() }
+}
 }
