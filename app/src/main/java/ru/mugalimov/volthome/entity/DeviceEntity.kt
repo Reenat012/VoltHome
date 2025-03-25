@@ -17,7 +17,7 @@ import java.util.Date
 )
 data class DeviceEntity(
     @PrimaryKey(autoGenerate = true)
-    val id: Int = 0,
+    val id: Long = 0,
 
     @ColumnInfo(name = "name") //явное указание имени столбца
     val name: String,
@@ -37,5 +37,5 @@ data class DeviceEntity(
 
     //связь с комнатой через id
     @ColumnInfo(name = "room_id")
-    val roomId: Int
+    val roomId: Long
 )

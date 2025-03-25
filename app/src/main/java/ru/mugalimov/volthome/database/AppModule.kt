@@ -39,7 +39,9 @@ object DatabaseModule {
                     // Инициализация БД при первом создании
                 }
             })
-//            .fallbackToDestructiveMigration() //использовать для пересоздания БД при ошибке миграции
+            // Использовать для пересоздания БД при ошибке миграции
+            // TODO после использования закомментировать иначе БД будет постоянно пересоздаваться
+//            .fallbackToDestructiveMigration()
             .build()
     }
 
@@ -71,7 +73,5 @@ abstract class RepositoryModule {
     ): DeviceRepository
 
     @Binds
-    abstract fun bindLoadRepository(
-        impl: LoadsRepositoryImpl
-    ): LoadsRepository
+    abstract fun bindLoadRepository(impl: LoadsRepositoryImpl): LoadsRepository
 }

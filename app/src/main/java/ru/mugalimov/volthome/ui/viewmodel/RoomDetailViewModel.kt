@@ -33,7 +33,7 @@ class RoomDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle // Конверт с запросом (ID комнаты)
 ) : ViewModel() {
 
-    private val _roomId = savedStateHandle.get<Int>("roomId") ?: 0
+    private val _roomId = savedStateHandle.get<Long>("roomId") ?: 0
     val roomId = _roomId
 
     //хранилище комнат
@@ -57,7 +57,7 @@ class RoomDetailViewModel @Inject constructor(
 
 
     init {
-        if (roomId == 0) {
+        if (roomId.toInt() == 0) {
             Log.e(TAG, "Ошибка: roomId не передан или равен 0")
             // Можно выбросить исключение или показать ошибку в UI
         }
@@ -85,7 +85,7 @@ class RoomDetailViewModel @Inject constructor(
     //наблюдение за данными
     private fun observeDevices() {
         viewModelScope.launch {
-            deviceRepository.observeDevicesByIdRoom(roomId)
+            deviceRepository.observeDevicesByIdRoom(_roomId)
                 //начинаем поиск
                 .onStart { _uiState.update { it.copy(isLoading = true) } }
                 // Обрабатываем ошибки
@@ -151,7 +151,7 @@ class RoomDetailViewModel @Inject constructor(
     }
 
     // Удаление комнаты
-    fun deleteDevice(deviceId: Int) {
+    fun deleteDevice(deviceId: Long) {
         viewModelScope.launch {
             executeOperation {
                 deviceRepository.deleteDevice(deviceId)

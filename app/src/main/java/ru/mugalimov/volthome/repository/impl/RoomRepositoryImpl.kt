@@ -6,13 +6,17 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import ru.mugalimov.volthome.dao.DeviceDao
+import ru.mugalimov.volthome.dao.LoadDao
 import ru.mugalimov.volthome.dao.RoomDao
 import ru.mugalimov.volthome.entity.DeviceEntity
+import ru.mugalimov.volthome.entity.LoadEntity
 import ru.mugalimov.volthome.entity.RoomEntity
 import ru.mugalimov.volthome.error.RoomAlreadyExistsException
 import ru.mugalimov.volthome.error.RoomNotFoundException
 import ru.mugalimov.volthome.model.Device
+import ru.mugalimov.volthome.model.Load
 import ru.mugalimov.volthome.model.Room
+import ru.mugalimov.volthome.model.RoomWithLoad
 import ru.mugalimov.volthome.module.IoDispatcher
 import ru.mugalimov.volthome.repository.RoomRepository
 import java.util.Date
@@ -21,6 +25,7 @@ import javax.inject.Inject
 class RoomRepositoryImpl @Inject constructor(
     private val roomDao: RoomDao,
     private val deviceDao: DeviceDao,
+    private val loadDao: LoadDao,
     //свойство dispatchers, которое хранит диспетчер для запуска корутин
     //в фоновых потоках, подходящих для IO-задач
     @IoDispatcher private val dispatchers: CoroutineDispatcher
@@ -36,20 +41,22 @@ class RoomRepositoryImpl @Inject constructor(
     }
 
 
-    override suspend fun addRoom(name: String) {
+    override suspend fun addRoom(room: Room) {
         //запускаем в фоновом потоке, используя корутину
         withContext(dispatchers) {
             //проверка на существование комнаты по имени
-            if (roomDao.existsByName(name)) {
-                throw RoomAlreadyExistsException("Комната с именем '$name' уже существует")
+            if (roomDao.existsByName(room.name)) {
+                throw RoomAlreadyExistsException("Комната с именем '${room.name}' уже существует")
             }
 
             //добавляем комнату в БД
-            roomDao.addRoom(RoomEntity(name = name, createdAt = Date()))
+            roomDao.addRoom(RoomEntity(name = room.name, createdAt = Date())).let { roomId ->
+                loadDao.addLoad(LoadEntity(roomId = roomId, createdAt = Date()))
+            }
         }
     }
 
-    override suspend fun deleteRoom(roomId: Int) {
+    override suspend fun deleteRoom(roomId: Long) {
         //запускаем в фоновом потоке, используя корутину
         withContext(dispatchers) {
             //записываем в переменную число удаленных строк
@@ -61,7 +68,7 @@ class RoomRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun getRoomById(roomId: Int): Room? = withContext(dispatchers) {
+    override suspend fun getRoomById(roomId: Long): Room? = withContext(dispatchers) {
         return@withContext try {
             //ищем комнату в БД
             val entity = roomDao.getRoomById(roomId)
@@ -71,6 +78,10 @@ class RoomRepositoryImpl @Inject constructor(
         } catch (e: Exception) {
             throw RoomNotFoundException()
         }
+    }
+
+    override suspend fun getRoomsWithLoads(): Flow<List<RoomWithLoad>> {
+        return loadDao.getRoomsWithLoads()
     }
 }
 
@@ -116,5 +127,17 @@ private fun DeviceEntity.toDomainModelDevice() = Device(
     createdAt = createdAt,
     roomId = roomId
 )
+
+fun toLoad(entity: LoadEntity): Load {
+    return Load(
+        id = entity.id,
+        name = entity.name,
+        current = entity.current,
+        sumPower = entity.sumPower,
+        countDevices = entity.countDevices,
+        createdAt = entity.createdAt,
+        roomId = entity.roomId
+    )
+}
 
 

@@ -8,7 +8,7 @@ import java.util.Date
 @Entity(tableName = "rooms")
 data class RoomEntity(
     @PrimaryKey(autoGenerate = true)
-    val id: Int = 0,
+    val id: Long = 0,
 
     @ColumnInfo(name = "name") //явное указание имени столбца
     val name: String,

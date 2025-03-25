@@ -27,14 +27,14 @@ class DeviceRepositoryImpl @Inject constructor(
 
     //получение списка комнат через DAO
     //используется для получения изменения данных
-    override suspend fun observeDevicesByIdRoom(roomId: Int): Flow<List<Device>> {
+    override suspend fun observeDevicesByIdRoom(roomId: Long): Flow<List<Device>> {
         return deviceDao.observeDevicesByIdRoom(roomId)
             //преобразуем список DeviceEntity в список Device
             .map { entities -> entities.toDomainModelListDevice() }
             .flowOn(dispatchers)
     }
 
-    override suspend fun addDevice(name: String, power: Int, voltage: Int, demandRatio: Double, roomId: Int) {
+    override suspend fun addDevice(name: String, power: Int, voltage: Int, demandRatio: Double, roomId: Long) {
         Log.d(TAG, "Заходим в репо")
         //запускаем в фоновом потоке, используя корутину
         try {
@@ -63,7 +63,7 @@ class DeviceRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun deleteDevice(deviceId: Int) {
+    override suspend fun deleteDevice(deviceId: Long) {
         //запускаем в фоновом потоке, используя корутину
         withContext(dispatchers) {
             //записываем в переменную число удаленных строк

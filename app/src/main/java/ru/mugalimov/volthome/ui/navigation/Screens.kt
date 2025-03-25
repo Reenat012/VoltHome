@@ -14,12 +14,12 @@ sealed class Screens(val route: String) {
     data object RoomDetailScreen: Screens("room_detail/{roomId}") {
         // Функция для генерации пути с roomId.
         // Параметр roomId подставляется в маршрут.
-        fun createRoute(roomId: Int) = "room_detail/$roomId"
+        fun createRoute(roomId: Long) = "room_detail/$roomId"
     }
     data object AddDeviceScreen: Screens("add_device/{roomId}") {
         // Функция для генерации пути с roomId.
         // Параметр roomId подставляется в маршрут.
-        fun createRoute(roomId: Int) = "add_device/$roomId"
+        fun createRoute(roomId: Long) = "add_device/$roomId"
     }
     data object DeviceList: Screens(route = "device_list")
 }

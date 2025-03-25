@@ -21,12 +21,12 @@ interface RoomDao {
     //onConflict = OnConflictStrategy.ABORT - если запись с таким же PrimeryKey существует
     //то запись прервывается
     @Insert(onConflict = OnConflictStrategy.ABORT)
-    suspend fun addRoom(room: RoomEntity)
+    suspend fun addRoom(room: RoomEntity) : Long // Возвращаем ID новой комнаты
 
     //удаление комнаты по id
     //возращает количество удаленных строк 0 или 1
     @Query("DELETE FROM rooms WHERE id = :roomId")
-    suspend fun deleteRoomById(roomId: Int) : Int
+    suspend fun deleteRoomById(roomId: Long) : Int
 
     //проверить существует ли комната с таким именем
     @Query("SELECT EXISTS(SELECT 1 FROM rooms WHERE name = :name LIMIT 1)")
@@ -34,5 +34,5 @@ interface RoomDao {
 
     //получить комнату по roomId
     @Query("SELECT * FROM rooms WHERE id = :roomId")
-    suspend fun getRoomById(roomId: Int): RoomEntity?
+    suspend fun getRoomById(roomId: Long): RoomEntity?
 }

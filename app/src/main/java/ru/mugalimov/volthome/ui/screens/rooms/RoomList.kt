@@ -10,8 +10,8 @@ import ru.mugalimov.volthome.model.Room
 @Composable
 fun RoomList(
     rooms: List<Room>,
-    onClickRoom: (Int) -> Unit,
-    onDelete: (Int) -> Unit,
+    onClickRoom: (Long) -> Unit,
+    onDelete: (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(modifier = modifier) {

@@ -7,7 +7,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Date
 
 data class Room(
-    val id: Int,
+    val id: Long = 0, // До генерации в entity будет 0
     val name: String,
     val createdAt: Date
 )

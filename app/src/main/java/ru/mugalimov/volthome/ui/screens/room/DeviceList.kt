@@ -11,7 +11,7 @@ import ru.mugalimov.volthome.model.Device
 fun DeviceList(
     devices: List<Device>,
 //    onClickDevice: (Int) -> Unit,
-    onDelete: (Int) -> Unit,
+    onDelete: (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(modifier = modifier) {

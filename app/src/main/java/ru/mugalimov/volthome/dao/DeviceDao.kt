@@ -12,7 +12,7 @@ interface DeviceDao {
     //получение потока данных со списком устройств и сортировкой по дате создания
     //возвращает flow для автоматического обновления при изменениях в БД
     @Query("SELECT * FROM devices WHERE room_id = :roomId")
-    fun observeDevicesByIdRoom(roomId: Int): Flow<List<DeviceEntity>>
+    fun observeDevicesByIdRoom(roomId: Long): Flow<List<DeviceEntity>>
 
     //добавить устройство в комнату
     //onConflict = OnConflictStrategy.ABORT - если запись с таким же PrimeryKey существует
@@ -23,7 +23,7 @@ interface DeviceDao {
     //удаление устройства по id
     //возращает количество удаленных строк 0 или 1
     @Query("DELETE FROM devices WHERE id = :deviceId")
-    suspend fun deleteDeviceById(deviceId: Int): Int
+    suspend fun deleteDeviceById(deviceId: Long): Int
 
     //получить устройство по deviceId
     @Query("SELECT * FROM devices WHERE id = :deviceId")

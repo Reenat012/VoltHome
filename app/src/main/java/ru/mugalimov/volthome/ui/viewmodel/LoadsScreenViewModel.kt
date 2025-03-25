@@ -1,10 +1,10 @@
 package ru.mugalimov.volthome.ui.viewmodel
 
-import android.content.ContentValues.TAG
-import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -12,51 +12,39 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import ru.mugalimov.volthome.model.Load
-import ru.mugalimov.volthome.model.Room
-import ru.mugalimov.volthome.repository.DeviceRepository
+import ru.mugalimov.volthome.dao.LoadDao
+import ru.mugalimov.volthome.model.RoomWithLoad
 import ru.mugalimov.volthome.repository.LoadsRepository
 import ru.mugalimov.volthome.repository.RoomRepository
 import javax.inject.Inject
 
+@HiltViewModel
 class LoadsScreenViewModel @Inject constructor(
     private val roomRepository: RoomRepository,
     private val loadRepository: LoadsRepository,
+    private val loadDao: LoadDao,
     savedStateHandle: SavedStateHandle // Конверт с запросом (ID комнаты)
 ) : ViewModel() {
-    private val _roomId = savedStateHandle.get<Int>("roomId") ?: 0
-    val roomId = _roomId
-
-    private val _rooms = MutableStateFlow<Room?>(null)
-    val rooms: StateFlow<Room?> = _rooms.asStateFlow()
+//    // Наблюдение за нагрузками
+    val roomsWithLoads: Flow<List<RoomWithLoad>> = loadDao.getRoomsWithLoads()
+//
+//
+//    private val _roomId = savedStateHandle.get<Int>("roomId") ?: 0
+//    val roomId = _roomId
+//
+//    private val _loads = MutableStateFlow<RoomWithLoad?>(null)
+//    val loads: StateFlow<RoomWithLoad?> = _loads.asStateFlow()
 
     private val _uiState = MutableStateFlow(LoadUiState())
     val uiState: StateFlow<LoadUiState> = _uiState.asStateFlow()
 
     init {
-        if (_roomId == 0) {
-            Log.e(TAG, "Ошибка: roomId не передан или равен 0")
-        }
-
-
-    }
-
-    private fun loadRooms() {
-        viewModelScope.launch {
-            try {
-                val foundRooms = roomRepository.getRoomById(_roomId)
-
-                _rooms.value = foundRooms
-            } catch (e: Exception) {
-                //если комната не найдена, оставляем хранилище пустым
-                _rooms.value = null
-            }
-        }
+        observeLoads()
     }
 
     private fun observeLoads() {
         viewModelScope.launch {
-            loadRepository.observeLoads()
+            roomRepository.getRoomsWithLoads()
                 // Начинаем поиск нагрузок
                 .onStart { _uiState.update { it.copy(isLoading = true) } }
                 // Если ошибка
@@ -69,8 +57,7 @@ class LoadsScreenViewModel @Inject constructor(
                     }
                 }
                 // Обновляем состояние при успехе
-                .collect {
-                    loads ->
+                .collect { loads ->
                     _uiState.update {
                         it.copy(
                             loads = loads,
@@ -85,7 +72,7 @@ class LoadsScreenViewModel @Inject constructor(
 }
 
 data class LoadUiState(
-    val loads: List<Load> = emptyList(),
+    val loads: List<RoomWithLoad> = emptyList(),
     val isLoading: Boolean = true,
     val error: Throwable? = null
 )

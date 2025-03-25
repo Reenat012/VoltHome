@@ -8,5 +8,5 @@ interface LoadsRepository {
     //получаем список нагрузок
     suspend fun observeLoads() : Flow<List<Load>>
 
-    suspend fun addLoads(name: String, current: Double, sumPower: Int, countDevice: Int, roomId: Int)
+    suspend fun addLoads(name: String, current: Double, sumPower: Int, countDevice: Int, roomId: Long)
 }

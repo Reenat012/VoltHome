@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.model.Room
+import java.util.Date
 
 @HiltViewModel //viewModel будет управляться Hilt
 //класс отвечает за управление состоянием экрана (например, списка комнат)
@@ -73,7 +74,8 @@ class RoomViewModel @Inject constructor( // @Inject constructor помечает
                         it.copy(isLoading = true)
                     }
                     validateName(name) // Проверяем валидность имени
-                    roomRepository.addRoom(name) //добавляем комнату через репозиторий
+                    val newRoom = Room(name = name, createdAt = Date())
+                    roomRepository.addRoom(newRoom) //добавляем комнату через репозиторий
                 } catch (e: Exception) {
                     _uiState.update {
                         it.copy(
@@ -87,7 +89,7 @@ class RoomViewModel @Inject constructor( // @Inject constructor помечает
     }
 
     //удаление комнаты
-    fun deleteRoom(roomId: Int) {
+    fun deleteRoom(roomId: Long) {
         viewModelScope.launch {
             executeOperation {
                 roomRepository.deleteRoom(roomId)

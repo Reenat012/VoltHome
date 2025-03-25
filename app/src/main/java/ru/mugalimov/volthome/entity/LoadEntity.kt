@@ -17,23 +17,23 @@ import java.util.Date
 )
 data class LoadEntity(
     @PrimaryKey
-    val id: Int = 0,
+    val id: Long = 0,
 
     @ColumnInfo(name = "name")
-    val name: String,
+    val name: String = "",
 
     @ColumnInfo(name = "current")
-    val current: Double,
+    val current: Double = 0.0,
 
     @ColumnInfo(name = "sum_power")
-    val sumPower: Int,
+    val sumPower: Int = 0,
 
     @ColumnInfo(name = "count_devices")
-    val countDevices: Int,
+    val countDevices: Int = 0,
 
     @ColumnInfo(name = "created_at")
     val createdAt: Date,
 
     @ColumnInfo(name = "room_id")
-    val roomId: Int
+    val roomId: Long
 )

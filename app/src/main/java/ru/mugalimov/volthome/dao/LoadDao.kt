@@ -5,11 +5,14 @@ import androidx.room.Embedded
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Relation
 import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 import ru.mugalimov.volthome.entity.LoadEntity
+import ru.mugalimov.volthome.entity.RoomEntity
 import ru.mugalimov.volthome.model.Load
 import ru.mugalimov.volthome.model.Room
+import ru.mugalimov.volthome.model.RoomWithLoad
 
 @Dao
 interface LoadDao {
@@ -21,14 +24,10 @@ interface LoadDao {
     suspend fun addLoad(loadEntity: LoadEntity)
 
     @Query("SELECT * FROM loads WHERE room_id = :roomId")
-    fun getLoadForRoom(roomId: Int): Flow<Load>
+    fun getLoadForRoom(roomId: Long): Flow<List<LoadEntity>>
 
     @Transaction
     @Query("SELECT * FROM rooms")
     fun getRoomsWithLoads(): Flow<List<RoomWithLoad>>
 }
 
-data class RoomWithLoad(
-    @Embedded val room: Room,
-    @Embedded val load: Load
-)

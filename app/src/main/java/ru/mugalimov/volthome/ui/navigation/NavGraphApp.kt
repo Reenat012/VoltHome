@@ -113,7 +113,7 @@ fun NavGraphApp(
             )
 
             // Извлекаем roomId из аргументов навигации
-            val roomId = backStackEntry.arguments?.getInt("roomId") ?: 0
+            val roomId = backStackEntry.arguments?.getLong("roomId") ?: 0
 
             RoomDetailScreen(
                 roomId = backStackEntry.arguments?.getInt("roomId") ?: 0,

@@ -12,8 +12,9 @@ import ru.mugalimov.volthome.model.Load
 import ru.mugalimov.volthome.module.IoDispatcher
 import ru.mugalimov.volthome.repository.LoadsRepository
 import java.util.Date
+import javax.inject.Inject
 
-class LoadsRepositoryImpl(
+class LoadsRepositoryImpl @Inject constructor(
     private val loadDao: LoadDao,
     @IoDispatcher private val dispatchers: CoroutineDispatcher
 ) :
@@ -29,7 +30,7 @@ class LoadsRepositoryImpl(
         current: Double,
         sumPower: Int,
         countDevice: Int,
-        roomId: Int
+        roomId: Long
     ) {
         loadDao.addLoad(
             LoadEntity(
