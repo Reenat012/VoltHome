@@ -1,4 +1,4 @@
-package ru.mugalimov.volthome.ui.screens
+package ru.mugalimov.volthome.ui.screens.loads
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize

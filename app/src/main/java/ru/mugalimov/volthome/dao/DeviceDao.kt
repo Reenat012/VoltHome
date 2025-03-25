@@ -18,7 +18,7 @@ interface DeviceDao {
     //onConflict = OnConflictStrategy.ABORT - если запись с таким же PrimeryKey существует
     //то запись прервывается
     @Insert(onConflict = OnConflictStrategy.ABORT)
-    suspend fun addDevice(device: DeviceEntity)
+    suspend fun addDevice(deviceEntity: DeviceEntity)
 
     //удаление устройства по id
     //возращает количество удаленных строк 0 или 1

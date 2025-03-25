@@ -1,7 +1,10 @@
 package ru.mugalimov.volthome.ui.screens.room
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -30,30 +33,35 @@ fun CardDevice(
             .fillMaxWidth()
 //            .clickable { onClickDevice() } // Обработчик клика на карточку
     ) {
-        Row (
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = device.name,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.titleMedium
-            )
-            Text(
-                text = device.power.toString(),
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.titleMedium
-            )
-            Text(
-                text = device.voltage.toString(),
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.titleMedium
-            )
-            Text(
-                text = device.demandRatio.toString(),
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.titleMedium
-            )
+        Row(modifier = Modifier.fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically) {
+            Column(
+                modifier = Modifier
+                .weight(1f) // Занимает всё свободное пространство
+                    .padding(16.dp),
+//            verticalAlignment = Alignment.CenterVertically // Выравнивание по вертикали
+            ) {
+                Text(
+                    text = device.name,
+//                modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    text = device.power.toString(),
+//                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    text = device.voltage.toString(),
+//                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    text = device.demandRatio.toString(),
+//                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
 
             IconButton(onClick = onDelete) {
                 Icon(

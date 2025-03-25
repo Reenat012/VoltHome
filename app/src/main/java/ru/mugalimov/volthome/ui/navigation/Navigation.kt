@@ -21,12 +21,15 @@ import androidx.compose.ui.graphics.vector.ImageVector
  * @param title Отображаемое название пункта меню
  * @param icon Иконка из Material Icons
  */
-sealed class BottomNavItem(val title: String, val icon: ImageVector) {
-    data object Rooms : BottomNavItem("Комнаты", Icons.Default.Home)
-    data object Loads : BottomNavItem("Нагрузки", Icons.Default.Speed)
-    data object Exploitation : BottomNavItem("Экспликация", Icons.Default.List)
+sealed class BottomNavItem(
+    val title: String,
+    val icon: ImageVector,
+    val route: String // У каждого пункта меню свой адрес, уникальный идентификатор экрана (как URL)
+) {
+    data object Rooms : BottomNavItem("Комнаты", Icons.Default.Home, "rooms")
+    data object Loads : BottomNavItem("Нагрузки", Icons.Default.Speed, "loads")
+    data object Exploitation : BottomNavItem("Экспликация", Icons.Default.List, "exploitation")
 }
-
 
 
 /**
@@ -58,7 +61,11 @@ fun MainBottomNavBar(
     NavigationBar(
         containerColor = MaterialTheme.colorScheme.surfaceVariant
     ) {
-        listOf(BottomNavItem.Rooms, BottomNavItem.Loads, BottomNavItem.Exploitation).forEach { item ->
+        listOf(
+            BottomNavItem.Rooms,
+            BottomNavItem.Loads,
+            BottomNavItem.Exploitation
+        ).forEach { item ->
             NavigationBarItem(
                 icon = { Icon(item.icon, contentDescription = item.title) },
                 label = { Text(item.title) },

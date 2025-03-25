@@ -50,7 +50,7 @@ fun RoomDetailScreen(
         topBar = {
             //Создаем верхнее меню
             TopAppBar(
-                title = { Text("${room?.name} Комната $roomId" ?: "Загрузка... ") },
+                title = { Text("${room?.name}" ?: "Загрузка... ") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, "Назад")

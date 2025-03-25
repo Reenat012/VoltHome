@@ -1,5 +1,7 @@
 package ru.mugalimov.volthome.ui.navigation
 
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
@@ -11,11 +13,10 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import ru.mugalimov.volthome.ui.screens.room.AddDeviceScreen
-import ru.mugalimov.volthome.ui.screens.rooms.AddRoomScreen
 import ru.mugalimov.volthome.ui.screens.ExploitationScreen
-import ru.mugalimov.volthome.ui.screens.LoadsScreen
-import ru.mugalimov.volthome.ui.screens.room.DeviceList
+import ru.mugalimov.volthome.ui.screens.loads.LoadsScreen
 import ru.mugalimov.volthome.ui.screens.room.RoomDetailScreen
+import ru.mugalimov.volthome.ui.screens.rooms.AddRoomScreen
 import ru.mugalimov.volthome.ui.screens.rooms.RoomsScreen
 import ru.mugalimov.volthome.ui.viewmodel.RoomDetailViewModel
 
@@ -25,6 +26,8 @@ import ru.mugalimov.volthome.ui.viewmodel.RoomDetailViewModel
  * @param selectedItem Выбранный пункт нижнего меню
  * @param padding Отступы от панелей Scaffold
  */
+
+// карта всех "этажей"
 @Composable
 fun NavGraphApp(
     navController: NavHostController,
@@ -32,13 +35,24 @@ fun NavGraphApp(
     padding: PaddingValues
 ) {
     // Навигационный граф приложения
+    // контейнер, где отображаются экраны
     NavHost(
         navController = navController,
-        startDestination = Screens.RoomsList.route, //домашний экран
+        startDestination = BottomNavItem.Rooms.route, //домашний экран
         modifier = Modifier.padding(padding)
     ) {
+
+        /** Основные экраны */
+
         // Маршруты для раздела "Комнаты"
-        composable(Screens.RoomsList.route) {
+        composable(route = BottomNavItem.Rooms.route,
+            enterTransition = {
+                slideInHorizontally(initialOffsetX = { 1000 })
+            },
+            exitTransition = {
+                slideOutHorizontally(targetOffsetX = { -1000 })
+            }
+        ) {
             RoomsScreen(
                 //маршрут добавления новой комнаты
                 onAddRoom = { navController.navigate(Screens.AddRoom.route) },
@@ -51,13 +65,35 @@ fun NavGraphApp(
             )
         }
 
-//        composable(Screens.DeviceList.route) {
-//            RoomDetailScreen(
-//                onAddDevice = { navController.navigate(Screens.AddDeviceScreen.route) },
-//                onBack = { navController.popBackStack() }
-//            )
-//        }
-        
+        composable(
+            route = BottomNavItem.Loads.route,
+            enterTransition = {
+                slideInHorizontally(initialOffsetX = { 1000 })
+            },
+            exitTransition = {
+                slideOutHorizontally(targetOffsetX = { -1000 })
+            }
+        ) {
+            LoadsScreen()
+        }
+        composable(
+            route = BottomNavItem.Exploitation.route,
+            enterTransition = {
+                slideInHorizontally(initialOffsetX = { 1000 })
+            },
+            exitTransition = {
+                slideOutHorizontally(targetOffsetX = { -1000 })
+            }
+        ) {
+            ExploitationScreen()
+        }
+
+
+        /** Вложенные экраны */
+
+        composable(Screens.AddRoom.route) {
+            AddRoomScreen(onBack = { navController.popBackStack() })
+        }
 
         composable(
             //Определяет уникальный "адрес" экрана
@@ -91,7 +127,7 @@ fun NavGraphApp(
                 },
                 viewModel = viewModel
             )
-    }
+        }
 
         composable(
             route = Screens.AddDeviceScreen.route,
@@ -109,11 +145,5 @@ fun NavGraphApp(
                 onBack = { navController.popBackStack() }
             )
         }
-
-
-
-    // Маршруты для других разделов
-    composable(Screens.LoadsScreen.route) { LoadsScreen() }
-    composable(Screens.ExploitationScreen.route) { ExploitationScreen() }
-}
+    }
 }

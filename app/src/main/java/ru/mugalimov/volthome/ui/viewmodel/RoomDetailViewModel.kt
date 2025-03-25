@@ -34,7 +34,6 @@ class RoomDetailViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val _roomId = savedStateHandle.get<Int>("roomId") ?: 0
-
     val roomId = _roomId
 
     //хранилище комнат
@@ -87,7 +86,9 @@ class RoomDetailViewModel @Inject constructor(
     private fun observeDevices() {
         viewModelScope.launch {
             deviceRepository.observeDevicesByIdRoom(roomId)
+                //начинаем поиск
                 .onStart { _uiState.update { it.copy(isLoading = true) } }
+                // Обрабатываем ошибки
                 .catch { e ->
                     _uiState.update {
                         it.copy(
@@ -95,7 +96,8 @@ class RoomDetailViewModel @Inject constructor(
                             error = e
                         )
                     }
-                } // Обрабатываем ошибки
+                }
+                // Обновляем список комнат
                 .collect { devices ->
                     _uiState.update {
                         it.copy(
@@ -104,10 +106,7 @@ class RoomDetailViewModel @Inject constructor(
                             error = null
                         )
                     }
-
-                    //TODO потом удалить
-                    Log.d(TAG, "Received ${devices.size} devices")
-                } // Обновляем список комнат
+                }
         }
     }
 
@@ -127,20 +126,9 @@ class RoomDetailViewModel @Inject constructor(
 
                 // Проверяем валидность параметров
                 validateName(name)
-                //TODO удалить после отладки
-                Log.d(TAG, "name")
-
                 validatePower(power)
-
-                Log.d(TAG, "power")
-
                 validateVoltage(voltage)
-
-                Log.d(TAG, "voltage")
-
                 validateDemandRatio(demandRatio)
-
-                Log.d(TAG, "ratio")
 
                 // Добавляем комнату через репозиторий
                 deviceRepository.addDevice( //судя по логам мы застреваем здесь
@@ -150,11 +138,6 @@ class RoomDetailViewModel @Inject constructor(
                     demandRatio = demandRatio,
                     roomId = this@RoomDetailViewModel.roomId
                 )
-
-                //TODO удалить после отладки
-                Log.d(TAG, "Add device")
-
-
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(

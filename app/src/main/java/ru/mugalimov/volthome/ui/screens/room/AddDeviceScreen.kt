@@ -52,7 +52,7 @@ fun AddDeviceScreen(
         // TopAppBar — это верхняя панель с заголовком и кнопкой "Назад".
         topBar = {
             TopAppBar(
-                title = { Text("Добавить комнату") },
+                title = { Text("Добавить устройство") },
                 // Кнопка "Назад" с иконкой стрелки.
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Назад") }
