@@ -1,4 +1,4 @@
-package ru.mugalimov.volthome.ui.screens
+package ru.mugalimov.volthome.ui.screens.rooms
 
 import android.annotation.SuppressLint
 import androidx.compose.foundation.layout.padding
@@ -17,8 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import ru.mugalimov.volthome.ui.components.ErrorView
 import ru.mugalimov.volthome.ui.components.LoadingView
-import ru.mugalimov.volthome.ui.components.RoomList
-import ru.mugalimov.volthome.viewmodel.RoomViewModel
+import ru.mugalimov.volthome.ui.viewmodel.RoomViewModel
 
 /**
  * Экран отображения списка комнат.
@@ -32,6 +31,8 @@ fun RoomsScreen(
     onAddRoom: () -> Unit, // Обработчик клика на кнопку "Добавить комнату"
     viewModel: RoomViewModel = hiltViewModel()
 ) {
+
+    //подключаем наблюдателя за состоянием экрана
     val uiState by viewModel.uiState.collectAsState()
 
     Scaffold(
@@ -50,7 +51,8 @@ fun RoomsScreen(
             else -> RoomList(
                 rooms = uiState.rooms,
                 onDelete = viewModel::deleteRoom,
-                modifier = Modifier.padding(padding)
+                modifier = Modifier.padding(padding),
+                onClickRoom = onClickRoom
             )
         }
     }

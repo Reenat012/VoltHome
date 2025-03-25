@@ -1,26 +1,17 @@
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.navigation.NavGraph
-import androidx.navigation.NavHostController
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
+import androidx.navigation.NavController
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import ru.mugalimov.volthome.ui.navigation.BottomNavItem
 import ru.mugalimov.volthome.ui.navigation.MainBottomNavBar
 import ru.mugalimov.volthome.ui.navigation.MainTopAppBar
 import ru.mugalimov.volthome.ui.navigation.NavGraphApp
-import ru.mugalimov.volthome.ui.navigation.Screen
-import ru.mugalimov.volthome.ui.screens.AddRoomScreen
-import ru.mugalimov.volthome.ui.screens.ExploitationScreen
-import ru.mugalimov.volthome.ui.screens.LoadsScreen
-import ru.mugalimov.volthome.ui.screens.RoomsScreen
 
 
 /**
@@ -32,16 +23,43 @@ import ru.mugalimov.volthome.ui.screens.RoomsScreen
 @Composable
 fun MainScreen() {
     // Контроллер навигации для управления переходами между экранами
+    // "мозг" навигации, запоминает куда мы ходили
     val navController = rememberNavController()
 
+    // Опеределяем текущий выбранный пункт на основе маршрута
+    // Следим за текущим этажом (экран + параметры)
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+
     // Состояние выбранного пункта нижнего меню
-    var selectedItem by remember { mutableStateOf<BottomNavItem>(BottomNavItem.Rooms) }
+    // Определяем выбранную кнопку по текущему этажу
+    val selectedItem = when (navBackStackEntry?.destination?.route) {
+        BottomNavItem.Rooms.route -> BottomNavItem.Rooms
+        BottomNavItem.Loads.route -> BottomNavItem.Loads
+        BottomNavItem.Exploitation.route -> BottomNavItem.Exploitation
+        else -> BottomNavItem.Rooms
+
+    }
 
     // Базовая структура экрана с использованием Scaffold
     Scaffold(
         topBar = { MainTopAppBar() },
-        bottomBar = { MainBottomNavBar(selectedItem, onItemSelected = { selectedItem = it }) }
+        bottomBar = {
+            MainBottomNavBar(selectedItem, onItemSelected = { item ->
+                // Навигация очистки стека
+                // При нажатии кнопки говорим лифту куда ехать
+                navController.navigate(item.route) {
+                    // Очищаем историю переходов (как кнопка "Домой" в лифте)
+                    popUpTo(navController.graph.findStartDestination().id) {
+                        saveState = true
+                    }
+                    launchSingleTop = true // Не создавать новый экран, если уже на нем
+                    restoreState = true // Восстанавливаем скролл и т.д.
+                }
+            })
+        }
     ) { padding ->
+        // Место где отображаются экраны
+        // карта всех "этажей"
         NavGraphApp(
             navController = navController,
             selectedItem = selectedItem,

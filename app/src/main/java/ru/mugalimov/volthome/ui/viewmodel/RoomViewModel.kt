@@ -1,4 +1,4 @@
-package ru.mugalimov.volthome.viewmodel
+package ru.mugalimov.volthome.ui.viewmodel
 
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel

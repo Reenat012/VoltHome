@@ -10,12 +10,16 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import ru.mugalimov.volthome.dao.DeviceDao
+import ru.mugalimov.volthome.dao.LoadDao
 import ru.mugalimov.volthome.dao.RoomDao
+import ru.mugalimov.volthome.repository.DeviceRepository
+import ru.mugalimov.volthome.repository.LoadsRepository
 import ru.mugalimov.volthome.repository.RoomRepository
+import ru.mugalimov.volthome.repository.impl.DeviceRepositoryImpl
+import ru.mugalimov.volthome.repository.impl.LoadsRepositoryImpl
 import ru.mugalimov.volthome.repository.impl.RoomRepositoryImpl
 import javax.inject.Singleton
-
-// di/DatabaseModule.kt
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -35,11 +39,19 @@ object DatabaseModule {
                     // Инициализация БД при первом создании
                 }
             })
+//            .fallbackToDestructiveMigration() //использовать для пересоздания БД при ошибке миграции
             .build()
     }
 
     @Provides
     fun provideRoomDao(database: AppDatabase): RoomDao = database.roomDao()
+
+    @Provides
+    fun provideDeviceDao(database: AppDatabase): DeviceDao = database.deviceDao()
+
+    @Provides
+    fun provideLoadDao(database: AppDatabase): LoadDao = database.loadDao()
+
 }
 
 // di/RepositoryModule.kt
@@ -52,4 +64,14 @@ abstract class RepositoryModule {
     abstract fun bindRoomRepository(
         impl: RoomRepositoryImpl
     ): RoomRepository
+
+    @Binds
+    abstract fun bindDeviceRepository(
+        impl: DeviceRepositoryImpl
+    ): DeviceRepository
+
+    @Binds
+    abstract fun bindLoadRepository(
+        impl: LoadsRepositoryImpl
+    ): LoadsRepository
 }

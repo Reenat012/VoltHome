@@ -6,7 +6,9 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
+import ru.mugalimov.volthome.entity.DeviceEntity
 import ru.mugalimov.volthome.entity.RoomEntity
+import ru.mugalimov.volthome.model.Device
 
 @Dao
 interface RoomDao {
@@ -29,4 +31,8 @@ interface RoomDao {
     //проверить существует ли комната с таким именем
     @Query("SELECT EXISTS(SELECT 1 FROM rooms WHERE name = :name LIMIT 1)")
     suspend fun existsByName(name: String): Boolean
+
+    //получить комнату по roomId
+    @Query("SELECT * FROM rooms WHERE id = :roomId")
+    suspend fun getRoomById(roomId: Int): RoomEntity?
 }

@@ -91,4 +91,7 @@ dependencies {
 
     implementation (libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
+
+    implementation(libs.androidx.ui.v154)
+    implementation(libs.androidx.material3.v112)
 }
