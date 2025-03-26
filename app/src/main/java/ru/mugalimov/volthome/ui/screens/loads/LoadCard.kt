@@ -11,7 +11,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import ru.mugalimov.volthome.model.RoomWithLoad
+import ru.mugalimov.volthome.domain.model.RoomWithLoad
 
 @Composable
 fun LoadCard(

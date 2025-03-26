@@ -46,12 +46,6 @@ fun NavGraphApp(
 
         // Маршруты для раздела "Комнаты"
         composable(route = BottomNavItem.Rooms.route,
-            enterTransition = {
-                slideInHorizontally(initialOffsetX = { 1000 })
-            },
-            exitTransition = {
-                slideOutHorizontally(targetOffsetX = { -1000 })
-            }
         ) {
             RoomsScreen(
                 //маршрут добавления новой комнаты
@@ -67,23 +61,12 @@ fun NavGraphApp(
 
         composable(
             route = BottomNavItem.Loads.route,
-            enterTransition = {
-                slideInHorizontally(initialOffsetX = { 1000 })
-            },
-            exitTransition = {
-                slideOutHorizontally(targetOffsetX = { -1000 })
-            }
         ) {
             LoadsScreen()
         }
         composable(
             route = BottomNavItem.Exploitation.route,
-            enterTransition = {
-                slideInHorizontally(initialOffsetX = { 1000 })
-            },
-            exitTransition = {
-                slideOutHorizontally(targetOffsetX = { -1000 })
-            }
+
         ) {
             ExploitationScreen()
         }
@@ -102,7 +85,7 @@ fun NavGraphApp(
             arguments = listOf(
                 //создаём аргумент с именем "roomId"
                 navArgument("roomId") {
-                    type = NavType.IntType //указываем, что это целое число
+                    type = NavType.LongType //указываем, что это целое число
                     defaultValue = 0 //значение по умолчанию, если параметр не передан
                 }
             )
@@ -116,7 +99,7 @@ fun NavGraphApp(
             val roomId = backStackEntry.arguments?.getLong("roomId") ?: 0
 
             RoomDetailScreen(
-                roomId = backStackEntry.arguments?.getInt("roomId") ?: 0,
+                roomId = backStackEntry.arguments?.getLong("roomId") ?: 0,
                 onBack = { navController.popBackStack() },
                 onClickDevice = { deviceId ->
                     navController.navigate("device_detail/$deviceId")
@@ -133,13 +116,13 @@ fun NavGraphApp(
             route = Screens.AddDeviceScreen.route,
             arguments = listOf(
                 navArgument("roomId") {
-                    type = NavType.IntType
+                    type = NavType.LongType
                     defaultValue = 0
                 }
             )
         ) { backStackEntry ->
             // Извлекаем roomId из аргументов навигации
-            val roomId = backStackEntry.arguments?.getInt("roomId") ?: 0
+            val roomId = backStackEntry.arguments?.getLong("roomId") ?: 0
             AddDeviceScreen(
                 roomId = roomId,
                 onBack = { navController.popBackStack() }

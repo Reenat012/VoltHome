@@ -18,8 +18,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
-import ru.mugalimov.volthome.entity.LoadEntity
-import ru.mugalimov.volthome.model.Load
+import ru.mugalimov.volthome.data.local.entity.LoadEntity
+import ru.mugalimov.volthome.domain.model.Load
 import ru.mugalimov.volthome.ui.components.ErrorView
 import ru.mugalimov.volthome.ui.components.LoadingView
 import ru.mugalimov.volthome.ui.screens.rooms.RoomList

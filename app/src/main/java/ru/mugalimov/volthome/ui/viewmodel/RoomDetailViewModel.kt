@@ -9,8 +9,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import ru.mugalimov.volthome.model.Room
-import ru.mugalimov.volthome.repository.RoomRepository
+import ru.mugalimov.volthome.domain.model.Room
+import ru.mugalimov.volthome.data.repository.RoomRepository
 import javax.inject.Inject
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.Flow
@@ -20,9 +20,9 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import ru.mugalimov.volthome.entity.DeviceEntity
-import ru.mugalimov.volthome.model.Device
-import ru.mugalimov.volthome.repository.DeviceRepository
+import ru.mugalimov.volthome.data.local.entity.DeviceEntity
+import ru.mugalimov.volthome.domain.model.Device
+import ru.mugalimov.volthome.data.repository.DeviceRepository
 import java.util.Date
 import java.util.Random
 
@@ -111,7 +111,7 @@ class RoomDetailViewModel @Inject constructor(
     }
 
     //добавление комнаты
-    fun addDevice(name: String, power: Int, voltage: Int, demandRatio: Double, roomId: Int) {
+    fun addDevice(name: String, power: Int, voltage: Int, demandRatio: Double, roomId: Long) {
         viewModelScope.launch {
             //TODO удалить после отладки
             Log.d(TAG, "Заходим в метод")

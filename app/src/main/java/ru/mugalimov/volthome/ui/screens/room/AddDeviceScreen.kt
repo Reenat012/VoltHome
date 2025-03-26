@@ -24,7 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import ru.mugalimov.volthome.entity.DeviceEntity
+import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.ui.viewmodel.RoomDetailViewModel
 import java.util.Date
 
@@ -35,7 +35,7 @@ import java.util.Date
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddDeviceScreen(
-    roomId: Int, // Получаем roomId из аргументов навигации
+    roomId: Long, // Получаем roomId из аргументов навигации
     onBack: () -> Unit,
     viewModel: RoomDetailViewModel = hiltViewModel()
 ) {

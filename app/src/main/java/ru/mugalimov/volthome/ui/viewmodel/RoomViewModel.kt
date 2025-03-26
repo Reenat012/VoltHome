@@ -3,7 +3,7 @@ package ru.mugalimov.volthome.ui.viewmodel
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
-import ru.mugalimov.volthome.repository.RoomRepository
+import ru.mugalimov.volthome.data.repository.RoomRepository
 import javax.inject.Inject
 import androidx.compose.runtime.State
 import androidx.compose.ui.util.fastCbrt
@@ -16,7 +16,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import ru.mugalimov.volthome.model.Room
+import ru.mugalimov.volthome.domain.model.Room
 import java.util.Date
 
 @HiltViewModel //viewModel будет управляться Hilt

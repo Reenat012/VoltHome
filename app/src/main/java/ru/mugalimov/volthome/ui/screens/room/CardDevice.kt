@@ -18,7 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import ru.mugalimov.volthome.model.Device
+import ru.mugalimov.volthome.domain.model.Device
 
 //карточка устройства в списке
 @Composable

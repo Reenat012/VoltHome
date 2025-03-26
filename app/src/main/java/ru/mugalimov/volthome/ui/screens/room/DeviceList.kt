@@ -4,7 +4,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import ru.mugalimov.volthome.model.Device
+import ru.mugalimov.volthome.domain.model.Device
 
 //Список устройств
 @Composable

@@ -12,10 +12,10 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import ru.mugalimov.volthome.dao.LoadDao
-import ru.mugalimov.volthome.model.RoomWithLoad
-import ru.mugalimov.volthome.repository.LoadsRepository
-import ru.mugalimov.volthome.repository.RoomRepository
+import ru.mugalimov.volthome.data.local.dao.LoadDao
+import ru.mugalimov.volthome.domain.model.RoomWithLoad
+import ru.mugalimov.volthome.data.repository.LoadsRepository
+import ru.mugalimov.volthome.data.repository.RoomRepository
 import javax.inject.Inject
 
 @HiltViewModel

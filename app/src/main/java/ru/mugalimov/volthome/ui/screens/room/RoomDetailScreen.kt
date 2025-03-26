@@ -33,7 +33,7 @@ import java.time.format.DateTimeFormatter
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RoomDetailScreen(
-    roomId: Int, // Получаем roomId из аргументов навигации
+    roomId: Long, // Получаем roomId из аргументов навигации
     onClickDevice: (Int) -> Unit,  // Обработчик клика на устройство
     onAddDevice: () -> Unit, // Обработчик клика на кнопку "Добавить устройство"
     onBack: () -> Unit,
