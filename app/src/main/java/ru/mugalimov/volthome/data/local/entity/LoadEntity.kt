@@ -16,7 +16,7 @@ import java.util.Date
     )]
 )
 data class LoadEntity(
-    @PrimaryKey
+    @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
 
     @ColumnInfo(name = "name")

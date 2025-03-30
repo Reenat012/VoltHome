@@ -18,7 +18,7 @@ import kotlin.synchronized
 @TypeConverters(Converters::class)
 @Database(
     entities = [RoomEntity::class, DeviceEntity::class, LoadEntity::class],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

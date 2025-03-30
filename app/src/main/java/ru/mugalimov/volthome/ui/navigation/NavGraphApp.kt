@@ -31,7 +31,7 @@ import ru.mugalimov.volthome.ui.viewmodel.RoomDetailViewModel
 @Composable
 fun NavGraphApp(
     navController: NavHostController,
-    selectedItem: BottomNavItem,
+    modifier: Modifier,
     padding: PaddingValues
 ) {
     // Навигационный граф приложения
@@ -45,7 +45,8 @@ fun NavGraphApp(
         /** Основные экраны */
 
         // Маршруты для раздела "Комнаты"
-        composable(route = BottomNavItem.Rooms.route,
+        composable(
+            route = BottomNavItem.Rooms.route,
         ) {
             RoomsScreen(
                 //маршрут добавления новой комнаты
@@ -60,14 +61,22 @@ fun NavGraphApp(
         }
 
         composable(
-            route = BottomNavItem.Loads.route,
-        ) {
-            LoadsScreen()
+            route = "loads?roomId={roomId}",
+            arguments = listOf(
+                navArgument("roomId") {
+                    type = NavType.LongType
+                    defaultValue = 0L
+                }
+            )
+        ) { backStackEntry ->
+            val roomId = backStackEntry.arguments?.getLong("roomId") ?: 0L
+            LoadsScreen(roomId = roomId)
         }
+
         composable(
             route = BottomNavItem.Exploitation.route,
 
-        ) {
+            ) {
             ExploitationScreen()
         }
 
@@ -86,7 +95,7 @@ fun NavGraphApp(
                 //создаём аргумент с именем "roomId"
                 navArgument("roomId") {
                     type = NavType.LongType //указываем, что это целое число
-                    defaultValue = 0 //значение по умолчанию, если параметр не передан
+                    defaultValue = 0L //значение по умолчанию, если параметр не передан
                 }
             )
         ) { backStackEntry -> //объект, содержащий информацию о текущем состоянии навигации.
@@ -96,10 +105,10 @@ fun NavGraphApp(
             )
 
             // Извлекаем roomId из аргументов навигации
-            val roomId = backStackEntry.arguments?.getLong("roomId") ?: 0
+            val roomId = backStackEntry.arguments?.getLong("roomId") ?: 0L
 
             RoomDetailScreen(
-                roomId = backStackEntry.arguments?.getLong("roomId") ?: 0,
+                roomId = backStackEntry.arguments?.getLong("roomId") ?: 0L,
                 onBack = { navController.popBackStack() },
                 onClickDevice = { deviceId ->
                     navController.navigate("device_detail/$deviceId")
@@ -117,12 +126,12 @@ fun NavGraphApp(
             arguments = listOf(
                 navArgument("roomId") {
                     type = NavType.LongType
-                    defaultValue = 0
+                    defaultValue = 0L
                 }
             )
         ) { backStackEntry ->
             // Извлекаем roomId из аргументов навигации
-            val roomId = backStackEntry.arguments?.getLong("roomId") ?: 0
+            val roomId = backStackEntry.arguments?.getLong("roomId") ?: 0L
             AddDeviceScreen(
                 roomId = roomId,
                 onBack = { navController.popBackStack() }

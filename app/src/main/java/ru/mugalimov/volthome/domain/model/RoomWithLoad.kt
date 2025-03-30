@@ -11,5 +11,8 @@ data class RoomWithLoad(
         parentColumn = "id",
         entityColumn = "room_id"
     )
-    val loads: List<LoadEntity> // Список нагрузок для комнаты
-)
+    val load: LoadEntity? = null // Список нагрузок для комнаты
+) {
+    // Функция для обновления параметров LoadEntity при расчетах нагрузки
+    fun copyWithLoad(newLoad: LoadEntity?) = copy(load = newLoad)
+}

@@ -131,7 +131,7 @@ class RoomDetailViewModel @Inject constructor(
                 validateDemandRatio(demandRatio)
 
                 // Добавляем комнату через репозиторий
-                deviceRepository.addDevice( //судя по логам мы застреваем здесь
+                deviceRepository.addDevice(
                     name = name,
                     power = power,
                     voltage = voltage,

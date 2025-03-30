@@ -11,13 +11,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import ru.mugalimov.volthome.domain.model.Load
 import ru.mugalimov.volthome.domain.model.RoomWithLoad
+import ru.mugalimov.volthome.ui.navigation.BottomNavItem
 
 
 //Список устройств
 @Composable
 fun LoadList(
     roomsWithLoads: List<RoomWithLoad>,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -27,7 +28,8 @@ fun LoadList(
         items(roomsWithLoads) { roomWithLoad ->
             LoadCard(
                 roomWithLoad = roomWithLoad,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                roomId = roomWithLoad.room.id
             )
         }
     }

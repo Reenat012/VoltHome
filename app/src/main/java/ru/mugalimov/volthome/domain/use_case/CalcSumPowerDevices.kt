@@ -8,7 +8,9 @@ import javax.inject.Inject
 class CalcSumPowerDevices @Inject constructor(
     private val deviceRepository: DeviceRepository
 ) {
-    fun execute(devices: List<Device>) : Int {
-        return devices.sumOf { it.power }
+    suspend fun execute(roomId: Long) : Int {
+        val listDevives = deviceRepository.getAllDevicesByRoomId(roomId)
+
+        return listDevives.sumOf { it.power }
     }
 }

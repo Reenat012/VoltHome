@@ -82,6 +82,15 @@ class RoomRepositoryImpl @Inject constructor(
 
     override suspend fun getRoomsWithLoads(): Flow<List<RoomWithLoad>> {
         return loadDao.getRoomsWithLoads()
+            .map { list ->
+                list.map {
+                    RoomWithLoad(
+                        room = it.room,
+                        load = it.load // Дефолтное значение
+                    )
+                }
+            }
+            .flowOn(dispatchers)
     }
 }
 

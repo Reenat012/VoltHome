@@ -7,6 +7,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Relation
 import androidx.room.Transaction
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 import ru.mugalimov.volthome.data.local.entity.LoadEntity
 import ru.mugalimov.volthome.data.local.entity.RoomEntity
@@ -29,5 +30,34 @@ interface LoadDao {
     @Transaction
     @Query("SELECT * FROM rooms")
     fun getRoomsWithLoads(): Flow<List<RoomWithLoad>>
+
+    // Базовое обновление
+    @Update(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun updateLoad(load: LoadEntity): Int
+
+    @Update
+    // Расширенный метод UPSERT (обновить или вставить)
+    suspend fun upsertLoad(load: LoadEntity) {
+        if (updateLoad(load) == 0) { // Если запись не найдена
+            addLoad(load) // Вставляем новую
+        }
+    }
+
+    // Попытка обновлять все записи разом
+    @Transaction // Добавьте аннотацию
+    suspend fun updateAllLoads(loads: List<LoadEntity>) {
+        loads.forEach { updateLoad(it) }
+    }
+
+    @Transaction
+    suspend fun upsertAllLoads(loads: List<LoadEntity>) {
+        loads.forEach { load ->
+            if (load.id == 0L) { // Новая запись
+                addLoad(load)
+            } else { // Существующая
+                updateLoad(load)
+            }
+        }
+    }
 }
 
