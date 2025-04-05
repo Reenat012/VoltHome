@@ -1,0 +1,149 @@
+[
+  {
+    "id": 1,
+    "name": "Микроволновая печь",
+    "power": 1000,
+    "voltage": 220,
+    "demandRatio": 0.8
+  },
+  {
+    "id": 2,
+    "name": "Электрический чайник",
+    "power": 1500,
+    "voltage": 220,
+    "demandRatio": 0.9
+  },
+  {
+    "id": 3,
+    "name": "Холодильник",
+    "power": 200,
+    "voltage": 220,
+    "demandRatio": 0.7
+  },
+  {
+    "id": 4,
+    "name": "Стиральная машина",
+    "power": 1800,
+    "voltage": 220,
+    "demandRatio": 0.6
+  },
+  {
+    "id": 5,
+    "name": "Телевизор",
+    "power": 150,
+    "voltage": 220,
+    "demandRatio": 0.9
+  },
+  {
+    "id": 6,
+    "name": "Игровая приставка",
+    "power": 200,
+    "voltage": 220,
+    "demandRatio": 0.8
+  },
+  {
+    "id": 7,
+    "name": "Компьютер",
+    "power": 400,
+    "voltage": 220,
+    "demandRatio": 0.85
+  },
+  {
+    "id": 8,
+    "name": "Ноутбук",
+    "power": 60,
+    "voltage": 220,
+    "demandRatio": 0.9
+  },
+  {
+    "id": 9,
+    "name": "Кондиционер",
+    "power": 2000,
+    "voltage": 220,
+    "demandRatio": 0.75
+  },
+  {
+    "id": 10,
+    "name": "Обогреватель",
+    "power": 1500,
+    "voltage": 220,
+    "demandRatio": 0.8
+  },
+  {
+    "id": 11,
+    "name": "Вентилятор",
+    "power": 50,
+    "voltage": 220,
+    "demandRatio": 0.9
+  },
+  {
+    "id": 12,
+    "name": "Светодиодная лампа",
+    "power": 10,
+    "voltage": 220,
+    "demandRatio": 1.0
+  },
+  {
+    "id": 13,
+    "name": "Люстра",
+    "power": 100,
+    "voltage": 220,
+    "demandRatio": 1.0
+  },
+  {
+    "id": 14,
+    "name": "Фен",
+    "power": 1200,
+    "voltage": 220,
+    "demandRatio": 0.7
+  },
+  {
+    "id": 15,
+    "name": "Пылесос",
+    "power": 1600,
+    "voltage": 220,
+    "demandRatio": 0.6
+  },
+  {
+    "id": 16,
+    "name": "Утюг",
+    "power": 2200,
+    "voltage": 220,
+    "demandRatio": 0.65
+  },
+  {
+    "id": 17,
+    "name": "Кофеварка",
+    "power": 800,
+    "voltage": 220,
+    "demandRatio": 0.8
+  },
+  {
+    "id": 18,
+    "name": "Тостер",
+    "power": 1100,
+    "voltage": 220,
+    "demandRatio": 0.7
+  },
+  {
+    "id": 19,
+    "name": "Блендер",
+    "power": 500,
+    "voltage": 220,
+    "demandRatio": 0.6
+  },
+  {
+    "id": 20,
+    "name": "Роутер Wi-Fi",
+    "power": 15,
+    "voltage": 220,
+    "demandRatio": 1.0
+  },
+  {
+    "id": 21,
+    "name": "Зарядное устройство",
+    "power": 25,
+    "voltage": 220,
+    "demandRatio": 0.95
+  }
+]

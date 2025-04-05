@@ -9,20 +9,26 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import ru.mugalimov.volthome.model.Room
-import ru.mugalimov.volthome.repository.RoomRepository
+import ru.mugalimov.volthome.domain.model.Room
+import ru.mugalimov.volthome.data.repository.RoomRepository
 import javax.inject.Inject
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import ru.mugalimov.volthome.entity.DeviceEntity
-import ru.mugalimov.volthome.model.Device
-import ru.mugalimov.volthome.repository.DeviceRepository
+import ru.mugalimov.volthome.data.local.entity.DeviceEntity
+import ru.mugalimov.volthome.domain.model.Device
+import ru.mugalimov.volthome.data.repository.DeviceRepository
+import ru.mugalimov.volthome.domain.model.DefaultDevice
 import java.util.Date
 import java.util.Random
 
@@ -33,7 +39,7 @@ class RoomDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle // Конверт с запросом (ID комнаты)
 ) : ViewModel() {
 
-    private val _roomId = savedStateHandle.get<Int>("roomId") ?: 0
+    private val _roomId = savedStateHandle.get<Long>("roomId") ?: 0
     val roomId = _roomId
 
     //хранилище комнат
@@ -43,27 +49,36 @@ class RoomDetailViewModel @Inject constructor(
     //приватное состояние, хранящее данные для UI (список устройств, загрузка, ошибки).
     // Используется mutableStateOf (из Jetpack Compose) для реактивного обновления UI.
     private val _uiState = MutableStateFlow(DeviceUiState())
-
     //публичное свойство, предоставляющее доступ к _uiState
     val uiState: StateFlow<DeviceUiState> = _uiState.asStateFlow()
 
-    // Устройства только для этой комнаты
-//    val devices: Flow<List<DeviceEntity>> = deviceRepository.observeDevicesByIdRoom(roomId)
-//        .stateIn(
-//            scope = viewModelScope,
-//            started = SharingStarted.WhileSubscribed(5000),
-//            initialValue = emptyList()
-//        )
+    // Получаем устройства из каталога
+    private val _defaultDevices = MutableStateFlow<List<DefaultDevice>>(emptyList())
+    val defaultDevices: StateFlow<List<DefaultDevice>> = _defaultDevices.asStateFlow()
 
+    private val _error = MutableSharedFlow<String>() // Для одноразовых событий
+    val error: SharedFlow<String> = _error
 
     init {
-        if (roomId == 0) {
+        if (roomId.toInt() == 0) {
             Log.e(TAG, "Ошибка: roomId не передан или равен 0")
             // Можно выбросить исключение или показать ошибку в UI
         }
 
         loadRooms()
         observeDevices()
+        loadDefaultDevices()
+    }
+
+    fun loadDefaultDevices() {
+        viewModelScope.launch {
+            try {
+                _defaultDevices.value = deviceRepository.getDefaultDevices()
+                    .first() // Берем первый элемент Flow
+            } catch (e: Exception) {
+                Log.e("LOAD_ERROR", "Error loading devices", e)
+            }
+        }
     }
 
     private fun loadRooms() {
@@ -85,7 +100,7 @@ class RoomDetailViewModel @Inject constructor(
     //наблюдение за данными
     private fun observeDevices() {
         viewModelScope.launch {
-            deviceRepository.observeDevicesByIdRoom(roomId)
+            deviceRepository.observeDevicesByIdRoom(_roomId)
                 //начинаем поиск
                 .onStart { _uiState.update { it.copy(isLoading = true) } }
                 // Обрабатываем ошибки
@@ -111,7 +126,7 @@ class RoomDetailViewModel @Inject constructor(
     }
 
     //добавление комнаты
-    fun addDevice(name: String, power: Int, voltage: Int, demandRatio: Double, roomId: Int) {
+    fun addDevice(name: String, power: Int, voltage: Int, demandRatio: Double, roomId: Long) {
         viewModelScope.launch {
             //TODO удалить после отладки
             Log.d(TAG, "Заходим в метод")
@@ -131,7 +146,7 @@ class RoomDetailViewModel @Inject constructor(
                 validateDemandRatio(demandRatio)
 
                 // Добавляем комнату через репозиторий
-                deviceRepository.addDevice( //судя по логам мы застреваем здесь
+                deviceRepository.addDevice(
                     name = name,
                     power = power,
                     voltage = voltage,
@@ -151,7 +166,7 @@ class RoomDetailViewModel @Inject constructor(
     }
 
     // Удаление комнаты
-    fun deleteDevice(deviceId: Int) {
+    fun deleteDevice(deviceId: Long) {
         viewModelScope.launch {
             executeOperation {
                 deviceRepository.deleteDevice(deviceId)

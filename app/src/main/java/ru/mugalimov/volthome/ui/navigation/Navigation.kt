@@ -15,6 +15,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.currentBackStackEntryAsState
 
 /**
  * Модель для элементов нижней навигационной панели.
@@ -53,24 +56,30 @@ fun MainTopAppBar() {
  * @param selectedItem Выбранный в данный момент пункт меню
  * @param onItemSelected Обработчик выбора пункта меню
  */
+
 @Composable
-fun MainBottomNavBar(
-    selectedItem: BottomNavItem,
-    onItemSelected: (BottomNavItem) -> Unit
-) {
-    NavigationBar(
-        containerColor = MaterialTheme.colorScheme.surfaceVariant
-    ) {
+fun MainBottomNavBar(navController: NavHostController) {
+    val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
+
+    NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
         listOf(
             BottomNavItem.Rooms,
             BottomNavItem.Loads,
             BottomNavItem.Exploitation
         ).forEach { item ->
             NavigationBarItem(
-                icon = { Icon(item.icon, contentDescription = item.title) },
+                icon = { Icon(item.icon, item.title) },
                 label = { Text(item.title) },
-                selected = selectedItem == item,
-                onClick = { onItemSelected(item) },
+                selected = currentRoute == item.route,
+                onClick = {
+                    navController.navigate(item.route) {
+                        popUpTo(navController.graph.findStartDestination().id) {
+                            saveState = true
+                        }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                },
                 colors = NavigationBarItemDefaults.colors(
                     selectedIconColor = MaterialTheme.colorScheme.primary,
                     selectedTextColor = MaterialTheme.colorScheme.primary,

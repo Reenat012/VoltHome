@@ -27,7 +27,7 @@ import ru.mugalimov.volthome.ui.viewmodel.RoomViewModel
 @SuppressLint("NotConstructor")
 @Composable
 fun RoomsScreen(
-    onClickRoom: (Int) -> Unit,  // Обработчик клика на комнату
+    onClickRoom: (Long) -> Unit,  // Обработчик клика на комнату
     onAddRoom: () -> Unit, // Обработчик клика на кнопку "Добавить комнату"
     viewModel: RoomViewModel = hiltViewModel()
 ) {

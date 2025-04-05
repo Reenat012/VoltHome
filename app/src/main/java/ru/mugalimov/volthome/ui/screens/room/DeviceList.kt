@@ -4,14 +4,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import ru.mugalimov.volthome.model.Device
+import ru.mugalimov.volthome.domain.model.DefaultDevice
+import ru.mugalimov.volthome.domain.model.Device
 
 //Список устройств
 @Composable
 fun DeviceList(
     devices: List<Device>,
 //    onClickDevice: (Int) -> Unit,
-    onDelete: (Int) -> Unit,
+    onDelete: (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(modifier = modifier) {

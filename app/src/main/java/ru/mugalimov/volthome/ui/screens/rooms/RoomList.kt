@@ -4,14 +4,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import ru.mugalimov.volthome.model.Room
+import ru.mugalimov.volthome.domain.model.Room
 
 //Список комнат
 @Composable
 fun RoomList(
     rooms: List<Room>,
-    onClickRoom: (Int) -> Unit,
-    onDelete: (Int) -> Unit,
+    onClickRoom: (Long) -> Unit,
+    onDelete: (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(modifier = modifier) {
