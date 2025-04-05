@@ -1,7 +1,10 @@
 package ru.mugalimov.volthome.data.repository.impl
 
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
@@ -19,6 +22,8 @@ import ru.mugalimov.volthome.domain.model.Room
 import ru.mugalimov.volthome.domain.model.RoomWithLoad
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.data.repository.RoomRepository
+import ru.mugalimov.volthome.domain.model.DefaultRoom
+import ru.mugalimov.volthome.ui.components.JsonParser
 import java.util.Date
 import javax.inject.Inject
 
@@ -28,7 +33,8 @@ class RoomRepositoryImpl @Inject constructor(
     private val loadDao: LoadDao,
     //свойство dispatchers, которое хранит диспетчер для запуска корутин
     //в фоновых потоках, подходящих для IO-задач
-    @IoDispatcher private val dispatchers: CoroutineDispatcher
+    @IoDispatcher private val dispatchers: CoroutineDispatcher,
+    @ApplicationContext private val context: Context
 ) : RoomRepository {
 
     //получение списка комнат через DAO
@@ -92,6 +98,14 @@ class RoomRepositoryImpl @Inject constructor(
             }
             .flowOn(dispatchers)
     }
+
+    override suspend fun getDefaultRooms(): Flow<List<DefaultRoom>> {
+        return try {
+            JsonParser.parseRooms(context)
+        } catch (e: Exception) {
+            emptyFlow()
+        }
+    }
 }
 
 //преобразования объектов из Entity в Domain
@@ -141,8 +155,8 @@ fun toLoad(entity: LoadEntity): Load {
     return Load(
         id = entity.id,
         name = entity.name,
-        current = entity.current,
-        sumPower = entity.sumPower,
+        current = entity.currentRoom,
+        sumPower = entity.powerRoom,
         countDevices = entity.countDevices,
         createdAt = entity.createdAt,
         roomId = entity.roomId

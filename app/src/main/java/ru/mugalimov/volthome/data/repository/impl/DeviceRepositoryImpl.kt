@@ -1,20 +1,25 @@
 package ru.mugalimov.volthome.data.repository.impl
 
 import android.content.ContentValues.TAG
+import android.content.Context
 import android.util.Log
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import ru.mugalimov.volthome.core.error.DeviceNotFoundException
+import ru.mugalimov.volthome.core.error.RoomNotFoundException
 import ru.mugalimov.volthome.data.local.dao.DeviceDao
 import ru.mugalimov.volthome.data.local.dao.RoomDao
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
-import ru.mugalimov.volthome.core.error.DeviceNotFoundException
-import ru.mugalimov.volthome.core.error.RoomNotFoundException
-import ru.mugalimov.volthome.domain.model.Device
-import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.data.repository.DeviceRepository
+import ru.mugalimov.volthome.di.database.IoDispatcher
+import ru.mugalimov.volthome.domain.model.DefaultDevice
+import ru.mugalimov.volthome.domain.model.Device
+import ru.mugalimov.volthome.ui.components.JsonParser
 import java.util.Date
 import javax.inject.Inject
 
@@ -23,7 +28,8 @@ class DeviceRepositoryImpl @Inject constructor(
     private val roomDao: RoomDao,
     //свойство dispatchers, которое хранит диспетчер для запуска корутин
     //в фоновых потоках, подходящих для IO-задач
-    @IoDispatcher private val dispatchers: CoroutineDispatcher
+    @IoDispatcher private val dispatchers: CoroutineDispatcher,
+    @ApplicationContext private val context: Context
 ) : DeviceRepository {
 
     //получение списка комнат через DAO
@@ -106,6 +112,14 @@ class DeviceRepositoryImpl @Inject constructor(
                 throw RoomNotFoundException()
             }
         }
+
+    override suspend fun getDefaultDevices(): Flow<List<DefaultDevice>> {
+        return try {
+            JsonParser.parseDevices(context)
+        } catch (e: Exception) {
+            emptyFlow()
+        }
+    }
 }
 
 //преобразования объектов из Entity в Domain

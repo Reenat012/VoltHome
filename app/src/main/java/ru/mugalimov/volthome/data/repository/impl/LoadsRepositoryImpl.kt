@@ -33,8 +33,8 @@ class LoadsRepositoryImpl @Inject constructor(
         loadDao.addLoad(
             LoadEntity(
                 name = name,
-                current = current,
-                sumPower = sumPower,
+                currentRoom = current,
+                powerRoom = sumPower,
                 countDevices = countDevice,
                 roomId = roomId,
                 createdAt = Date()
@@ -48,8 +48,8 @@ private fun List<LoadEntity>.toDomainModelListLoad(): List<Load> {
         Load(
             id = entity.id,
             name = entity.name,
-            current = entity.current,
-            sumPower = entity.sumPower,
+            current = entity.currentRoom,
+            sumPower = entity.powerRoom,
             countDevices = entity.countDevices,
             createdAt = entity.createdAt,
             roomId = entity.roomId
@@ -61,8 +61,8 @@ private fun List<LoadEntity>.toDomainModelListLoad(): List<Load> {
 private fun LoadEntity.toDomainModelLoad() = Load(
     id = id,
     name = name,
-    current = current,
-    sumPower = sumPower,
+    current = currentRoom,
+    sumPower = powerRoom,
     countDevices = countDevices,
     createdAt = createdAt,
     roomId = roomId

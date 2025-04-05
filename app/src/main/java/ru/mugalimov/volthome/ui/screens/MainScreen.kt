@@ -26,10 +26,25 @@ import ru.mugalimov.volthome.ui.navigation.NavGraphApp
 fun MainScreen() {
     val navController = rememberNavController()
 
+    // Получаем текущий маршрут
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
+
+    // Определяем нужно ли показывать нижнее меню
+    val bottomNavItems = listOf(
+        BottomNavItem.Rooms.route,
+        BottomNavItem.Loads.route,
+        BottomNavItem.Exploitation.route
+    )
+
+    val showBottomBar = bottomNavItems.any { it == currentRoute }
+
     Scaffold(
         topBar = { MainTopAppBar() },
         bottomBar = {
-            MainBottomNavBar(navController = navController)
+            if (showBottomBar) {
+                MainBottomNavBar(navController = navController)
+            }
         }
     ) { padding ->
         NavGraphApp(

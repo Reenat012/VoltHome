@@ -5,11 +5,9 @@ package ru.mugalimov.volthome.ui.navigation
  */
 sealed class Screens(val route: String) {
     // Основные разделы нижнего меню
-    data object RoomsList : Screens("rooms_list")
-    data object LoadsScreen : Screens("loads?roomId={roomId}") {
-        fun createRoute(roomId: Long) = "loads?roomId=$roomId"
-    }
-    data object ExploitationScreen : Screens("exploitation_screen")
+    data object RoomsList : Screens("rooms")
+    data object LoadsScreen : Screens("loads")
+    data object ExploitationScreen : Screens("exploitations")
 
     // Вложенные экраны
     data object AddRoom : Screens("add_room")

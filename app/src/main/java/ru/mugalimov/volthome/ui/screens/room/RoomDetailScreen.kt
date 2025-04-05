@@ -16,6 +16,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -44,6 +45,15 @@ fun RoomDetailScreen(
 
     //подлкючаем наблюдателя за комнатами
     val uiState by viewModel.uiState.collectAsState()
+
+    // Состояния из viewModel
+    val devicesDefault by viewModel.defaultDevices.collectAsState()
+
+    // Загрузка данных при первом открытии
+    LaunchedEffect(Unit) {
+        viewModel.loadDefaultDevices()
+    }
+
 
     //рисуем интерфейс
     Scaffold(

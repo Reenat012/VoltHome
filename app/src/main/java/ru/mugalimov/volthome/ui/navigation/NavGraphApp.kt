@@ -61,13 +61,7 @@ fun NavGraphApp(
         }
 
         composable(
-            route = "loads?roomId={roomId}",
-            arguments = listOf(
-                navArgument("roomId") {
-                    type = NavType.LongType
-                    defaultValue = 0L
-                }
-            )
+            route =  Screens.LoadsScreen.route
         ) { backStackEntry ->
             val roomId = backStackEntry.arguments?.getLong("roomId") ?: 0L
             LoadsScreen(roomId = roomId)

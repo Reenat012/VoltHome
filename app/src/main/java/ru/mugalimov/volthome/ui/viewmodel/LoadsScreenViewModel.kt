@@ -6,7 +6,6 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,10 +15,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.local.dao.LoadDao
 import ru.mugalimov.volthome.data.local.entity.LoadEntity
+import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.domain.model.RoomWithLoad
 import ru.mugalimov.volthome.data.repository.LoadsRepository
 import ru.mugalimov.volthome.data.repository.RoomRepository
-import ru.mugalimov.volthome.domain.use_case.CalcSumPowerDevices
+import ru.mugalimov.volthome.domain.use_case.CalcLoads
 import java.util.Date
 import javax.inject.Inject
 
@@ -27,8 +27,9 @@ import javax.inject.Inject
 class LoadsScreenViewModel @Inject constructor(
     private val roomRepository: RoomRepository,
     private val loadRepository: LoadsRepository,
+    private val deviceRepository: DeviceRepository,
     private val loadDao: LoadDao,
-    private val calcSumPowerDevices: CalcSumPowerDevices,
+    private val calcLoads: CalcLoads,
     savedStateHandle: SavedStateHandle // Конверт с запросом (ID комнаты)
 ) : ViewModel() {
 //    // Наблюдение за нагрузками
@@ -96,18 +97,35 @@ class LoadsScreenViewModel @Inject constructor(
         }
     }
 
-    suspend fun calcSumLoad() {
+    suspend fun calcLoad() {
         viewModelScope.launch {
-            val updates = _uiState.value.loadsWithRoom.mapNotNull { roomWithLoad ->
+            val updates = _uiState.value.loadsWithRoom.map { roomWithLoad ->
                 val roomId = roomWithLoad.room.id
-                val newSumPower = calcSumPowerDevices.execute(roomId)
+                val newPowerRoom = calcLoads.calPowerRoom(roomId)
 
-                roomWithLoad.load?.copy(sumPower = newSumPower) ?: run {
+                val devicesByRoom = deviceRepository.getAllDevicesByRoomId(roomId)
+
+                val sumVoltage = devicesByRoom.sumOf {
+                    it.voltage
+                }
+
+                val countDevices = devicesByRoom.size
+
+                val voltage = sumVoltage/countDevices
+                Log.d(TAG, "$voltage")
+
+                val newCurrentRoom = (newPowerRoom.toDouble() / voltage).toDouble()
+                Log.d(TAG, "$newCurrentRoom")
+
+                roomWithLoad.load?.copy(
+                    powerRoom = newPowerRoom,
+                    currentRoom = newCurrentRoom,
+                    countDevices = countDevices) ?: run {
                     LoadEntity(
                         roomId = roomId,
-                        sumPower = newSumPower,
+                        powerRoom = newPowerRoom,
                         name = "Auto",
-                        current = 0.0,
+                        currentRoom = newCurrentRoom,
                         createdAt = Date(),
                         countDevices = 0
                     ).also {

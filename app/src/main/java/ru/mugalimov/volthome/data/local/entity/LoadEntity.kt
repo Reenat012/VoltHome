@@ -23,10 +23,10 @@ data class LoadEntity(
     val name: String = "",
 
     @ColumnInfo(name = "current")
-    val current: Double = 0.0,
+    val currentRoom: Double = 0.0,
 
     @ColumnInfo(name = "sum_power")
-    val sumPower: Int = 0,
+    val powerRoom: Int = 0,
 
     @ColumnInfo(name = "count_devices")
     val countDevices: Int = 0,

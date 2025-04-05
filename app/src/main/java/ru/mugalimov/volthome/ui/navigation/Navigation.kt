@@ -56,37 +56,6 @@ fun MainTopAppBar() {
  * @param selectedItem Выбранный в данный момент пункт меню
  * @param onItemSelected Обработчик выбора пункта меню
  */
-//@Composable
-//fun MainBottomNavBar(
-//    selectedItem: BottomNavItem,
-//    navController: NavHostController, // Добавляем navController
-//) {
-//    NavigationBar(
-//        containerColor = MaterialTheme.colorScheme.surfaceVariant
-//    ) {
-//        listOf(
-//            BottomNavItem.Rooms,
-//            BottomNavItem.Loads,
-//            BottomNavItem.Exploitation
-//        ).forEach { item ->
-//            NavigationBarItem(
-//                icon = { Icon(item.icon, contentDescription = item.title) },
-//                label = { Text(item.title) },
-//                selected = selectedItem == item,
-//                onClick = {  navController.navigate(item.route) { // Используем базовый маршрут
-//                    popUpTo(navController.graph.startDestinationId)
-//                    launchSingleTop = true
-//                } },
-//                colors = NavigationBarItemDefaults.colors(
-//                    selectedIconColor = MaterialTheme.colorScheme.primary,
-//                    selectedTextColor = MaterialTheme.colorScheme.primary,
-//                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-//                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
-//                )
-//            )
-//        }
-//    }
-//}
 
 @Composable
 fun MainBottomNavBar(navController: NavHostController) {

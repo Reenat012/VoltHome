@@ -5,17 +5,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Divider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import ru.mugalimov.volthome.domain.model.Load
 import ru.mugalimov.volthome.domain.model.RoomWithLoad
 import ru.mugalimov.volthome.ui.viewmodel.LoadsScreenViewModel
 
@@ -41,7 +36,17 @@ fun LoadCard(
                 style = MaterialTheme.typography.titleMedium
             )
             Text(
-                text = "Суммарная мощность устройств = ${roomWithLoad.load?.sumPower} Вт "
+                text = "Суммарная мощность устройств = ${roomWithLoad.load?.powerRoom} Вт "
+            )
+            Text(
+                text = "Суммарный ток устройств = ${
+                    roomWithLoad.load?.currentRoom?.let {
+                        "%.1f".format(it)
+                    } ?: "N/A"
+                } А"
+            )
+            Text(
+                text = "Количество устройств = ${roomWithLoad.load?.countDevices}"
             )
         }
     }

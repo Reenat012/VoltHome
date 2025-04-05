@@ -14,8 +14,13 @@ import ru.mugalimov.volthome.data.repository.RoomRepository
 import javax.inject.Inject
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -23,6 +28,7 @@ import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.data.repository.DeviceRepository
+import ru.mugalimov.volthome.domain.model.DefaultDevice
 import java.util.Date
 import java.util.Random
 
@@ -43,18 +49,15 @@ class RoomDetailViewModel @Inject constructor(
     //приватное состояние, хранящее данные для UI (список устройств, загрузка, ошибки).
     // Используется mutableStateOf (из Jetpack Compose) для реактивного обновления UI.
     private val _uiState = MutableStateFlow(DeviceUiState())
-
     //публичное свойство, предоставляющее доступ к _uiState
     val uiState: StateFlow<DeviceUiState> = _uiState.asStateFlow()
 
-    // Устройства только для этой комнаты
-//    val devices: Flow<List<DeviceEntity>> = deviceRepository.observeDevicesByIdRoom(roomId)
-//        .stateIn(
-//            scope = viewModelScope,
-//            started = SharingStarted.WhileSubscribed(5000),
-//            initialValue = emptyList()
-//        )
+    // Получаем устройства из каталога
+    private val _defaultDevices = MutableStateFlow<List<DefaultDevice>>(emptyList())
+    val defaultDevices: StateFlow<List<DefaultDevice>> = _defaultDevices.asStateFlow()
 
+    private val _error = MutableSharedFlow<String>() // Для одноразовых событий
+    val error: SharedFlow<String> = _error
 
     init {
         if (roomId.toInt() == 0) {
@@ -64,6 +67,18 @@ class RoomDetailViewModel @Inject constructor(
 
         loadRooms()
         observeDevices()
+        loadDefaultDevices()
+    }
+
+    fun loadDefaultDevices() {
+        viewModelScope.launch {
+            try {
+                _defaultDevices.value = deviceRepository.getDefaultDevices()
+                    .first() // Берем первый элемент Flow
+            } catch (e: Exception) {
+                Log.e("LOAD_ERROR", "Error loading devices", e)
+            }
+        }
     }
 
     private fun loadRooms() {

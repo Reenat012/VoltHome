@@ -1,6 +1,7 @@
 package ru.mugalimov.volthome.data.repository
 
 import kotlinx.coroutines.flow.Flow
+import ru.mugalimov.volthome.domain.model.DefaultRoom
 import ru.mugalimov.volthome.domain.model.Room
 import ru.mugalimov.volthome.domain.model.RoomWithLoad
 
@@ -18,4 +19,6 @@ interface RoomRepository {
     suspend fun getRoomById(roomId: Long) : Room?
 
     suspend fun getRoomsWithLoads(): Flow<List<RoomWithLoad>>
+
+    suspend fun getDefaultRooms(): Flow<List<DefaultRoom>>
 }
