@@ -10,7 +10,7 @@ interface DeviceRepository {
     suspend fun observeDevicesByIdRoom(roomId: Long) : Flow<List<Device>>
 
     //добавить устройство в комнату
-    suspend fun addDevice(name: String, power: Int, voltage: Int, demandRatio: Double, roomId: Long)
+    suspend fun addDevice(device: Device)
 
     //удалить комнату
     suspend fun deleteDevice(deviceId: Long)

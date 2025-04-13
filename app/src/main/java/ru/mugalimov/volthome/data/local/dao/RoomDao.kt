@@ -5,6 +5,7 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.data.local.entity.RoomEntity
@@ -22,6 +23,14 @@ interface RoomDao {
     //то запись прервывается
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun addRoom(room: RoomEntity) : Long // Возвращаем ID новой комнаты
+
+    /**
+     * Обновляет существующую комнату в базе данных.
+     * @param room Обновленная версия комнаты (должна иметь существующий ID)
+     * @return Количество обновленных строк (должно быть 1 при успешном обновлении)
+     */
+    @Update(onConflict = OnConflictStrategy.ABORT)
+    suspend fun updateRoom(room: RoomEntity): Int
 
     //удаление комнаты по id
     //возращает количество удаленных строк 0 или 1

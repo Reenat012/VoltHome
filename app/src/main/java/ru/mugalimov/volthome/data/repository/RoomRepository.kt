@@ -12,6 +12,9 @@ interface RoomRepository {
     //добавить новую комнату
     suspend fun addRoom(room: Room)
 
+    // Обновить комнату после добавления списка устройств
+    suspend fun updateRoom(room: Room)
+
     //удалить комнату
     suspend fun deleteRoom(roomId: Long)
 

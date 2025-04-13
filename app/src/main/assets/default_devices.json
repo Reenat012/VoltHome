@@ -4,146 +4,175 @@
     "name": "Микроволновая печь",
     "power": 1000,
     "voltage": 220,
-    "demandRatio": 0.8
+    "demandRatio": 0.8,
+    "deviceType": "SOCKET"
   },
   {
     "id": 2,
     "name": "Электрический чайник",
     "power": 1500,
     "voltage": 220,
-    "demandRatio": 0.9
+    "demandRatio": 0.9,
+    "deviceType": "SOCKET"
   },
   {
     "id": 3,
     "name": "Холодильник",
     "power": 200,
     "voltage": 220,
-    "demandRatio": 0.7
+    "demandRatio": 0.7,
+    "deviceType": "SOCKET"
   },
   {
     "id": 4,
     "name": "Стиральная машина",
     "power": 1800,
     "voltage": 220,
-    "demandRatio": 0.6
+    "demandRatio": 0.6,
+    "deviceType": "SOCKET"
   },
   {
     "id": 5,
     "name": "Телевизор",
     "power": 150,
     "voltage": 220,
-    "demandRatio": 0.9
+    "demandRatio": 0.9,
+    "deviceType": "SOCKET"
   },
   {
     "id": 6,
     "name": "Игровая приставка",
     "power": 200,
     "voltage": 220,
-    "demandRatio": 0.8
+    "demandRatio": 0.8,
+    "deviceType": "SOCKET"
   },
   {
     "id": 7,
     "name": "Компьютер",
     "power": 400,
     "voltage": 220,
-    "demandRatio": 0.85
+    "demandRatio": 0.85,
+    "deviceType": "SOCKET"
   },
   {
     "id": 8,
     "name": "Ноутбук",
     "power": 60,
     "voltage": 220,
-    "demandRatio": 0.9
+    "demandRatio": 0.9,
+    "deviceType": "SOCKET"
   },
   {
     "id": 9,
     "name": "Кондиционер",
     "power": 2000,
     "voltage": 220,
-    "demandRatio": 0.75
+    "demandRatio": 0.75,
+    "deviceType": "SOCKET"
   },
   {
     "id": 10,
     "name": "Обогреватель",
     "power": 1500,
     "voltage": 220,
-    "demandRatio": 0.8
+    "demandRatio": 0.8,
+    "deviceType": "SOCKET"
   },
   {
     "id": 11,
     "name": "Вентилятор",
     "power": 50,
     "voltage": 220,
-    "demandRatio": 0.9
+    "demandRatio": 0.9,
+    "deviceType": "SOCKET"
   },
   {
     "id": 12,
     "name": "Светодиодная лампа",
     "power": 10,
     "voltage": 220,
-    "demandRatio": 1.0
+    "demandRatio": 1.0,
+    "deviceType": "LIGHTING"
   },
   {
     "id": 13,
     "name": "Люстра",
     "power": 100,
     "voltage": 220,
-    "demandRatio": 1.0
+    "demandRatio": 1.0,
+    "deviceType": "LIGHTING"
   },
   {
     "id": 14,
     "name": "Фен",
     "power": 1200,
     "voltage": 220,
-    "demandRatio": 0.7
+    "demandRatio": 0.7,
+    "deviceType": "SOCKET"
   },
   {
     "id": 15,
     "name": "Пылесос",
     "power": 1600,
     "voltage": 220,
-    "demandRatio": 0.6
+    "demandRatio": 0.6,
+    "deviceType": "SOCKET"
   },
   {
     "id": 16,
     "name": "Утюг",
     "power": 2200,
     "voltage": 220,
-    "demandRatio": 0.65
+    "demandRatio": 0.65,
+    "deviceType": "SOCKET"
   },
   {
     "id": 17,
     "name": "Кофеварка",
     "power": 800,
     "voltage": 220,
-    "demandRatio": 0.8
+    "demandRatio": 0.8,
+    "deviceType": "SOCKET"
   },
   {
     "id": 18,
     "name": "Тостер",
     "power": 1100,
     "voltage": 220,
-    "demandRatio": 0.7
+    "demandRatio": 0.7,
+    "deviceType": "SOCKET"
   },
   {
     "id": 19,
     "name": "Блендер",
     "power": 500,
     "voltage": 220,
-    "demandRatio": 0.6
+    "demandRatio": 0.6,
+    "deviceType": "SOCKET"
   },
   {
     "id": 20,
     "name": "Роутер Wi-Fi",
     "power": 15,
     "voltage": 220,
-    "demandRatio": 1.0
+    "demandRatio": 1.0,
+    "deviceType": "SOCKET"
   },
   {
     "id": 21,
     "name": "Зарядное устройство",
     "power": 25,
     "voltage": 220,
-    "demandRatio": 0.95
+    "demandRatio": 0.95,
+    "deviceType": "SOCKET"
+  },
+  {
+    "id": 22,
+    "name": "Розетка бытовая",
+    "power": 2200,
+    "voltage": 220,
+    "demandRatio": 0.75,
+    "deviceType": "SOCKET"
   }
 ]

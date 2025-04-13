@@ -19,6 +19,7 @@ import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.model.DefaultDevice
 import ru.mugalimov.volthome.domain.model.Device
+import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.ui.components.JsonParser
 import java.util.Date
 import javax.inject.Inject
@@ -42,30 +43,27 @@ class DeviceRepositoryImpl @Inject constructor(
     }
 
     override suspend fun addDevice(
-        name: String,
-        power: Int,
-        voltage: Int,
-        demandRatio: Double,
-        roomId: Long
+        device: Device
     ) {
         Log.d(TAG, "Заходим в репо")
         //запускаем в фоновом потоке, используя корутину
         try {
             withContext(dispatchers) {
-                val isRoomExist = roomDao.getRoomById(roomId)
+                val isRoomExist = roomDao.getRoomById(device.roomId)
                 if (isRoomExist == null) {
-                    throw IllegalArgumentException("Комната с ID $roomId не найдена")
+                    throw IllegalArgumentException("Комната с ID ${device.roomId} не найдена")
                 }
 
                 Log.d(TAG, "Заходим в корутину")
                 deviceDao.addDevice(
                     DeviceEntity(
-                        name = name,
-                        power = power,
-                        voltage = voltage,
-                        demandRatio = demandRatio,
-                        roomId = roomId,
-                        createdAt = Date()
+                        name = device.name,
+                        power = device.power,
+                        voltage = device.voltage,
+                        demandRatio = device.demandRatio,
+                        roomId = device.roomId,
+                        createdAt = Date(),
+                        deviceType = device.deviceType
                     )
                 )
                 Log.d(TAG, "Успех")
@@ -132,7 +130,8 @@ private fun List<DeviceEntity>.toDomainModelListDevice(): List<Device> {
             voltage = entity.voltage,
             demandRatio = entity.demandRatio,
             roomId = entity.roomId,
-            createdAt = entity.createdAt
+            createdAt = entity.createdAt,
+            deviceType = entity.deviceType
         )
     }
 }
@@ -145,5 +144,6 @@ private fun DeviceEntity.toDomainModelDevice() = Device(
     demandRatio = demandRatio,
     voltage = voltage,
     roomId = roomId,
-    createdAt = createdAt
+    createdAt = createdAt,
+    deviceType = deviceType
 )

@@ -106,13 +106,12 @@ class LoadsScreenViewModel @Inject constructor(
                 val devicesByRoom = deviceRepository.getAllDevicesByRoomId(roomId)
 
                 val sumVoltage = devicesByRoom.sumOf {
-                    it.voltage
+                    it.voltage.value
                 }
 
                 val countDevices = devicesByRoom.size
 
-                val voltage = sumVoltage/countDevices
-                Log.d(TAG, "$voltage")
+                val voltage = sumVoltage / countDevices
 
                 val newCurrentRoom = (newPowerRoom.toDouble() / voltage).toDouble()
                 Log.d(TAG, "$newCurrentRoom")

@@ -25,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -39,6 +40,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.domain.model.DefaultDevice
+import ru.mugalimov.volthome.domain.model.DeviceType
+import ru.mugalimov.volthome.domain.model.Voltage
 import ru.mugalimov.volthome.ui.viewmodel.RoomDetailViewModel
 import java.util.Date
 
@@ -57,6 +60,8 @@ fun AddDeviceScreen(
         viewModel.loadDefaultDevices()
     }
 
+
+
     val defaultDevices by viewModel.defaultDevices.collectAsStateWithLifecycle()
 
     // Состояния для выпадающего списка
@@ -66,8 +71,9 @@ fun AddDeviceScreen(
     // Состояние для хранения названия комнаты
     var deviceName by remember { mutableStateOf("") }
     var devicePower by remember { mutableStateOf("") }
-    var deviceVoltage by remember { mutableStateOf("") }
+    var deviceVoltage by remember { mutableStateOf<Voltage?>(null) }
     var deviceDemandRatio by remember { mutableStateOf("") }
+    var deviceType by remember { mutableStateOf<DeviceType>(DeviceType.SOCKET)}
 
 
     // Scaffold — это базовый макет для экрана, который включает TopAppBar и контент.
@@ -86,15 +92,15 @@ fun AddDeviceScreen(
                         onClick = {
                             if (deviceName.isNotBlank()
                                 && devicePower.isNotBlank()
-                                && deviceVoltage.isNotBlank()
                                 && deviceDemandRatio.isNotBlank()
                             ) {
                                 viewModel.addDevice(
                                     name = deviceName,
                                     power = devicePower.toInt(),
-                                    voltage = deviceVoltage.toInt(),
+                                    voltage = deviceVoltage!!,
                                     demandRatio = deviceDemandRatio.toDouble(),
-                                    roomId = roomId // Используем переданный roomId, а не id из viewmodel
+                                    roomId = roomId, // Используем переданный roomId, а не id из viewmodel
+                                    deviceType = deviceType
                                 )
                                 onBack()
                             }
@@ -148,8 +154,9 @@ fun AddDeviceScreen(
                                 expanded = false
                                 deviceName = device.name
                                 devicePower = device.power.toString()
-                                deviceVoltage = device.voltage.toString()
+                                deviceVoltage = device.voltage
                                 deviceDemandRatio = device.demandRatio.toString()
+                                deviceType = device.deviceType
                             }
                         )
                     }
@@ -171,12 +178,15 @@ fun AddDeviceScreen(
                 label = { Text("Мощность, Вт") }, // Подпись поля
                 modifier = Modifier.fillMaxWidth() // Занимает всю доступную ширину.
             )
+
             // Поле ввода класса напряжения устройства
             OutlinedTextField(
-                value = deviceVoltage, // Текущее значение поля.
-                onValueChange = { deviceVoltage = it }, // Обработчик изменения текста.
+                value = deviceVoltage?.value.toString(), // Текущее значение поля.
+                onValueChange = {}, // Обработчик изменения текста.
                 label = { Text("Класс напряжения, В") }, // Подпись поля
-                modifier = Modifier.fillMaxWidth() // Занимает всю доступную ширину.
+                modifier = Modifier.fillMaxWidth(), // Занимает всю доступную ширину.
+                readOnly = true, // Запрещаем редактирование
+                enabled = true // Поле визуально активно (можно фокусироваться)
             )
             // Поле ввода к-та спроса
             OutlinedTextField(

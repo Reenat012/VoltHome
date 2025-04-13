@@ -9,7 +9,8 @@ import java.util.Date
 data class Room(
     val id: Long = 0, // До генерации в entity будет 0
     val name: String,
-    val createdAt: Date
+    val createdAt: Date,
+    val devices: List<Device?> = emptyList()
 )
 
 @RequiresApi(Build.VERSION_CODES.O)

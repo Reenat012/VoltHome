@@ -4,6 +4,8 @@ import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.PrimaryKey
+import ru.mugalimov.volthome.domain.model.DeviceType
+import ru.mugalimov.volthome.domain.model.Voltage
 import java.util.Date
 
 @Entity(
@@ -26,7 +28,7 @@ data class DeviceEntity(
     val power: Int,
 
     @ColumnInfo(name = "voltage")
-    val voltage: Int,
+    val voltage: Voltage,
 
     //к-т спроса
     @ColumnInfo(name = "demand_ratio")
@@ -37,5 +39,8 @@ data class DeviceEntity(
 
     //связь с комнатой через id
     @ColumnInfo(name = "room_id")
-    val roomId: Long
+    val roomId: Long,
+
+    @ColumnInfo(name = "device_type")
+    val deviceType: DeviceType
 )

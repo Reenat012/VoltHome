@@ -62,6 +62,18 @@ class RoomRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun updateRoom(room: Room) {
+        withContext(dispatchers) {
+            try {
+                val roomEntity = room.toDomainModelRoomEntity()
+
+                roomDao.updateRoom(roomEntity)
+            } catch (e: Exception) {
+                throw RoomNotFoundException()
+            }
+        }
+    }
+
     override suspend fun deleteRoom(roomId: Long) {
         //запускаем в фоновом потоке, используя корутину
         withContext(dispatchers) {
@@ -119,8 +131,25 @@ private fun List<RoomEntity>.toDomainModelListRoom(): List<Room> {
     }
 }
 
+//преобразования объектов из Domain в Entity
+private fun List<Room>.toDomainModelListRoomEntity(): List<RoomEntity> {
+    return map { entity ->
+        RoomEntity(
+            id = entity.id,
+            name = entity.name,
+            createdAt = entity.createdAt
+        )
+    }
+}
+
 
 private fun RoomEntity.toDomainModelRoom() = Room(
+    id = id,
+    name = name,
+    createdAt = createdAt
+)
+
+private fun Room.toDomainModelRoomEntity() = RoomEntity(
     id = id,
     name = name,
     createdAt = createdAt
@@ -135,7 +164,8 @@ private fun List<DeviceEntity>.toDomainModelListDevice(): List<Device> {
             voltage = entity.voltage,
             demandRatio = entity.demandRatio,
             createdAt = entity.createdAt,
-            roomId = entity.roomId
+            roomId = entity.roomId,
+            deviceType = entity.deviceType
         )
     }
 }
@@ -148,7 +178,8 @@ private fun DeviceEntity.toDomainModelDevice() = Device(
     demandRatio = demandRatio,
     voltage = voltage,
     createdAt = createdAt,
-    roomId = roomId
+    roomId = roomId,
+    deviceType = deviceType
 )
 
 fun toLoad(entity: LoadEntity): Load {

@@ -29,6 +29,8 @@ import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.domain.model.DefaultDevice
+import ru.mugalimov.volthome.domain.model.DeviceType
+import ru.mugalimov.volthome.domain.model.Voltage
 import java.util.Date
 import java.util.Random
 
@@ -49,6 +51,7 @@ class RoomDetailViewModel @Inject constructor(
     //приватное состояние, хранящее данные для UI (список устройств, загрузка, ошибки).
     // Используется mutableStateOf (из Jetpack Compose) для реактивного обновления UI.
     private val _uiState = MutableStateFlow(DeviceUiState())
+
     //публичное свойство, предоставляющее доступ к _uiState
     val uiState: StateFlow<DeviceUiState> = _uiState.asStateFlow()
 
@@ -126,7 +129,14 @@ class RoomDetailViewModel @Inject constructor(
     }
 
     //добавление комнаты
-    fun addDevice(name: String, power: Int, voltage: Int, demandRatio: Double, roomId: Long) {
+    fun addDevice(
+        name: String,
+        power: Int,
+        voltage: Voltage,
+        demandRatio: Double,
+        roomId: Long,
+        deviceType: DeviceType
+    ) {
         viewModelScope.launch {
             //TODO удалить после отладки
             Log.d(TAG, "Заходим в метод")
@@ -147,11 +157,14 @@ class RoomDetailViewModel @Inject constructor(
 
                 // Добавляем комнату через репозиторий
                 deviceRepository.addDevice(
-                    name = name,
-                    power = power,
-                    voltage = voltage,
-                    demandRatio = demandRatio,
-                    roomId = this@RoomDetailViewModel.roomId
+                    Device(
+                        name = name,
+                        power = power,
+                        voltage = voltage,
+                        demandRatio = demandRatio,
+                        roomId = this@RoomDetailViewModel.roomId,
+                        deviceType = deviceType
+                    )
                 )
             } catch (e: Exception) {
                 _uiState.update {
@@ -204,7 +217,7 @@ class RoomDetailViewModel @Inject constructor(
         }
     }
 
-    private fun validateVoltage(voltage: Int) {
+    private fun validateVoltage(voltage: Voltage) {
         if (voltage.toString().isBlank()) {
             throw IllegalArgumentException("Поле напряжения (В) не может быть пустым")
         }

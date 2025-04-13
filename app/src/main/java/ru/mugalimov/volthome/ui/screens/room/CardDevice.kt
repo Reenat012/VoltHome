@@ -46,7 +46,7 @@ fun CardDevice(
             verticalAlignment = Alignment.CenterVertically) {
             Column(
                 modifier = Modifier
-                .weight(1f) // Занимает всё свободное пространство
+                    .weight(1f) // Занимает всё свободное пространство
                     .padding(16.dp),
 //            verticalAlignment = Alignment.CenterVertically // Выравнивание по вертикали
             ) {
@@ -61,12 +61,17 @@ fun CardDevice(
                     style = MaterialTheme.typography.titleMedium
                 )
                 Text(
-                    text = device.voltage.toString(),
+                    text = device.voltage.value.toString(),
 //                    modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.titleMedium
                 )
                 Text(
                     text = device.demandRatio.toString(),
+//                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    text = "Группа ${device.deviceType}",
 //                    modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.titleMedium
                 )
