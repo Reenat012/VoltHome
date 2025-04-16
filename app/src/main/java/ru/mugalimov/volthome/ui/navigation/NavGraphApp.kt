@@ -1,7 +1,5 @@
 package ru.mugalimov.volthome.ui.navigation
 
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
@@ -13,7 +11,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import ru.mugalimov.volthome.ui.screens.room.AddDeviceScreen
-import ru.mugalimov.volthome.ui.screens.ExploitationScreen
+import ru.mugalimov.volthome.ui.screens.ExpliсationScreen
 import ru.mugalimov.volthome.ui.screens.loads.LoadsScreen
 import ru.mugalimov.volthome.ui.screens.room.RoomDetailScreen
 import ru.mugalimov.volthome.ui.screens.rooms.AddRoomScreen
@@ -71,7 +69,7 @@ fun NavGraphApp(
             route = BottomNavItem.Exploitation.route,
 
             ) {
-            ExploitationScreen()
+            ExpliсationScreen()
         }
 
 

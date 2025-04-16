@@ -10,7 +10,7 @@ import androidx.compose.ui.Modifier
 
 //экран экспликации
 @Composable
-fun ExploitationScreen() {
+fun ExpliсationScreen() {
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center

@@ -5,11 +5,13 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.data.local.entity.RoomEntity
 import ru.mugalimov.volthome.domain.model.Device
+import ru.mugalimov.volthome.domain.model.RoomWithDevices
 
 @Dao
 interface RoomDao {
@@ -44,4 +46,12 @@ interface RoomDao {
     //получить комнату по roomId
     @Query("SELECT * FROM rooms WHERE id = :roomId")
     suspend fun getRoomById(roomId: Long): RoomEntity?
+
+    @Transaction
+    @Query("SELECT * FROM rooms WHERE id=:roomId")
+    suspend fun getRoomWithDevicesById(roomId: Long) : RoomWithDevices?
+
+    @Transaction
+    @Query("SELECT * FROM rooms ORDER BY created_at DESC")
+    fun observeAllRoomsWithDevices(): Flow<List<RoomWithDevices>>
 }

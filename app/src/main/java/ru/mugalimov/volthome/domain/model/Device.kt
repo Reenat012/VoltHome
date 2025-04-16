@@ -16,5 +16,5 @@ data class Device(
         if (voltage == Voltage.V220) {
             (power / voltage.value).toDouble()
         } else (power / (1.73 * voltage.value * 0.95))
-        }
+    }
 }
