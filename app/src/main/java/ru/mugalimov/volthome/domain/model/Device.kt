@@ -12,9 +12,8 @@ data class Device(
     val createdAt: Date = Date(),
     val deviceType: DeviceType
 ) {
-    val current by lazy {
+    val current: Double =
         if (voltage == Voltage.V220) {
-            (power / voltage.value).toDouble()
+            (power.toDouble() / voltage.value).toDouble()
         } else (power / (1.73 * voltage.value * 0.95))
-    }
 }

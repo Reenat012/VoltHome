@@ -98,4 +98,6 @@ dependencies {
 
     implementation (libs.gson)
 
+    implementation(libs.coil.compose)
+    implementation(libs.coil.svg) // Для поддержки SVG
 }

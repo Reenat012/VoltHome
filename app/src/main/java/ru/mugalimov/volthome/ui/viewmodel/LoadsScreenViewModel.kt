@@ -32,23 +32,9 @@ class LoadsScreenViewModel @Inject constructor(
     private val calcLoads: CalcLoads,
     savedStateHandle: SavedStateHandle // Конверт с запросом (ID комнаты)
 ) : ViewModel() {
-//    // Наблюдение за нагрузками
-//    private val _roomsWithLoads: Flow<List<RoomWithLoad>> = loadDao.getRoomsWithLoads()
-//    val roomsWithLoads: Flow<List<RoomWithLoad>> = _roomsWithLoads
-
-//
-//
-//    private val _roomId = savedStateHandle.get<Long>("roomId") ?: 0
-//    val roomId = _roomId
-//
-//    private val _loads = MutableStateFlow<RoomWithLoad?>(null)
-//    val loads: StateFlow<RoomWithLoad?> = _loads.asStateFlow()
 
     private val _uiState = MutableStateFlow(LoadUiState())
     val uiState: StateFlow<LoadUiState> = _uiState.asStateFlow()
-
-    private val _sumLoad = MutableStateFlow(0)
-    val sumLoad: StateFlow<Int> = _sumLoad.asStateFlow()
 
     // Получаем roomId из аргументов навигации
     private val _roomId = MutableStateFlow(0L)

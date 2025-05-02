@@ -11,7 +11,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import ru.mugalimov.volthome.ui.screens.room.AddDeviceScreen
-import ru.mugalimov.volthome.ui.screens.ExpliсationScreen
+import ru.mugalimov.volthome.ui.screens.explication.ExpliсationScreen
 import ru.mugalimov.volthome.ui.screens.loads.LoadsScreen
 import ru.mugalimov.volthome.ui.screens.room.RoomDetailScreen
 import ru.mugalimov.volthome.ui.screens.rooms.AddRoomScreen

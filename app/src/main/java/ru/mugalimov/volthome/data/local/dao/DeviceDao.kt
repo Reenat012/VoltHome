@@ -22,14 +22,26 @@ interface DeviceDao {
 
     //удаление устройства по id
     //возращает количество удаленных строк 0 или 1
-    @Query("DELETE FROM devices WHERE id = :deviceId")
+    @Query("DELETE FROM devices WHERE device_id = :deviceId")
     suspend fun deleteDeviceById(deviceId: Long): Int
 
     //получить устройство по deviceId
-    @Query("SELECT * FROM devices WHERE id = :deviceId")
+    @Query("SELECT * FROM devices WHERE device_id = :deviceId")
     suspend fun getDeviceById(deviceId: Int): DeviceEntity?
 
     // Получить все устройства с определенной комнаты по id комнаты
     @Query("SELECT * FROM devices WHERE room_id = :roomId")
     suspend fun getAllDevicesByRoomId(roomId: Long): List<DeviceEntity>
+
+    @Query("SELECT * FROM devices")
+    suspend fun getAllDevices() : List<DeviceEntity>
+
+    @Query("""
+    SELECT * FROM devices 
+    WHERE device_id IN (
+        SELECT device_id FROM group_device_join 
+        WHERE group_id = :groupId
+    )
+""")
+    suspend fun getDevicesForGroup(groupId: Long): List<DeviceEntity>
 }

@@ -16,10 +16,10 @@ import ru.mugalimov.volthome.data.local.dao.DeviceDao
 import ru.mugalimov.volthome.data.local.dao.RoomDao
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.data.repository.DeviceRepository
+import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.model.DefaultDevice
 import ru.mugalimov.volthome.domain.model.Device
-import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.ui.components.JsonParser
 import java.util.Date
 import javax.inject.Inject
@@ -27,6 +27,7 @@ import javax.inject.Inject
 class DeviceRepositoryImpl @Inject constructor(
     private val deviceDao: DeviceDao,
     private val roomDao: RoomDao,
+    private val explicationRepository: ExplicationRepository,
     //свойство dispatchers, которое хранит диспетчер для запуска корутин
     //в фоновых потоках, подходящих для IO-задач
     @IoDispatcher private val dispatchers: CoroutineDispatcher,
@@ -83,6 +84,9 @@ class DeviceRepositoryImpl @Inject constructor(
             if (rowsDeleted == 0) {
                 throw DeviceNotFoundException("Устройство с ID $deviceId не найдено")
             }
+
+            // Обработка удаления связанных с устройством групп
+            explicationRepository.handleDeviceDeletion(deviceId)
         }
     }
 
@@ -93,7 +97,7 @@ class DeviceRepositoryImpl @Inject constructor(
                 val entity = deviceDao.getDeviceById(deviceId)
 
                 //преобразовываем из Entity в модель удобную для чтения
-                entity?.toDomainModelDevice()
+                entity?.toDomainModelListDevice()
             } catch (e: Exception) {
                 throw DeviceNotFoundException()
             }
@@ -118,13 +122,22 @@ class DeviceRepositoryImpl @Inject constructor(
             emptyFlow()
         }
     }
+
+    override suspend fun getAllDevices(): List<Device> =
+        withContext(dispatchers) {
+            return@withContext try {
+                deviceDao.getAllDevices().toDomainModelListDevice()
+            } catch (e: Exception) {
+                throw DeviceNotFoundException()
+            }
+        }
 }
 
 //преобразования объектов из Entity в Domain
 private fun List<DeviceEntity>.toDomainModelListDevice(): List<Device> {
     return map { entity ->
         Device(
-            id = entity.id,
+            id = entity.deviceId,
             name = entity.name,
             power = entity.power,
             voltage = entity.voltage,
@@ -137,8 +150,8 @@ private fun List<DeviceEntity>.toDomainModelListDevice(): List<Device> {
 }
 
 
-private fun DeviceEntity.toDomainModelDevice() = Device(
-    id = id,
+private fun DeviceEntity.toDomainModelListDevice() = Device(
+    id = deviceId,
     name = name,
     power = power,
     demandRatio = demandRatio,

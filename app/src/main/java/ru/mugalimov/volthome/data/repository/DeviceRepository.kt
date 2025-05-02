@@ -23,4 +23,7 @@ interface DeviceRepository {
 
     // Получение устройств из каталога json файла
     suspend fun getDefaultDevices(): Flow<List<DefaultDevice>>
+
+    // Получение всех устройств
+    suspend fun getAllDevices(): List<Device>
 }

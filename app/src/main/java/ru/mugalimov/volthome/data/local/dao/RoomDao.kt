@@ -1,17 +1,14 @@
 package ru.mugalimov.volthome.data.local.dao
 
 import androidx.room.Dao
-import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
-import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.data.local.entity.RoomEntity
-import ru.mugalimov.volthome.domain.model.Device
-import ru.mugalimov.volthome.domain.model.RoomWithDevices
+import ru.mugalimov.volthome.domain.model.RoomWithDevicesEntity
 
 @Dao
 interface RoomDao {
@@ -49,9 +46,12 @@ interface RoomDao {
 
     @Transaction
     @Query("SELECT * FROM rooms WHERE id=:roomId")
-    suspend fun getRoomWithDevicesById(roomId: Long) : RoomWithDevices?
+    suspend fun getRoomWithDevicesById(roomId: Long) : RoomWithDevicesEntity?
 
     @Transaction
     @Query("SELECT * FROM rooms ORDER BY created_at DESC")
-    fun observeAllRoomsWithDevices(): Flow<List<RoomWithDevices>>
+    fun observeAllRoomsWithDevices(): List<RoomWithDevicesEntity>
+
+    @Query("SELECT * FROM rooms")
+    suspend fun getAllRooms() : List<RoomEntity>
 }

@@ -19,7 +19,8 @@ import java.util.Date
 )
 data class DeviceEntity(
     @PrimaryKey(autoGenerate = true)
-    val id: Long = 0,
+    @ColumnInfo(name = "device_id")
+    val deviceId: Long = 0,
 
     @ColumnInfo(name = "name") //явное указание имени столбца
     val name: String,
