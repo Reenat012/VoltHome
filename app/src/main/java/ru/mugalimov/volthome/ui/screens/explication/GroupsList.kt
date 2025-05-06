@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.ui.screens.explication
 
+import GroupCard
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
