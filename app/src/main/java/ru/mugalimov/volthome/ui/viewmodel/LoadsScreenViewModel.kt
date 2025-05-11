@@ -50,6 +50,10 @@ class LoadsScreenViewModel @Inject constructor(
         observeLoads()
     }
 
+    fun refresh() {
+        observeLoads()
+    }
+
     fun getRoomId(roomId: Long) {
         _roomId.value = roomId
     }
@@ -91,6 +95,12 @@ class LoadsScreenViewModel @Inject constructor(
 
                 val devicesByRoom = deviceRepository.getAllDevicesByRoomId(roomId)
 
+                // Если список устройств пуст, пропускаем обновление
+                if (devicesByRoom.isEmpty()) {
+                    Log.d(TAG, "Нет устройств в комнате с id $roomId")
+                    return@map roomWithLoad.load
+                }
+
                 val sumVoltage = devicesByRoom.sumOf {
                     it.voltage.value
                 }
@@ -99,8 +109,10 @@ class LoadsScreenViewModel @Inject constructor(
 
                 val voltage = sumVoltage / countDevices
 
-                val newCurrentRoom = (newPowerRoom.toDouble() / voltage).toDouble()
-                Log.d(TAG, "$newCurrentRoom")
+                val newCurrentRoom = if (voltage == 0) {
+                    Log.d(TAG, "Напряжение равно 0 в комнате с id $roomId")
+                    0.0
+                } else (newPowerRoom.toDouble() / voltage).takeIf { !it.isNaN() } ?: 0.0
 
                 roomWithLoad.load?.copy(
                     powerRoom = newPowerRoom,
@@ -112,7 +124,7 @@ class LoadsScreenViewModel @Inject constructor(
                         name = "Auto",
                         currentRoom = newCurrentRoom,
                         createdAt = Date(),
-                        countDevices = 0
+                        countDevices = countDevices
                     ).also {
                         Log.d("DEBUG", "Creating new Load for room $roomId")
                     }
@@ -120,6 +132,9 @@ class LoadsScreenViewModel @Inject constructor(
             }
 
             loadDao.upsertAllLoads(updates) // Пакетное обновление
+
+            // Принудительно запрашиваем обновление
+            observeLoads()
         }
     }
 

@@ -3,6 +3,7 @@ package ru.mugalimov.volthome.ui.screens.room
 import android.content.ContentValues.TAG
 import android.util.Log
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -10,24 +11,35 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Power
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -35,9 +47,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ru.mugalimov.volthome.R
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.domain.model.DefaultDevice
 import ru.mugalimov.volthome.domain.model.DeviceType
@@ -52,154 +69,274 @@ import java.util.Date
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddDeviceScreen(
-    roomId: Long, // Получаем roomId из аргументов навигации
+    roomId: Long,
     onBack: () -> Unit,
     viewModel: RoomDetailViewModel = hiltViewModel()
 ) {
-    LaunchedEffect(Unit) {
-        viewModel.loadDefaultDevices()
-    }
-
-
-
+    LaunchedEffect(Unit) { viewModel.loadDefaultDevices() }
     val defaultDevices by viewModel.defaultDevices.collectAsStateWithLifecycle()
 
-    // Состояния для выпадающего списка
     var expanded by remember { mutableStateOf(false) }
     var selectedDevice by remember { mutableStateOf<DefaultDevice?>(null) }
-
-    // Состояние для хранения названия комнаты
     var deviceName by remember { mutableStateOf("") }
     var devicePower by remember { mutableStateOf("") }
     var deviceVoltage by remember { mutableStateOf<Voltage?>(null) }
     var deviceDemandRatio by remember { mutableStateOf("") }
     var deviceType by remember { mutableStateOf<DeviceType>(DeviceType.SOCKET)}
+    val focusManager = LocalFocusManager.current
+    val scrollState = rememberScrollState()
 
-
-    // Scaffold — это базовый макет для экрана, который включает TopAppBar и контент.
     Scaffold(
-        // TopAppBar — это верхняя панель с заголовком и кнопкой "Назад".
         topBar = {
-            TopAppBar(
-                title = { Text("Добавить устройство") },
-                // Кнопка "Назад" с иконкой стрелки.
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Назад") }
+            CenterAlignedTopAppBar(
+                title = {
+                    Text(
+                        "Добавить устройство",
+                        style = MaterialTheme.typography.headlineSmall
+                    )
                 },
-                //кнопка для добавления комнаты
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.Filled.ArrowBack,
+                            contentDescription = "Назад",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                },
                 actions = {
-                    IconButton(
+                    FilledTonalButton(
                         onClick = {
-                            if (deviceName.isNotBlank()
-                                && devicePower.isNotBlank()
-                                && deviceDemandRatio.isNotBlank()
-                            ) {
+                            if (validateInput(deviceName, devicePower, deviceDemandRatio)) {
                                 viewModel.addDevice(
                                     name = deviceName,
                                     power = devicePower.toInt(),
                                     voltage = deviceVoltage!!,
                                     demandRatio = deviceDemandRatio.toDouble(),
-                                    roomId = roomId, // Используем переданный roomId, а не id из viewmodel
+                                    roomId = roomId,
                                     deviceType = deviceType
                                 )
                                 onBack()
                             }
-                        }
+                        },
+                        enabled = validateInput(deviceName, devicePower, deviceDemandRatio),
+                        modifier = Modifier.padding(end = 8.dp)
                     ) {
-                        Icon(Icons.Default.Check, "Сохранить") // Иконка "галочка"}
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = "Сохранить",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
                     }
-                }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
+                )
             )
-
         }
-    ) { padding ->
-
-
-        // Column — это вертикальный контейнер для размещения элементов.
+    ) { innerPadding ->
         Column(
             modifier = Modifier
-                .padding(padding) // Отступы от Scaffold.
-                .fillMaxSize() // Занимает весь доступный размер.
-                .padding(16.dp) // Внутренние отступы.
-
+                .padding(innerPadding)
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            ExposedDropdownMenuBox(
-                expanded = expanded,
-                onExpandedChange = { expanded = it },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                OutlinedTextField(
-                    value = selectedDevice?.name ?: "Выберите устройство",
-                    onValueChange = {},
-                    readOnly = true,
-                    trailingIcon = {
-                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
-                    },
-                    colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
-                    modifier = Modifier
-                        .menuAnchor()
-                        .fillMaxWidth()
+            // Шаблоны устройств
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Шаблоны устройств",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                ExposedDropdownMenu(
+                ExposedDropdownMenuBox(
                     expanded = expanded,
-                    onDismissRequest = { expanded = false },
+                    onExpandedChange = { expanded = it },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    defaultDevices.forEach { device ->
-                        DropdownMenuItem(
-                            text = { Text(device.name) },
-                            onClick = {
-                                selectedDevice = device
-                                expanded = false
-                                deviceName = device.name
-                                devicePower = device.power.toString()
-                                deviceVoltage = device.voltage
-                                deviceDemandRatio = device.demandRatio.toString()
-                                deviceType = device.deviceType
-                            }
-                        )
+                    OutlinedTextField(
+                        value = selectedDevice?.name ?: "Выберите шаблон",
+                        onValueChange = {},
+                        readOnly = true,
+                        leadingIcon = {
+                            Icon(
+                                painterResource(R.drawable.ic_devices),
+                                contentDescription = "Шаблоны устройств"
+                            )
+                        },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+                        colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                        ),
+                        shape = MaterialTheme.shapes.large,
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+
+                    ExposedDropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        defaultDevices.forEach { device ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        device.name,
+                                        style = MaterialTheme.typography.bodyLarge
+                                    )
+                                },
+                                onClick = {
+                                    selectedDevice = device
+                                    expanded = false
+                                    deviceName = device.name
+                                    devicePower = device.power.toString()
+                                    deviceVoltage = device.voltage
+                                    deviceDemandRatio = device.demandRatio.toString()
+                                    deviceType = device.deviceType
+                                    focusManager.clearFocus()
+                                }
+                            )
+                        }
                     }
                 }
             }
 
+            // Основные параметры
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                OutlinedTextField(
+                    value = deviceName,
+                    onValueChange = { deviceName = it },
+                    label = { Text("Название") },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Filled.Edit,
+                            contentDescription = "Иконка редактирования"
+                        )
+                    },
+                    placeholder = { Text("Например: Стиральная машина") },
+                    colors = textFieldColors(),
+                    modifier = Modifier.fillMaxWidth()
+                )
 
-            // Поле ввода для названия комнаты.
-            OutlinedTextField(
-                value = deviceName, // Текущее значение поля.
-                onValueChange = { deviceName = it }, // Обработчик изменения текста.
-                label = { Text("Название") }, // Подпись поля
-                modifier = Modifier.fillMaxWidth() // Занимает всю доступную ширину.
-            )
-            // Поле для ввода мощности устройства
-            OutlinedTextField(
-                value = devicePower, // Текущее значение поля.
-                onValueChange = { devicePower = it }, // Обработчик изменения текста.
-                label = { Text("Мощность, Вт") }, // Подпись поля
-                modifier = Modifier.fillMaxWidth() // Занимает всю доступную ширину.
-            )
+                OutlinedTextField(
+                    value = devicePower,
+                    onValueChange = { if (it.isNumber()) devicePower = it },
+                    label = { Text("Мощность (Вт)") },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Filled.Power,
+                            contentDescription = "Иконка мощности"
+                        )
+                    },
+                    colors = textFieldColors(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                    suffix = {
+                        Text(
+                            "Вт",
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+                        )
+                    }
+                )
 
-            // Поле ввода класса напряжения устройства
-            OutlinedTextField(
-                value = deviceVoltage?.value.toString(), // Текущее значение поля.
-                onValueChange = {}, // Обработчик изменения текста.
-                label = { Text("Класс напряжения, В") }, // Подпись поля
-                modifier = Modifier.fillMaxWidth(), // Занимает всю доступную ширину.
-                readOnly = true, // Запрещаем редактирование
-                enabled = true // Поле визуально активно (можно фокусироваться)
-            )
-            // Поле ввода к-та спроса
-            OutlinedTextField(
-                value = deviceDemandRatio, // Текущее значение поля.
-                onValueChange = { deviceDemandRatio = it }, // Обработчик изменения текста.
-                label = { Text("Коэффициент спроса") }, // Подпись поля
-                modifier = Modifier.fillMaxWidth() // Занимает всю доступную ширину.
-            )
+                VoltageSelector(
+                    selectedVoltage = deviceVoltage,
+                    onVoltageSelected = { deviceVoltage = it }
+                )
+
+                OutlinedTextField(
+                    value = deviceDemandRatio,
+                    onValueChange = { if (it.isDecimal()) deviceDemandRatio = it },
+                    label = { Text("Коэффициент спроса") },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Filled.Calculate,
+                            contentDescription = "Иконка калькулятора"
+                        )
+                    },
+                    colors = textFieldColors(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Done
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                    suffix = {
+                        Text(
+                            "0.0-1.0",
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+                        )
+                    }
+                )
+            }
         }
-
-        // Spacer — это пустое пространство между элементами.
-        Spacer(modifier = Modifier.height(16.dp))
-
-
     }
 }
+
+@Composable
+private fun textFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+    focusedBorderColor = MaterialTheme.colorScheme.primary,
+    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun VoltageSelector(
+    selectedVoltage: Voltage?,
+    onVoltageSelected: (Voltage) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        OutlinedTextField(
+            value = selectedVoltage?.value?.toString() ?: "Выберите напряжение",
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Напряжение (В)") },
+            leadingIcon = {
+                Icon(
+                    Icons.Filled.Bolt,
+                    contentDescription = "Иконка напряжения"
+                )
+            },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+            modifier = Modifier.menuAnchor().fillMaxWidth()
+        )
+
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            Voltage.entries.forEach { voltage ->
+                DropdownMenuItem(
+                    text = { Text("${voltage.value} В") },
+                    onClick = {
+                        onVoltageSelected(voltage)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+private fun validateInput(name: String, power: String, ratio: String): Boolean {
+    return name.isNotBlank() &&
+            power.isNotBlank() &&
+            ratio.isNotBlank() &&
+            power.toIntOrNull() != null &&
+            ratio.toDoubleOrNull()?.let { it in 0.0..1.0 } ?: false
+}
+
+private fun String.isNumber() = matches(Regex("^\\d+\$"))
+private fun String.isDecimal() = matches(Regex("^\\d*(\\.\\d*)?\$"))

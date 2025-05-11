@@ -1,34 +1,44 @@
 package ru.mugalimov.volthome.ui.screens.rooms
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import ru.mugalimov.volthome.domain.model.DefaultDevice
+import ru.mugalimov.volthome.R
 import ru.mugalimov.volthome.domain.model.DefaultRoom
 import ru.mugalimov.volthome.ui.viewmodel.RoomViewModel
 
@@ -38,100 +48,176 @@ import ru.mugalimov.volthome.ui.viewmodel.RoomViewModel
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddRoomScreen(onBack: () -> Unit, viewModel: RoomViewModel = hiltViewModel()) {
-
-
+fun AddRoomScreen(
+    onBack: () -> Unit,
+    viewModel: RoomViewModel = hiltViewModel()
+) {
     val defaultRooms by viewModel.defaultRooms.collectAsStateWithLifecycle()
-
-    // Состояния для выпадающего списка
     var expanded by remember { mutableStateOf(false) }
-    var selectedRooms by remember { mutableStateOf<DefaultRoom?>(null) }
-
-    // Состояние для хранения названия комнаты
+    var selectedRoom by remember { mutableStateOf<DefaultRoom?>(null) }
     var roomName by remember { mutableStateOf("") }
+    val scrollState = rememberScrollState()
+    val focusManager = LocalFocusManager.current
 
-    // Scaffold — это базовый макет для экрана, который включает TopAppBar и контент.
     Scaffold(
-        // TopAppBar — это верхняя панель с заголовком и кнопкой "Назад".
         topBar = {
-            TopAppBar(
-                title = { Text("Добавить комнату") },
-                // Кнопка "Назад" с иконкой стрелки.
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Назад") }
-                },
-                //кнопка для добавления комнаты
-                actions = {
-                    IconButton(
-                        onClick = {
-                            if (roomName.isNotBlank()) {
-                                viewModel.addRoom(roomName)
-                                onBack()
-                            }
-                        }
-                    ) {
-                        Icon(Icons.Default.Check, "Сохранить") // Иконка "галочка"}
-                    }
-                }
-            )
+            CenterAlignedTopAppBar(
+                title = {
 
+                    Text(
+                        text = "Добавить комнату",
+                        style = MaterialTheme.typography.headlineSmall
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.Filled.ArrowBack,
+                            contentDescription = "Назад",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                },
+                actions = {
+                    FilledTonalButton(
+                        onClick = {
+                            viewModel.addRoom(roomName)
+                            onBack()
+                        },
+                        enabled = roomName.isNotBlank(),
+                        modifier = Modifier.padding(end = 8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = "Сохранить",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
+                )
+            )
         }
-    ) { padding ->
-        // Column — это вертикальный контейнер для размещения элементов.
+    ) { innerPadding ->
         Column(
             modifier = Modifier
-                .padding(padding) // Отступы от Scaffold.
-                .fillMaxSize() // Занимает весь доступный размер.
-                .padding(16.dp) // Внутренние отступы.
+                .padding(innerPadding)
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
-            ExposedDropdownMenuBox(
-                expanded = expanded,
-                onExpandedChange = { expanded = it },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                OutlinedTextField(
-                    value = selectedRooms?.name ?: "Выберите комнату",
-                    onValueChange = {},
-                    readOnly = true,
-                    trailingIcon = {
-                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
-                    },
-                    colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
-                    modifier = Modifier
-                        .menuAnchor()
-                        .fillMaxWidth()
+            // Секция выбора шаблона
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Шаблоны комнат",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                ExposedDropdownMenu(
+                ExposedDropdownMenuBox(
                     expanded = expanded,
-                    onDismissRequest = { expanded = false },
+                    onExpandedChange = { expanded = it },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    defaultRooms.forEach { room ->
-                        DropdownMenuItem(
-                            text = { Text(room.name) },
-                            onClick = {
-                                selectedRooms = room
-                                expanded = false
-                                roomName = room.name
-                            }
-                        )
+                    OutlinedTextField(
+                        value = selectedRoom?.name ?: "Выберите шаблон",
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+                        },
+                        leadingIcon = {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_template),
+                                contentDescription = "Шаблоны",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        },
+                        colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                        ),
+                        shape = MaterialTheme.shapes.extraLarge,
+                        modifier = Modifier
+                            .menuAnchor()
+                            .fillMaxWidth()
+                    )
+
+                    ExposedDropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        defaultRooms.forEach { room ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = room.name,
+                                        style = MaterialTheme.typography.bodyLarge
+                                    )
+                                },
+                                onClick = {
+                                    selectedRoom = room
+                                    expanded = false
+                                    roomName = room.name
+                                    focusManager.clearFocus()
+                                }
+                            )
+                        }
                     }
                 }
             }
 
-            // Поле ввода для названия комнаты.
-            OutlinedTextField(
-                value = roomName, // Текущее значение поля.
-                onValueChange = { roomName = it }, // Обработчик изменения текста.
-                label = { Text("Название") }, // Подпись поля
-                modifier = Modifier.fillMaxWidth() // Занимает всю доступную ширину.
+            // Секция ввода названия
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Название комнаты",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                OutlinedTextField(
+                    value = roomName,
+                    onValueChange = { roomName = it },
+                    placeholder = {
+                        Text(
+                            "Например: Гостиная",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                        )
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                        focusedLabelColor = MaterialTheme.colorScheme.primary,
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                    ),
+                    shape = MaterialTheme.shapes.extraLarge,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    leadingIcon = {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_edit),
+                            contentDescription = "Название",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(
+                        onDone = { focusManager.clearFocus() }
+                    )
+                )
+            }
+
+            // Подсказка
+            Text(
+                text = "Используйте уникальные названия для удобства управления",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 8.dp)
             )
         }
-
-        // Spacer — это пустое пространство между элементами.
-        Spacer(modifier = Modifier.height(16.dp))
-
-
     }
 }

@@ -33,6 +33,7 @@ fun LoadsScreen(
     // Вызываем расчет суммы при создании экрана или изменении roomId
     LaunchedEffect(roomId) {
         viewModel.calcLoad()
+        viewModel.refresh()
     }
 
     //подключаем наблюдателя за состоянием экрана

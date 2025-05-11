@@ -3,6 +3,9 @@ package ru.mugalimov.volthome.ui.utilities
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -13,8 +16,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.dp
 import ru.mugalimov.volthome.R
 
 @Composable
@@ -27,8 +32,9 @@ fun TelegramButton() {
         onClick = { showDialog = true }
     ) {
         Icon(
-            painterResource(R.drawable.telegram),
-            contentDescription = "Follow telegram"
+            imageVector = Icons.Default.Lightbulb,
+            contentDescription = "Telegram Consultation",
+            modifier = Modifier.size(24.dp)
         )
     }
 
@@ -42,8 +48,8 @@ fun TelegramButton() {
                 TextButton(
                     onClick = {
                         // Ссылка на вашего бота (замените your_bot_name)
-                        val telegramUrl = "tg://resolve?domain=your_bot_name"
-                        val webUrl = "https://t.me/your_bot_name"
+                        val telegramUrl = "tg://resolve?domain=VoltHomeBot"
+                        val webUrl = "https://t.me/VoltHomeBot"
 
                         try {
                             // Пытаемся открыть в приложении
