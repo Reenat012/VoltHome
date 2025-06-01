@@ -3,6 +3,7 @@ package ru.netology.nework.converters
 import androidx.room.TypeConverter
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.Voltage
