@@ -1,5 +1,29 @@
 [
   {
+    "id": 12,
+    "name": "Светодиодная лампа",
+    "power": 10,
+    "voltage": 220,
+    "demandRatio": 1.0,
+    "deviceType": "LIGHTING"
+  },
+  {
+    "id": 13,
+    "name": "Люстра",
+    "power": 100,
+    "voltage": 220,
+    "demandRatio": 1.0,
+    "deviceType": "LIGHTING"
+  },
+  {
+    "id": 22,
+    "name": "Розетка бытовая",
+    "power": 2200,
+    "voltage": 220,
+    "demandRatio": 0.75,
+    "deviceType": "SOCKET"
+  },
+  {
     "id": 1,
     "name": "Микроволновая печь",
     "power": 1000,
@@ -88,22 +112,6 @@
     "deviceType": "SOCKET"
   },
   {
-    "id": 12,
-    "name": "Светодиодная лампа",
-    "power": 10,
-    "voltage": 220,
-    "demandRatio": 1.0,
-    "deviceType": "LIGHTING"
-  },
-  {
-    "id": 13,
-    "name": "Люстра",
-    "power": 100,
-    "voltage": 220,
-    "demandRatio": 1.0,
-    "deviceType": "LIGHTING"
-  },
-  {
     "id": 14,
     "name": "Фен",
     "power": 1200,
@@ -165,14 +173,6 @@
     "power": 25,
     "voltage": 220,
     "demandRatio": 0.95,
-    "deviceType": "SOCKET"
-  },
-  {
-    "id": 22,
-    "name": "Розетка бытовая",
-    "power": 2200,
-    "voltage": 220,
-    "demandRatio": 0.75,
     "deviceType": "SOCKET"
   }
 ]

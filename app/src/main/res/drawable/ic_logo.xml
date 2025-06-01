@@ -1,0 +1,6 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+    <!-- Фон щита -->
+    <path d="M20,30 L100,10 L180,30 L160,150 L100,190 L40,150 Z" fill="#1E90FF" stroke="#000000" stroke-width="2"/>
+    <!-- Молния внутри щита -->
+    <path d="M70,70 L100,130 L90,130 L120,70 L110,70 L100,90 L90,70 Z" fill="#FFA500"/>
+</svg>

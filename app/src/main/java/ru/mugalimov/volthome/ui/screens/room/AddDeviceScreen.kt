@@ -301,6 +301,7 @@ private fun VoltageSelector(
             value = selectedVoltage?.value?.toString() ?: "Выберите напряжение",
             onValueChange = {},
             readOnly = true,
+            enabled = false, // Блокируем взаимодействие
             label = { Text("Напряжение (В)") },
             leadingIcon = {
                 Icon(
@@ -308,24 +309,28 @@ private fun VoltageSelector(
                     contentDescription = "Иконка напряжения"
                 )
             },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            // Убираем trailing icon (стрелочку)
+            trailingIcon = null,
+//            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
             colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
             modifier = Modifier.menuAnchor().fillMaxWidth()
         )
 
         ExposedDropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
-            Voltage.entries.forEach { voltage ->
-                DropdownMenuItem(
-                    text = { Text("${voltage.value} В") },
-                    onClick = {
-                        onVoltageSelected(voltage)
-                        expanded = false
-                    }
-                )
+            expanded = false,
+            onDismissRequest = {
+//                expanded = false
             }
+        ) {
+//            Voltage.entries.forEach { voltage ->
+//                DropdownMenuItem(
+//                    text = { Text("${voltage.value} В") },
+//                    onClick = {
+//                        onVoltageSelected(voltage)
+//                        expanded = false
+//                    }
+//                )
+//            }
         }
     }
 }

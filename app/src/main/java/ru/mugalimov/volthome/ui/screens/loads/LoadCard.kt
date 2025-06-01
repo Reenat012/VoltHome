@@ -98,7 +98,7 @@ fun LoadCard(
                 icon = Icons.Outlined.Bolt,
                 label = "Суммарный ток",
                 value = roomWithLoad.load?.currentRoom?.let {
-                    "%.1f А".format(it)
+                    "%.2f А".format(it)
                 } ?: "N/A",
                 highlightColor = MaterialTheme.colorScheme.secondary
             )
