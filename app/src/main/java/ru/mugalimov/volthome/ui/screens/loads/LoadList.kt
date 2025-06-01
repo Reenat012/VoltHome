@@ -28,8 +28,7 @@ fun LoadList(
         items(roomsWithLoads) { roomWithLoad ->
             LoadCard(
                 roomWithLoad = roomWithLoad,
-                modifier = Modifier.fillMaxWidth(),
-                roomId = roomWithLoad.room.id
+                modifier = Modifier.fillMaxWidth()
             )
         }
     }

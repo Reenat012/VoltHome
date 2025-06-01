@@ -4,5 +4,6 @@ data class DefaultRoom(
     val id: Long,
     val name: String,
     val icon: String,
-    val description: String
+    val description: String,
+    val deviceType: DeviceType
 )

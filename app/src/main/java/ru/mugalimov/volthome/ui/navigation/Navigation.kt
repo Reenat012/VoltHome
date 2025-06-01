@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
+import ru.mugalimov.volthome.ui.utilities.TelegramButton
 
 /**
  * Модель для элементов нижней навигационной панели.
@@ -47,7 +48,10 @@ fun MainTopAppBar() {
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer,
             titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-        )
+        ),
+        actions = {
+            TelegramButton()
+        }
     )
 }
 
@@ -90,3 +94,4 @@ fun MainBottomNavBar(navController: NavHostController) {
         }
     }
 }
+

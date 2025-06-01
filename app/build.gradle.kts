@@ -55,6 +55,7 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.benchmark.macro)
     implementation(libs.firebase.crashlytics.buildtools)
+    implementation(libs.litert.support.api)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -98,4 +99,6 @@ dependencies {
 
     implementation (libs.gson)
 
+    implementation(libs.coil.compose)
+    implementation(libs.coil.svg) // Для поддержки SVG
 }

@@ -32,23 +32,9 @@ class LoadsScreenViewModel @Inject constructor(
     private val calcLoads: CalcLoads,
     savedStateHandle: SavedStateHandle // Конверт с запросом (ID комнаты)
 ) : ViewModel() {
-//    // Наблюдение за нагрузками
-//    private val _roomsWithLoads: Flow<List<RoomWithLoad>> = loadDao.getRoomsWithLoads()
-//    val roomsWithLoads: Flow<List<RoomWithLoad>> = _roomsWithLoads
-
-//
-//
-//    private val _roomId = savedStateHandle.get<Long>("roomId") ?: 0
-//    val roomId = _roomId
-//
-//    private val _loads = MutableStateFlow<RoomWithLoad?>(null)
-//    val loads: StateFlow<RoomWithLoad?> = _loads.asStateFlow()
 
     private val _uiState = MutableStateFlow(LoadUiState())
     val uiState: StateFlow<LoadUiState> = _uiState.asStateFlow()
-
-    private val _sumLoad = MutableStateFlow(0)
-    val sumLoad: StateFlow<Int> = _sumLoad.asStateFlow()
 
     // Получаем roomId из аргументов навигации
     private val _roomId = MutableStateFlow(0L)
@@ -61,6 +47,10 @@ class LoadsScreenViewModel @Inject constructor(
 //            Log.d(TAG, "roomId = 0")
 //        }
 
+        observeLoads()
+    }
+
+    fun refresh() {
         observeLoads()
     }
 
@@ -105,17 +95,24 @@ class LoadsScreenViewModel @Inject constructor(
 
                 val devicesByRoom = deviceRepository.getAllDevicesByRoomId(roomId)
 
+                // Если список устройств пуст, пропускаем обновление
+                if (devicesByRoom.isEmpty()) {
+                    Log.d(TAG, "Нет устройств в комнате с id $roomId")
+                    return@map roomWithLoad.load
+                }
+
                 val sumVoltage = devicesByRoom.sumOf {
-                    it.voltage
+                    it.voltage.value
                 }
 
                 val countDevices = devicesByRoom.size
 
-                val voltage = sumVoltage/countDevices
-                Log.d(TAG, "$voltage")
+                val voltage = sumVoltage / countDevices
 
-                val newCurrentRoom = (newPowerRoom.toDouble() / voltage).toDouble()
-                Log.d(TAG, "$newCurrentRoom")
+                val newCurrentRoom = if (voltage == 0) {
+                    Log.d(TAG, "Напряжение равно 0 в комнате с id $roomId")
+                    0.0
+                } else (newPowerRoom.toDouble() / voltage).takeIf { !it.isNaN() } ?: 0.0
 
                 roomWithLoad.load?.copy(
                     powerRoom = newPowerRoom,
@@ -127,7 +124,7 @@ class LoadsScreenViewModel @Inject constructor(
                         name = "Auto",
                         currentRoom = newCurrentRoom,
                         createdAt = Date(),
-                        countDevices = 0
+                        countDevices = countDevices
                     ).also {
                         Log.d("DEBUG", "Creating new Load for room $roomId")
                     }
@@ -135,6 +132,9 @@ class LoadsScreenViewModel @Inject constructor(
             }
 
             loadDao.upsertAllLoads(updates) // Пакетное обновление
+
+            // Принудительно запрашиваем обновление
+            observeLoads()
         }
     }
 

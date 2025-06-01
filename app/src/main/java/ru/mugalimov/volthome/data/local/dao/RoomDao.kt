@@ -1,14 +1,14 @@
 package ru.mugalimov.volthome.data.local.dao
 
 import androidx.room.Dao
-import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
-import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.data.local.entity.RoomEntity
-import ru.mugalimov.volthome.domain.model.Device
+import ru.mugalimov.volthome.domain.model.RoomWithDevicesEntity
 
 @Dao
 interface RoomDao {
@@ -23,6 +23,14 @@ interface RoomDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun addRoom(room: RoomEntity) : Long // Возвращаем ID новой комнаты
 
+    /**
+     * Обновляет существующую комнату в базе данных.
+     * @param room Обновленная версия комнаты (должна иметь существующий ID)
+     * @return Количество обновленных строк (должно быть 1 при успешном обновлении)
+     */
+    @Update(onConflict = OnConflictStrategy.ABORT)
+    suspend fun updateRoom(room: RoomEntity): Int
+
     //удаление комнаты по id
     //возращает количество удаленных строк 0 или 1
     @Query("DELETE FROM rooms WHERE id = :roomId")
@@ -35,4 +43,15 @@ interface RoomDao {
     //получить комнату по roomId
     @Query("SELECT * FROM rooms WHERE id = :roomId")
     suspend fun getRoomById(roomId: Long): RoomEntity?
+
+    @Transaction
+    @Query("SELECT * FROM rooms WHERE id=:roomId")
+    suspend fun getRoomWithDevicesById(roomId: Long) : RoomWithDevicesEntity?
+
+    @Transaction
+    @Query("SELECT * FROM rooms ORDER BY created_at DESC")
+    fun observeAllRoomsWithDevices(): List<RoomWithDevicesEntity>
+
+    @Query("SELECT * FROM rooms")
+    suspend fun getAllRooms() : List<RoomEntity>
 }

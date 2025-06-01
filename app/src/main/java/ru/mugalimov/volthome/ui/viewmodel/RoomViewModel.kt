@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import ru.mugalimov.volthome.core.error.RoomNotFoundException
+import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.domain.model.DefaultRoom
 import ru.mugalimov.volthome.domain.model.Room
 import java.util.Date
@@ -22,7 +24,8 @@ import java.util.Date
 //класс отвечает за управление состоянием экрана (например, списка комнат)
 // и взаимодействие с данными через репозиторий.
 class RoomViewModel @Inject constructor( // @Inject constructor помечает конструктор как доступный для внедрения зависимостей
-    private val roomRepository: RoomRepository
+    private val roomRepository: RoomRepository,
+    private val deviceRepository: DeviceRepository
 ) : ViewModel() {
 
     //приватное состояние, хранящее данные для UI (список комнат, загрузка, ошибки).
@@ -42,6 +45,7 @@ class RoomViewModel @Inject constructor( // @Inject constructor помечает
     init {
         observeRooms()
         loadDefaultRooms()
+
     }
 
     //наблюдение за данными
@@ -101,7 +105,26 @@ class RoomViewModel @Inject constructor( // @Inject constructor помечает
         }
     }
 
-    fun loadDefaultRooms() {
+    // Обновляем Room с devices внутри
+    fun updateRoomWithDevices(roomId: Long) {
+        viewModelScope.launch {
+            try {
+                val devices = deviceRepository.getAllDevicesByRoomId(roomId)
+
+                val room = roomRepository.getRoomById(roomId)
+
+                val updateRoom = room?.copy(devices = devices)
+
+                if (room != null) {
+                    roomRepository.updateRoom(room)
+                }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e) }
+            }
+        }
+    }
+
+    private fun loadDefaultRooms() {
         viewModelScope.launch {
             try {
                 _defaultRooms.value = roomRepository.getDefaultRooms().first()

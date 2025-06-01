@@ -16,6 +16,7 @@ import ru.mugalimov.volthome.data.local.dao.DeviceDao
 import ru.mugalimov.volthome.data.local.dao.RoomDao
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.data.repository.DeviceRepository
+import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.model.DefaultDevice
 import ru.mugalimov.volthome.domain.model.Device
@@ -26,6 +27,7 @@ import javax.inject.Inject
 class DeviceRepositoryImpl @Inject constructor(
     private val deviceDao: DeviceDao,
     private val roomDao: RoomDao,
+    private val explicationRepository: ExplicationRepository,
     //свойство dispatchers, которое хранит диспетчер для запуска корутин
     //в фоновых потоках, подходящих для IO-задач
     @IoDispatcher private val dispatchers: CoroutineDispatcher,
@@ -42,30 +44,27 @@ class DeviceRepositoryImpl @Inject constructor(
     }
 
     override suspend fun addDevice(
-        name: String,
-        power: Int,
-        voltage: Int,
-        demandRatio: Double,
-        roomId: Long
+        device: Device
     ) {
         Log.d(TAG, "Заходим в репо")
         //запускаем в фоновом потоке, используя корутину
         try {
             withContext(dispatchers) {
-                val isRoomExist = roomDao.getRoomById(roomId)
+                val isRoomExist = roomDao.getRoomById(device.roomId)
                 if (isRoomExist == null) {
-                    throw IllegalArgumentException("Комната с ID $roomId не найдена")
+                    throw IllegalArgumentException("Комната с ID ${device.roomId} не найдена")
                 }
 
                 Log.d(TAG, "Заходим в корутину")
                 deviceDao.addDevice(
                     DeviceEntity(
-                        name = name,
-                        power = power,
-                        voltage = voltage,
-                        demandRatio = demandRatio,
-                        roomId = roomId,
-                        createdAt = Date()
+                        name = device.name,
+                        power = device.power,
+                        voltage = device.voltage,
+                        demandRatio = device.demandRatio,
+                        roomId = device.roomId,
+                        createdAt = Date(),
+                        deviceType = device.deviceType
                     )
                 )
                 Log.d(TAG, "Успех")
@@ -85,6 +84,9 @@ class DeviceRepositoryImpl @Inject constructor(
             if (rowsDeleted == 0) {
                 throw DeviceNotFoundException("Устройство с ID $deviceId не найдено")
             }
+
+            // Обработка удаления связанных с устройством групп
+            explicationRepository.handleDeviceDeletion(deviceId)
         }
     }
 
@@ -95,7 +97,7 @@ class DeviceRepositoryImpl @Inject constructor(
                 val entity = deviceDao.getDeviceById(deviceId)
 
                 //преобразовываем из Entity в модель удобную для чтения
-                entity?.toDomainModelDevice()
+                entity?.toDomainModelListDevice()
             } catch (e: Exception) {
                 throw DeviceNotFoundException()
             }
@@ -120,30 +122,41 @@ class DeviceRepositoryImpl @Inject constructor(
             emptyFlow()
         }
     }
+
+    override suspend fun getAllDevices(): List<Device> =
+        withContext(dispatchers) {
+            return@withContext try {
+                deviceDao.getAllDevices().toDomainModelListDevice()
+            } catch (e: Exception) {
+                throw DeviceNotFoundException()
+            }
+        }
 }
 
 //преобразования объектов из Entity в Domain
 private fun List<DeviceEntity>.toDomainModelListDevice(): List<Device> {
     return map { entity ->
         Device(
-            id = entity.id,
+            id = entity.deviceId,
             name = entity.name,
             power = entity.power,
             voltage = entity.voltage,
             demandRatio = entity.demandRatio,
             roomId = entity.roomId,
-            createdAt = entity.createdAt
+            createdAt = entity.createdAt,
+            deviceType = entity.deviceType
         )
     }
 }
 
 
-private fun DeviceEntity.toDomainModelDevice() = Device(
-    id = id,
+private fun DeviceEntity.toDomainModelListDevice() = Device(
+    id = deviceId,
     name = name,
     power = power,
     demandRatio = demandRatio,
     voltage = voltage,
     roomId = roomId,
-    createdAt = createdAt
+    createdAt = createdAt,
+    deviceType = deviceType
 )

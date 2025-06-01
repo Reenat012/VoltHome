@@ -11,12 +11,16 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import ru.mugalimov.volthome.data.local.dao.DeviceDao
+import ru.mugalimov.volthome.data.local.dao.GroupDao
+import ru.mugalimov.volthome.data.local.dao.GroupDeviceJoinDao
 import ru.mugalimov.volthome.data.local.dao.LoadDao
 import ru.mugalimov.volthome.data.local.dao.RoomDao
 import ru.mugalimov.volthome.data.repository.DeviceRepository
+import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.data.repository.LoadsRepository
 import ru.mugalimov.volthome.data.repository.RoomRepository
 import ru.mugalimov.volthome.data.repository.impl.DeviceRepositoryImpl
+import ru.mugalimov.volthome.data.repository.impl.ExplicationRepositoryImpl
 import ru.mugalimov.volthome.data.repository.impl.LoadsRepositoryImpl
 import ru.mugalimov.volthome.data.repository.impl.RoomRepositoryImpl
 import javax.inject.Singleton
@@ -54,6 +58,11 @@ object DatabaseModule {
     @Provides
     fun provideLoadDao(database: AppDatabase): LoadDao = database.loadDao()
 
+    @Provides
+    fun provideGroupDao(database: AppDatabase): GroupDao = database.groupDao()
+
+    @Provides
+    fun provideGroupDeviceJoinDao(database: AppDatabase): GroupDeviceJoinDao = database.groupDeviceJoinDao()
 }
 
 // di/RepositoryModule.kt
@@ -74,4 +83,7 @@ abstract class RepositoryModule {
 
     @Binds
     abstract fun bindLoadRepository(impl: LoadsRepositoryImpl): LoadsRepository
+
+    @Binds
+    abstract fun bindExplicationRepository(impl: ExplicationRepositoryImpl): ExplicationRepository
 }
