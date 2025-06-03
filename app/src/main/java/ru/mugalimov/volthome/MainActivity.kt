@@ -8,6 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import dagger.hilt.android.AndroidEntryPoint
+import ru.mugalimov.volthome.ui.screens.MainAppEntryPoint
 
 
 /**
@@ -32,7 +33,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun VoltHomeApp() {
     MaterialTheme {
-        MainScreen()
+        MainAppEntryPoint()
     }
 }
 

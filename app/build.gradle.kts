@@ -101,4 +101,14 @@ dependencies {
 
     implementation(libs.coil.compose)
     implementation(libs.coil.svg) // Для поддержки SVG
+
+    // Lottie для векторных анимаций
+    implementation ("com.airbnb.android:lottie-compose:6.3.0")
+
+    // Карусель
+    implementation ("com.google.accompanist:accompanist-pager:0.34.0")
+    implementation ("com.google.accompanist:accompanist-pager-indicators:0.34.0")
+
+    // DataStore
+    implementation ("androidx.datastore:datastore-preferences:1.0.0")
 }
