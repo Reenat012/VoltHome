@@ -52,17 +52,4 @@ fun ExpliсationScreen(
             )
         }
     }
-
-
-//    if (uiState.isLoading) {
-//        LoadingView()
-//    } else if (uiState.error != null) {
-//        ErrorView(error = uiState.error!!)
-//    } else {
-//
-//        GroupList(
-//            groups = uiState.groups,
-//            modifier = Modifier
-//        )
-//    }
 }

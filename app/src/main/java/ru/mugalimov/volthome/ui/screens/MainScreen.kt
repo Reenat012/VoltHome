@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavController
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import ru.mugalimov.volthome.ui.navigation.BottomNavItem
@@ -22,12 +23,30 @@ import ru.mugalimov.volthome.ui.navigation.NavGraphApp
  * - Нижнюю навигационную панель
  * - Контентную область с навигацией
  */
+// Новый композейбл для основного приложения
 @Composable
-fun MainScreen() {
-    val navController = rememberNavController()
+fun MainApp(rootNavController: NavHostController) {
+    Scaffold(
+        topBar = { MainTopAppBar(rootNavController = rootNavController) },
+        bottomBar = { /* Здесь будет нижняя панель */ }
+    ) { innerPadding ->
+        MainScreen(
+            rootNavController = rootNavController,
+            modifier = Modifier.padding(innerPadding)
+        )
+    }
+}
+
+// Обновленный MainScreen
+@Composable
+fun MainScreen(
+    rootNavController: NavHostController,
+    modifier: Modifier = Modifier
+) {
+    val mainNavController = rememberNavController()
 
     // Получаем текущий маршрут
-    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val navBackStackEntry by mainNavController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
     // Определяем нужно ли показывать нижнее меню
@@ -40,16 +59,16 @@ fun MainScreen() {
     val showBottomBar = bottomNavItems.any { it == currentRoute }
 
     Scaffold(
-        topBar = { MainTopAppBar() },
+        topBar = { /* Можем оставить пустым, так как верхняя панель в MainApp */ },
         bottomBar = {
             if (showBottomBar) {
-                MainBottomNavBar(navController = navController)
+                MainBottomNavBar(navController = mainNavController)
             }
         }
     ) { padding ->
         NavGraphApp(
-            navController = navController,
-            modifier = Modifier.padding(padding),
+            navController = mainNavController,
+            modifier = modifier.padding(padding),
             padding = padding
         )
     }

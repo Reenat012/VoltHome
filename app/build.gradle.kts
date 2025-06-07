@@ -56,6 +56,7 @@ dependencies {
     implementation(libs.androidx.benchmark.macro)
     implementation(libs.firebase.crashlytics.buildtools)
     implementation(libs.litert.support.api)
+    implementation(libs.androidx.storage)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -111,4 +112,7 @@ dependencies {
 
     // DataStore
     implementation ("androidx.datastore:datastore-preferences:1.0.0")
+
+    // WebView для Compose
+    implementation ("androidx.webkit:webkit:1.14.0")
 }

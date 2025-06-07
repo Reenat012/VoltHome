@@ -1,11 +1,17 @@
 package ru.mugalimov.volthome.ui.navigation
 
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -14,11 +20,15 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
+
 import ru.mugalimov.volthome.ui.utilities.TelegramButton
+
 
 /**
  * Модель для элементов нижней навигационной панели.
@@ -42,7 +52,7 @@ sealed class BottomNavItem(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainTopAppBar() {
+fun MainTopAppBar(rootNavController: NavHostController) {
     TopAppBar(
         title = { Text("VoltHome") },
         colors = TopAppBarDefaults.topAppBarColors(
@@ -51,6 +61,12 @@ fun MainTopAppBar() {
         ),
         actions = {
             TelegramButton()
+            IconButton(onClick = { rootNavController.navigate(Screens.SettingsScreen.route) }) {
+                Icon(Icons.Default.Settings, "Настройки")
+            }
+//            IconButton(onClick = { rootNavController.navigate(Screens.AboutScreen.route) }) {
+//                Icon(Icons.Default.Info, "О программе")
+//            }
         }
     )
 }

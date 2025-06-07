@@ -34,6 +34,7 @@ benchmarkMacro = "1.3.3" # Версия Android Gradle Plugin (AGP)
 uiVersion = "1.5.4"
 firebaseCrashlyticsBuildtools = "3.0.3"
 litertSupportApi = "1.2.0"
+storage = "1.5.0"
 
 [libraries]
 androidx-activity-compose-v182 = { module = "androidx.activity:activity-compose", version.ref = "activityComposeVersion" }
@@ -77,6 +78,7 @@ ui = { module = "androidx.compose.ui:ui", version.ref = "ui" }
 androidx-benchmark-macro = { group = "androidx.benchmark", name = "benchmark-macro", version.ref = "benchmarkMacro" }
 firebase-crashlytics-buildtools = { group = "com.google.firebase", name = "firebase-crashlytics-buildtools", version.ref = "firebaseCrashlyticsBuildtools" }
 litert-support-api = { group = "com.google.ai.edge.litert", name = "litert-support-api", version.ref = "litertSupportApi" }
+androidx-storage = { group = "androidx.test.services", name = "storage", version.ref = "storage" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

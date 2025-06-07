@@ -22,4 +22,11 @@ sealed class Screens(val route: String) {
         fun createRoute(roomId: Long) = "add_device/$roomId"
     }
     data object DeviceList: Screens(route = "device_list")
+
+    data object WelcomeScreen : Screens("welcome_screen")
+    data object MainApp : Screens("main_app")
+    data object SettingsScreen : Screens("settings")
+    data object AboutScreen : Screens("about")
+
+    data object OnBoardingScreen : Screens("onBoardingScreen")
 }
