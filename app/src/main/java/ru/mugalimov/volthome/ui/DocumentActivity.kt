@@ -1,8 +1,10 @@
 package ru.mugalimov.volthome.ui
 
 import android.os.Bundle
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,7 +20,11 @@ class DocumentActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val url = intent.getStringExtra("URL") ?: ""
+        val url = intent.getStringExtra("URL") ?: run {
+            Toast.makeText(this, "Неверный URL", Toast.LENGTH_SHORT).show()
+            finish()
+            return
+        }
 
         setContent {
             AppTheme {
@@ -31,10 +37,30 @@ class DocumentActivity : ComponentActivity() {
 @Composable
 fun WebViewScreen(url: String) {
     val context = LocalContext.current
-    val webView = remember { WebView(context).apply {
-        settings.javaScriptEnabled = true
-        webViewClient = WebViewClient()
-    } }
+    val webView = remember {
+        WebView(context).apply {
+            settings.apply {
+                javaScriptEnabled = true
+                domStorageEnabled = true // Важно для современных сайтов
+                setSupportZoom(true)
+                builtInZoomControls = true
+                displayZoomControls = false
+                cacheMode = WebSettings.LOAD_DEFAULT
+            }
+
+            webViewClient = object : WebViewClient() {
+                // Обработка ошибок загрузки
+                override fun onReceivedError(
+                    view: WebView,
+                    errorCode: Int,
+                    description: String,
+                    failingUrl: String
+                ) {
+                    Toast.makeText(context, "Ошибка загрузки: $description", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
 
     LaunchedEffect(url) {
         webView.loadUrl(url)
