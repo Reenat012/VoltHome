@@ -7,5 +7,6 @@ data class DefaultDevice(
     val power: Int,
     val voltage: Voltage,
     val demandRatio: Double,
-    val deviceType: DeviceType
+    val deviceType: DeviceType,
+    val powerFactor: Double
 )

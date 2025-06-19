@@ -43,5 +43,8 @@ data class DeviceEntity(
     val roomId: Long,
 
     @ColumnInfo(name = "device_type")
-    val deviceType: DeviceType
+    val deviceType: DeviceType,
+
+    @ColumnInfo(name = "power_factor")
+    val powerFactor: Double
 )

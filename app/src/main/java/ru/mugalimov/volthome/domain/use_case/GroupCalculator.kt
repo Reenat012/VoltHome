@@ -187,7 +187,8 @@ private fun DeviceEntity.toDomainModelDevice() = Device(
     voltage = voltage,
     createdAt = createdAt,
     roomId = roomId,
-    deviceType = deviceType
+    deviceType = deviceType,
+    powerFactor = powerFactor
 )
 
 private fun List<DeviceEntity>.toDomainModelListDevice(): List<Device> {
@@ -200,7 +201,8 @@ private fun List<DeviceEntity>.toDomainModelListDevice(): List<Device> {
             demandRatio = entity.demandRatio,
             createdAt = entity.createdAt,
             roomId = entity.roomId,
-            deviceType = entity.deviceType
+            deviceType = entity.deviceType,
+            powerFactor = entity.powerFactor
         )
     }
 }

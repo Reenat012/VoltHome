@@ -31,8 +31,7 @@ fun LoadsScreen(
     roomId: Long, // Получаем roomId из аргументов навигации
 ) {
     // Вызываем расчет суммы при создании экрана или изменении roomId
-    LaunchedEffect(roomId) {
-        viewModel.calcLoad()
+    LaunchedEffect(Unit) {
         viewModel.refresh()
     }
 
@@ -65,14 +64,3 @@ fun LoadsScreen(
 
 }
 
-fun toLoad(entity: LoadEntity): Load {
-    return Load(
-        id = entity.id,
-        name = entity.name,
-        current = entity.currentRoom,
-        sumPower = entity.powerRoom,
-        countDevices = entity.countDevices,
-        createdAt = entity.createdAt,
-        roomId = entity.roomId
-    )
-}

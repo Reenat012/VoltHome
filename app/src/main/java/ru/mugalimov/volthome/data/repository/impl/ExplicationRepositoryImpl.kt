@@ -240,7 +240,8 @@ private fun List<DeviceEntity>.toDomainModelListDevice(): List<Device> {
             demandRatio = entity.demandRatio,
             roomId = entity.roomId,
             createdAt = entity.createdAt,
-            deviceType = entity.deviceType
+            deviceType = entity.deviceType,
+            powerFactor = entity.powerFactor
         )
     }
 }

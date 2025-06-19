@@ -135,7 +135,8 @@ class RoomDetailViewModel @Inject constructor(
         voltage: Voltage,
         demandRatio: Double,
         roomId: Long,
-        deviceType: DeviceType
+        deviceType: DeviceType,
+        powerFactor: Double
     ) {
         viewModelScope.launch {
             //TODO удалить после отладки
@@ -163,7 +164,8 @@ class RoomDetailViewModel @Inject constructor(
                         voltage = voltage,
                         demandRatio = demandRatio,
                         roomId = this@RoomDetailViewModel.roomId,
-                        deviceType = deviceType
+                        deviceType = deviceType,
+                        powerFactor = powerFactor
                     )
                 )
             } catch (e: Exception) {

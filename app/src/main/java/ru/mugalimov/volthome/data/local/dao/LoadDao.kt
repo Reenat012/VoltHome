@@ -26,7 +26,7 @@ interface LoadDao {
     suspend fun addLoad(loadEntity: LoadEntity)
 
     @Query("SELECT * FROM loads WHERE room_id = :roomId")
-    fun getLoadForRoom(roomId: Long): Flow<List<LoadEntity>>
+    fun getLoadForRoom(roomId: Long): List<LoadEntity>
 
     @Transaction
     @RewriteQueriesToDropUnusedColumns

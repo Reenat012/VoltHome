@@ -9,9 +9,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import ru.mugalimov.volthome.domain.model.Load
 import ru.mugalimov.volthome.domain.model.RoomWithLoad
-import ru.mugalimov.volthome.ui.navigation.BottomNavItem
 
 
 //Список устройств

@@ -17,7 +17,9 @@ import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Calculate
 import androidx.compose.material.icons.outlined.Category
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.ElectricBolt
 import androidx.compose.material.icons.outlined.ElectricalServices
+import androidx.compose.material.icons.outlined.Emergency
 import androidx.compose.material.icons.outlined.FlashOn
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -100,6 +102,18 @@ fun CardDevice(
                     label = "Коэф. спроса",
                     value = "%.2f".format(device.demandRatio),
                     icon = Icons.Outlined.Calculate
+                )
+
+                DeviceParameterRow(
+                    label = "Коэф. мощности",
+                    value = "%.2f".format(device.powerFactor),
+                    icon = Icons.Outlined.Emergency
+                )
+
+                DeviceParameterRow(
+                    label = "Ток",
+                    value = "%.2f А".format(device.current),
+                    icon = Icons.Outlined.ElectricBolt
                 )
 
                 DeviceParameterRow(

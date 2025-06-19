@@ -2,8 +2,11 @@ package ru.mugalimov.volthome.data.repository.impl
 
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import ru.mugalimov.volthome.data.local.dao.LoadDao
 import ru.mugalimov.volthome.data.local.entity.LoadEntity
 import ru.mugalimov.volthome.domain.model.Load
@@ -40,6 +43,22 @@ class LoadsRepositoryImpl @Inject constructor(
                 createdAt = Date()
             )
         )
+    }
+
+    override suspend fun getLoadForRoom(roomId: Long): LoadEntity? = withContext(dispatchers) {
+        // Для совместимости с Room возвращаем первый элемент, если есть
+        loadDao.getLoadForRoom(roomId).firstOrNull()
+    }
+    override suspend fun upsertAllLoads(loads: List<LoadEntity>) = withContext(dispatchers) {
+        val validLoads = loads.filterNotNull()
+        if (validLoads.isNotEmpty()) {
+            loadDao.upsertAllLoads(validLoads)
+        }
+
+    }
+
+    override suspend fun getAllLoads(): List<LoadEntity> = withContext(dispatchers) {
+        loadDao.observeLoads().first()
     }
 }
 

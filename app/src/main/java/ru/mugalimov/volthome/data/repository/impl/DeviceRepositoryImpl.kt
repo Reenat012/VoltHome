@@ -64,7 +64,8 @@ class DeviceRepositoryImpl @Inject constructor(
                         demandRatio = device.demandRatio,
                         roomId = device.roomId,
                         createdAt = Date(),
-                        deviceType = device.deviceType
+                        deviceType = device.deviceType,
+                        powerFactor = device.powerFactor
                     )
                 )
                 Log.d(TAG, "Успех")
@@ -144,7 +145,8 @@ private fun List<DeviceEntity>.toDomainModelListDevice(): List<Device> {
             demandRatio = entity.demandRatio,
             roomId = entity.roomId,
             createdAt = entity.createdAt,
-            deviceType = entity.deviceType
+            deviceType = entity.deviceType,
+            powerFactor = entity.powerFactor
         )
     }
 }
@@ -158,5 +160,6 @@ private fun DeviceEntity.toDomainModelListDevice() = Device(
     voltage = voltage,
     roomId = roomId,
     createdAt = createdAt,
-    deviceType = deviceType
+    deviceType = deviceType,
+    powerFactor = powerFactor
 )

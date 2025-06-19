@@ -47,18 +47,20 @@ class LoadsScreenViewModel @Inject constructor(
 //            Log.d(TAG, "roomId = 0")
 //        }
 
-        observeLoads()
+        observeRoomsWithLoads()
     }
 
     fun refresh() {
-        observeLoads()
+        viewModelScope.launch {
+            calcLoad()
+        }
     }
 
     fun getRoomId(roomId: Long) {
         _roomId.value = roomId
     }
 
-    private fun observeLoads() {
+    private fun observeRoomsWithLoads() {
         viewModelScope.launch {
             roomRepository.getRoomsWithLoads()
                 // Начинаем поиск нагрузок
@@ -87,54 +89,84 @@ class LoadsScreenViewModel @Inject constructor(
         }
     }
 
-    suspend fun calcLoad() {
-        viewModelScope.launch {
-            val updates = _uiState.value.loadsWithRoom.map { roomWithLoad ->
-                val roomId = roomWithLoad.room.id
-                val newPowerRoom = calcLoads.calPowerRoom(roomId)
+    private suspend fun calcLoad() {
+        val rooms = roomRepository.getAllRoom()
+        val updates = mutableListOf<LoadEntity>()
 
-                val devicesByRoom = deviceRepository.getAllDevicesByRoomId(roomId)
+        rooms.forEach { room ->
+            val devices = deviceRepository.getAllDevicesByRoomId(room.id)
+            if (devices.isNotEmpty()) {
+                val powerRoom = devices.sumOf { (it.power * it.demandRatio).toInt() }
+                val currentRoom = devices.sumOf { it.current }
+                val countDevices = devices.size
 
-                // Если список устройств пуст, пропускаем обновление
-                if (devicesByRoom.isEmpty()) {
-                    Log.d(TAG, "Нет устройств в комнате с id $roomId")
-                    return@map roomWithLoad.load
-                }
+                // Проверяем существование нагрузки для комнаты или создаем новую
+                val existLoads = loadRepository.getLoadForRoom(room.id)
 
-                val sumVoltage = devicesByRoom.sumOf {
-                    it.voltage.value
-                }
-
-                val countDevices = devicesByRoom.size
-
-                val voltage = sumVoltage / countDevices
-
-                val newCurrentRoom = if (voltage == 0) {
-                    Log.d(TAG, "Напряжение равно 0 в комнате с id $roomId")
-                    0.0
-                } else (newPowerRoom.toDouble() / voltage).takeIf { !it.isNaN() } ?: 0.0
-
-                roomWithLoad.load?.copy(
-                    powerRoom = newPowerRoom,
-                    currentRoom = newCurrentRoom,
-                    countDevices = countDevices) ?: run {
-                    LoadEntity(
-                        roomId = roomId,
-                        powerRoom = newPowerRoom,
-                        name = "Auto",
-                        currentRoom = newCurrentRoom,
-                        createdAt = Date(),
-                        countDevices = countDevices
-                    ).also {
-                        Log.d("DEBUG", "Creating new Load for room $roomId")
-                    }
-                }
+                val loadEntity = existLoads?.copy(
+                    powerRoom = powerRoom,
+                    currentRoom = currentRoom,
+                    countDevices = countDevices
+                ) ?: LoadEntity(
+                    roomId = room.id,
+                    name = "Auto",
+                    currentRoom = currentRoom,
+                    powerRoom = powerRoom,
+                    countDevices = countDevices,
+                    createdAt = Date(),
+                )
+                updates.add(loadEntity)
             }
+        }
 
-            loadDao.upsertAllLoads(updates) // Пакетное обновление
+        // Сохраняем обновленные нагрузки
+        if (updates.isNotEmpty()) {
+            loadRepository.upsertAllLoads(updates)
 
-            // Принудительно запрашиваем обновление
-            observeLoads()
+//        viewModelScope.launch {
+//            val updates = _uiState.value.loadsWithRoom.map { roomWithLoad ->
+//                val roomId = roomWithLoad.room.id
+//                val newPowerRoom = calcLoads.calPowerRoom(roomId)
+//
+//                val devicesByRoom = deviceRepository.getAllDevicesByRoomId(roomId)
+//
+//                // Если список устройств пуст, пропускаем обновление
+//                if (devicesByRoom.isEmpty()) {
+//                    Log.d(TAG, "Нет устройств в комнате с id $roomId")
+//                    return@map roomWithLoad.load
+//                }
+//
+//                val sumVoltage = devicesByRoom.sumOf {
+//                    it.voltage.value
+//                }
+//
+//                val sumCurrent = devicesByRoom.sumOf {
+//                    it.current
+//                }
+//
+//                val countDevices = devicesByRoom.size
+//
+//                roomWithLoad.load?.copy(
+//                    powerRoom = newPowerRoom,
+//                    currentRoom = sumCurrent,
+//                    countDevices = countDevices) ?: run {
+//                    LoadEntity(
+//                        roomId = roomId,
+//                        powerRoom = newPowerRoom,
+//                        name = "Auto",
+//                        currentRoom = sumCurrent,
+//                        createdAt = Date(),
+//                        countDevices = countDevices
+//                    ).also {
+//                        Log.d("DEBUG", "Creating new Load for room $roomId")
+//                    }
+//                }
+//            }
+//
+//            loadDao.upsertAllLoads(updates) // Пакетное обновление
+//
+//            // Принудительно запрашиваем обновление
+//            observeLoads()
         }
     }
 

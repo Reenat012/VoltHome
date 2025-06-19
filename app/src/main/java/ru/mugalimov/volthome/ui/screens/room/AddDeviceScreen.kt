@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Emergency
 import androidx.compose.material.icons.filled.Power
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DropdownMenu
@@ -82,6 +83,7 @@ fun AddDeviceScreen(
     var devicePower by remember { mutableStateOf("") }
     var deviceVoltage by remember { mutableStateOf<Voltage?>(null) }
     var deviceDemandRatio by remember { mutableStateOf("") }
+    var devicePowerFactor by remember { mutableStateOf("") }
     var deviceType by remember { mutableStateOf<DeviceType>(DeviceType.SOCKET)}
     val focusManager = LocalFocusManager.current
     val scrollState = rememberScrollState()
@@ -107,19 +109,20 @@ fun AddDeviceScreen(
                 actions = {
                     FilledTonalButton(
                         onClick = {
-                            if (validateInput(deviceName, devicePower, deviceDemandRatio)) {
+                            if (validateInput(deviceName, devicePower, deviceDemandRatio, devicePowerFactor)) {
                                 viewModel.addDevice(
                                     name = deviceName,
                                     power = devicePower.toInt(),
                                     voltage = deviceVoltage!!,
                                     demandRatio = deviceDemandRatio.toDouble(),
                                     roomId = roomId,
-                                    deviceType = deviceType
+                                    deviceType = deviceType,
+                                    powerFactor = devicePowerFactor.toDouble()
                                 )
                                 onBack()
                             }
                         },
-                        enabled = validateInput(deviceName, devicePower, deviceDemandRatio),
+                        enabled = validateInput(deviceName, devicePower, deviceDemandRatio, devicePowerFactor),
                         modifier = Modifier.padding(end = 8.dp)
                     ) {
                         Icon(
@@ -198,6 +201,8 @@ fun AddDeviceScreen(
                                     deviceDemandRatio = device.demandRatio.toString()
                                     deviceType = device.deviceType
                                     focusManager.clearFocus()
+                                    devicePowerFactor = device.powerFactor.toString()
+
                                 }
                             )
                         }
@@ -256,6 +261,30 @@ fun AddDeviceScreen(
                         Icon(
                             Icons.Filled.Calculate,
                             contentDescription = "Иконка калькулятора"
+                        )
+                    },
+                    colors = textFieldColors(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Done
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                    suffix = {
+                        Text(
+                            "0.0-1.0",
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+                        )
+                    }
+                )
+
+                OutlinedTextField(
+                    value = devicePowerFactor,
+                    onValueChange = { if (it.isDecimal()) devicePowerFactor = it },
+                    label = { Text("Коэффициент мощности") },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Filled.Emergency,
+                            contentDescription = "Иконка звездочка"
                         )
                     },
                     colors = textFieldColors(),
@@ -335,12 +364,14 @@ private fun VoltageSelector(
     }
 }
 
-private fun validateInput(name: String, power: String, ratio: String): Boolean {
+private fun validateInput(name: String, power: String, ratio: String, powerFactory: String): Boolean {
     return name.isNotBlank() &&
             power.isNotBlank() &&
             ratio.isNotBlank() &&
             power.toIntOrNull() != null &&
-            ratio.toDoubleOrNull()?.let { it in 0.0..1.0 } ?: false
+            ratio.toDoubleOrNull()?.let { it in 0.0..1.0 } ?: false &&
+            powerFactory.toDoubleOrNull()?.let { it in 0.0 .. 1.0} ?: false
+
 }
 
 private fun String.isNumber() = matches(Regex("^\\d+\$"))
