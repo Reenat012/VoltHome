@@ -1,15 +1,19 @@
 package ru.mugalimov.volthome.ui.navigation
 
 import AboutScreen
+import MainApp
 import SettingsScreen
 import WelcomeScreen
 import android.content.SharedPreferences
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import ru.mugalimov.volthome.ui.screens.onboarding.OnboardingScreen
 
@@ -38,24 +42,32 @@ fun RootNavGraph(
             )
         }
 
+        // Запуск анимации
         composable(Screens.OnBoardingScreen.route) {
             OnboardingScreen(
                 onComplete = {
-                    onOnboardingCompleted()
+                    // Всегда переходим на главный экран
                     rootNavController.navigate(Screens.MainApp.route) {
                         popUpTo(0)
                     }
+
+                    // Вызываем завершение ТОЛЬКО при первом запуске
+                    if (rootNavController.previousBackStackEntry?.destination?.route != Screens.MainApp.route) {
+                        onOnboardingCompleted()
+                    }
                 },
-                animationResources = listOf("lottie/1-2.json", "lottie/1-3.json")
+                animationResources = listOf(
+                    "lottie/1.json",
+                    "lottie/2.json",
+                    "lottie/3.json",
+                    "lottie/4.json",
+                    "lottie/5.json"
+                )
             )
         }
 
         composable(Screens.MainApp.route) {
             MainApp(rootNavController = rootNavController)
-        }
-
-        composable(Screens.SettingsScreen.route) {
-            SettingsScreen(onBack = { rootNavController.popBackStack() })
         }
 
         composable(Screens.AboutScreen.route) {
@@ -64,18 +76,3 @@ fun RootNavGraph(
     }
 }
 
-@Composable
-fun MainApp(rootNavController: NavHostController) {
-    val mainNavController = rememberNavController()
-
-    Scaffold(
-        topBar = { MainTopAppBar(rootNavController) },
-        bottomBar = { MainBottomNavBar(mainNavController) }
-    ) { innerPadding ->
-        NavGraphApp(
-            navController = mainNavController,
-            modifier = Modifier,
-            padding = innerPadding
-        )
-    }
-}

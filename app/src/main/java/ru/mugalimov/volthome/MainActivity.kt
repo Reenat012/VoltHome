@@ -1,15 +1,10 @@
 // MainActivity.kt
 package ru.mugalimov.volthome
 
-import MainAppEntryPoint
-import MainScreen
-import WelcomeScreen
 import android.content.Context
-import android.content.Context.MODE_PRIVATE
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember

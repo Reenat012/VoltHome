@@ -52,7 +52,10 @@ sealed class BottomNavItem(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainTopAppBar(rootNavController: NavHostController) {
+fun MainTopAppBar(
+    rootNavController: NavHostController,
+    mainNavController: NavHostController
+) {
     TopAppBar(
         title = { Text("VoltHome") },
         colors = TopAppBarDefaults.topAppBarColors(
@@ -61,7 +64,10 @@ fun MainTopAppBar(rootNavController: NavHostController) {
         ),
         actions = {
             TelegramButton()
-            IconButton(onClick = { rootNavController.navigate(Screens.SettingsScreen.route) }) {
+            IconButton(onClick = {
+                // Используем mainNavController для внутренних экранов
+                mainNavController.navigate(Screens.SettingsScreen.route)
+            }) {
                 Icon(Icons.Default.Settings, "Настройки")
             }
 //            IconButton(onClick = { rootNavController.navigate(Screens.AboutScreen.route) }) {

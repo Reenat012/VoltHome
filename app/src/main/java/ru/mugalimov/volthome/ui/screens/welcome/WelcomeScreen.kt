@@ -20,11 +20,9 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -38,11 +36,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import ru.mugalimov.volthome.R
 import ru.mugalimov.volthome.legal.LegalUrls
 import ru.mugalimov.volthome.ui.screens.welcome.openDocument
 
@@ -146,12 +142,14 @@ private fun WelcomeContent(
                     DocumentLink(
                         icon = Icons.Default.Description,
                         text = "Пользовательское соглашение",
-                        onClick = { context.openDocument(LegalUrls.AGREEMENT) }
+                        onClick = { context.openDocument(webUrl = LegalUrls.AGREEMENT,
+                            localAssetPath = "documents/user_agreement.html") }
                     )
                     DocumentLink(
                         icon = Icons.Default.PrivacyTip,
                         text = "Политика конфиденциальности",
-                        onClick = { context.openDocument(LegalUrls.PRIVACY) }
+                        onClick = { context.openDocument(webUrl = LegalUrls.PRIVACY,
+                            localAssetPath = "documents/privacy_policy.html") }
                     )
                 }
             }

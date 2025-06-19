@@ -40,29 +40,18 @@ fun OnboardingScreen(
     // Состояние пейджера для управления карасульею
     val pagerState = rememberPagerState(pageCount = { animationResources.size })
 
-    // Контекст для доступа к ресурсам
-    val context = LocalContext.current
-
     // Область видимости для корутин (для анимации)
     val coroutineScope = rememberCoroutineScope()
 
-//     Состояния для управления анимациями
-//    val animationStates = remember(animationResources) {
-//        animationResources.map { mutableStateOf(AnimationState()) }
-//    }
-
-    // Инициализируем состояния для каждой анимации с разными скоростями
-    val animationStates = remember {
-        animationResources.mapIndexed { index, _ ->
-            mutableStateOf(
-                AnimationState(
-                    // Замедляем ТОЛЬКО вторую анимацию (индекс 1)
-                    speed = if (index == 1) 0.2f else 1.0f
-                )
-            )
-        }
+    // 1. Состояние для контроля воспроизведения анимаций
+    val animationPlayStates = remember {
+        animationResources.map { mutableStateOf(true) }
     }
 
+    // Автозапуск первой анимации
+    LaunchedEffect(Unit) {
+        animationPlayStates[0].value = true
+    }
 
 //    // Флаг для управления автопрокруткой
 //    val autoScrollEnabled by remember { mutableStateOf(true) }
@@ -82,11 +71,12 @@ fun OnboardingScreen(
                 // Компонент векторной анимации для текущего шага
                 LottieAnimationItem(
                     animationPath = animationResources[pageIndex],
-                    state = animationStates[pageIndex],
+                    isPlaying = animationPlayStates[pageIndex].value,
                     onAnimationEnd = {
-                        // Автопрокрутка при завершении анимации (кроме последней)
+                        // Для не-последних страниц: переходим дальше с задержкой
                         if (pageIndex < animationResources.lastIndex) {
                             coroutineScope.launch {
+                                delay(300) // Задержка для финального кадра
                                 pagerState.animateScrollToPage(pageIndex + 1)
                             }
                         }
@@ -128,19 +118,20 @@ fun OnboardingScreen(
         }
     }
 
-    // Обработка событий при смене страницы
+    // Обработчик смены страниц
     LaunchedEffect(pagerState.currentPage) {
-        // Перезапускаем анимацию при переходе на страницу
-        animationStates[pagerState.currentPage].value = AnimationState(
-            isPlaying = true,
-            restartOnPlay = true
-        )
+        // Выключаем все анимации
+        animationPlayStates.forEach { it.value = false }
 
-        // Завершение онбординга после последней анимации
+        // Включаем только текущую
+        animationPlayStates[pagerState.currentPage].value = true
+
+        // Автозавершение для последней страницы
         if (pagerState.currentPage == animationResources.lastIndex) {
-            // Даем время для завершения анимации
-            delay(1500)
-            onComplete()
+            coroutineScope.launch {
+                delay(2500) // Ждём завершения анимации
+                onComplete()
+            }
         }
     }
 }

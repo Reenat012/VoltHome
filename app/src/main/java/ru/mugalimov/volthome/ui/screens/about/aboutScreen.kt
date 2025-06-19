@@ -98,13 +98,15 @@ fun AboutScreen(onBack: () -> Unit) {
                     LegalButton(
                         text = "Соглашение",
                         icon = Icons.Default.Description,
-                        onClick = { context.openDocument(LegalUrls.AGREEMENT) }
+                        onClick = { context.openDocument(webUrl = LegalUrls.AGREEMENT,
+                            localAssetPath = "documents/user_agreement.html") }
                     )
 
                     LegalButton(
                         text = "Конфиденциальность",
                         icon = Icons.Default.PrivacyTip,
-                        onClick = { context.openDocument(LegalUrls.PRIVACY) }
+                        onClick = { context.openDocument(webUrl = LegalUrls.AGREEMENT,
+                            localAssetPath = "documents/privacy_policy.html.html") }
                     )
                 }
             }

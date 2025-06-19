@@ -15,55 +15,100 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import ru.mugalimov.volthome.ui.screens.welcome.AppTheme
+import ru.mugalimov.volthome.ui.screens.welcome.isOnline
 
 class DocumentActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val url = intent.getStringExtra("URL") ?: run {
-            Toast.makeText(this, "Неверный URL", Toast.LENGTH_SHORT).show()
+        val webUrl = intent.getStringExtra("WEB_URL") ?: ""
+        val localAssetPath = intent.getStringExtra("LOCAL_ASSET_PATH") ?: ""
+
+        if (webUrl.isEmpty() && localAssetPath.isEmpty()) {
+            Toast.makeText(this, "Неверные параметры документа", Toast.LENGTH_SHORT).show()
             finish()
             return
         }
 
         setContent {
             AppTheme {
-                WebViewScreen(url)
+                WebViewScreen(
+                    webUrl = webUrl,
+                    localAssetPath = localAssetPath
+                )
             }
         }
     }
 }
 
 @Composable
-fun WebViewScreen(url: String) {
+fun WebViewScreen(webUrl: String, localAssetPath: String) {
     val context = LocalContext.current
     val webView = remember {
         WebView(context).apply {
             settings.apply {
                 javaScriptEnabled = true
-                domStorageEnabled = true // Важно для современных сайтов
+                domStorageEnabled = true
                 setSupportZoom(true)
                 builtInZoomControls = true
                 displayZoomControls = false
                 cacheMode = WebSettings.LOAD_DEFAULT
             }
 
+            // Создаем функцию для загрузки локальных ресурсов
+            val loadLocalAsset = { assetPath: String ->
+                try {
+                    loadUrl("file:///android_asset/$assetPath")
+                } catch (e: Exception) {
+                    Toast.makeText(
+                        context,
+                        "Ошибка загрузки локального документа",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+
             webViewClient = object : WebViewClient() {
-                // Обработка ошибок загрузки
                 override fun onReceivedError(
                     view: WebView,
                     errorCode: Int,
                     description: String,
                     failingUrl: String
                 ) {
-                    Toast.makeText(context, "Ошибка загрузки: $description", Toast.LENGTH_SHORT).show()
+                    // При ошибке загрузки пробуем локальный файл
+                    if (failingUrl == webUrl && localAssetPath.isNotEmpty()) {
+                        loadLocalAsset(localAssetPath)
+                    } else {
+                        Toast.makeText(
+                            context,
+                            "Ошибка загрузки: $description",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
                 }
             }
         }
     }
 
-    LaunchedEffect(url) {
-        webView.loadUrl(url)
+    // Проверяем интернет при запуске
+    val urlToLoad = if (context.isOnline() && webUrl.isNotEmpty()) {
+        webUrl
+    } else if (localAssetPath.isNotEmpty()) {
+        "file:///android_asset/$localAssetPath"
+    } else {
+        ""
+    }
+
+    LaunchedEffect(urlToLoad) {
+        if (urlToLoad.isNotEmpty()) {
+            webView.loadUrl(urlToLoad)
+        } else {
+            Toast.makeText(
+                context,
+                "Документ недоступен",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
     }
 
     AndroidView(

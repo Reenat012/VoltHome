@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.ui.navigation
 
+import SettingsScreen
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
@@ -30,7 +31,8 @@ import ru.mugalimov.volthome.ui.viewmodel.RoomDetailViewModel
 fun NavGraphApp(
     navController: NavHostController,
     modifier: Modifier,
-    padding: PaddingValues
+    padding: PaddingValues,
+    showOnboarding: () -> Unit
 ) {
     // Навигационный граф приложения
     // контейнер, где отображаются экраны
@@ -130,6 +132,12 @@ fun NavGraphApp(
             )
         }
 
+        composable(Screens.SettingsScreen.route) {
+            SettingsScreen(
+                onBack = { navController.popBackStack() },
+                onShowOnboarding = showOnboarding // Передаем в настройки
+            )
+        }
 
     }
 }

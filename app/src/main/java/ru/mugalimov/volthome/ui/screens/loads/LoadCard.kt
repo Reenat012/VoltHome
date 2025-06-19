@@ -10,12 +10,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.Memory
-import androidx.compose.material.icons.filled.Power
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Devices
-import androidx.compose.material.icons.outlined.ElectricBolt
 import androidx.compose.material.icons.outlined.ElectricalServices
 import androidx.compose.material.icons.outlined.MeetingRoom
 import androidx.compose.material3.Card
@@ -31,10 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.viewmodel.compose.viewModel
 import ru.mugalimov.volthome.domain.model.RoomWithLoad
-import ru.mugalimov.volthome.ui.viewmodel.LoadsScreenViewModel
 
 @Composable
 fun LoadCard(

@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PrivacyTip
@@ -36,11 +37,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ru.mugalimov.volthome.legal.LegalUrls
+import ru.mugalimov.volthome.ui.navigation.Screens
+import ru.mugalimov.volthome.ui.screens.onboarding.OnboardingScreen
 import ru.mugalimov.volthome.ui.screens.welcome.openDocument
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(
+    onBack: () -> Unit,
+    onShowOnboarding: () -> Unit
+) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -69,13 +75,17 @@ fun SettingsScreen(onBack: () -> Unit) {
         containerColor = MaterialTheme.colorScheme.surface
     ) { innerPadding ->
         SettingsContent(
-            modifier = Modifier.padding(innerPadding)
+            modifier = Modifier.padding(innerPadding),
+            onShowOnboarding = onShowOnboarding
         )
     }
 }
 
 @Composable
-private fun SettingsContent(modifier: Modifier = Modifier) {
+private fun SettingsContent(
+    modifier: Modifier = Modifier,
+    onShowOnboarding: () -> Unit
+) {
     val context = LocalContext.current
     val legalItems = listOf(
         LegalItem(
@@ -113,6 +123,7 @@ private fun SettingsContent(modifier: Modifier = Modifier) {
         }
 
         // Карточка с юридическими документами
+        // Карточки с юридическими документами (отдельные карточки)
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -121,26 +132,58 @@ private fun SettingsContent(modifier: Modifier = Modifier) {
                 ),
                 elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
             ) {
-                Column {
-                    legalItems.forEachIndexed { index, item ->
-                        LegalDocumentItem(
-                            item = item,
-                            onClick = { context.openDocument(item.url) }
+                LegalDocumentItem(
+                    item = legalItems[0], // Пользовательское соглашение
+                    onClick = {
+                        context.openDocument(
+                            webUrl = legalItems[0].url,
+                            localAssetPath = "documents/user_agreement.html"
                         )
-                        if (index < legalItems.size - 1) {
-                            HorizontalDivider(
-                                modifier = Modifier.padding(start = 72.dp),
-                                color = MaterialTheme.colorScheme.outlineVariant
-                            )
-                        }
                     }
-                }
+                )
+            }
+        }
+
+// Отступ между карточками
+        item {
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {
+                LegalDocumentItem(
+                    item = legalItems[1], // Политика конфиденциальности
+                    onClick = {
+                        context.openDocument(
+                            webUrl = legalItems[1].url,
+                            localAssetPath = "documents/privacy_policy.html"
+                        )
+                    }
+                )
             }
         }
 
         item {
             Spacer(modifier = Modifier.height(32.dp))
         }
+
+        // Заголовок раздела
+        item {
+            Text(
+                "Информация о приложении",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+        }
+
 
         // Информация о приложении
         item {
@@ -153,7 +196,9 @@ private fun SettingsContent(modifier: Modifier = Modifier) {
             ) {
                 ListItem(
                     headlineContent = { Text("О приложении") },
-                    supportingContent = { Text("Версия 1.0.0 • Сборка 123") },
+                    supportingContent = {
+                        Text("Версия 1.0.0 • Сборка 123\nКликни чтобы снова запустить анимированную инструкцию ")
+                    },
                     leadingContent = {
                         Icon(
                             Icons.Filled.Info,
@@ -162,13 +207,12 @@ private fun SettingsContent(modifier: Modifier = Modifier) {
                             tint = MaterialTheme.colorScheme.primary
                         )
                     },
-                    modifier = Modifier.clickable { /* Переход на экран "О приложении" */ }
+                    modifier = Modifier.clickable {
+                        // Запуск анимации
+                        onShowOnboarding()
+                    }
                 )
             }
-        }
-
-        item {
-            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }

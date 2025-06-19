@@ -10,7 +10,7 @@ class CalcLoads @Inject constructor(
     suspend fun calPowerRoom(roomId: Long) : Int {
         val listDevives = deviceRepository.getAllDevicesByRoomId(roomId)
 
-        return listDevives.sumOf { it.power }
+        return listDevives.sumOf { it.power * it.demandRatio.toInt() }
     }
 
     suspend fun calcCurrentRoom(roomId: Long, voltageDevice: Int) : Double {

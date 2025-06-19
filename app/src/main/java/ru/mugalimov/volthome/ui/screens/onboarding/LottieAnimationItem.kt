@@ -25,55 +25,33 @@ import com.airbnb.lottie.compose.rememberLottieComposition
  */
 @Composable
 fun LottieAnimationItem(
-    animationPath: String,     // Путь к JSON-файлу в assets
-    state: MutableState<AnimationState>,
-    onAnimationEnd: () -> Unit  // Коллбек при завершении анимации
+    animationPath: String,
+    isPlaying: Boolean,
+    onAnimationEnd: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    // Загрузка композиции анимации
     val composition by rememberLottieComposition(
         LottieCompositionSpec.Asset(animationPath)
     )
 
-    // Управление прогрессом анимации
     val progress by animateLottieCompositionAsState(
         composition = composition,
-        isPlaying = state.value.isPlaying,
-        speed = state.value.speed,
-        restartOnPlay = state.value.restartOnPlay,
+        isPlaying = isPlaying,
+        restartOnPlay = false,
+        speed = 1f,
         iterations = 1
     )
 
-    // Отслеживаем завершение анимации через LaunchedEffect
+    // Отслеживаем завершение анимации
     LaunchedEffect(progress) {
-        if (progress == 1f) { // 1f = анимация завершена
+        if (progress >= 0.999f) { // Учитываем возможные ошибки округления
             onAnimationEnd()
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
-        // Отображение анимации
-        LottieAnimation(
-            composition = composition,
-            progress = { progress },
-            modifier = Modifier.fillMaxSize()
-        )
-
-        // Кнопка перезапуска анимации
-        IconButton(
-            onClick = {
-                state.value = state.value.copy(
-                    isPlaying = true,
-                    restartOnPlay = true
-                )
-            },
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(16.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Replay,
-                contentDescription = "Restart animation"
-            )
-        }
-    }
+    LottieAnimation(
+        composition = composition,
+        progress = progress,
+        modifier = modifier.fillMaxSize()
+    )
 }

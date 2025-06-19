@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -16,14 +18,33 @@ android {
         minSdk = 24
         //noinspection EditedTargetSdkVersion
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        val properties = Properties()
+        val file = rootProject.file("keystore.properties")
+        if (file.exists()) {
+            properties.load(file.inputStream())
+        }
+
+        create("release") {
+            storeFile = file("/Users/mugalimovrinat/Documents/VoltHome/Публикация/Key/upload_key")
+            storePassword = "\"${properties.getProperty("storePassword", "")}\""
+            keyAlias = "upload_key"
+            keyPassword = "\"${properties.getProperty("keyPassword", "")}\""
+            enableV1Signing = true
+            enableV2Signing = true
+        }
+    }
+
     buildTypes {
         release {
+            // Подключаем конфигурацию подписи
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

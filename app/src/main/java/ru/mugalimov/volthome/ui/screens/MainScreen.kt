@@ -15,6 +15,7 @@ import ru.mugalimov.volthome.ui.navigation.BottomNavItem
 import ru.mugalimov.volthome.ui.navigation.MainBottomNavBar
 import ru.mugalimov.volthome.ui.navigation.MainTopAppBar
 import ru.mugalimov.volthome.ui.navigation.NavGraphApp
+import ru.mugalimov.volthome.ui.navigation.Screens
 
 
 /**
@@ -24,52 +25,43 @@ import ru.mugalimov.volthome.ui.navigation.NavGraphApp
  * - Контентную область с навигацией
  */
 // Новый композейбл для основного приложения
+// MainApp.kt
 @Composable
 fun MainApp(rootNavController: NavHostController) {
-    Scaffold(
-        topBar = { MainTopAppBar(rootNavController = rootNavController) },
-        bottomBar = { /* Здесь будет нижняя панель */ }
-    ) { innerPadding ->
-        MainScreen(
-            rootNavController = rootNavController,
-            modifier = Modifier.padding(innerPadding)
-        )
-    }
-}
-
-// Обновленный MainScreen
-@Composable
-fun MainScreen(
-    rootNavController: NavHostController,
-    modifier: Modifier = Modifier
-) {
     val mainNavController = rememberNavController()
 
-    // Получаем текущий маршрут
-    val navBackStackEntry by mainNavController.currentBackStackEntryAsState()
-    val currentRoute = navBackStackEntry?.destination?.route
-
-    // Определяем нужно ли показывать нижнее меню
-    val bottomNavItems = listOf(
-        BottomNavItem.Rooms.route,
-        BottomNavItem.Loads.route,
-        BottomNavItem.Exploitation.route
-    )
-
-    val showBottomBar = bottomNavItems.any { it == currentRoute }
-
     Scaffold(
-        topBar = { /* Можем оставить пустым, так как верхняя панель в MainApp */ },
+        topBar = {
+            MainTopAppBar(
+                rootNavController = rootNavController,
+                mainNavController = mainNavController
+            )
+        },
         bottomBar = {
-            if (showBottomBar) {
+            // Определяем, нужно ли показывать нижнюю панель
+            val navBackStackEntry by mainNavController.currentBackStackEntryAsState()
+            val currentRoute = navBackStackEntry?.destination?.route
+            val bottomNavItems = listOf(
+                BottomNavItem.Rooms.route,
+                BottomNavItem.Loads.route,
+                BottomNavItem.Exploitation.route
+            )
+
+            if (bottomNavItems.any { it == currentRoute }) {
                 MainBottomNavBar(navController = mainNavController)
             }
         }
-    ) { padding ->
+    ) { innerPadding ->
+        // Убираем MainScreen и переносим его функционал сюда
         NavGraphApp(
             navController = mainNavController,
-            modifier = modifier.padding(padding),
-            padding = padding
+            modifier = Modifier.padding(innerPadding),
+            padding = innerPadding,
+            showOnboarding = {
+                rootNavController.navigate(Screens.OnBoardingScreen.route) {
+                    popUpTo(Screens.MainApp.route) { inclusive = true }
+                }
+            }
         )
     }
 }
