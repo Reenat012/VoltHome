@@ -46,5 +46,11 @@ data class DeviceEntity(
     val deviceType: DeviceType,
 
     @ColumnInfo(name = "power_factor")
-    val powerFactor: Double
+    val powerFactor: Double,
+
+    @ColumnInfo(name = "has_motor")
+    val hasMotor: Boolean = false,  // Имеет ли двигатель
+
+    @ColumnInfo(name = "requires_dedicated")
+    val requiresDedicatedCircuit: Boolean = false  // Требует выделенной линии
 )

@@ -1,22 +1,15 @@
 package ru.mugalimov.volthome.ui.screens.room
 
-import android.content.ContentValues.TAG
-import android.util.Log
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Check
@@ -24,7 +17,6 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Emergency
 import androidx.compose.material.icons.filled.Power
 import androidx.compose.material3.CenterAlignedTopAppBar
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -37,9 +29,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -56,12 +45,10 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ru.mugalimov.volthome.R
-import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.domain.model.DefaultDevice
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.Voltage
 import ru.mugalimov.volthome.ui.viewmodel.RoomDetailViewModel
-import java.util.Date
 
 /**
  * Экран добавления нового устройства.
@@ -85,6 +72,8 @@ fun AddDeviceScreen(
     var deviceDemandRatio by remember { mutableStateOf("") }
     var devicePowerFactor by remember { mutableStateOf("") }
     var deviceType by remember { mutableStateOf<DeviceType>(DeviceType.SOCKET)}
+    var hasMotor by remember { mutableStateOf(false) }
+    var requiresDedicatedCircuit by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
     val scrollState = rememberScrollState()
 
@@ -117,7 +106,9 @@ fun AddDeviceScreen(
                                     demandRatio = deviceDemandRatio.toDouble(),
                                     roomId = roomId,
                                     deviceType = deviceType,
-                                    powerFactor = devicePowerFactor.toDouble()
+                                    powerFactor = devicePowerFactor.toDouble(),
+                                    hasMotor = hasMotor,
+                                    requiresDedicatedCircuit = requiresDedicatedCircuit
                                 )
                                 onBack()
                             }
@@ -202,6 +193,8 @@ fun AddDeviceScreen(
                                     deviceType = device.deviceType
                                     focusManager.clearFocus()
                                     devicePowerFactor = device.powerFactor.toString()
+                                    hasMotor = device.hasMotor
+                                    requiresDedicatedCircuit = device.requiresDedicatedCircuit
 
                                 }
                             )

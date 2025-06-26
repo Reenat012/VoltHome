@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -14,11 +15,15 @@ import androidx.compose.material.icons.outlined.Cable
 import androidx.compose.material.icons.outlined.Category
 import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.ElectricBolt
+import androidx.compose.material.icons.outlined.ElectricalServices
 import androidx.compose.material.icons.outlined.Numbers
+import androidx.compose.material.icons.outlined.SafetyDivider
+import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,129 +34,118 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ru.mugalimov.volthome.domain.model.CircuitGroup
+import ru.mugalimov.volthome.ui.screens.explication.GroupParameterRow
+import ru.mugalimov.volthome.ui.screens.explication.WarningItem
 
 @Composable
-fun GroupCard(
-    group: CircuitGroup,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        modifier = modifier
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .fillMaxWidth()
-            .animateContentSize(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-        ),
-        shape = MaterialTheme.shapes.extraLarge
-    ) {
-        Column(
-            modifier = Modifier
-                .padding(20.dp)
-                .fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Заголовок
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Numbers,
-                    contentDescription = "Номер группы",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(28.dp)
-                ) // Добавлена закрывающая скобка
-
-                Spacer(modifier = Modifier.width(16.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Группа ${group.groupNumber}",
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Text(
-                        text = group.roomName,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            Divider(
-                color = MaterialTheme.colorScheme.outlineVariant,
-                thickness = 1.dp,
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
-
-            // Параметры группы
-            GroupParameterRow(
-                icon = Icons.Outlined.Category,
-                label = "Тип группы",
-                value = group.groupType.name
-            )
-
-            GroupParameterRow(
-                icon = Icons.Outlined.Devices,
-                label = "Устройства",
-                value = group.devices.joinToString(", ") { it.name } // Добавлен разделитель
-            )
-
-            GroupParameterRow(
-                icon = Icons.Outlined.Cable,
-                label = "Сечение кабеля",
-                value = "${group.cableSection} кв.мм"
-            )
-
-            GroupParameterRow(
-                icon = Icons.Outlined.ElectricBolt,
-                label = "Автоматический выключатель",
-                value = "${group.circuitBreaker} А"
-            )
-
-            GroupParameterRow(
-                icon = Icons.Outlined.Calculate,
-                label = "Расчетный ток",
-                value = "%.2f А".format(group.nominalCurrent)
-            )
-        }
+fun GroupCard(group: CircuitGroup) {
+    // Рассчитываем процент загрузки группы
+    val loadPercent = if (group.circuitBreaker > 0) {
+        (group.nominalCurrent / group.circuitBreaker) * 100
+    } else {
+        0.0
     }
-}
 
-@Composable
-private fun GroupParameterRow(
-    icon: ImageVector,
-    label: String,
-    value: String
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
+    // Определяем цвет индикатора в зависимости от загрузки
+    val indicatorColor = when {
+        loadPercent > 80 -> MaterialTheme.colorScheme.error
+        loadPercent > 60 -> MaterialTheme.colorScheme.tertiary
+        else -> MaterialTheme.colorScheme.primary
+    }
+
+    // Проверяем, содержит ли группа устройства с пусковыми токами
+    val hasReactiveLoad = group.devices.any {
+        it.powerFactor < 0.7 || it.hasMotor
+    }
+
+    Card(
+        elevation = CardDefaults.cardElevation(6.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = "$label иконка",
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(24.dp)
-        )
+        Column(modifier = Modifier.padding(16.dp)) {
+            // Заголовок карточки с номером группы
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Outlined.ElectricalServices,
+                    contentDescription = "Группа"
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "Группа ${group.groupNumber}",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+            }
 
-        Spacer(modifier = Modifier.width(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-        Column(modifier = Modifier.weight(1f)) {
+            // Информация о комнате
             Text(
-                text = label,
+                text = "Комната: ${group.roomName}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            Text(
-                text = value,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Medium
+            Divider(modifier = Modifier.padding(vertical = 12.dp))
+
+            // Параметры группы
+            GroupParameterRow("Тип группы", group.groupType.name)
+            GroupParameterRow("Кол-во устройств", "${group.devices.size}")
+            GroupParameterRow("Автомат", "${group.circuitBreaker}A тип ${group.breakerType}")
+            GroupParameterRow("Кабель", "${group.cableSection} мм²")
+
+            // Индикатор загрузки
+            Spacer(modifier = Modifier.height(12.dp))
+            Text("Загрузка группы: ${"%.1f".format(loadPercent)}%")
+            LinearProgressIndicator(
+                progress = (loadPercent / 100).toFloat(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(8.dp),
+                color = indicatorColor
             )
+
+            // Запас мощности
+            val reserve = group.circuitBreaker - group.nominalCurrent
+            Text(
+                text = "Запас: ${"%.1f".format(reserve)}A",
+                color = if (reserve < 3) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall
+            )
+
+            // Блок предупреждений
+            if (group.rcdRequired || hasReactiveLoad) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "Требования безопасности:",
+                    style = MaterialTheme.typography.labelLarge
+                )
+
+                if (group.rcdRequired) {
+                    WarningItem(
+                        text = "Требуется УЗО на ${group.rcdCurrent}мА",
+                        icon = Icons.Outlined.SafetyDivider
+                    )
+                }
+
+                if (hasReactiveLoad) {
+                    WarningItem(
+                        text = "Содержит устройства с пусковыми токами",
+                        icon = Icons.Outlined.Warning
+                    )
+                }
+            }
+
+            // Список устройств в группе
+            Spacer(modifier = Modifier.height(12.dp))
+            Text("Устройства:")
+            group.devices.forEach { device ->
+                Text(
+                    text = "- ${device.name} (${device.power} Вт)",
+                    modifier = Modifier.padding(start = 8.dp)
+                )
+            }
         }
     }
 }

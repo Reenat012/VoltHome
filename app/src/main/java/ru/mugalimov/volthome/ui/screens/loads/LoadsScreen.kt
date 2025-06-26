@@ -47,20 +47,10 @@ fun LoadsScreen(
             uiState.isLoading -> LoadingView()
             uiState.error != null -> ErrorView(uiState.error!!)
             else -> LoadList(
-                roomsWithLoads = uiState.loadsWithRoom,
+                items = uiState.items,
                 modifier = Modifier.padding(padding)
             )
         }
     }
-
-//    if (uiState.isLoading) {
-//        LoadingView()
-//    } else if (uiState.error != null) {
-//        ErrorView(error = uiState.error!!)
-//    } else LoadList(
-//        roomsWithLoads = uiState.loadsWithRoom,
-//        modifier = Modifier
-//    )
-
 }
 

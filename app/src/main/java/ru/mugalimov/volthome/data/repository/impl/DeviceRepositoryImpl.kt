@@ -65,7 +65,9 @@ class DeviceRepositoryImpl @Inject constructor(
                         roomId = device.roomId,
                         createdAt = Date(),
                         deviceType = device.deviceType,
-                        powerFactor = device.powerFactor
+                        powerFactor = device.powerFactor,
+                        hasMotor = device.hasMotor,
+                        requiresDedicatedCircuit = device.requiresDedicatedCircuit
                     )
                 )
                 Log.d(TAG, "Успех")

@@ -7,6 +7,7 @@ import com.google.gson.reflect.TypeToken
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.Voltage
+import ru.mugalimov.volthome.domain.model.VoltageType
 import java.util.Date
 
 class Converters {
@@ -22,15 +23,17 @@ class Converters {
     }
 
     @TypeConverter
-    fun fromVoltage(voltage: Voltage): Int = voltage.value
+    fun fromVoltage(voltage: Voltage): String {
+        return "${voltage.value}|${voltage.type.name}"
+    }
 
     @TypeConverter
-    fun toVoltage(value: Int): Voltage {
-        return when (value) {
-            220 -> Voltage.V220
-            380 -> Voltage.V380
-            else -> throw IllegalArgumentException("Unknown voltage value")
-        }
+    fun toVoltage(value: String): Voltage {
+        val parts = value.split("|")
+        return Voltage(
+            value = parts[0].toInt(),
+            type = VoltageType.valueOf(parts[1])
+        )
     }
 
     @TypeConverter

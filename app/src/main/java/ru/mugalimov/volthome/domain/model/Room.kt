@@ -10,7 +10,8 @@ data class Room(
     val id: Long = 0, // До генерации в entity будет 0
     val name: String,
     val createdAt: Date,
-    val devices: List<Device> = emptyList()
+    val devices: List<Device> = emptyList(),
+    val roomType: RoomType = RoomType.STANDARD  // Тип помещения
 )
 
 @RequiresApi(Build.VERSION_CODES.O)

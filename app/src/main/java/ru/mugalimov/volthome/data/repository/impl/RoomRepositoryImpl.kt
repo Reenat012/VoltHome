@@ -151,73 +151,12 @@ private fun List<RoomEntity>.toDomainModelListRoom(): List<Room> {
     }
 }
 
-//преобразования объектов из Domain в Entity
-private fun List<Room>.toDomainModelListRoomEntity(): List<RoomEntity> {
-    return map { entity ->
-        RoomEntity(
-            id = entity.id,
-            name = entity.name,
-            createdAt = entity.createdAt
-        )
-    }
-}
-
-
-private fun RoomEntity.toDomainModelRoom() = Room(
-    id = id,
-    name = name,
-    createdAt = createdAt
-)
+// Преобразования объектов из Domain в Entity
 
 private fun Room.toDomainModelRoomEntity() = RoomEntity(
     id = id,
     name = name,
     createdAt = createdAt
-)
-
-private fun List<DeviceEntity>.toDomainModelListDevice(): List<Device> {
-    return map { entity ->
-        Device(
-            id = entity.deviceId,
-            name = entity.name,
-            power = entity.power,
-            voltage = entity.voltage,
-            demandRatio = entity.demandRatio,
-            createdAt = entity.createdAt,
-            roomId = entity.roomId,
-            deviceType = entity.deviceType,
-            powerFactor = entity.powerFactor
-        )
-    }
-}
-
-private fun List<Device>.toDomainModelListDeviceEntity(): List<DeviceEntity> {
-    return map { entity ->
-        DeviceEntity(
-            deviceId = entity.id,
-            name = entity.name,
-            power = entity.power,
-            voltage = entity.voltage,
-            demandRatio = entity.demandRatio,
-            createdAt = entity.createdAt,
-            roomId = entity.roomId,
-            deviceType = entity.deviceType,
-            powerFactor = entity.powerFactor
-        )
-    }
-}
-
-
-private fun Device.toDomainModelListDevice() = DeviceEntity(
-    deviceId = id,
-    name = name,
-    power = power,
-    demandRatio = demandRatio,
-    voltage = voltage,
-    createdAt = createdAt,
-    roomId = roomId,
-    deviceType = deviceType,
-    powerFactor = powerFactor
 )
 
 private fun DeviceEntity.toDomainModelListDevice() = Device(
@@ -232,17 +171,6 @@ private fun DeviceEntity.toDomainModelListDevice() = Device(
     powerFactor = powerFactor
 )
 
-fun toLoad(entity: LoadEntity): Load {
-    return Load(
-        id = entity.id,
-        name = entity.name,
-        current = entity.currentRoom,
-        sumPower = entity.powerRoom,
-        countDevices = entity.countDevices,
-        createdAt = entity.createdAt,
-        roomId = entity.roomId
-    )
-}
 
 private fun RoomWithDevicesEntity.toDomainModelGroup(): Room {
     return Room(
