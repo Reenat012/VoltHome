@@ -97,7 +97,7 @@ dependencies {
 
     // Room
     implementation (libs.androidx.room.runtime)
-    kapt ("androidx.room:room-compiler:2.6.1")
+    kapt ("androidx.room:room-compiler:2.7.2")
     implementation (libs.androidx.room.ktx)
 
     // Hilt (опционально, но рекомендуется)

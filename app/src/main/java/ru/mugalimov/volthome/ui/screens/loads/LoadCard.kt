@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -36,10 +37,9 @@ fun LoadCard(
 ) {
     Card(
         modifier = modifier
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .fillMaxWidth()
-            .animateContentSize(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
         ),
@@ -47,67 +47,94 @@ fun LoadCard(
     ) {
         Column(
             modifier = Modifier
-                .padding(20.dp)
+                .padding(16.dp)
                 .fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Заголовок с иконкой
+            // Компактный заголовок
             Row(
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Icon(
-                    imageVector = Icons.Outlined.MeetingRoom,
-                    contentDescription = "Комната",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(28.dp)
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Outlined.MeetingRoom,
+                        contentDescription = "Комната",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = roomWithLoad.room.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
 
-                Spacer(modifier = Modifier.width(16.dp))
-
-                Text(
-                    text = roomWithLoad.room.name,
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.weight(1f)
-                )
+                // Компактный блок с устройствами
+                if (roomWithLoad.load?.countDevices ?: 0 > 0) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Outlined.Devices,
+                            contentDescription = "Устройства",
+                            tint = MaterialTheme.colorScheme.tertiary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "${roomWithLoad.load?.countDevices ?: 0}",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.tertiary
+                        )
+                    }
+                }
             }
 
-            Divider(
-                color = MaterialTheme.colorScheme.outlineVariant,
-                thickness = 1.dp,
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
+            // Горизонтальный разделитель (только если есть данные)
+            if (roomWithLoad.load != null) {
+                Divider(
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                    thickness = 1.dp,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
 
-            // Параметры нагрузки
-            LoadParameterRow(
-                icon = Icons.Outlined.ElectricalServices,
-                label = "Суммарная мощность",
-                value = "${roomWithLoad.load?.powerRoom ?: 0} Вт",
-                highlightColor = MaterialTheme.colorScheme.primary
-            )
+                // Параметры в компактном ряду
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    CompactParameter(
+                        icon = Icons.Outlined.ElectricalServices,
+                        label = "Мощность",
+                        value = "${roomWithLoad.load.powerRoom} Вт",
+                        highlightColor = MaterialTheme.colorScheme.primary
+                    )
 
-            LoadParameterRow(
-                icon = Icons.Outlined.Bolt,
-                label = "Суммарный ток",
-                value = roomWithLoad.load?.currentRoom?.let {
-                    "%.2f А".format(it)
-                } ?: "N/A",
-                highlightColor = MaterialTheme.colorScheme.secondary
-            )
+                    VerticalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant,
+                        thickness = 1.dp,
+                        modifier = Modifier
+                            .height(32.dp)
+                            .padding(horizontal = 4.dp)
+                    )
 
-            LoadParameterRow(
-                icon = Icons.Outlined.Devices,
-                label = "Устройств",
-                value = "${roomWithLoad.load?.countDevices ?: 0}",
-                highlightColor = MaterialTheme.colorScheme.tertiary
-            )
+                    CompactParameter(
+                        icon = Icons.Outlined.Bolt,
+                        label = "Ток",
+                        value = "%.2f А".format(roomWithLoad.load.currentRoom),
+                        highlightColor = MaterialTheme.colorScheme.secondary
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun LoadParameterRow(
+fun LoadParameterRow(
     icon: ImageVector,
     label: String,
     value: String,

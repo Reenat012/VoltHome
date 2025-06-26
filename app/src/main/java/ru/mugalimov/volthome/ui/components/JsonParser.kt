@@ -9,29 +9,39 @@ import com.google.gson.reflect.TypeToken
 import com.google.gson.stream.JsonReader
 import com.google.gson.stream.JsonWriter
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import ru.mugalimov.volthome.domain.model.DefaultDevice
 import ru.mugalimov.volthome.domain.model.DefaultRoom
 import ru.mugalimov.volthome.domain.model.Voltage
+import ru.mugalimov.volthome.domain.model.VoltageTypeAdapter
 
 object JsonParser {
-    fun parseDevices(context: Context): Flow<List<DefaultDevice>> {
-        return try {
+    fun parseDevices(context: Context): Flow<List<DefaultDevice>> = flow {
+        try {
+            Log.d("JsonParser", "Trying to open default_devices.json")
+            val fileNames = context.assets.list("")?.joinToString()
+            Log.d("JsonParser", "Available files: $fileNames")
+
+            val inputStream = context.assets.open("default_devices.json")
+            val size = inputStream.available()
+            Log.d("JsonParser", "File size: $size bytes")
+
+            val json = inputStream.bufferedReader().use { it.readText() }
+            Log.d("JsonParser", "File content: ${json.take(500)}...") // Первые 500 символов
+
             val gson = GsonBuilder()
                 .registerTypeAdapter(Voltage::class.java, VoltageTypeAdapter())
                 .create()
 
-            val json = context.assets.open("default_devices.json")
-                .bufferedReader().use { it.readText() }
+            val typeToken = object : TypeToken<List<DefaultDevice>>() {}.type
+            val result = gson.fromJson<List<DefaultDevice>>(json, typeToken)
 
-            val devices = gson.fromJson<List<DefaultDevice>>(
-                json,
-                object : TypeToken<List<DefaultDevice>>() {}.type
-            )
-
-            flowOf(devices ?: emptyList())
+            Log.d("JsonParser", "Parsed ${result?.size ?: 0} devices")
+            emit(result ?: emptyList())
         } catch (e: Exception) {
-            flowOf(emptyList())
+            Log.e("JsonParser", "Error parsing devices", e)
+            emit(emptyList())
         }
     }
 
@@ -48,16 +58,3 @@ object JsonParser {
     }
 }
 
-class VoltageTypeAdapter : TypeAdapter<Voltage>() {
-    override fun write(out: JsonWriter, value: Voltage) {
-        out.value(value.value)
-    }
-
-    override fun read(`in`: JsonReader): Voltage {
-        return when (`in`.nextInt()) {
-            220 -> Voltage.V220
-            380 -> Voltage.V380
-            else -> throw IllegalArgumentException("Unknown voltage value")
-        }
-    }
-}

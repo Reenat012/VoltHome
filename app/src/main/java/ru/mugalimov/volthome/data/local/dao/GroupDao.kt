@@ -50,4 +50,12 @@ interface GroupDao {
 
     @Query("UPDATE groups SET nominal_current = :current WHERE group_id = :groupId")
     suspend fun updateGroupCurrent(groupId: Long, current: Double)
+
+    @Transaction
+    @Query("SELECT * FROM groups")
+    suspend fun getAllGroupsWithDevices(): List<CircuitGroupWithDevices>
+
+    @Transaction
+    @Query("SELECT * FROM groups WHERE group_id = :groupId")
+    suspend fun getGroupWithDevicesById(groupId: Long): CircuitGroupWithDevices?
 }

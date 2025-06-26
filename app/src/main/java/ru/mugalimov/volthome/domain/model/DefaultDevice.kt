@@ -5,7 +5,10 @@ data class DefaultDevice(
     val id: Long,
     val name: String,
     val power: Int,
-    val voltage: Voltage,
+    val voltage: Voltage, // Используется адаптер
     val demandRatio: Double,
-    val deviceType: DeviceType
+    val deviceType: DeviceType,
+    val powerFactor: Double,
+    val hasMotor: Boolean,
+    val requiresDedicatedCircuit: Boolean
 )

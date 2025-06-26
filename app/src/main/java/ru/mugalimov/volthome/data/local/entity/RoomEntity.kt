@@ -3,6 +3,7 @@ package ru.mugalimov.volthome.data.local.entity
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import ru.mugalimov.volthome.domain.model.RoomType
 import java.util.Date
 
 @Entity(tableName = "rooms")
@@ -14,5 +15,8 @@ data class RoomEntity(
     val name: String,
 
     @ColumnInfo(name = "created_at")
-    val createdAt: Date //временная метка создания
+    val createdAt: Date,
+
+    @ColumnInfo(name = "room_type")
+    val roomType: RoomType = RoomType.STANDARD  // Тип помещения
 )

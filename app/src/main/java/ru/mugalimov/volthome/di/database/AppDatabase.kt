@@ -27,8 +27,8 @@ import kotlin.synchronized
         LoadEntity::class,
         GroupDeviceJoin::class,
         CircuitGroupEntity::class],
-    version = 10,
-    exportSchema = false
+    version = 12,
+    exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun roomDao(): RoomDao //доступ к dao
@@ -48,7 +48,8 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "app_database" // Имя файла БД
-                ).build()
+                )
+                    .build()
                 INSTANCE = instance
                 instance
             }

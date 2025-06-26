@@ -5,7 +5,10 @@
     "power": 10,
     "voltage": 220,
     "demandRatio": 1.0,
-    "deviceType": "LIGHTING"
+    "powerFactor": 0.95,
+    "deviceType": "LIGHTING",
+    "hasMotor": false,
+    "requiresDedicatedCircuit": false
   },
   {
     "id": 13,
@@ -13,7 +16,10 @@
     "power": 100,
     "voltage": 220,
     "demandRatio": 1.0,
-    "deviceType": "LIGHTING"
+    "powerFactor": 0.95,
+    "deviceType": "LIGHTING",
+    "hasMotor": false,
+    "requiresDedicatedCircuit": false
   },
   {
     "id": 22,
@@ -21,7 +27,10 @@
     "power": 2200,
     "voltage": 220,
     "demandRatio": 0.75,
-    "deviceType": "SOCKET"
+    "powerFactor": 0.85,
+    "deviceType": "SOCKET",
+    "hasMotor": false,
+    "requiresDedicatedCircuit": true
   },
   {
     "id": 1,
@@ -29,7 +38,10 @@
     "power": 1000,
     "voltage": 220,
     "demandRatio": 0.8,
-    "deviceType": "SOCKET"
+    "powerFactor": 0.85,
+    "deviceType": "SOCKET",
+    "hasMotor": false,
+    "requiresDedicatedCircuit": false
   },
   {
     "id": 2,
@@ -37,7 +49,10 @@
     "power": 1500,
     "voltage": 220,
     "demandRatio": 0.9,
-    "deviceType": "SOCKET"
+    "powerFactor": 1.0,
+    "deviceType": "SOCKET",
+    "hasMotor": false,
+    "requiresDedicatedCircuit": false
   },
   {
     "id": 3,
@@ -45,7 +60,10 @@
     "power": 200,
     "voltage": 220,
     "demandRatio": 0.7,
-    "deviceType": "SOCKET"
+    "powerFactor": 0.75,
+    "deviceType": "SOCKET",
+    "hasMotor": true,
+    "requiresDedicatedCircuit": false
   },
   {
     "id": 4,
@@ -53,7 +71,10 @@
     "power": 1800,
     "voltage": 220,
     "demandRatio": 0.6,
-    "deviceType": "SOCKET"
+    "powerFactor": 0.75,
+    "deviceType": "SOCKET",
+    "hasMotor": true,
+    "requiresDedicatedCircuit": false
   },
   {
     "id": 5,
@@ -61,7 +82,10 @@
     "power": 150,
     "voltage": 220,
     "demandRatio": 0.9,
-    "deviceType": "SOCKET"
+    "powerFactor": 0.65,
+    "deviceType": "SOCKET",
+    "hasMotor": false,
+    "requiresDedicatedCircuit": false
   },
   {
     "id": 6,
@@ -69,7 +93,10 @@
     "power": 200,
     "voltage": 220,
     "demandRatio": 0.8,
-    "deviceType": "SOCKET"
+    "powerFactor": 0.65,
+    "deviceType": "SOCKET",
+    "hasMotor": false,
+    "requiresDedicatedCircuit": false
   },
   {
     "id": 7,
@@ -77,7 +104,10 @@
     "power": 400,
     "voltage": 220,
     "demandRatio": 0.85,
-    "deviceType": "SOCKET"
+    "powerFactor": 0.65,
+    "deviceType": "SOCKET",
+    "hasMotor": false,
+    "requiresDedicatedCircuit": false
   },
   {
     "id": 8,
@@ -85,7 +115,10 @@
     "power": 60,
     "voltage": 220,
     "demandRatio": 0.9,
-    "deviceType": "SOCKET"
+    "powerFactor": 0.65,
+    "deviceType": "SOCKET",
+    "hasMotor": false,
+    "requiresDedicatedCircuit": false
   },
   {
     "id": 9,
@@ -93,7 +126,10 @@
     "power": 2000,
     "voltage": 220,
     "demandRatio": 0.75,
-    "deviceType": "SOCKET"
+    "powerFactor": 0.8,
+    "deviceType": "SOCKET",
+    "hasMotor": true,
+    "requiresDedicatedCircuit": true
   },
   {
     "id": 10,
@@ -101,7 +137,10 @@
     "power": 1500,
     "voltage": 220,
     "demandRatio": 0.8,
-    "deviceType": "SOCKET"
+    "powerFactor": 1.0,
+    "deviceType": "SOCKET",
+    "hasMotor": false,
+    "requiresDedicatedCircuit": false
   },
   {
     "id": 11,
@@ -109,7 +148,10 @@
     "power": 50,
     "voltage": 220,
     "demandRatio": 0.9,
-    "deviceType": "SOCKET"
+    "powerFactor": 0.75,
+    "deviceType": "SOCKET",
+    "hasMotor": true,
+    "requiresDedicatedCircuit": false
   },
   {
     "id": 14,
@@ -117,7 +159,10 @@
     "power": 1200,
     "voltage": 220,
     "demandRatio": 0.7,
-    "deviceType": "SOCKET"
+    "powerFactor": 1.0,
+    "deviceType": "SOCKET",
+    "hasMotor": false,
+    "requiresDedicatedCircuit": false
   },
   {
     "id": 15,
@@ -125,7 +170,10 @@
     "power": 1600,
     "voltage": 220,
     "demandRatio": 0.6,
-    "deviceType": "SOCKET"
+    "powerFactor": 0.75,
+    "deviceType": "SOCKET",
+    "hasMotor": true,
+    "requiresDedicatedCircuit": false
   },
   {
     "id": 16,
@@ -133,7 +181,10 @@
     "power": 2200,
     "voltage": 220,
     "demandRatio": 0.65,
-    "deviceType": "SOCKET"
+    "powerFactor": 1.0,
+    "deviceType": "SOCKET",
+    "hasMotor": false,
+    "requiresDedicatedCircuit": true
   },
   {
     "id": 17,
@@ -141,7 +192,10 @@
     "power": 800,
     "voltage": 220,
     "demandRatio": 0.8,
-    "deviceType": "SOCKET"
+    "powerFactor": 0.8,
+    "deviceType": "SOCKET",
+    "hasMotor": false,
+    "requiresDedicatedCircuit": false
   },
   {
     "id": 18,
@@ -149,7 +203,10 @@
     "power": 1100,
     "voltage": 220,
     "demandRatio": 0.7,
-    "deviceType": "SOCKET"
+    "powerFactor": 1.0,
+    "deviceType": "SOCKET",
+    "hasMotor": false,
+    "requiresDedicatedCircuit": false
   },
   {
     "id": 19,
@@ -157,7 +214,10 @@
     "power": 500,
     "voltage": 220,
     "demandRatio": 0.6,
-    "deviceType": "SOCKET"
+    "powerFactor": 0.75,
+    "deviceType": "SOCKET",
+    "hasMotor": true,
+    "requiresDedicatedCircuit": false
   },
   {
     "id": 20,
@@ -165,7 +225,10 @@
     "power": 15,
     "voltage": 220,
     "demandRatio": 1.0,
-    "deviceType": "SOCKET"
+    "powerFactor": 0.65,
+    "deviceType": "SOCKET",
+    "hasMotor": false,
+    "requiresDedicatedCircuit": false
   },
   {
     "id": 21,
@@ -173,6 +236,9 @@
     "power": 25,
     "voltage": 220,
     "demandRatio": 0.95,
-    "deviceType": "SOCKET"
+    "powerFactor": 0.65,
+    "deviceType": "SOCKET",
+    "hasMotor": false,
+    "requiresDedicatedCircuit": false
   }
 ]

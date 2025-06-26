@@ -1,98 +1,104 @@
 package ru.mugalimov.volthome.ui.viewmodel
 
 import android.content.ContentValues.TAG
-import android.nfc.Tag
 import android.util.Log
-import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.onStart
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import ru.mugalimov.volthome.core.error.GroupNotFoundException
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.domain.model.CircuitGroup
-import ru.mugalimov.volthome.domain.use_case.GroupCalculator
+import ru.mugalimov.volthome.domain.use_case.GroupCalculatorFactory
 import javax.inject.Inject
 
 @HiltViewModel
 class ExplicationViewModel @Inject constructor(
     private val explicationRepository: ExplicationRepository,
-    private val calcGroup: GroupCalculator
+    private val groupCalculatorFactory: GroupCalculatorFactory
 ) : ViewModel() {
-    private val _uiState = MutableStateFlow(GroupUiState())
-    val uiState: StateFlow<GroupUiState> = _uiState.asStateFlow()
 
+    // Состояние UI экрана групп
+    private val _uiState = MutableStateFlow<GroupScreenState>(GroupScreenState.Loading)
+    val uiState: StateFlow<GroupScreenState> = _uiState.asStateFlow()
 
     init {
-        loadGroups()
-        Log.d(TAG, "Groups in viewModel ${uiState.value.groups}")
-
-
-    }
-
-    private fun loadGroups() {
         viewModelScope.launch {
-            explicationRepository.observeAllGroup()
-                .onStart { _uiState.update { it.copy(isLoading = true) } }
-                .catch { e ->
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            error = e
-                        )
-                    }
-                }
-                .collect { groups ->
-                    _uiState.update {
-                        it.copy(
-                            groups = groups,
-                            isLoading = false,
-                            error = null
-                        )
-                    }
-                }
-        }
-    }
-
-    suspend fun getAllGroup() {
-        viewModelScope.launch {
-            try {
-                val groupsTest = explicationRepository.getAllGroups()
-
-                Log.d(TAG, "Тест групп во viewModel getAllGroups: $groupsTest")
-            } catch (e: Exception) {
-                Log.e(TAG, "Ошибка при получении групп: ", e)
-
+            explicationRepository.observeAllGroup().collect { groups ->
+                _uiState.value = GroupScreenState.Success(
+                    groups = groups,
+                    totalGroups = groups.size,
+                    totalCurrent = groups.sumOf { it.nominalCurrent }
+                )
             }
         }
     }
 
-    fun calcGroups() {
+//    private fun loadGroups() {
+//        viewModelScope.launch {
+//            explicationRepository.observeAllGroup()
+//                .onStart { _uiState.update { it.copy(isLoading = true) } }
+//                .catch { e ->
+//                    _uiState.update {
+//                        it.copy(
+//                            isLoading = false,
+//                            error = e
+//                        )
+//                    }
+//                }
+//                .collect { groups ->
+//                    _uiState.update {
+//                        it.copy(
+//                            groups = groups,
+//                            isLoading = false,
+//                            error = null
+//                        )
+//                    }
+//                }
+//        }
+//    }
+
+    fun getAllGroups() {
         viewModelScope.launch {
-//            val electicalSystem = calcGroup.calculateGroups()
-//
-//            val groups = electicalSystem.circuitGroups
-//            Log.d(TAG, "Группы в calcGroups из useCase $groups")
-//
-//            explicationRepository.addGroup(groups)
-
-            val electicalSystem = calcGroup.calculateGroups()
-            val groups = electicalSystem.circuitGroups
-
-            // Очищаем старые группы перед добавлением новых
-            explicationRepository.deleteAllGroups()
-            explicationRepository.addGroup(groups)
-
+            try {
+                val groups = explicationRepository.getAllGroups()
+                Log.d(TAG, "Groups: $groups")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error loading groups", e)
+            }
         }
     }
 
+    /**
+     * Запускает расчет электрических групп
+     */
+    fun calculateGroups() {
+        viewModelScope.launch {
+            _uiState.value = GroupScreenState.Loading
+            val calcGroup = groupCalculatorFactory.create()
+            calcGroup.calculateGroups()
+        }
+    }
+}
 
+
+/**
+ * Состояния UI экрана групп:
+ * - Loading: данные загружаются
+ * - Success: успешный расчет с данными групп
+ * - Error: ошибка расчета с сообщением
+ */
+sealed class GroupScreenState {
+    object Loading : GroupScreenState()
+    data class Success(
+        val groups: List<CircuitGroup>,
+        val totalGroups: Int,
+        val totalCurrent: Double
+    ) : GroupScreenState()
+
+    data class Error(val message: String) : GroupScreenState()
 }
 
 data class GroupUiState(

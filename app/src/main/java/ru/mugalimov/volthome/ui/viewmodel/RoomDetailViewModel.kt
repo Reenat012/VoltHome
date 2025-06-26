@@ -75,12 +75,11 @@ class RoomDetailViewModel @Inject constructor(
 
     fun loadDefaultDevices() {
         viewModelScope.launch {
-            try {
-                _defaultDevices.value = deviceRepository.getDefaultDevices()
-                    .first() // Берем первый элемент Flow
-            } catch (e: Exception) {
-                Log.e("LOAD_ERROR", "Error loading devices", e)
-            }
+            deviceRepository.getDefaultDevices()
+                .collect { devices ->
+                    _defaultDevices.value = devices
+                    Log.d("DeviceLoad", "Loaded ${devices.size} devices")
+                }
         }
     }
 
@@ -135,7 +134,10 @@ class RoomDetailViewModel @Inject constructor(
         voltage: Voltage,
         demandRatio: Double,
         roomId: Long,
-        deviceType: DeviceType
+        deviceType: DeviceType,
+        powerFactor: Double,
+        hasMotor: Boolean,
+        requiresDedicatedCircuit: Boolean
     ) {
         viewModelScope.launch {
             //TODO удалить после отладки
@@ -163,7 +165,10 @@ class RoomDetailViewModel @Inject constructor(
                         voltage = voltage,
                         demandRatio = demandRatio,
                         roomId = this@RoomDetailViewModel.roomId,
-                        deviceType = deviceType
+                        deviceType = deviceType,
+                        powerFactor = powerFactor,
+                        hasMotor = hasMotor,
+                        requiresDedicatedCircuit = requiresDedicatedCircuit
                     )
                 )
             } catch (e: Exception) {

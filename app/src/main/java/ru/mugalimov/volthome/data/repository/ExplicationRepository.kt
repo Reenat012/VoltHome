@@ -4,6 +4,7 @@ import kotlinx.coroutines.flow.Flow
 import ru.mugalimov.volthome.data.local.entity.CircuitGroupEntity
 import ru.mugalimov.volthome.data.local.entity.GroupDeviceJoin
 import ru.mugalimov.volthome.domain.model.CircuitGroup
+import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
 
 interface ExplicationRepository {
@@ -26,4 +27,7 @@ interface ExplicationRepository {
     suspend fun getAllGroups() : List<CircuitGroup>
 
     suspend fun deleteAllGroups()
+
+    suspend fun addDeviceToGroup(deviceId: Long, groupId: Long)
+    suspend fun getDevicesForGroup(groupId: Long): List<Device>
 }
