@@ -11,7 +11,7 @@ data class Room(
     val name: String,
     val createdAt: Date,
     val devices: List<Device> = emptyList(),
-    val roomType: RoomType = RoomType.STANDARD  // Тип помещения
+    val roomType: RoomType
 )
 
 @RequiresApi(Build.VERSION_CODES.O)

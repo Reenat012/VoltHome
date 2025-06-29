@@ -93,6 +93,7 @@ fun GroupCard(group: CircuitGroup) {
             GroupParameterRow("Кол-во устройств", "${group.devices.size}")
             GroupParameterRow("Автомат", "${group.circuitBreaker}A тип ${group.breakerType}")
             GroupParameterRow("Кабель", "${group.cableSection} мм²")
+            GroupParameterRow("Требуется ли УЗО", "${group.rcdRequired}")
 
             // Индикатор загрузки
             Spacer(modifier = Modifier.height(12.dp))

@@ -1,3 +1,5 @@
+import android.content.ContentValues.TAG
+import android.util.Log
 import ru.mugalimov.volthome.data.local.entity.CircuitGroupEntity
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.data.local.entity.RoomEntity
@@ -55,7 +57,10 @@ class GroupCalculator (
             // Шаг 2: Обработка ВЫДЕЛЕННЫХ ЛИНИЙ для мощных устройств
             rooms.forEach { roomWithDevices ->
                 val room = roomWithDevices.room
+                Log.d("GroupCalc", "${room.roomType}")
+
                 val safetyProfile = roomSafetyProfiles[room.roomType] ?: SafetyProfile()
+
 
                 roomWithDevices.devices
                     .filter { device ->

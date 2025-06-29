@@ -2,17 +2,14 @@ package ru.mugalimov.volthome.ui.components
 
 import android.content.Context
 import android.util.Log
-import com.google.gson.Gson
 import com.google.gson.GsonBuilder
-import com.google.gson.TypeAdapter
 import com.google.gson.reflect.TypeToken
-import com.google.gson.stream.JsonReader
-import com.google.gson.stream.JsonWriter
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import ru.mugalimov.volthome.domain.model.DefaultDevice
 import ru.mugalimov.volthome.domain.model.DefaultRoom
+import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.domain.model.Voltage
 import ru.mugalimov.volthome.domain.model.VoltageTypeAdapter
 
@@ -49,12 +46,36 @@ object JsonParser {
         return try {
             val inputStream = context.assets.open("default_rooms.json")
             val json = inputStream.bufferedReader().use { it.readText() }
-            val typeToken = object : TypeToken<List<DefaultRoom>>() {}.type
-            val result = Gson().fromJson<List<DefaultRoom>>(json, typeToken)
-            flowOf(result ?: emptyList())
+
+            val gson = GsonBuilder()
+                .registerTypeAdapter(RoomType::class.java, RoomTypeAdapter())
+                .create()
+
+            val typeToken = object : TypeToken<List<DefaultRoomJson>>() {}.type
+            val jsonObjects = gson.fromJson<List<DefaultRoomJson>>(json, typeToken)
+
+            flowOf(jsonObjects.map { jsonObject ->
+                DefaultRoom(
+                    id = jsonObject.id,
+                    name = jsonObject.name,
+                    icon = jsonObject.icon,
+                    description = jsonObject.description,
+                    roomType = jsonObject.roomType
+                )
+            })
         } catch (e: Exception) {
+            Log.e("JsonParser", "Error parsing rooms", e)
             flowOf(emptyList())
         }
     }
+
+    // Временный класс для парсинга JSON
+    private data class DefaultRoomJson(
+        val id: Long,
+        val name: String,
+        val icon: String,
+        val description: String,
+        val roomType: RoomType  // Теперь парсится через адаптер
+    )
 }
 

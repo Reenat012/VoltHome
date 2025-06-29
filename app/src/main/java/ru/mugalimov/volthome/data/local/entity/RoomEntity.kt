@@ -18,5 +18,5 @@ data class RoomEntity(
     val createdAt: Date,
 
     @ColumnInfo(name = "room_type")
-    val roomType: RoomType = RoomType.STANDARD  // Тип помещения
+    val roomType: RoomType
 )

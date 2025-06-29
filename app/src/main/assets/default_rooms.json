@@ -3,120 +3,140 @@
     "id": 1,
     "name": "Гостиная",
     "icon": "living_room",
-    "description": "Основная зона отдыха и приема гостей"
+    "description": "Основная зона отдыха и приема гостей",
+    "roomType": "STANDARD"
   },
   {
     "id": 2,
     "name": "Кухня",
     "icon": "kitchen",
-    "description": "Пространство для приготовления пищи"
+    "description": "Пространство для приготовления пищи",
+    "roomType": "KITCHEN"
   },
   {
     "id": 3,
     "name": "Спальня",
     "icon": "bed",
-    "description": "Персональная спальная зона"
+    "description": "Персональная спальная зона",
+    "roomType": "STANDARD"
   },
   {
     "id": 4,
     "name": "Ванная",
     "icon": "bathroom",
-    "description": "Комната с санузлом и душевой"
+    "description": "Комната с санузлом и душевой",
+    "roomType": "BATHROOM"
   },
   {
     "id": 5,
     "name": "Домашний офис",
     "icon": "desk",
-    "description": "Рабочее пространство для удаленной работы"
+    "description": "Рабочее пространство для удаленной работы",
+    "roomType": "STANDARD"
   },
   {
     "id": 6,
     "name": "Детская",
     "icon": "child_care",
-    "description": "Комната для детей"
+    "description": "Комната для детей",
+    "roomType": "STANDARD"
   },
   {
     "id": 7,
     "name": "Гардеробная",
     "icon": "checkroom",
-    "description": "Хранение одежды и аксессуаров"
+    "description": "Хранение одежды и аксессуаров",
+    "roomType": "STANDARD"
   },
   {
     "id": 8,
     "name": "Балкон",
     "icon": "balcony",
-    "description": "Открытая или застекленная лоджия"
+    "description": "Открытая или застекленная лоджия",
+    "roomType": "OUTDOOR"
   },
   {
     "id": 9,
     "name": "Кладовая",
     "icon": "storage",
-    "description": "Хранение запасов и редко используемых вещей"
+    "description": "Хранение запасов и редко используемых вещей",
+    "roomType": "STANDARD"
   },
   {
     "id": 10,
     "name": "Тренажерный зал",
     "icon": "fitness_center",
-    "description": "Домашняя зона для тренировок"
+    "description": "Домашняя зона для тренировок",
+    "roomType": "STANDARD"
   },
   {
     "id": 11,
     "name": "Кинотеатр",
     "icon": "movie",
-    "description": "Домашний кинотеатр с проектором"
+    "description": "Домашний кинотеатр с проектором",
+    "roomType": "STANDARD"
   },
   {
     "id": 12,
     "name": "Гараж",
     "icon": "garage",
-    "description": "Помещение для автомобиля и инструментов"
+    "description": "Помещение для автомобиля и инструментов",
+    "roomType": "OUTDOOR"
   },
   {
     "id": 13,
     "name": "Сауна",
     "icon": "spa",
-    "description": "Домашняя сауна или парная"
+    "description": "Домашняя сауна или парная",
+    "roomType": "BATHROOM"
   },
   {
     "id": 14,
     "name": "Библиотека",
     "icon": "library_books",
-    "description": "Комната для чтения и хранения книг"
+    "description": "Комната для чтения и хранения книг",
+    "roomType": "STANDARD"
   },
   {
     "id": 15,
     "name": "Терраса",
     "icon": "deck",
-    "description": "Открытая площадка для отдыха"
+    "description": "Открытая площадка для отдыха",
+    "roomType": "OUTDOOR"
   },
   {
     "id": 16,
     "name": "Игровая",
     "icon": "sports_esports",
-    "description": "Комната для видеоигр и развлечений"
+    "description": "Комната для видеоигр и развлечений",
+    "roomType": "STANDARD"
   },
   {
     "id": 17,
     "name": "Мастерская",
     "icon": "build",
-    "description": "Пространство для DIY-проектов"
+    "description": "Пространство для DIY-проектов",
+    "roomType": "STANDARD"
   },
   {
     "id": 18,
     "name": "Гостевая",
     "icon": "bed",
-    "description": "Комната для временных гостей"
+    "description": "Комната для временных гостей",
+    "roomType": "STANDARD"
   },
   {
     "id": 19,
     "name": "Студия",
     "icon": "mic",
-    "description": "Домашняя звукозаписывающая студия"
+    "description": "Домашняя звукозаписывающая студия",
+    "roomType": "STANDARD"
   },
   {
     "id": 20,
     "name": "Зимний сад",
     "icon": "grass",
-    "description": "Помещение с растениями и цветами"
+    "description": "Помещение с растениями и цветами",
+    "roomType": "OUTDOOR"
   }
 ]
