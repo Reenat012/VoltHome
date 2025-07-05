@@ -65,10 +65,12 @@ class GroupCalculator(
 
                 roomWithDevices.devices
                     .filter { device ->
-                        // Фильтруем устройства, требующие выделенной линии:
-                        // - Явно помеченные requiresDedicatedCircuit
-                        // - Мощностью более 2000 Вт
-                        device.requiresDedicatedCircuit || device.power > 2000
+                        val threshold = when (device.voltage.type) {
+                            VoltageType.AC_1PHASE -> 2300 // 230V × 10A
+                            VoltageType.AC_3PHASE -> 7000 // 400V × 16A × √3 ≈ 11000, но берем 7000 как безопасный порог
+                            else -> 2000
+                        }
+                        device.requiresDedicatedCircuit || device.power > threshold
                     }
                     .forEach { device ->
                         // Создаем отдельную группу для каждого такого устройства
@@ -233,9 +235,15 @@ class GroupCalculator(
         return if (device.hasMotor) base * 5.0 else base
     }
 
-    private fun determineBreakerType(devices: List<DeviceEntity>, baseType: String): String {
-        // Если есть устройства с двигателем - используем тип D
-        return if (devices.any { it.hasMotor }) "D" else baseType
+    private fun determineBreakerType(
+        devices: List<DeviceEntity>,
+        profile: GroupProfile
+    ): String {
+        return when {
+            devices.any { it.hasMotor } -> "D"
+            profile.breakerType == "D" -> "D"
+            else -> profile.breakerType
+        }
     }
 
     /**
@@ -256,11 +264,14 @@ class GroupCalculator(
     }
 
     private fun calculateCurrent(device: DeviceEntity): Double {
-        // Базовый расчет без пусковых токов
+        val effectivePower = device.power.toDouble() * device.demandRatio
+        val voltage = (device.voltage.value.takeIf { it > 0 } ?: 230.0).toDouble()
+        val powerFactor = device.powerFactor.coerceIn(0.8, 1.0)
+
         return when (device.voltage.type) {
-            VoltageType.AC_1PHASE -> device.power / (device.voltage.value * device.powerFactor)
-            VoltageType.AC_3PHASE -> device.power / (1.732 * device.voltage.value * device.powerFactor)
-            VoltageType.DC -> device.power / device.voltage.value.toDouble()
+            VoltageType.AC_1PHASE -> effectivePower / (voltage * powerFactor)
+            VoltageType.AC_3PHASE -> effectivePower / (1.732 * voltage * powerFactor)
+            VoltageType.DC -> effectivePower / voltage
         }
     }
 
@@ -272,9 +283,9 @@ class GroupCalculator(
         val peakCurrent = getPeakCurrent(device)
 
         // 1. Проверка номинального тока
-        if (nominalCurrent > profile.maxCurrent) {
+        if (peakCurrent > profile.breakerRating) {
             throw IllegalArgumentException(
-                "Устройство '${device.name}' требует автомата минимум на ${ceil(nominalCurrent).toInt()}A"
+                "Устройство '${device.name}' требует автомата минимум на ${ceil(peakCurrent).toInt()}A"
             )
         }
 
@@ -303,22 +314,47 @@ class GroupCalculator(
         groupNumber: Int,
         room: RoomEntity
     ): CircuitGroup {
-        val breakerType = determineBreakerType(devices, profile.breakerType)
+        val breakerType = determineBreakerType(devices, profile)
 
         // Используем первое устройство для определения типа подключения группы
         val isSocketGroup = devices.firstOrNull()?.let { isSocketConnection(it) } ?: false
 
         // Рассчитываем суммарный номинальный ток группы
         val nominalCurrent = devices.sumOf { device ->
-            (device.power * device.demandRatio) /
-                    (device.voltage.value * device.powerFactor)
+            val effectivePower = device.power * device.demandRatio
+            when (device.voltage.type) {
+                VoltageType.AC_1PHASE -> effectivePower / (device.voltage.value * device.powerFactor)
+                VoltageType.AC_3PHASE -> effectivePower / (1.732 * device.voltage.value * device.powerFactor)
+                VoltageType.DC -> effectivePower / device.voltage.value.toDouble()
+            }
+        }
+
+        // Проверка группового пускового тока
+        val maxGroupPeak = devices.sumOf { device ->
+            if (device.hasMotor) calculateCurrent(device) * 5 else calculateCurrent(device)
+        }
+        val maxTrip = when (breakerType) {
+            "B" -> profile.breakerRating * 5
+            "C" -> profile.breakerRating * 10
+            "D" -> profile.breakerRating * 20
+            else -> profile.breakerRating * 10
+        }
+
+        if (maxGroupPeak > maxTrip) {
+            throw IllegalStateException(
+                "Группа $groupNumber: пусковой ток ${"%.1f".format(maxGroupPeak)}A " +
+                        "превышает порог ${maxTrip}A для автомата $breakerType${profile.breakerRating}"
+            )
         }
 
         // Корректируем сечение кабеля
-        val cableSection = if (isSocketGroup) {
-            min(profile.cableSection, 2.5)
-        } else {
-            profile.cableSection
+        val cableSection = when {
+            // Для розеточных групп ограничиваем сечение 2.5 мм²
+            isSocketGroup -> min(profile.cableSection, 2.5)
+            // Для мощных устройств (HEAVY_DUTY) используем полное сечение
+            devices.first().deviceType == DeviceType.HEAVY_DUTY -> profile.cableSection
+            // Для остальных групп (освещение) используем профильное сечение
+            else -> profile.cableSection
         }
 
         return CircuitGroup(
@@ -349,8 +385,10 @@ class GroupCalculator(
         val nominalCurrent = calculateCurrent(device)
         val peakCurrent = getPeakCurrent(device)
 
+        val breakerType = if (device.hasMotor) "D" else profile.breakerType
+
         // Проверяем, выдержит ли автомат пусковой ток
-        val maxInstantaneousTrip = when (profile.breakerType) {
+        val maxInstantaneousTrip = when (breakerType) {
             "B" -> profile.breakerRating * 5
             "C" -> profile.breakerRating * 10
             "D" -> profile.breakerRating * 20
@@ -374,7 +412,7 @@ class GroupCalculator(
             nominalCurrent = nominalCurrent,
             circuitBreaker = profile.breakerRating,
             cableSection = cableSection,
-            breakerType = profile.breakerType,
+            breakerType = breakerType,
             rcdRequired = safetyProfile.rcdRequired,
             rcdCurrent = safetyProfile.rcdCurrent,
             groupNumber = groupNumber,
@@ -385,9 +423,8 @@ class GroupCalculator(
 
 // Добавим функцию для определения типа подключения устройства
 private fun isSocketConnection(device: DeviceEntity): Boolean {
-    // Для розеточных устройств или явно помеченных как требующих розетку
     return device.deviceType == DeviceType.SOCKET ||
-            device.requiresSocketConnection
+            (device.deviceType == DeviceType.HEAVY_DUTY && device.power <= 2300)
 }
 
 // Функция, которая будет выбирать корректное сечение кабеля в зависимости от типа подключения
