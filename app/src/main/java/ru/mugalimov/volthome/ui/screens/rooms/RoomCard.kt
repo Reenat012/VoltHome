@@ -70,13 +70,6 @@ fun RoomCard(
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.padding(end = 16.dp)
                 )
-
-                Text(
-                    text = room.roomType.toString(),
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.padding(end = 16.dp)
-                )
             }
 
             IconButton(

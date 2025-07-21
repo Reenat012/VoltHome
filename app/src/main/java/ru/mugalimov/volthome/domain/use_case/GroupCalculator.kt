@@ -474,4 +474,3 @@ fun CircuitGroupEntity.toDomainModel(devices: List<Device>) = CircuitGroup(
     rcdCurrent = rcdCurrent
 )
 
-

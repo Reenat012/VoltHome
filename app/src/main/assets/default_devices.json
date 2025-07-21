@@ -32,7 +32,7 @@
     "powerFactor": 0.85,
     "deviceType": "SOCKET",
     "hasMotor": false,
-    "requiresDedicatedCircuit": true,
+    "requiresDedicatedCircuit": false,
     "requiresSocketConnection": false
   },
   {
