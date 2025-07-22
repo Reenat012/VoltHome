@@ -77,6 +77,8 @@ fun AddDeviceScreen(
     val focusManager = LocalFocusManager.current
     val scrollState = rememberScrollState()
 
+    val isTemplateSelected = selectedDevice != null // Флаг выбора шаблона
+
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -238,7 +240,9 @@ fun AddDeviceScreen(
                             "Вт",
                             color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
                         )
-                    }
+                    },
+                    readOnly = isTemplateSelected, // Блокировка редактирования
+                    enabled = !isTemplateSelected // Визуальная индикация
                 )
 
                 VoltageSelector(
@@ -267,7 +271,9 @@ fun AddDeviceScreen(
                             "0.0-1.0",
                             color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
                         )
-                    }
+                    },
+                    readOnly = isTemplateSelected, // Блокировка редактирования
+                    enabled = !isTemplateSelected // Визуальная индикация
                 )
 
                 OutlinedTextField(
@@ -291,7 +297,9 @@ fun AddDeviceScreen(
                             "0.0-1.0",
                             color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
                         )
-                    }
+                    },
+                    readOnly = isTemplateSelected, // Блокировка редактирования
+                    enabled = !isTemplateSelected // Визуальная индикация
                 )
             }
         }

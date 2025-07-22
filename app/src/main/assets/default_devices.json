@@ -138,7 +138,7 @@
     "voltage": 220,
     "demandRatio": 0.75,
     "powerFactor": 0.8,
-    "deviceType": "SOCKET",
+    "deviceType": "HEAVY_DUTY",
     "hasMotor": true,
     "requiresDedicatedCircuit": true,
     "requiresSocketConnection": false

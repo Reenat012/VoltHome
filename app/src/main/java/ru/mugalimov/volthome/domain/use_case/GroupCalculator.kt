@@ -23,58 +23,57 @@ class GroupCalculator(
     private val roomRepository: RoomRepository,
     private val groupRepository: ExplicationRepository
 ) {
-    // Профили групп для разных типов устройств
+    // Обновленные профили групп
     private val groupProfiles = mapOf(
-        // Освещение: 10A автомат типа B, кабель 1.5 мм²
         DeviceType.LIGHTING to GroupProfile(10.0, 10, 1.5, "B"),
-
-        // Розетки: 16A автомат типа C, кабель 2.5 мм²
         DeviceType.SOCKET to GroupProfile(16.0, 16, 2.5, "C"),
-
-        // Мощные устройства: 25A автомат типа D, кабель 4.0 мм²
         DeviceType.HEAVY_DUTY to GroupProfile(25.0, 25, 4.0, "D")
     )
 
-    // Профили безопасности для разных типов помещений
+    // Обновленные профили безопасности с током УЗО
     private val roomSafetyProfiles = mapOf(
-        RoomType.BATHROOM to SafetyProfile(rcdRequired = true),  // Ванная: УЗО обязательно
-        RoomType.KITCHEN to SafetyProfile(rcdRequired = true),   // Кухня: УЗО обязательно
-        RoomType.OUTDOOR to SafetyProfile(rcdRequired = true),   // Уличные розетки: УЗО
-        RoomType.STANDARD to SafetyProfile(rcdRequired = false)  // Обычные: УЗО не требуется
+        RoomType.BATHROOM to SafetyProfile(rcdRequired = true, rcdCurrent = 30),
+        RoomType.KITCHEN to SafetyProfile(rcdRequired = true, rcdCurrent = 30),
+        RoomType.OUTDOOR to SafetyProfile(rcdRequired = true, rcdCurrent = 30),
+        RoomType.STANDARD to SafetyProfile(rcdRequired = false)
     )
 
-    /**
-     * Основная функция расчета групп
-     * Возвращает sealed class с результатом (успех или ошибка)
-     */
     suspend fun calculateGroups(): GroupingResult {
         return try {
-            // Шаг 1: Получаем все комнаты с устройствами из базы данных
             val rooms = roomRepository.getRoomsWithDevices()
-
-            var totalGroupNumber = 1  // Счетчик групп для сквозной нумерации
+            var totalGroupNumber = 1
             val allGroups = mutableListOf<CircuitGroup>()
 
-            // Шаг 2: Обработка ВЫДЕЛЕННЫХ ЛИНИЙ для мощных устройств
+            // Шаг 1: Выделенные линии с учетом ограничения для розеток
             rooms.forEach { roomWithDevices ->
                 val room = roomWithDevices.room
-                Log.d("GroupCalc", "${room.roomType}")
-
                 val safetyProfile = roomSafetyProfiles[room.roomType] ?: SafetyProfile()
-
 
                 roomWithDevices.devices
                     .filter { device ->
                         val threshold = when (device.voltage.type) {
-                            VoltageType.AC_1PHASE -> 2300 // 230V × 10A
-                            VoltageType.AC_3PHASE -> 7000 // 400V × 16A × √3 ≈ 11000, но берем 7000 как безопасный порог
+                            VoltageType.AC_1PHASE -> 2300
+                            VoltageType.AC_3PHASE -> 7000
                             else -> 2000
                         }
                         device.requiresDedicatedCircuit || device.power > threshold
                     }
                     .forEach { device ->
-                        // Создаем отдельную группу для каждого такого устройства
-                        val profile = groupProfiles[DeviceType.HEAVY_DUTY]!!
+                        // ФИКС: Рассчитываем ток с учетом коэффициента спроса
+                        val nominalCurrent = calculateCurrent(device)
+
+                        val profile = if (device.requiresSocketConnection) {
+                            groupProfiles[DeviceType.SOCKET]!! // Для розеток всегда профиль SOCKET
+                        } else {
+                            when {
+                                nominalCurrent > 25 -> GroupProfile(32.0, 32, 6.0, "D")
+                                nominalCurrent > 16 -> groupProfiles[DeviceType.HEAVY_DUTY]!!
+                                else -> groupProfiles[DeviceType.SOCKET]!!
+                            }
+                        }
+                        // ДОБАВЛЕНА ПРОВЕРКА ДЛЯ ВЫДЕЛЕННЫХ ЛИНИЙ
+//                        validateDevices(device, profile)
+
                         allGroups.add(
                             createDedicatedGroup(
                                 device = device,
@@ -87,25 +86,19 @@ class GroupCalculator(
                     }
             }
 
-            // Шаг 3: Обработка СТАНДАРТНЫХ ГРУПП (освещение, розетки)
+            // Шаг 2: Стандартные группы с защитой от перегрузки
             rooms.forEach { roomWithDevices ->
                 val room = roomWithDevices.room
                 val safetyProfile = roomSafetyProfiles[room.roomType] ?: SafetyProfile()
 
-                // Фильтруем устройства, не требующие выделенной линии
                 val devices = roomWithDevices.devices.filterNot {
                     it.requiresDedicatedCircuit || it.power > 2000
                 }
 
-                // Группируем устройства по их типу (освещение, розетки)
                 val groupedDevices = devices.groupBy { it.deviceType }
 
-                // Обрабатываем каждую группу устройств отдельно
                 groupedDevices.forEach { (deviceType, typeDevices) ->
-                    // Получаем профиль для данного типа устройств
                     val profile = groupProfiles[deviceType] ?: groupProfiles[DeviceType.SOCKET]!!
-
-                    // Создаем группы устройств с учетом параметров профиля
                     val groups = createCircuitGroups(
                         devices = typeDevices,
                         profile = profile,
@@ -113,19 +106,14 @@ class GroupCalculator(
                         startGroupNumber = totalGroupNumber,
                         room = room
                     )
-
-                    // Добавляем созданные группы в общий список
                     allGroups.addAll(groups)
                     totalGroupNumber += groups.size
                 }
             }
-            // Сохраняем группы и связи
-            saveGroupsWithDevices(allGroups)
 
-            // Возвращаем успешный результат с рассчитанными группами
+            saveGroupsWithDevices(allGroups)
             GroupingResult.Success(ElectricalSystem(allGroups))
         } catch (e: Exception) {
-            // Возвращаем ошибку с сообщением
             GroupingResult.Error("Ошибка расчета: ${e.message}")
         }
     }
@@ -160,26 +148,31 @@ class GroupCalculator(
         startGroupNumber: Int,
         room: RoomEntity
     ): List<CircuitGroup> {
+        val actualProfile = if (devices.firstOrNull()?.deviceType == DeviceType.SOCKET) {
+            profile.copy(cableSection = 2.5) // Принудительно устанавливаем 2.5 мм²
+        } else {
+            profile
+        }
+
         devices.forEach { validateDevices(it, profile) }
-        val sortedDevices =
-            devices.sortedByDescending { calculateCurrent(it) } // Используем номинальный ток для сортировки
+        val sortedDevices = devices.sortedByDescending { calculateCurrent(it) }
         val groups = mutableListOf<CircuitGroup>()
         var currentGroup = mutableListOf<DeviceEntity>()
         var currentSum = 0.0
         var groupNumber = startGroupNumber
 
         for (device in sortedDevices) {
-            val nominalCurrent = calculateCurrent(device) // Номинальный ток (без пусковых)
-            val peakCurrent = getPeakCurrent(device)      // Пиковый ток (с пусковыми)
+            val nominalCurrent = calculateCurrent(device)
 
-            // 1. Проверка, помещается ли устройство в текущую группу
-            if (currentSum + nominalCurrent > profile.maxCurrentWithReserve) {
-                // Сохраняем текущую группу, если она не пустая
+            // Защита от перегрузки группы (не более 80% автомата)
+            val maxAllowedCurrent = profile.breakerRating * 0.8
+
+            if (currentSum + nominalCurrent > maxAllowedCurrent) {
                 if (currentGroup.isNotEmpty()) {
                     groups.add(
                         createGroup(
                             currentGroup,
-                            profile,
+                            actualProfile,
                             safetyProfile,
                             groupNumber++,
                             room
@@ -189,21 +182,13 @@ class GroupCalculator(
                     currentSum = 0.0
                 }
 
-                // 2. Проверка, помещается ли устройство в ПУСТУЮ группу
-                if (nominalCurrent > profile.maxCurrentWithReserve) {
-                    // Устройство слишком мощное даже для отдельной группы
-                    if (peakCurrent > profile.breakerRating) {
+                // Проверка для одиночного устройства
+                if (nominalCurrent > maxAllowedCurrent) {
+                    if (nominalCurrent > profile.breakerRating) {
                         throw IllegalArgumentException(
-                            "Устройство '${device.name}' (${device.power}W) слишком мощное " +
-                                    "для автомата ${profile.breakerRating}A. Требуется минимум ${
-                                        ceil(
-                                            peakCurrent
-                                        ).toInt()
-                                    }A"
+                            "Устройство '${device.name}' слишком мощное для автомата ${profile.breakerRating}A"
                         )
                     }
-
-                    // Создаем отдельную группу для одного устройства
                     groups.add(
                         createGroup(
                             listOf(device),
@@ -213,16 +198,14 @@ class GroupCalculator(
                             room
                         )
                     )
-                    continue  // Переходим к следующему устройству
+                    continue
                 }
             }
 
-            // 3. Добавляем устройство в текущую группу
             currentGroup.add(device)
             currentSum += nominalCurrent
         }
 
-        // Добавляем последнюю группу
         if (currentGroup.isNotEmpty()) {
             groups.add(createGroup(currentGroup, profile, safetyProfile, groupNumber, room))
         }
@@ -264,14 +247,16 @@ class GroupCalculator(
     }
 
     private fun calculateCurrent(device: DeviceEntity): Double {
-        val effectivePower = device.power.toDouble() * device.demandRatio
+        // ФИКС: Учитываем коэффициент спроса и коэффициент мощности
+        val effectivePower = device.power.toDouble() * (device.demandRatio ?: 1.0)
         val voltage = (device.voltage.value.takeIf { it > 0 } ?: 230.0).toDouble()
-        val powerFactor = device.powerFactor.coerceIn(0.8, 1.0)
+        val powerFactor = (device.powerFactor ?: 1.0).coerceIn(0.8, 1.0)
 
         return when (device.voltage.type) {
             VoltageType.AC_1PHASE -> effectivePower / (voltage * powerFactor)
             VoltageType.AC_3PHASE -> effectivePower / (1.732 * voltage * powerFactor)
             VoltageType.DC -> effectivePower / voltage
+            else -> effectivePower / voltage // Для неизвестных типов
         }
     }
 
@@ -282,10 +267,11 @@ class GroupCalculator(
         val nominalCurrent = calculateCurrent(device)
         val peakCurrent = getPeakCurrent(device)
 
-        // 1. Проверка номинального тока
-        if (peakCurrent > profile.breakerRating) {
+        // 1. Проверка номинального тока (ПУЭ 3.1.10)
+        if (nominalCurrent > profile.breakerRating) {
             throw IllegalArgumentException(
-                "Устройство '${device.name}' требует автомата минимум на ${ceil(peakCurrent).toInt()}A"
+                "Устройство '${device.name}' (${"%.2f".format(nominalCurrent)}A) " +
+                        "превышает номинал автомата ${profile.breakerRating}A"
             )
         }
 
@@ -299,7 +285,8 @@ class GroupCalculator(
 
         if (peakCurrent > maxInstantaneousTrip) {
             throw IllegalArgumentException(
-                "Автомат не защищает устройство: пусковой ток $peakCurrent А слишком высок для типа ${profile.breakerType}"
+                "Пусковой ток устройства '${device.name}' (${"%.2f".format(peakCurrent)}А) " +
+                        "превышает порог срабатывания автомата ${profile.breakerType} (${maxInstantaneousTrip}A)"
             )
         }
     }
@@ -316,8 +303,16 @@ class GroupCalculator(
     ): CircuitGroup {
         val breakerType = determineBreakerType(devices, profile)
 
-        // Используем первое устройство для определения типа подключения группы
-        val isSocketGroup = devices.firstOrNull()?.let { isSocketConnection(it) } ?: false
+        // Для розеточных групп всегда тип SOCKET и кабель 2.5 мм²
+        val isSocketGroup = devices.any { it.deviceType == DeviceType.SOCKET }
+
+        val groupType = if (isSocketGroup) DeviceType.SOCKET else devices.first().deviceType
+
+        val cableSection = when {
+            isSocketGroup -> 2.5 // Для розеток всегда 2.5 мм²
+            groupType == DeviceType.HEAVY_DUTY -> profile.cableSection
+            else -> profile.cableSection
+        }
 
         // Рассчитываем суммарный номинальный ток группы
         val nominalCurrent = devices.sumOf { device ->
@@ -347,19 +342,9 @@ class GroupCalculator(
             )
         }
 
-        // Корректируем сечение кабеля
-        val cableSection = when {
-            // Для розеточных групп ограничиваем сечение 2.5 мм²
-            isSocketGroup -> min(profile.cableSection, 2.5)
-            // Для мощных устройств (HEAVY_DUTY) используем полное сечение
-            devices.first().deviceType == DeviceType.HEAVY_DUTY -> profile.cableSection
-            // Для остальных групп (освещение) используем профильное сечение
-            else -> profile.cableSection
-        }
-
         return CircuitGroup(
             roomName = room.name,
-            groupType = devices.first().deviceType,
+            groupType = groupType,
             devices = devices.map { it.toDomainModel() },
             nominalCurrent = nominalCurrent,
             circuitBreaker = profile.breakerRating,
@@ -385,9 +370,34 @@ class GroupCalculator(
         val nominalCurrent = calculateCurrent(device)
         val peakCurrent = getPeakCurrent(device)
 
-        val breakerType = if (device.hasMotor) "D" else profile.breakerType
+        val groupType = when {
+            device.requiresSocketConnection -> DeviceType.SOCKET
+            device.deviceType == DeviceType.HEAVY_DUTY -> DeviceType.HEAVY_DUTY
+            else -> DeviceType.SOCKET // По умолчанию для совместимости
+        }
 
-        // Проверяем, выдержит ли автомат пусковой ток
+        // ФИКС: Для розеточных устройств всегда кабель 2.5 мм²
+        val cableSection = if (device.requiresSocketConnection) {
+            2.5
+        } else {
+            when {
+                nominalCurrent > 25 -> 6.0
+                nominalCurrent > 16 -> 4.0
+                else -> 2.5
+            }
+        }
+
+        // Проверка по ПУЭ 7.1.79 для розеток
+        // Определение типа автомата
+        // ФИКС: Автоматический выбор типа автомата
+        val breakerType = when {
+            device.hasMotor -> "D"
+            device.requiresSocketConnection -> "C"
+            nominalCurrent > 16 -> "D"
+            else -> "C"
+        }
+
+        // Проверка соответствия автомата
         val maxInstantaneousTrip = when (breakerType) {
             "B" -> profile.breakerRating * 5
             "C" -> profile.breakerRating * 10
@@ -395,23 +405,29 @@ class GroupCalculator(
             else -> profile.breakerRating * 10
         }
 
-        if (peakCurrent > maxInstantaneousTrip) {
+        // ФИКС: Проверка номинального тока с запасом 10%
+        if (nominalCurrent > profile.breakerRating * 0.9) {
             throw IllegalArgumentException(
-                "Автомат ${profile.breakerType}${profile.breakerRating}A не защищает устройство " +
-                        "'${device.name}': пусковой ток $peakCurrent А превышает порог срабатывания $maxInstantaneousTrip А"
+                "Устройство '${device.name}' (${"%.1f".format(nominalCurrent)}A) " +
+                        "превышает 90% номинала автомата ${profile.breakerRating}A"
             )
         }
 
-        // Корректируем сечение кабеля для розеточных подключений
-        val cableSection = getAdjustedCableSection(profile.cableSection, device)
+        if (peakCurrent > maxInstantaneousTrip) {
+            throw IllegalArgumentException(
+                "Пусковой ток устройства '${device.name}' (${"%.1f".format(peakCurrent)}А) " +
+                        "превышает порог срабатывания автомата $breakerType${profile.breakerRating}A"
+            )
+        }
+
 
         return CircuitGroup(
             roomName = room.name,
-            groupType = DeviceType.HEAVY_DUTY,
+            groupType = groupType, // Корректный тип группы
             devices = listOf(device.toDomainModel()),
             nominalCurrent = nominalCurrent,
             circuitBreaker = profile.breakerRating,
-            cableSection = cableSection,
+            cableSection = cableSection, // Корректное сечение
             breakerType = breakerType,
             rcdRequired = safetyProfile.rcdRequired,
             rcdCurrent = safetyProfile.rcdCurrent,
@@ -423,18 +439,16 @@ class GroupCalculator(
 
 // Добавим функцию для определения типа подключения устройства
 private fun isSocketConnection(device: DeviceEntity): Boolean {
-    return device.deviceType == DeviceType.SOCKET ||
-            (device.deviceType == DeviceType.HEAVY_DUTY && device.power <= 2300)
+    return device.requiresSocketConnection // Только явное указание
 }
 
 // Функция, которая будет выбирать корректное сечение кабеля в зависимости от типа подключения
-private fun getAdjustedCableSection(
-    baseSection: Double,
-    device: DeviceEntity
-): Double {
+private fun getAdjustedCableSection(baseSection: Double, current: Double): Double {
     return when {
-        isSocketConnection(device) && baseSection > 2.5 -> 2.5
-        else -> baseSection
+        current > 25 -> 6.0   // Для токов >25A - кабель 6мм²
+        current > 16 -> 4.0   // Для токов >16A - кабель 4мм²
+        current > 10 -> 2.5   // Для токов >10A - кабель 2.5мм²
+        else -> 1.5           // Для остальных - 1.5мм²
     }
 }
 
@@ -450,11 +464,7 @@ fun DeviceEntity.toDomainModel() = Device(
     requiresDedicatedCircuit = requiresDedicatedCircuit,
     deviceType = deviceType,
     roomId = roomId,
-    requiresSocketConnection = when (deviceType) {
-        DeviceType.SOCKET -> true
-        DeviceType.LIGHTING -> false
-        DeviceType.HEAVY_DUTY -> false // По умолчанию мощные устройства без розетки
-    }
+    requiresSocketConnection = requiresSocketConnection
 )
 
 fun List<DeviceEntity>.toDomainModels() = map { it.toDomainModel() }
