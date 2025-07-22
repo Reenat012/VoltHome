@@ -241,8 +241,8 @@ fun AddDeviceScreen(
                             color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
                         )
                     },
-                    readOnly = isTemplateSelected, // Блокировка редактирования
-                    enabled = !isTemplateSelected // Визуальная индикация
+//                    readOnly = isTemplateSelected, // Блокировка редактирования
+//                    enabled = !isTemplateSelected // Визуальная индикация
                 )
 
                 VoltageSelector(

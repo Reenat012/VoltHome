@@ -62,17 +62,28 @@ class GroupCalculator(
                         // ФИКС: Рассчитываем ток с учетом коэффициента спроса
                         val nominalCurrent = calculateCurrent(device)
 
-                        val profile = if (device.requiresSocketConnection) {
-                            groupProfiles[DeviceType.SOCKET]!! // Для розеток всегда профиль SOCKET
-                        } else {
-                            when {
-                                nominalCurrent > 25 -> GroupProfile(32.0, 32, 6.0, "D")
-                                nominalCurrent > 16 -> groupProfiles[DeviceType.HEAVY_DUTY]!!
-                                else -> groupProfiles[DeviceType.SOCKET]!!
+                        val profile = when {
+                            device.deviceType == DeviceType.HEAVY_DUTY -> {
+                                // Для HEAVY_DUTY устройств динамически выбираем профиль по току
+                                when {
+                                    nominalCurrent > 25 -> GroupProfile(32.0, 32, 6.0, "D") // Усиленный профиль для мощных устройств
+                                    else -> groupProfiles[DeviceType.HEAVY_DUTY]!! // Стандартный профиль 25A
+                                }
+                            }
+                            device.requiresSocketConnection ->
+                                groupProfiles[DeviceType.SOCKET]!! // Розеточные устройства
+                            else -> {
+                                // Обычные не-розеточные устройства
+                                when {
+                                    nominalCurrent > 25 -> GroupProfile(32.0, 32, 6.0, "D")
+                                    nominalCurrent > 16 -> groupProfiles[DeviceType.HEAVY_DUTY]!!
+                                    else -> groupProfiles[DeviceType.SOCKET]!!
+                                }
                             }
                         }
+
                         // ДОБАВЛЕНА ПРОВЕРКА ДЛЯ ВЫДЕЛЕННЫХ ЛИНИЙ
-//                        validateDevices(device, profile)
+                        validateDevices(device, profile)
 
                         allGroups.add(
                             createDedicatedGroup(
@@ -269,6 +280,8 @@ class GroupCalculator(
 
         // 1. Проверка номинального тока (ПУЭ 3.1.10)
         if (nominalCurrent > profile.breakerRating) {
+            Log.d(TAG, "\"Устройство '${device.name}' (${"%.2f".format(nominalCurrent)}A) \" +\n" +
+                    "                        \"превышает номинал автомата ${profile.breakerRating}A\"")
             throw IllegalArgumentException(
                 "Устройство '${device.name}' (${"%.2f".format(nominalCurrent)}A) " +
                         "превышает номинал автомата ${profile.breakerRating}A"
@@ -284,6 +297,12 @@ class GroupCalculator(
         }
 
         if (peakCurrent > maxInstantaneousTrip) {
+            Log.d(TAG, "                \"Пусковой ток устройства '${device.name}' (${
+                "%.2f".format(
+                    peakCurrent
+                )
+            }А) \" +\n" +
+                    "                        \"превышает порог срабатывания автомата ${profile.breakerType} (${maxInstantaneousTrip}A)\"")
             throw IllegalArgumentException(
                 "Пусковой ток устройства '${device.name}' (${"%.2f".format(peakCurrent)}А) " +
                         "превышает порог срабатывания автомата ${profile.breakerType} (${maxInstantaneousTrip}A)"
@@ -377,7 +396,13 @@ class GroupCalculator(
         }
 
         // ФИКС: Для розеточных устройств всегда кабель 2.5 мм²
-        val cableSection = if (device.requiresSocketConnection) {
+        val cableSection = if (device.deviceType == DeviceType.HEAVY_DUTY) {
+            // Для HEAVY_DUTY выбираем кабель по току
+            when {
+                nominalCurrent > 25 -> 6.0
+                else -> 4.0
+            }
+        } else if (device.requiresSocketConnection) {
             2.5
         } else {
             when {
