@@ -182,11 +182,28 @@ class GroupCalculator(
 
         for (device in sortedDevices) {
             val nominalCurrent = calculateCurrent(device)
+            val devicePeakCurrent = getPeakCurrent(device) // Пусковой ток для текущего устройства
 
-            // Защита от перегрузки группы (не более 80% автомата)
+            // 1. Стандартная проверка номинального тока (80% автомата)
             val maxAllowedCurrent = profile.breakerRating * 0.8
 
-            if (currentSum + nominalCurrent > maxAllowedCurrent) {
+            // 2. Проверка пусковых токов для группы
+            val maxAllowedPeak = when (profile.breakerType) {
+                "B" -> profile.breakerRating * 5
+                "C" -> profile.breakerRating * 10
+                "D" -> profile.breakerRating * 20
+                else -> profile.breakerRating * 10
+            }
+
+            // Рассчитываем суммарный пусковой ток для текущей группы
+            val currentGroupPeak = currentGroup.sumOf { getPeakCurrent(it) } + devicePeakCurrent
+
+            // Проверяем два условия:
+            val exceedsNominal = currentSum + nominalCurrent > maxAllowedCurrent
+            val exceedsPeak = currentGroupPeak > maxAllowedPeak
+
+            // Если превышаем хотя бы одно ограничение - создаем новую группу
+            if (exceedsNominal || exceedsPeak) {
                 if (currentGroup.isNotEmpty()) {
                     groups.add(
                         createGroup(
@@ -215,7 +232,7 @@ class GroupCalculator(
                     groups.add(
                         createGroup(
                             listOf(device),
-                            profile,
+                            actualProfile,
                             safetyProfile,
                             groupNumber++,
                             room
@@ -350,14 +367,7 @@ class GroupCalculator(
         }
 
         // Рассчитываем суммарный номинальный ток группы
-        val nominalCurrent = devices.sumOf { device ->
-            val effectivePower = device.power * device.demandRatio
-            when (device.voltage.type) {
-                VoltageType.AC_1PHASE -> effectivePower / (device.voltage.value * device.powerFactor)
-                VoltageType.AC_3PHASE -> effectivePower / (1.732 * device.voltage.value * device.powerFactor)
-                VoltageType.DC -> effectivePower / device.voltage.value.toDouble()
-            }
-        }
+        val nominalCurrent = devices.sumOf { calculateCurrent(it) }
 
         // Проверка группового пускового тока
         val maxGroupPeak = devices.sumOf { device ->
@@ -409,11 +419,13 @@ class GroupCalculator(
         val nominalCurrent = calculateCurrent(device)
         val peakCurrent = getPeakCurrent(device)
 
-        val groupType = when {
-            device.requiresSocketConnection -> DeviceType.SOCKET
-            device.deviceType == DeviceType.HEAVY_DUTY -> DeviceType.HEAVY_DUTY
-            else -> DeviceType.SOCKET // По умолчанию для совместимости
-        }
+//        val groupType = when {
+//            device.requiresSocketConnection -> DeviceType.SOCKET
+//            device.deviceType == DeviceType.HEAVY_DUTY -> DeviceType.HEAVY_DUTY
+//            else -> DeviceType.SOCKET // По умолчанию для совместимости
+//        }
+
+        val groupType = device.deviceType
 
         // ФИКС: Для розеточных устройств всегда кабель 2.5 мм²
         val cableSection = if (device.deviceType == DeviceType.HEAVY_DUTY) {
@@ -449,18 +461,18 @@ class GroupCalculator(
             "D" -> profile.breakerRating * 20
             else -> profile.breakerRating * 10
         }
-
-        // ФИКС: Проверка номинального тока с запасом 10%
-        if (nominalCurrent > profile.breakerRating * 0.9) {
-            Log.d(
-                TAG, " \"Устройство '${device.name}' (${"%.1f".format(nominalCurrent)}A) \" +\n" +
-                        "                        \"превышает 90% номинала автомата ${profile.breakerRating}A\""
-            )
-            throw IllegalArgumentException(
-                "Устройство '${device.name}' (${"%.1f".format(nominalCurrent)}A) " +
-                        "превышает 90% номинала автомата ${profile.breakerRating}A"
-            )
-        }
+//
+//        // ФИКС: Проверка номинального тока с запасом 10%
+//        if (nominalCurrent > profile.breakerRating * 0.9) {
+//            Log.d(
+//                TAG, " \"Устройство '${device.name}' (${"%.1f".format(nominalCurrent)}A) \" +\n" +
+//                        "                        \"превышает 90% номинала автомата ${profile.breakerRating}A\""
+//            )
+//            throw IllegalArgumentException(
+//                "Устройство '${device.name}' (${"%.1f".format(nominalCurrent)}A) " +
+//                        "превышает 90% номинала автомата ${profile.breakerRating}A"
+//            )
+//        }
 
         if (peakCurrent > maxInstantaneousTrip) {
             Log.d(

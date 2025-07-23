@@ -20,16 +20,15 @@ class CalcLoads @Inject constructor(
     suspend fun calcCurrentRoom(roomId: Long): Double {
         val devices = deviceRepository.getAllDevicesByRoomId(roomId)
         return devices.sumOf { device ->
-            // Применяем коэффициент спроса к мощности
-            val effectivePower = device.power * device.demandRatio
+            val effectivePower = device.power.toDouble() * (device.demandRatio ?: 1.0)
+            val voltage = (device.voltage.value.takeIf { it > 0 } ?: 230.0).toDouble()
+            val powerFactor = (device.powerFactor ?: 1.0).coerceIn(0.8, 1.0)
 
             when (device.voltage.type) {
-                VoltageType.AC_1PHASE ->
-                    effectivePower / (device.voltage.value * device.powerFactor)
-                VoltageType.AC_3PHASE ->
-                    effectivePower / (1.732 * device.voltage.value * device.powerFactor)
-                else ->
-                    effectivePower / device.voltage.value
+                VoltageType.AC_1PHASE -> effectivePower / (voltage * powerFactor)
+                VoltageType.AC_3PHASE -> effectivePower / (1.732 * voltage * powerFactor)
+                VoltageType.DC -> effectivePower / voltage
+                else -> effectivePower / voltage // Для неизвестных типов
             }
         }
     }
