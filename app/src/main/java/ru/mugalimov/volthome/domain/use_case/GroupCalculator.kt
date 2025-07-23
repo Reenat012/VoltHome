@@ -41,80 +41,60 @@ class GroupCalculator(
             var totalGroupNumber = 1
             val allGroups = mutableListOf<CircuitGroup>()
 
-            // Шаг 1: Выделенные линии с учетом ограничения для розеток
+            // Единый проход по всем комнатам
             rooms.forEach { roomWithDevices ->
                 val room = roomWithDevices.room
                 val safetyProfile = roomSafetyProfiles[room.roomType] ?: SafetyProfile()
 
-                roomWithDevices.devices
-                    .filter { device ->
-                        val threshold = when (device.voltage.type) {
-                            VoltageType.AC_1PHASE -> 2300
-                            VoltageType.AC_3PHASE -> 7000
-                            else -> 2000
-                        }
-                        device.requiresDedicatedCircuit || device.power > threshold
-                    }
-                    .forEach { device ->
-                        // Рассчитываем ток с учетом коэффициента спроса
-                        val nominalCurrent = calculateCurrent(device)
-
-                        val profile = when {
-                            device.deviceType == DeviceType.HEAVY_DUTY -> {
-                                // Для HEAVY_DUTY устройств динамически выбираем профиль по току
-                                when {
-                                    nominalCurrent > 25 -> GroupProfile(
-                                        32.0,
-                                        32,
-                                        6.0,
-                                        "D"
-                                    ) // Усиленный профиль для мощных устройств
-                                    else -> groupProfiles[DeviceType.HEAVY_DUTY]!! // Стандартный профиль 25A
-                                }
-                            }
-
-                            device.requiresSocketConnection ->
-                                groupProfiles[DeviceType.SOCKET]!! // Розеточные устройства
-                            else -> {
-                                // Обычные не-розеточные устройства
-                                when {
-                                    nominalCurrent > 25 -> GroupProfile(32.0, 32, 6.0, "D")
-                                    nominalCurrent > 16 -> groupProfiles[DeviceType.HEAVY_DUTY]!!
-                                    else -> groupProfiles[DeviceType.SOCKET]!!
-                                }
-                            }
-                        }
-
-                        // ДОБАВЛЕНА ПРОВЕРКА ДЛЯ ВЫДЕЛЕННЫХ ЛИНИЙ
-                        validateDevices(device, profile)
-
-                        allGroups.add(
-                            createDedicatedGroup(
-                                device = device,
-                                profile = profile,
-                                safetyProfile = safetyProfile,
-                                groupNumber = totalGroupNumber++,
-                                room = room
-                            )
-                        )
-                    }
-            }
-
-            // Шаг 2: Стандартные группы с защитой от перегрузки
-            rooms.forEach { roomWithDevices ->
-                val room = roomWithDevices.room
-                val safetyProfile = roomSafetyProfiles[room.roomType] ?: SafetyProfile()
-
-                val devices = roomWithDevices.devices.filterNot { device ->
+                // Функция для определения выделенных линий (вынесена для избежания дублирования)
+                fun isDedicatedCircuit(device: DeviceEntity): Boolean {
                     val threshold = when (device.voltage.type) {
                         VoltageType.AC_1PHASE -> 2300
                         VoltageType.AC_3PHASE -> 7000
                         else -> 2000
                     }
-                    device.requiresDedicatedCircuit || device.power > threshold
+                    return device.requiresDedicatedCircuit || device.power > threshold
                 }
 
-                val groupedDevices = devices.groupBy { it.deviceType }
+                // Разделяем устройства на выделенные и стандартные
+                val (dedicatedDevices, standardDevices) = roomWithDevices.devices.partition(::isDedicatedCircuit)
+
+                // Шаг 1: Обработка ВЫДЕЛЕННЫХ устройств
+                dedicatedDevices.forEach { device ->
+                    val nominalCurrent = calculateCurrent(device)
+
+                    val profile = when {
+                        device.deviceType == DeviceType.HEAVY_DUTY -> {
+                            when {
+                                nominalCurrent > 25 -> GroupProfile(32.0, 32, 6.0, "D")
+                                else -> groupProfiles[DeviceType.HEAVY_DUTY]!!
+                            }
+                        }
+                        device.requiresSocketConnection -> groupProfiles[DeviceType.SOCKET]!!
+                        else -> {
+                            when {
+                                nominalCurrent > 25 -> GroupProfile(32.0, 32, 6.0, "D")
+                                nominalCurrent > 16 -> groupProfiles[DeviceType.HEAVY_DUTY]!!
+                                else -> groupProfiles[DeviceType.SOCKET]!!
+                            }
+                        }
+                    }
+
+                    validateDevices(device, profile)
+
+                    allGroups.add(
+                        createDedicatedGroup(
+                            device = device,
+                            profile = profile,
+                            safetyProfile = safetyProfile,
+                            groupNumber = totalGroupNumber++,
+                            room = room
+                        )
+                    )
+                }
+
+                // Шаг 2: Обработка СТАНДАРТНЫХ устройств
+                val groupedDevices = standardDevices.groupBy { it.deviceType }
 
                 groupedDevices.forEach { (deviceType, typeDevices) ->
                     val profile = groupProfiles[deviceType] ?: groupProfiles[DeviceType.SOCKET]!!
