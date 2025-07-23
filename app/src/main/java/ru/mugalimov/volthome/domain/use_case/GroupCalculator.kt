@@ -14,9 +14,6 @@ import ru.mugalimov.volthome.domain.model.GroupingResult
 import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.domain.model.SafetyProfile
 import ru.mugalimov.volthome.domain.model.VoltageType
-import javax.inject.Inject
-import kotlin.math.ceil
-import kotlin.math.min
 
 
 class GroupCalculator(
@@ -59,17 +56,23 @@ class GroupCalculator(
                         device.requiresDedicatedCircuit || device.power > threshold
                     }
                     .forEach { device ->
-                        // ФИКС: Рассчитываем ток с учетом коэффициента спроса
+                        // Рассчитываем ток с учетом коэффициента спроса
                         val nominalCurrent = calculateCurrent(device)
 
                         val profile = when {
                             device.deviceType == DeviceType.HEAVY_DUTY -> {
                                 // Для HEAVY_DUTY устройств динамически выбираем профиль по току
                                 when {
-                                    nominalCurrent > 25 -> GroupProfile(32.0, 32, 6.0, "D") // Усиленный профиль для мощных устройств
+                                    nominalCurrent > 25 -> GroupProfile(
+                                        32.0,
+                                        32,
+                                        6.0,
+                                        "D"
+                                    ) // Усиленный профиль для мощных устройств
                                     else -> groupProfiles[DeviceType.HEAVY_DUTY]!! // Стандартный профиль 25A
                                 }
                             }
+
                             device.requiresSocketConnection ->
                                 groupProfiles[DeviceType.SOCKET]!! // Розеточные устройства
                             else -> {
@@ -102,8 +105,13 @@ class GroupCalculator(
                 val room = roomWithDevices.room
                 val safetyProfile = roomSafetyProfiles[room.roomType] ?: SafetyProfile()
 
-                val devices = roomWithDevices.devices.filterNot {
-                    it.requiresDedicatedCircuit || it.power > 2000
+                val devices = roomWithDevices.devices.filterNot { device ->
+                    val threshold = when (device.voltage.type) {
+                        VoltageType.AC_1PHASE -> 2300
+                        VoltageType.AC_3PHASE -> 7000
+                        else -> 2000
+                    }
+                    device.requiresDedicatedCircuit || device.power > threshold
                 }
 
                 val groupedDevices = devices.groupBy { it.deviceType }
@@ -196,6 +204,10 @@ class GroupCalculator(
                 // Проверка для одиночного устройства
                 if (nominalCurrent > maxAllowedCurrent) {
                     if (nominalCurrent > profile.breakerRating) {
+                        Log.d(
+                            TAG,
+                            " \"Устройство '${device.name}' слишком мощное для автомата ${profile.breakerRating}A\""
+                        )
                         throw IllegalArgumentException(
                             "Устройство '${device.name}' слишком мощное для автомата ${profile.breakerRating}A"
                         )
@@ -280,8 +292,10 @@ class GroupCalculator(
 
         // 1. Проверка номинального тока (ПУЭ 3.1.10)
         if (nominalCurrent > profile.breakerRating) {
-            Log.d(TAG, "\"Устройство '${device.name}' (${"%.2f".format(nominalCurrent)}A) \" +\n" +
-                    "                        \"превышает номинал автомата ${profile.breakerRating}A\"")
+            Log.d(
+                TAG, "\"Устройство '${device.name}' (${"%.2f".format(nominalCurrent)}A) \" +\n" +
+                        "                        \"превышает номинал автомата ${profile.breakerRating}A\""
+            )
             throw IllegalArgumentException(
                 "Устройство '${device.name}' (${"%.2f".format(nominalCurrent)}A) " +
                         "превышает номинал автомата ${profile.breakerRating}A"
@@ -297,12 +311,14 @@ class GroupCalculator(
         }
 
         if (peakCurrent > maxInstantaneousTrip) {
-            Log.d(TAG, "                \"Пусковой ток устройства '${device.name}' (${
-                "%.2f".format(
-                    peakCurrent
-                )
-            }А) \" +\n" +
-                    "                        \"превышает порог срабатывания автомата ${profile.breakerType} (${maxInstantaneousTrip}A)\"")
+            Log.d(
+                TAG, "                \"Пусковой ток устройства '${device.name}' (${
+                    "%.2f".format(
+                        peakCurrent
+                    )
+                }А) \" +\n" +
+                        "                        \"превышает порог срабатывания автомата ${profile.breakerType} (${maxInstantaneousTrip}A)\""
+            )
             throw IllegalArgumentException(
                 "Пусковой ток устройства '${device.name}' (${"%.2f".format(peakCurrent)}А) " +
                         "превышает порог срабатывания автомата ${profile.breakerType} (${maxInstantaneousTrip}A)"
@@ -355,6 +371,10 @@ class GroupCalculator(
         }
 
         if (maxGroupPeak > maxTrip) {
+            Log.d(
+                TAG, " \"Группа $groupNumber: пусковой ток ${"%.1f".format(maxGroupPeak)}A \" +\n" +
+                        "                        \"превышает порог ${maxTrip}A для автомата $breakerType${profile.breakerRating}\""
+            )
             throw IllegalStateException(
                 "Группа $groupNumber: пусковой ток ${"%.1f".format(maxGroupPeak)}A " +
                         "превышает порог ${maxTrip}A для автомата $breakerType${profile.breakerRating}"
@@ -432,6 +452,10 @@ class GroupCalculator(
 
         // ФИКС: Проверка номинального тока с запасом 10%
         if (nominalCurrent > profile.breakerRating * 0.9) {
+            Log.d(
+                TAG, " \"Устройство '${device.name}' (${"%.1f".format(nominalCurrent)}A) \" +\n" +
+                        "                        \"превышает 90% номинала автомата ${profile.breakerRating}A\""
+            )
             throw IllegalArgumentException(
                 "Устройство '${device.name}' (${"%.1f".format(nominalCurrent)}A) " +
                         "превышает 90% номинала автомата ${profile.breakerRating}A"
@@ -439,6 +463,11 @@ class GroupCalculator(
         }
 
         if (peakCurrent > maxInstantaneousTrip) {
+            Log.d(
+                TAG,
+                "  \"Пусковой ток устройства '${device.name}' (${"%.1f".format(peakCurrent)}А) \" +\n" +
+                        "                        \"превышает порог срабатывания автомата $breakerType${profile.breakerRating}A\""
+            )
             throw IllegalArgumentException(
                 "Пусковой ток устройства '${device.name}' (${"%.1f".format(peakCurrent)}А) " +
                         "превышает порог срабатывания автомата $breakerType${profile.breakerRating}A"
@@ -462,20 +491,59 @@ class GroupCalculator(
     }
 }
 
-// Добавим функцию для определения типа подключения устройства
-private fun isSocketConnection(device: DeviceEntity): Boolean {
-    return device.requiresSocketConnection // Только явное указание
-}
-
-// Функция, которая будет выбирать корректное сечение кабеля в зависимости от типа подключения
-private fun getAdjustedCableSection(baseSection: Double, current: Double): Double {
-    return when {
-        current > 25 -> 6.0   // Для токов >25A - кабель 6мм²
-        current > 16 -> 4.0   // Для токов >16A - кабель 4мм²
-        current > 10 -> 2.5   // Для токов >10A - кабель 2.5мм²
-        else -> 1.5           // Для остальных - 1.5мм²
-    }
-}
+//// Добавим функцию для определения типа подключения устройства
+//private fun isSocketConnection(device: DeviceEntity): Boolean {
+//    return device.requiresSocketConnection // Только явное указание
+//}
+//
+//// Функция, которая будет выбирать корректное сечение кабеля в зависимости от типа подключения
+//private fun getAdjustedCableSection(baseSection: Double, current: Double): Double {
+//    return when {
+//        current > 25 -> 6.0   // Для токов >25A - кабель 6мм²
+//        current > 16 -> 4.0   // Для токов >16A - кабель 4мм²
+//        current > 10 -> 2.5   // Для токов >10A - кабель 2.5мм²
+//        else -> 1.5           // Для остальных - 1.5мм²
+//    }
+//}
+//
+//// Обновленная функция выбора профиля
+//private fun selectProfileForDevice(device: DeviceEntity, nominalCurrent: Double): GroupProfile {
+//    // Определяем стандартные номиналы автоматов
+//    val standardBreakerRatings = listOf(6, 10, 16, 20, 25, 32, 40, 50, 63, 80, 100)
+//
+//    // Находим минимально подходящий номинал
+//    val selectedBreaker = standardBreakerRatings.firstOrNull { it >= nominalCurrent }
+//        ?: standardBreakerRatings.maxOrNull()
+//        ?: 100 // Фолбэк
+//
+//    // Выбираем сечение кабеля по току
+//    val cableSection = when {
+//        nominalCurrent <= 10 -> 1.5
+//        nominalCurrent <= 16 -> 2.5
+//        nominalCurrent <= 25 -> 4.0
+//        nominalCurrent <= 32 -> 6.0
+//        nominalCurrent <= 40 -> 10.0
+//        nominalCurrent <= 50 -> 16.0
+//        nominalCurrent <= 63 -> 16.0
+//        nominalCurrent <= 80 -> 25.0
+//        else -> 35.0
+//    }
+//
+//    // Выбираем тип автомата
+//    val breakerType = when {
+//        device.hasMotor -> "D"
+//        device.requiresSocketConnection -> "C"
+//        selectedBreaker > 32 -> "D" // Для мощных устройств
+//        else -> "C"
+//    }
+//
+//    return GroupProfile(
+//        maxCurrent = selectedBreaker.toDouble(),
+//        breakerRating = selectedBreaker,
+//        cableSection = cableSection,
+//        breakerType = breakerType
+//    )
+//}
 
 // Файл: data/mapper/DeviceMapper.kt
 fun DeviceEntity.toDomainModel() = Device(

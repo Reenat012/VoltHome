@@ -37,6 +37,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
@@ -50,10 +51,6 @@ import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.Voltage
 import ru.mugalimov.volthome.ui.viewmodel.RoomDetailViewModel
 
-/**
- * Экран добавления нового устройства.
- * @param onBack Обработчик возврата на предыдущий экран
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddDeviceScreen(
@@ -66,18 +63,7 @@ fun AddDeviceScreen(
 
     var expanded by remember { mutableStateOf(false) }
     var selectedDevice by remember { mutableStateOf<DefaultDevice?>(null) }
-    var deviceName by remember { mutableStateOf("") }
-    var devicePower by remember { mutableStateOf("") }
-    var deviceVoltage by remember { mutableStateOf<Voltage?>(null) }
-    var deviceDemandRatio by remember { mutableStateOf("") }
-    var devicePowerFactor by remember { mutableStateOf("") }
-    var deviceType by remember { mutableStateOf<DeviceType>(DeviceType.SOCKET)}
-    var hasMotor by remember { mutableStateOf(false) }
-    var requiresDedicatedCircuit by remember { mutableStateOf(false) }
-    val focusManager = LocalFocusManager.current
     val scrollState = rememberScrollState()
-
-    val isTemplateSelected = selectedDevice != null // Флаг выбора шаблона
 
     Scaffold(
         topBar = {
@@ -100,22 +86,22 @@ fun AddDeviceScreen(
                 actions = {
                     FilledTonalButton(
                         onClick = {
-                            if (validateInput(deviceName, devicePower, deviceDemandRatio, devicePowerFactor)) {
+                            selectedDevice?.let { device ->
                                 viewModel.addDevice(
-                                    name = deviceName,
-                                    power = devicePower.toInt(),
-                                    voltage = deviceVoltage!!,
-                                    demandRatio = deviceDemandRatio.toDouble(),
+                                    name = device.name,
+                                    power = device.power,
+                                    voltage = device.voltage,
+                                    demandRatio = device.demandRatio,
                                     roomId = roomId,
-                                    deviceType = deviceType,
-                                    powerFactor = devicePowerFactor.toDouble(),
-                                    hasMotor = hasMotor,
-                                    requiresDedicatedCircuit = requiresDedicatedCircuit
+                                    deviceType = device.deviceType,
+                                    powerFactor = device.powerFactor,
+                                    hasMotor = device.hasMotor,
+                                    requiresDedicatedCircuit = device.requiresDedicatedCircuit
                                 )
-                                onBack()
                             }
+                            onBack()
                         },
-                        enabled = validateInput(deviceName, devicePower, deviceDemandRatio, devicePowerFactor),
+                        enabled = selectedDevice != null,
                         modifier = Modifier.padding(end = 8.dp)
                     ) {
                         Icon(
@@ -154,7 +140,7 @@ fun AddDeviceScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     OutlinedTextField(
-                        value = selectedDevice?.name ?: "Выберите шаблон",
+                        value = selectedDevice?.name ?: "Выберите шаблон устройства",
                         onValueChange = {},
                         readOnly = true,
                         leadingIcon = {
@@ -188,16 +174,6 @@ fun AddDeviceScreen(
                                 onClick = {
                                     selectedDevice = device
                                     expanded = false
-                                    deviceName = device.name
-                                    devicePower = device.power.toString()
-                                    deviceVoltage = device.voltage
-                                    deviceDemandRatio = device.demandRatio.toString()
-                                    deviceType = device.deviceType
-                                    focusManager.clearFocus()
-                                    devicePowerFactor = device.powerFactor.toString()
-                                    hasMotor = device.hasMotor
-                                    requiresDedicatedCircuit = device.requiresDedicatedCircuit
-
                                 }
                             )
                         }
@@ -205,105 +181,80 @@ fun AddDeviceScreen(
                 }
             }
 
-            // Основные параметры
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                OutlinedTextField(
-                    value = deviceName,
-                    onValueChange = { deviceName = it },
-                    label = { Text("Название") },
-                    leadingIcon = {
-                        Icon(
-                            Icons.Filled.Edit,
-                            contentDescription = "Иконка редактирования"
-                        )
-                    },
-                    placeholder = { Text("Например: Стиральная машина") },
-                    colors = textFieldColors(),
+            // Отображение параметров выбранного устройства
+            selectedDevice?.let { device ->
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
                     modifier = Modifier.fillMaxWidth()
-                )
+                ) {
+                    // Название устройства
+                    DeviceInfoField(
+                        label = "Название",
+                        value = device.name,
+                        icon = Icons.Filled.Edit
+                    )
 
-                OutlinedTextField(
-                    value = devicePower,
-                    onValueChange = { if (it.isNumber()) devicePower = it },
-                    label = { Text("Мощность (Вт)") },
-                    leadingIcon = {
-                        Icon(
-                            Icons.Filled.Power,
-                            contentDescription = "Иконка мощности"
-                        )
-                    },
-                    colors = textFieldColors(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth(),
-                    suffix = {
-                        Text(
-                            "Вт",
-                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
-                        )
-                    },
-//                    readOnly = isTemplateSelected, // Блокировка редактирования
-//                    enabled = !isTemplateSelected // Визуальная индикация
-                )
+                    // Мощность
+                    DeviceInfoField(
+                        label = "Мощность",
+                        value = "${device.power} Вт",
+                        icon = Icons.Filled.Power
+                    )
 
-                VoltageSelector(
-                    selectedVoltage = deviceVoltage,
-                    onVoltageSelected = { deviceVoltage = it }
-                )
+                    // Напряжение
+                    DeviceInfoField(
+                        label = "Напряжение",
+                        value = "${device.voltage.value} В",
+                        icon = Icons.Filled.Bolt
+                    )
 
-                OutlinedTextField(
-                    value = deviceDemandRatio,
-                    onValueChange = { if (it.isDecimal()) deviceDemandRatio = it },
-                    label = { Text("Коэффициент спроса") },
-                    leadingIcon = {
-                        Icon(
-                            Icons.Filled.Calculate,
-                            contentDescription = "Иконка калькулятора"
-                        )
-                    },
-                    colors = textFieldColors(),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Number,
-                        imeAction = ImeAction.Done
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                    suffix = {
-                        Text(
-                            "0.0-1.0",
-                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
-                        )
-                    },
-                    readOnly = isTemplateSelected, // Блокировка редактирования
-                    enabled = !isTemplateSelected // Визуальная индикация
-                )
+                    // Коэффициент спроса
+                    DeviceInfoField(
+                        label = "Коэффициент спроса",
+                        value = device.demandRatio.toString(),
+                        icon = Icons.Filled.Calculate
+                    )
 
-                OutlinedTextField(
-                    value = devicePowerFactor,
-                    onValueChange = { if (it.isDecimal()) devicePowerFactor = it },
-                    label = { Text("Коэффициент мощности") },
-                    leadingIcon = {
-                        Icon(
-                            Icons.Filled.Emergency,
-                            contentDescription = "Иконка звездочка"
-                        )
-                    },
-                    colors = textFieldColors(),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Number,
-                        imeAction = ImeAction.Done
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                    suffix = {
-                        Text(
-                            "0.0-1.0",
-                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
-                        )
-                    },
-                    readOnly = isTemplateSelected, // Блокировка редактирования
-                    enabled = !isTemplateSelected // Визуальная индикация
+                    // Коэффициент мощности
+                    DeviceInfoField(
+                        label = "Коэффициент мощности",
+                        value = device.powerFactor.toString(),
+                        icon = Icons.Filled.Emergency
+                    )
+                }
+            } ?: run {
+                Text(
+                    "Выберите устройство из списка",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 16.dp)
                 )
             }
         }
     }
+}
+
+@Composable
+private fun DeviceInfoField(
+    label: String,
+    value: String,
+    icon: ImageVector
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = {},
+        label = { Text(label) },
+        leadingIcon = {
+            Icon(
+                icon,
+                contentDescription = null
+            )
+        },
+        colors = textFieldColors(),
+        modifier = Modifier.fillMaxWidth(),
+        readOnly = true,
+        enabled = false
+    )
 }
 
 @Composable
@@ -313,67 +264,3 @@ private fun textFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedBorderColor = MaterialTheme.colorScheme.primary,
     unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
 )
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun VoltageSelector(
-    selectedVoltage: Voltage?,
-    onVoltageSelected: (Voltage) -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = it },
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        OutlinedTextField(
-            value = selectedVoltage?.value?.toString() ?: "Выберите напряжение",
-            onValueChange = {},
-            readOnly = true,
-            enabled = false, // Блокируем взаимодействие
-            label = { Text("Напряжение (В)") },
-            leadingIcon = {
-                Icon(
-                    Icons.Filled.Bolt,
-                    contentDescription = "Иконка напряжения"
-                )
-            },
-            // Убираем trailing icon (стрелочку)
-            trailingIcon = null,
-//            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
-            modifier = Modifier.menuAnchor().fillMaxWidth()
-        )
-
-        ExposedDropdownMenu(
-            expanded = false,
-            onDismissRequest = {
-//                expanded = false
-            }
-        ) {
-//            Voltage.entries.forEach { voltage ->
-//                DropdownMenuItem(
-//                    text = { Text("${voltage.value} В") },
-//                    onClick = {
-//                        onVoltageSelected(voltage)
-//                        expanded = false
-//                    }
-//                )
-//            }
-        }
-    }
-}
-
-private fun validateInput(name: String, power: String, ratio: String, powerFactory: String): Boolean {
-    return name.isNotBlank() &&
-            power.isNotBlank() &&
-            ratio.isNotBlank() &&
-            power.toIntOrNull() != null &&
-            ratio.toDoubleOrNull()?.let { it in 0.0..1.0 } ?: false &&
-            powerFactory.toDoubleOrNull()?.let { it in 0.0 .. 1.0} ?: false
-
-}
-
-private fun String.isNumber() = matches(Regex("^\\d+\$"))
-private fun String.isDecimal() = matches(Regex("^\\d*(\\.\\d*)?\$"))

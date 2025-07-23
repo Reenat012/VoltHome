@@ -212,7 +212,8 @@ fun AddRoomScreen(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(
                         onDone = { focusManager.clearFocus() }
-                    )
+                    ),
+
                 )
             }
 
@@ -225,44 +226,44 @@ fun AddRoomScreen(
             )
 
             // Требуется ли УЗО
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "Требуется ли УЗО",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                OutlinedTextField(
-                    value = isUzo,
-                    onValueChange = { isUzo = it },
-                    placeholder = {
-                        Text(
-                            "Например: Не требуется",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                        )
-                    },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                        focusedLabelColor = MaterialTheme.colorScheme.primary,
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow
-                    ),
-                    shape = MaterialTheme.shapes.extraLarge,
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    leadingIcon = {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_edit),
-                            contentDescription = "УЗО",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(
-                        onDone = { focusManager.clearFocus() }
-                    )
-                )
-            }
+//            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+//                Text(
+//                    text = "Требуется ли УЗО",
+//                    style = MaterialTheme.typography.labelLarge,
+//                    color = MaterialTheme.colorScheme.onSurfaceVariant
+//                )
+//
+//                OutlinedTextField(
+//                    value = isUzo,
+//                    onValueChange = { isUzo = it },
+//                    placeholder = {
+//                        Text(
+//                            "Например: Не требуется",
+//                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+//                        )
+//                    },
+//                    colors = OutlinedTextFieldDefaults.colors(
+//                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+//                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+//                        focusedLabelColor = MaterialTheme.colorScheme.primary,
+//                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow
+//                    ),
+//                    shape = MaterialTheme.shapes.extraLarge,
+//                    modifier = Modifier.fillMaxWidth(),
+//                    singleLine = true,
+//                    leadingIcon = {
+//                        Icon(
+//                            painter = painterResource(R.drawable.ic_edit),
+//                            contentDescription = "УЗО",
+//                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+//                        )
+//                    },
+//                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+//                    keyboardActions = KeyboardActions(
+//                        onDone = { focusManager.clearFocus() }
+//                    )
+//                )
+//            }
         }
     }
 }
