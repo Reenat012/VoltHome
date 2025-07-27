@@ -40,6 +40,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ru.mugalimov.volthome.R
 import ru.mugalimov.volthome.domain.model.DefaultRoom
+import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.ui.viewmodel.RoomViewModel
 
 /**
@@ -56,6 +57,8 @@ fun AddRoomScreen(
     var expanded by remember { mutableStateOf(false) }
     var selectedRoom by remember { mutableStateOf<DefaultRoom?>(null) }
     var roomName by remember { mutableStateOf("") }
+    var isUzo by remember { mutableStateOf("") }
+    var roomType by remember { mutableStateOf<RoomType?>(null) }
     val scrollState = rememberScrollState()
     val focusManager = LocalFocusManager.current
 
@@ -81,7 +84,7 @@ fun AddRoomScreen(
                 actions = {
                     FilledTonalButton(
                         onClick = {
-                            viewModel.addRoom(roomName)
+                            roomType?.let { viewModel.addRoom(roomName, it) }
                             onBack()
                         },
                         enabled = roomName.isNotBlank(),
@@ -164,6 +167,8 @@ fun AddRoomScreen(
                                     expanded = false
                                     roomName = room.name
                                     focusManager.clearFocus()
+                                    isUzo = room.roomType.toString()
+                                    roomType = room.roomType
                                 }
                             )
                         }
@@ -207,7 +212,8 @@ fun AddRoomScreen(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(
                         onDone = { focusManager.clearFocus() }
-                    )
+                    ),
+
                 )
             }
 
@@ -218,6 +224,46 @@ fun AddRoomScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 8.dp)
             )
+
+            // Требуется ли УЗО
+//            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+//                Text(
+//                    text = "Требуется ли УЗО",
+//                    style = MaterialTheme.typography.labelLarge,
+//                    color = MaterialTheme.colorScheme.onSurfaceVariant
+//                )
+//
+//                OutlinedTextField(
+//                    value = isUzo,
+//                    onValueChange = { isUzo = it },
+//                    placeholder = {
+//                        Text(
+//                            "Например: Не требуется",
+//                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+//                        )
+//                    },
+//                    colors = OutlinedTextFieldDefaults.colors(
+//                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+//                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+//                        focusedLabelColor = MaterialTheme.colorScheme.primary,
+//                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow
+//                    ),
+//                    shape = MaterialTheme.shapes.extraLarge,
+//                    modifier = Modifier.fillMaxWidth(),
+//                    singleLine = true,
+//                    leadingIcon = {
+//                        Icon(
+//                            painter = painterResource(R.drawable.ic_edit),
+//                            contentDescription = "УЗО",
+//                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+//                        )
+//                    },
+//                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+//                    keyboardActions = KeyboardActions(
+//                        onDone = { focusManager.clearFocus() }
+//                    )
+//                )
+//            }
         }
     }
 }

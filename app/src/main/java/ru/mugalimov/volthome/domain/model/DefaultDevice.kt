@@ -10,5 +10,6 @@ data class DefaultDevice(
     val deviceType: DeviceType,
     val powerFactor: Double,
     val hasMotor: Boolean,
-    val requiresDedicatedCircuit: Boolean
+    val requiresDedicatedCircuit: Boolean,
+    val requiresSocketConnection: Boolean // Новое поле
 )

@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
+import ru.mugalimov.volthome.ui.utilities.AlgorithmInfoButton
 
 import ru.mugalimov.volthome.ui.utilities.TelegramButton
 
@@ -63,7 +64,7 @@ fun MainTopAppBar(
             titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
         ),
         actions = {
-            TelegramButton()
+            AlgorithmInfoButton(mainNavController) // Показываться этот экран описания работы алгоритма будет здесь
             IconButton(onClick = {
                 // Используем mainNavController для внутренних экранов
                 mainNavController.navigate(Screens.SettingsScreen.route)

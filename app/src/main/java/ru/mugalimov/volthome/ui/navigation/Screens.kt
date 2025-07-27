@@ -29,4 +29,5 @@ sealed class Screens(val route: String) {
     data object AboutScreen : Screens("about")
 
     data object OnBoardingScreen : Screens("onBoardingScreen")
+    data object AlgorithmExplanationScreen : Screens("algorithm_explanation")
 }

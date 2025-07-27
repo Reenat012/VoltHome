@@ -1,6 +1,7 @@
 package ru.mugalimov.volthome.data.repository.impl
 
 import android.content.Context
+import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
@@ -24,6 +25,7 @@ import ru.mugalimov.volthome.domain.model.RoomWithLoad
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.data.repository.RoomRepository
 import ru.mugalimov.volthome.domain.model.DefaultRoom
+import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.domain.model.RoomWithDevice
 import ru.mugalimov.volthome.domain.model.RoomWithDevicesEntity
 import ru.mugalimov.volthome.ui.components.JsonParser
@@ -59,7 +61,13 @@ class RoomRepositoryImpl @Inject constructor(
             }
 
             //добавляем комнату в БД
-            roomDao.addRoom(RoomEntity(name = room.name, createdAt = Date())).let { roomId ->
+            roomDao.addRoom(
+                RoomEntity(
+                    name = room.name,
+                    createdAt = Date(),
+                    roomType = room.roomType
+                )
+            ).let { roomId ->
                 loadDao.addLoad(LoadEntity(roomId = roomId, createdAt = Date()))
             }
         }
@@ -119,15 +127,12 @@ class RoomRepositoryImpl @Inject constructor(
 
     override suspend fun getRoomsWithDevices(): List<RoomWithDevice> =
         withContext(dispatchers) {
-            return@withContext roomDao.observeAllRoomsWithDevices().toDomainModelListRoomWithDevices()
+            return@withContext roomDao.observeAllRoomsWithDevices()
+                .toDomainModelListRoomWithDevices()
         }
 
     override suspend fun getDefaultRooms(): Flow<List<DefaultRoom>> {
-        return try {
-            JsonParser.parseRooms(context)
-        } catch (e: Exception) {
-            emptyFlow()
-        }
+        return JsonParser.parseRooms(context)
     }
 
     override suspend fun getAllRoom(): List<Room> =
@@ -146,7 +151,8 @@ private fun List<RoomEntity>.toDomainModelListRoom(): List<Room> {
         Room(
             id = entity.id,
             name = entity.name,
-            createdAt = entity.createdAt
+            createdAt = entity.createdAt,
+            roomType = entity.roomType
         )
     }
 }
@@ -156,7 +162,8 @@ private fun List<RoomEntity>.toDomainModelListRoom(): List<Room> {
 private fun Room.toDomainModelRoomEntity() = RoomEntity(
     id = id,
     name = name,
-    createdAt = createdAt
+    createdAt = createdAt,
+    roomType = roomType
 )
 
 private fun DeviceEntity.toDomainModelListDevice() = Device(
@@ -177,7 +184,8 @@ private fun RoomWithDevicesEntity.toDomainModelGroup(): Room {
         id = room.id,
         name = room.name,
         createdAt = room.createdAt,
-        devices = devices.map { it.toDomainModelListDevice() }
+        devices = devices.map { it.toDomainModelListDevice() },
+        roomType = room.roomType
     )
 }
 

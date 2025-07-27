@@ -5,5 +5,5 @@ data class DefaultRoom(
     val name: String,
     val icon: String,
     val description: String,
-    val deviceType: DeviceType
+    val roomType: RoomType
 )
