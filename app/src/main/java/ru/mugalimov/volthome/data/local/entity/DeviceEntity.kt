@@ -52,5 +52,8 @@ data class DeviceEntity(
     val hasMotor: Boolean = false,  // Имеет ли двигатель
 
     @ColumnInfo(name = "requires_dedicated")
-    val requiresDedicatedCircuit: Boolean = false  // Требует выделенной линии
+    val requiresDedicatedCircuit: Boolean = false,  // Требует выделенной линии
+
+    @ColumnInfo(name = "requires_socket")
+    val requiresSocketConnection: Boolean = true
 )

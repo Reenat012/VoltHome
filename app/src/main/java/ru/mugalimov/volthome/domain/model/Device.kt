@@ -14,7 +14,8 @@ data class Device(
     val deviceType: DeviceType,
     val powerFactor: Double,
     val hasMotor: Boolean = false,  // Имеет ли двигатель
-    val requiresDedicatedCircuit: Boolean = false  // Требует выделенной линии
+    val requiresDedicatedCircuit: Boolean = false,  // Требует выделенной линии
+    val requiresSocketConnection: Boolean = true // Для явного указания типа подключения
 ) {
     val current: Double
         get() = calculateCurrent()

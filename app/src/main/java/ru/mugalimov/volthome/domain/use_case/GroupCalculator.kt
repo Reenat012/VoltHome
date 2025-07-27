@@ -78,7 +78,7 @@ class GroupCalculator (
                         )
                     }
             }
-            
+
             // Шаг 3: Обработка СТАНДАРТНЫХ ГРУПП (освещение, розетки)
             rooms.forEach { roomWithDevices ->
                 val room = roomWithDevices.room

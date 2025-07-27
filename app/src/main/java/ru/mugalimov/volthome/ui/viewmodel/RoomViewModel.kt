@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.ui.viewmodel
 
+import android.content.ContentValues.TAG
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -18,6 +19,7 @@ import ru.mugalimov.volthome.core.error.RoomNotFoundException
 import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.domain.model.DefaultRoom
 import ru.mugalimov.volthome.domain.model.Room
+import ru.mugalimov.volthome.domain.model.RoomType
 import java.util.Date
 
 @HiltViewModel //viewModel будет управляться Hilt
@@ -74,7 +76,7 @@ class RoomViewModel @Inject constructor( // @Inject constructor помечает
     }
 
     //добавление комнаты
-    fun addRoom(name: String) {
+    fun addRoom(name: String, roomType: RoomType) {
         viewModelScope.launch {
             executeOperation {
                 try {
@@ -82,7 +84,9 @@ class RoomViewModel @Inject constructor( // @Inject constructor помечает
                         it.copy(isLoading = true)
                     }
                     validateName(name) // Проверяем валидность имени
-                    val newRoom = Room(name = name, createdAt = Date())
+                    val newRoom = Room(name = name, createdAt = Date(), roomType = roomType)
+                    Log.d("addRoom VM", "${roomType}")
+
                     roomRepository.addRoom(newRoom) //добавляем комнату через репозиторий
                 } catch (e: Exception) {
                     _uiState.update {
@@ -128,6 +132,7 @@ class RoomViewModel @Inject constructor( // @Inject constructor помечает
         viewModelScope.launch {
             try {
                 _defaultRooms.value = roomRepository.getDefaultRooms().first()
+                Log.d(TAG, "${defaultRooms.value}")
             } catch (e: Exception) {
                 Log.e("LOAD_ERROR", "Error loading rooms", e)
             }

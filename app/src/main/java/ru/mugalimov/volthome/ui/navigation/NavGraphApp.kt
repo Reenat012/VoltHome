@@ -17,6 +17,7 @@ import ru.mugalimov.volthome.ui.screens.loads.LoadsScreen
 import ru.mugalimov.volthome.ui.screens.room.RoomDetailScreen
 import ru.mugalimov.volthome.ui.screens.rooms.AddRoomScreen
 import ru.mugalimov.volthome.ui.screens.rooms.RoomsScreen
+import ru.mugalimov.volthome.ui.utilities.AlgorithmExplanationScreen
 import ru.mugalimov.volthome.ui.viewmodel.RoomDetailViewModel
 
 /**
@@ -139,5 +140,10 @@ fun NavGraphApp(
             )
         }
 
+        composable(Screens.AlgorithmExplanationScreen.route) {
+            AlgorithmExplanationScreen(
+                navController
+            )
+        }
     }
 }

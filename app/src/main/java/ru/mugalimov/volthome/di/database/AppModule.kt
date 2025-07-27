@@ -45,7 +45,7 @@ object DatabaseModule {
             })
             // Использовать для пересоздания БД при ошибке миграции
             // TODO после использования закомментировать иначе БД будет постоянно пересоздаваться
-//            .fallbackToDestructiveMigration()
+            .fallbackToDestructiveMigration()
             .build()
     }
 

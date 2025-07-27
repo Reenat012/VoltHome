@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Умное распределение устройств по группа</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background: linear-gradient(135deg, #1a2a6c, #2c3e50);
+            color: #f0f0f0;
+            line-height: 1.6;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            padding: 40px 20px;
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            font-size: 3.5rem;
+            margin-bottom: 15px;
+            background: linear-gradient(to right, #4facfe, #00f2fe);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .subtitle {
+            font-size: 1.4rem;
+            max-width: 800px;
+            margin: 0 auto;
+            opacity: 0.9;
+        }
+
+        .card-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 25px;
+            margin-bottom: 40px;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.4);
+            background: rgba(255, 255, 255, 0.12);
+        }
+
+        .card-icon {
+            font-size: 3.5rem;
+            margin-bottom: 20px;
+            display: inline-block;
+            background: linear-gradient(to right, #4facfe, #00f2fe);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .card-title {
+            font-size: 1.8rem;
+            margin-bottom: 20px;
+            color: #fff;
+            position: relative;
+            padding-bottom: 10px;
+        }
+
+        .card-title::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 60px;
+            height: 3px;
+            background: linear-gradient(to right, #4facfe, #00f2fe);
+            border-radius: 3px;
+        }
+
+        .card-content {
+            font-size: 1.1rem;
+            line-height: 1.8;
+        }
+
+        ul {
+            padding-left: 25px;
+            margin: 20px 0;
+        }
+
+        li {
+            margin-bottom: 12px;
+            position: relative;
+            padding-left: 25px;
+        }
+
+        li::before {
+            content: '✓';
+            color: #00f2fe;
+            position: absolute;
+            left: 0;
+            font-weight: bold;
+        }
+
+        .example-section {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 40px;
+            margin: 40px 0;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .example-title {
+            font-size: 2.2rem;
+            text-align: center;
+            margin-bottom: 40px;
+            color: #fff;
+        }
+
+        .example-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 25px;
+        }
+
+        .example-card {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 12px;
+            padding: 25px;
+            border-left: 4px solid #4facfe;
+        }
+
+        .example-card h3 {
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+            color: #4facfe;
+        }
+
+        .device-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .device-list li {
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding-left: 35px;
+            position: relative;
+        }
+
+        .device-list li::before {
+            content: '→';
+            color: #00f2fe;
+            left: 0;
+            font-size: 1.2rem;
+        }
+
+        .specs {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+            font-size: 0.95rem;
+        }
+
+        .guarantee {
+            text-align: center;
+            padding: 40px 20px;
+            max-width: 800px;
+            margin: 50px auto;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .guarantee h2 {
+            font-size: 2.5rem;
+            margin-bottom: 20px;
+            color: #fff;
+        }
+
+        .checklist {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin: 30px 0;
+        }
+
+        .check-item {
+            display: flex;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px 25px;
+            border-radius: 50px;
+            font-size: 1.1rem;
+        }
+
+        .check-icon {
+            color: #00f2fe;
+            margin-right: 10px;
+            font-size: 1.3rem;
+        }
+
+        footer {
+            text-align: center;
+            padding: 30px;
+            margin-top: 40px;
+            font-size: 1.1rem;
+            opacity: 0.8;
+        }
+
+        .highlight {
+            color: #00f2fe;
+            font-weight: bold;
+        }
+
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 2.5rem;
+            }
+
+            .subtitle {
+                font-size: 1.1rem;
+            }
+
+            .card-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .example-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <header>
+        <h1><i class="fas fa-bolt"></i> Умное распределение устройств по группам</h1>
+        <p class="subtitle">Профессиональный алгоритм группировки ваших устройств для максимальной безопасности и эффективности</p>
+    </header>
+
+    <div class="card-grid">
+        <div class="card">
+            <div class="card-icon">
+                <i class="fas fa-search"></i>
+            </div>
+            <h2 class="card-title">Анализ проекта</h2>
+            <div class="card-content">
+                <p>Алгоритм начинает с тщательного анализа всех помещений и устройств:</p>
+                <ul>
+                    <li>Сбор данных по каждому устройству (мощность, тип, наличие двигателя)</li>
+                    <li>Определение "особых зон" (ванная, кухня, улица)</li>
+                    <li>Учет характеристик напряжения и коэффициентов спроса</li>
+                    <li>Выявление приборов, требующих специальных условий</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-icon">
+                <i class="fas fa-star"></i>
+            </div>
+            <h2 class="card-title">HEAVY_DUTY-линии для мощной техники</h2>
+            <div class="card-content">
+                <p>Создаются выделенные линии для энергоемкого оборудования:</p>
+                <ul>
+                    <li>Кондиционеры и климатические системы</li>
+                    <li>Водонагреватели и электроплиты</li>
+                    <li>Любая техника мощнее 2000 Вт</li>
+                    <li>Приборы с пометкой "Требует выделенной линии"</li>
+                </ul>
+                <p>Для них подбирается усиленная защита: автоматы 25А-32А, кабель 4-6 мм², тип "D"</p>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-icon">
+                <i class="fas fa-lightbulb"></i>
+            </div>
+            <h2 class="card-title">Группы освещения</h2>
+            <div class="card-content">
+                <p>Все осветительные приборы объединяются в отдельные группы:</p>
+                <ul>
+                    <li>Люстры, светильники и LED-ленты</li>
+                    <li>Экономичное и безопасное решение</li>
+                    <li>Автоматы 10А с кабелем 1.5 мм²</li>
+                    <li>Оптимальное распределение по помещениям</li>
+                </ul>
+                <p>Отдельные группы для основного и декоративного освещения</p>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-icon">
+                <i class="fas fa-plug"></i>
+            </div>
+            <h2 class="card-title">Розеточные группы</h2>
+            <div class="card-content">
+                <p>Бытовая техника объединяется с соблюдением правил:</p>
+                <ul>
+                    <li>5-8 приборов на одну группу</li>
+                    <li>Нагрузка не превышает 80% от номинала автомата</li>
+                    <li>Автоматы типа "С" (16А)</li>
+                    <li>Универсальный кабель 2.5 мм²</li>
+                </ul>
+                <p>Автоматическое разделение групп при обнаружении перегрузки</p>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-icon">
+                <i class="fas fa-shield-alt"></i>
+            </div>
+            <h2 class="card-title">Защита и безопасность</h2>
+            <div class="card-content">
+                <p>Система обеспечивает максимальную защиту:</p>
+                <ul>
+                    <li>Автоматическое добавление УЗО 30мА для ванных, кухонь и уличных розеток</li>
+                    <li>Проверка соответствия проводки нагрузкам</li>
+                    <li>Защита от перегрузок и коротких замыканий</li>
+                    <li>Учет пусковых токов для техники с двигателями</li>
+                </ul>
+                <p>Двойная проверка всех решений на соответствие нормам</p>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-icon">
+                <i class="fas fa-file-alt"></i>
+            </div>
+            <h2 class="card-title">Формирование результатов</h2>
+            <div class="card-content">
+                <p>По завершении расчета вы получаете:</p>
+                <ul>
+                    <li>Полный перечень электрических групп</li>
+                    <li>Состав приборов в каждой группе</li>
+                    <li>Технические параметры (ток, автомат, кабель)</li>
+                    <li>Указание на необходимость УЗО</li>
+                    <li>Отчеты по помещениям</li>
+                </ul>
+                <p>Группы нумеруются в порядке создания для удобства монтажа</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="example-section">
+        <h2 class="example-title">Пример группировки для кухни</h2>
+        <div class="example-grid">
+            <div class="example-card">
+                <h3><i class="fas fa-crown"></i> HEAVY_DUTY-линия</h3>
+                <ul class="device-list">
+                    <li>Кондиционер (2000 Вт)</li>
+                    <li>Проточный водонагреватель (3500 Вт)</li>
+                </ul>
+                <div class="specs">
+                    <p><span class="highlight">Автомат:</span> 25А, тип "D"</p>
+                    <p><span class="highlight">Кабель:</span> 4 мм²</p>
+                    <p><span class="highlight">Защита:</span> УЗО 30мА</p>
+                </div>
+            </div>
+
+            <div class="example-card">
+                <h3><i class="fas fa-plug"></i> Розеточная группа</h3>
+                <ul class="device-list">
+                    <li>Холодильник (200 Вт)</li>
+                    <li>Микроволновка (1000 Вт)</li>
+                    <li>Кофемашина (800 Вт)</li>
+                    <li>Электрочайник (1500 Вт)</li>
+                </ul>
+                <div class="specs">
+                    <p><span class="highlight">Автомат:</span> 16А, тип "C"</p>
+                    <p><span class="highlight">Кабель:</span> 2.5 мм²</p>
+                    <p><span class="highlight">Защита:</span> УЗО 30мА</p>
+                </div>
+            </div>
+
+            <div class="example-card">
+                <h3><i class="fas fa-lightbulb"></i> Освещение</h3>
+                <ul class="device-list">
+                    <li>Основная люстра (100 Вт)</li>
+                    <li>Подсветка рабочей зоны (50 Вт)</li>
+                    <li>Декоративная подсветка (30 Вт)</li>
+                </ul>
+                <div class="specs">
+                    <p><span class="highlight">Автомат:</span> 10А, тип "B"</p>
+                    <p><span class="highlight">Кабель:</span> 1.5 мм²</p>
+                    <p><span class="highlight">Защита:</span> Без УЗО</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="guarantee">
+        <h2><i class="fas fa-shield-alt"></i> Почему это надежно?</h2>
+        <p>Наш алгоритм - это не просто автоматизация, а профессиональный электрик в вашем смартфоне!</p>
+
+        <div class="checklist">
+            <div class="check-item">
+                <i class="fas fa-check-circle check-icon"></i>
+                Соответствие ПУЭ
+            </div>
+            <div class="check-item">
+                <i class="fas fa-check-circle check-icon"></i>
+                Двойная проверка решений
+            </div>
+            <div class="check-item">
+                <i class="fas fa-check-circle check-icon"></i>
+                Запас мощности 20%
+            </div>
+            <div class="check-item">
+                <i class="fas fa-check-circle check-icon"></i>
+                Защита от опасных сценариев
+            </div>
+            <div class="check-item">
+                <i class="fas fa-check-circle check-icon"></i>
+                Учет пусковых токов
+            </div>
+            <div class="check-item">
+                <i class="fas fa-check-circle check-icon"></i>
+                Оптимальный подбор кабеля
+            </div>
+        </div>
+
+        <p>Все расчеты соответствуют строгим нормам безопасности и обеспечивают беспроблемную работу вашей техники на десятилетия.</p>
+    </div>
+
+    <footer>
+        <p>Ваш надежный помощник в проектировании электрического щита | Алгоритм разработан с учетом российских стандартов (ПУЭ)</p>
+        <p>© 2025 VoltHome | Все права защищены</p>
+    </footer>
+</div>
+
+<script>
+    // Анимация карточек при загрузке
+    document.addEventListener('DOMContentLoaded', function() {
+        const cards = document.querySelectorAll('.card');
+
+        cards.forEach((card, index) => {
+            setTimeout(() => {
+                card.style.opacity = '0';
+                card.style.transform = 'translateY(20px)';
+                card.style.transition = 'all 0.5s ease-out';
+
+                setTimeout(() => {
+                    card.style.opacity = '1';
+                    card.style.transform = 'translateY(0)';
+                }, 100);
+            }, 150 * index);
+        });
+
+        // Анимация гарантий
+        setTimeout(() => {
+            const checkItems = document.querySelectorAll('.check-item');
+            checkItems.forEach((item, index) => {
+                setTimeout(() => {
+                    item.style.opacity = '0';
+                    item.style.transform = 'scale(0.8)';
+                    item.style.transition = 'all 0.3s ease-out';
+
+                    setTimeout(() => {
+                        item.style.opacity = '1';
+                        item.style.transform = 'scale(1)';
+                    }, 100);
+                }, 200 * index);
+            });
+        }, 1000);
+    });
+</script>
+</body>
+</html>
