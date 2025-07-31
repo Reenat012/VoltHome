@@ -22,57 +22,33 @@ import javax.inject.Inject
 import kotlin.math.ceil
 
 
-class GroupCalculator (
+class GroupCalculator(
     private val roomRepository: RoomRepository,
     private val groupRepository: ExplicationRepository
 ) {
-    // Профили групп для разных типов устройств
-    private val groupProfiles = mapOf(
-        // Освещение: 10A автомат типа B, кабель 1.5 мм²
-        DeviceType.LIGHTING to GroupProfile(10.0, 10, 1.5, "B"),
 
-        // Розетки: 16A автомат типа C, кабель 2.5 мм²
-        DeviceType.SOCKET to GroupProfile(16.0, 16, 2.5, "C"),
-
-        // Мощные устройства: 25A автомат типа D, кабель 4.0 мм²
-        DeviceType.HEAVY_DUTY to GroupProfile(25.0, 25, 4.0, "D")
-    )
-
-    // Профили безопасности для разных типов помещений
     private val roomSafetyProfiles = mapOf(
-        RoomType.BATHROOM to SafetyProfile(rcdRequired = true),  // Ванная: УЗО обязательно
-        RoomType.KITCHEN to SafetyProfile(rcdRequired = true),   // Кухня: УЗО обязательно
-        RoomType.OUTDOOR to SafetyProfile(rcdRequired = true),   // Уличные розетки: УЗО
-        RoomType.STANDARD to SafetyProfile(rcdRequired = false)  // Обычные: УЗО не требуется
+        RoomType.BATHROOM to SafetyProfile(rcdRequired = true),
+        RoomType.KITCHEN to SafetyProfile(rcdRequired = true),
+        RoomType.OUTDOOR to SafetyProfile(rcdRequired = true),
+        RoomType.STANDARD to SafetyProfile(rcdRequired = false)
     )
 
-    /**
-     * Основная функция расчета групп
-     * Возвращает sealed class с результатом (успех или ошибка)
-     */
     suspend fun calculateGroups(): GroupingResult {
         return try {
-            // Шаг 1: Получаем все комнаты с устройствами из базы данных
             val rooms = roomRepository.getRoomsWithDevices()
-
-            var totalGroupNumber = 1  // Счетчик групп для сквозной нумерации
+            var totalGroupNumber = 1
             val allGroups = mutableListOf<CircuitGroup>()
 
-            // Шаг 2: Обработка ВЫДЕЛЕННЫХ ЛИНИЙ для мощных устройств
             rooms.forEach { roomWithDevices ->
                 val room = roomWithDevices.room
                 val safetyProfile = roomSafetyProfiles[room.roomType] ?: SafetyProfile()
 
                 roomWithDevices.devices
-                    .filter { device ->
-                        // Фильтруем устройства, требующие выделенной линии:
-                        // - Явно помеченные requiresDedicatedCircuit
-                        // - Мощностью более 2000 Вт
-                        device.requiresDedicatedCircuit || device.power > 2000
-                    }
+                    .filter { it.requiresDedicatedCircuit || it.power > 2000 }
                     .forEach { device ->
-                        // Создаем отдельную группу для каждого такого устройства
-                        val profile = groupProfiles[DeviceType.HEAVY_DUTY]!!
+                        val nominalCurrent = calculateCurrent(device)
+                        val profile = selectBreaker(nominalCurrent, device.hasMotor)
                         allGroups.add(
                             createDedicatedGroup(
                                 device = device,
@@ -85,25 +61,17 @@ class GroupCalculator (
                     }
             }
 
-            // Шаг 3: Обработка СТАНДАРТНЫХ ГРУПП (освещение, розетки)
             rooms.forEach { roomWithDevices ->
                 val room = roomWithDevices.room
                 val safetyProfile = roomSafetyProfiles[room.roomType] ?: SafetyProfile()
-
-                // Фильтруем устройства, не требующие выделенной линии
-                val devices = roomWithDevices.devices.filterNot {
-                    it.requiresDedicatedCircuit || it.power > 2000
-                }
-
-                // Группируем устройства по их типу (освещение, розетки)
+                val devices = roomWithDevices.devices.filterNot { it.requiresDedicatedCircuit || it.power > 2000 }
                 val groupedDevices = devices.groupBy { it.deviceType }
 
-                // Обрабатываем каждую группу устройств отдельно
                 groupedDevices.forEach { (deviceType, typeDevices) ->
-                    // Получаем профиль для данного типа устройств
-                    val profile = groupProfiles[deviceType] ?: groupProfiles[DeviceType.SOCKET]!!
+                    val maxCurrent = typeDevices.maxOfOrNull { calculateCurrent(it) } ?: 0.0
+                    val hasMotor = typeDevices.any { it.hasMotor }
+                    val profile = selectBreaker(maxCurrent, hasMotor)
 
-                    // Создаем группы устройств с учетом параметров профиля
                     val groups = createCircuitGroups(
                         devices = typeDevices,
                         profile = profile,
@@ -111,52 +79,25 @@ class GroupCalculator (
                         startGroupNumber = totalGroupNumber,
                         room = room
                     )
-
-                    // Добавляем созданные группы в общий список
                     allGroups.addAll(groups)
                     totalGroupNumber += groups.size
                 }
             }
 
-            Log.d(TAG, "distributedGroups = 0")
-
-            // Распределяем группы по фазам перед сохранением
             val distributedGroups = distributeGroupsBalanced(allGroups)
-
-            Log.d(TAG, "distributedGroups = $distributedGroups")
-            // Сохраняем группы и связи
             saveGroupsWithDevices(distributedGroups)
 
-            Log.d("GroupCalc", "Возвращаю ${distributedGroups.size} групп после расчета")
-            // Возвращаем успешный результат с рассчитанными группами
             GroupingResult.Success(ElectricalSystem(distributedGroups))
         } catch (e: Exception) {
-            // Возвращаем ошибку с сообщением
             GroupingResult.Error("Ошибка расчета: ${e.message}")
         }
     }
 
-    private suspend fun saveGroupsToDatabase(groups: List<CircuitGroup>) {
-        // Преобразуем в Entity и сохраняем
-        groupRepository.addGroup(groups)
-
-        // Обновляем связи устройств с группами
-        groups.forEach { group ->
-            group.devices.forEach { device ->
-                groupRepository.addDeviceToGroup(device.id, group.groupId)
-            }
-        }
-    }
-
     private suspend fun saveGroupsWithDevices(groups: List<CircuitGroup>) {
-            groupRepository.deleteAllGroups()
-            groupRepository.addGroup(groups)
-
+        groupRepository.deleteAllGroups()
+        groupRepository.addGroup(groups)
     }
 
-    /**
-     * Создает группы для списка устройств с учетом ограничений профиля
-     */
     private fun createCircuitGroups(
         devices: List<DeviceEntity>,
         profile: GroupProfile,
@@ -164,25 +105,15 @@ class GroupCalculator (
         startGroupNumber: Int,
         room: RoomEntity
     ): List<CircuitGroup> {
-        // Валидация: проверяем, что все устройства соответствуют профилю
-        validateDevices(devices, profile)
+        val sortedDevices = devices.sortedByDescending { calculateCurrent(it) }
+        val groups = mutableListOf<CircuitGroup>()
+        var currentGroup = mutableListOf<DeviceEntity>()
+        var currentSum = 0.0
+        var groupNumber = startGroupNumber
 
-        // Сортируем устройства по току (от большего к меньшему) для оптимального распределения
-        val sortedDevices = devices.sortedByDescending { getEffectiveCurrent(it) }
-
-        val groups = mutableListOf<CircuitGroup>()  // Результирующий список групп
-        var currentGroup = mutableListOf<DeviceEntity>()  // Текущая формируемая группа
-        var currentSum = 0.0  // Суммарный ток в текущей группе
-        var groupNumber = startGroupNumber  // Номер текущей группы
-
-        // Распределение устройств по группам
         for (device in sortedDevices) {
-            // Рассчитываем эффективный ток устройства с учетом пусковых токов
-            val effectiveCurrent = getEffectiveCurrent(device)
-
-            // Проверяем, поместится ли устройство в текущую группу с учетом 20% запаса
-            if (currentSum + effectiveCurrent > profile.maxCurrentWithReserve) {
-                // Если не помещается - сохраняем текущую группу
+            val current = calculateCurrent(device)
+            if (currentSum + current > profile.maxCurrent * 1.2) {
                 if (currentGroup.isNotEmpty()) {
                     groups.add(
                         createGroup(
@@ -194,17 +125,13 @@ class GroupCalculator (
                         )
                     )
                 }
-                // Начинаем новую группу
                 currentGroup = mutableListOf()
                 currentSum = 0.0
             }
-
-            // Добавляем устройство в текущую группу
             currentGroup.add(device)
-            currentSum += effectiveCurrent
+            currentSum += current
         }
 
-        // Добавляем последнюю группу, если в ней есть устройства
         if (currentGroup.isNotEmpty()) {
             groups.add(
                 createGroup(
@@ -220,51 +147,40 @@ class GroupCalculator (
         return groups
     }
 
-    /**
-     * Рассчитывает эффективный ток устройства с учетом:
-     * - Коэффициента спроса
-     * - Коэффициента мощности
-     * - Пусковых токов для двигателей
-     */
-    private fun getEffectiveCurrent(device: DeviceEntity): Double {
-        // Базовый расчет тока: P * k_s / (U * cosφ)
-        val baseCurrent = calculateCurrent(device)
+    private fun selectBreaker(nominalCurrent: Double, hasMotor: Boolean): GroupProfile {
+        val current = ceil(nominalCurrent).toInt()
+        val breakerOptions = listOf(
+            Triple(10, 1.5, "B"),
+            Triple(16, 2.5, "C"),
+            Triple(20, 2.5, "C"),
+            Triple(25, 4.0, "C"),
+            Triple(32, 6.0, "C"),
+            Triple(40, 10.0, "C"),
+            Triple(50, 10.0, "D"),
+            Triple(63, 16.0, "D")
+        )
 
-        // Учет пусковых токов для устройств с двигателями
-        return when {
-            device.hasMotor -> baseCurrent * 5.0  // Пусковой ток в 5 раз выше номинала
-            else -> baseCurrent
-        }
+        val (rating, cable, type) = breakerOptions.firstOrNull { it.first >= current }
+            ?: throw IllegalArgumentException("Нет подходящего автомата для ${current}А")
+
+        val finalType = if (hasMotor) "D" else type
+
+        return GroupProfile(
+            maxCurrent = rating.toDouble(),
+            breakerRating = rating,
+            cableSection = cable,
+            breakerType = finalType
+        )
     }
 
-    fun calculateCurrent(device: DeviceEntity): Double {
+    private fun calculateCurrent(device: DeviceEntity): Double {
         return when (device.voltage.type) {
-            VoltageType.AC_1PHASE ->
-                device.power / (device.voltage.value * device.powerFactor)
-            VoltageType.AC_3PHASE ->
-                device.power / (1.732 * device.voltage.value * device.powerFactor)
-            VoltageType.DC ->
-                device.power / device.voltage.value.toDouble()
+            VoltageType.AC_1PHASE -> device.power / (device.voltage.value * device.powerFactor)
+            VoltageType.AC_3PHASE -> device.power / (1.732 * device.voltage.value * device.powerFactor)
+            VoltageType.DC -> device.power.toDouble() / device.voltage.value
         }
     }
 
-    /**
-     * Проверяет, что все устройства могут быть защищены автоматом из профиля
-     */
-    private fun validateDevices(devices: List<DeviceEntity>, profile: GroupProfile) {
-        devices.forEach { device ->
-            val nominalCurrent = calculateCurrent(device)
-            if (nominalCurrent > profile.maxCurrent) {
-                throw IllegalArgumentException(
-                    "Устройство '${device.name}' требует автомата минимум на ${ceil(nominalCurrent).toInt()}A"
-                )
-            }
-        }
-    }
-
-    /**
-     * Создает группу из списка устройств
-     */
     private fun createGroup(
         devices: List<DeviceEntity>,
         profile: GroupProfile,
@@ -272,16 +188,13 @@ class GroupCalculator (
         groupNumber: Int,
         room: RoomEntity
     ): CircuitGroup {
-        // Рассчитываем суммарный номинальный ток группы
-        val nominalCurrent = devices.sumOf { device ->
-            (device.power * device.demandRatio) /
-                    (device.voltage.value * device.powerFactor)
+        val nominalCurrent = devices.sumOf {
+            it.power * it.demandRatio / (it.voltage.value * it.powerFactor)
         }
 
-        // Создаем объект группы
         return CircuitGroup(
             roomName = room.name,
-            groupType = devices.first().deviceType,  // Тип группы = тип первого устройства
+            groupType = devices.first().deviceType,
             devices = devices.map { it.toDomainModel() },
             nominalCurrent = nominalCurrent,
             circuitBreaker = profile.breakerRating,
@@ -294,9 +207,6 @@ class GroupCalculator (
         )
     }
 
-    /**
-     * Создает выделенную группу для одного мощного устройства
-     */
     private fun createDedicatedGroup(
         device: DeviceEntity,
         profile: GroupProfile,
@@ -304,9 +214,7 @@ class GroupCalculator (
         groupNumber: Int,
         room: RoomEntity
     ): CircuitGroup {
-        // Расчет номинального тока для устройства
-        val nominalCurrent = (device.power * device.demandRatio) /
-                (device.voltage.value * device.powerFactor)
+        val nominalCurrent = calculateCurrent(device)
 
         return CircuitGroup(
             roomName = room.name,
@@ -324,7 +232,6 @@ class GroupCalculator (
     }
 }
 
-// Файл: data/mapper/DeviceMapper.kt
 fun DeviceEntity.toDomainModel() = Device(
     id = deviceId,
     name = name,
@@ -354,5 +261,3 @@ fun CircuitGroupEntity.toDomainModel(devices: List<Device>) = CircuitGroup(
     rcdRequired = rcdRequired,
     rcdCurrent = rcdCurrent
 )
-
-

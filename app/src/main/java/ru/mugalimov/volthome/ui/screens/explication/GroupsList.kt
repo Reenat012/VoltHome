@@ -39,13 +39,13 @@ fun GroupList(groups: List<CircuitGroup>, onRecalculate: () -> Unit) {
             modifier = Modifier.padding(bottom = 16.dp)
         )
 
-        // Кнопка перерасчета
-        Button(
-            onClick = onRecalculate,
-            modifier = Modifier.align(Alignment.End)
-        ) {
-            Text("Пересчитать группы")
-        }
+//        // Кнопка перерасчета
+//        Button(
+//            onClick = onRecalculate,
+//            modifier = Modifier.align(Alignment.End)
+//        ) {
+//            Text("Пересчитать группы")
+//        }
 
         Spacer(modifier = Modifier.height(16.dp))
 
