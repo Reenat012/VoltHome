@@ -17,5 +17,8 @@ data class CircuitGroup(
 
     // Параметры безопасности
     val rcdRequired: Boolean,    // Требуется ли УЗО
-    val rcdCurrent: Int = 30     // Ток утечки для УЗО (мА)
+    val rcdCurrent: Int = 30,     // Ток утечки для УЗО (мА)
+
+    // Фазы
+    val phase: Phase = Phase.A
 )

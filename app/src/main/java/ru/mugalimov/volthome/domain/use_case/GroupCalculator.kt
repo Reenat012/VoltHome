@@ -1,8 +1,13 @@
+import android.content.ContentValues.TAG
+import android.util.Log
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.withContext
 import ru.mugalimov.volthome.data.local.entity.CircuitGroupEntity
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.data.local.entity.RoomEntity
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.data.repository.RoomRepository
+import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
@@ -12,6 +17,7 @@ import ru.mugalimov.volthome.domain.model.GroupingResult
 import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.domain.model.SafetyProfile
 import ru.mugalimov.volthome.domain.model.VoltageType
+import ru.mugalimov.volthome.domain.usecase.distributeGroupsBalanced
 import javax.inject.Inject
 import kotlin.math.ceil
 
@@ -111,11 +117,19 @@ class GroupCalculator (
                     totalGroupNumber += groups.size
                 }
             }
-            // Сохраняем группы и связи
-            saveGroupsWithDevices(allGroups)
 
+            Log.d(TAG, "distributedGroups = 0")
+
+            // Распределяем группы по фазам перед сохранением
+            val distributedGroups = distributeGroupsBalanced(allGroups)
+
+            Log.d(TAG, "distributedGroups = $distributedGroups")
+            // Сохраняем группы и связи
+            saveGroupsWithDevices(distributedGroups)
+
+            Log.d("GroupCalc", "Возвращаю ${distributedGroups.size} групп после расчета")
             // Возвращаем успешный результат с рассчитанными группами
-            GroupingResult.Success(ElectricalSystem(allGroups))
+            GroupingResult.Success(ElectricalSystem(distributedGroups))
         } catch (e: Exception) {
             // Возвращаем ошибку с сообщением
             GroupingResult.Error("Ошибка расчета: ${e.message}")
@@ -135,11 +149,9 @@ class GroupCalculator (
     }
 
     private suspend fun saveGroupsWithDevices(groups: List<CircuitGroup>) {
-        // Очищаем старые группы и связи
-        groupRepository.deleteAllGroups()
+            groupRepository.deleteAllGroups()
+            groupRepository.addGroup(groups)
 
-        // Сохраняем новые группы
-        groupRepository.addGroup(groups)
     }
 
     /**
@@ -241,11 +253,10 @@ class GroupCalculator (
      */
     private fun validateDevices(devices: List<DeviceEntity>, profile: GroupProfile) {
         devices.forEach { device ->
-            val effectiveCurrent = getEffectiveCurrent(device)
-            // Проверяем, не превышает ли ток устройства номинал автомата
-            if (effectiveCurrent > profile.maxCurrent) {
+            val nominalCurrent = calculateCurrent(device)
+            if (nominalCurrent > profile.maxCurrent) {
                 throw IllegalArgumentException(
-                    "Устройство '${device.name}' требует автомата минимум на ${ceil(effectiveCurrent).toInt()}A"
+                    "Устройство '${device.name}' требует автомата минимум на ${ceil(nominalCurrent).toInt()}A"
                 )
             }
         }
@@ -330,7 +341,7 @@ fun DeviceEntity.toDomainModel() = Device(
 fun List<DeviceEntity>.toDomainModels() = map { it.toDomainModel() }
 
 fun CircuitGroupEntity.toDomainModel(devices: List<Device>) = CircuitGroup(
-    groupId = groupId,
+    groupId = 0L,
     groupNumber = groupNumber,
     roomName = roomName,
     roomId = roomId,

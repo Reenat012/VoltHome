@@ -21,6 +21,7 @@ import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
+import ru.mugalimov.volthome.domain.model.Phase
 import javax.inject.Inject
 
 class ExplicationRepositoryImpl @Inject constructor(
@@ -32,7 +33,7 @@ class ExplicationRepositoryImpl @Inject constructor(
     @IoDispatcher private val dispatchers: CoroutineDispatcher,
     @ApplicationContext private val context: Context
 ) : ExplicationRepository {
-    override suspend fun observeAllGroup(): Flow<List<CircuitGroup>> {
+    override fun observeAllGroup(): Flow<List<CircuitGroup>> {
         return groupDao.observeGroupsWithDevices()
             .map { groupsWithDevices ->
                 groupsWithDevices.map { it.toDomainModel() }
@@ -41,11 +42,13 @@ class ExplicationRepositoryImpl @Inject constructor(
 
     override suspend fun addGroup(circuitGroups: List<CircuitGroup>) {
         withContext(dispatchers) {
+            Log.d("Repo", "Сохраняем ${circuitGroups.size} групп")
             try {
                 circuitGroups.forEach { group ->
                     // Сохраняем группу
                     val groupEntity = group.toEntity()
                     val groupId = groupDao.addGroup(groupEntity)
+                    Log.d("Repo", "Inserted group with ID = $groupId, номер группы = ${group.groupNumber}")
 
                     // Сохраняем связи с устройствами
                     group.devices.forEach { device ->
@@ -163,7 +166,8 @@ private fun CircuitGroupWithDevices.toDomainModel(): CircuitGroup {
         cableSection = group.cableSection,
         breakerType = group.breakerType,
         rcdRequired = group.rcdRequired,
-        rcdCurrent = group.rcdCurrent
+        rcdCurrent = group.rcdCurrent,
+        phase = Phase.valueOf(group.phase)
     )
 }
 
@@ -173,7 +177,7 @@ private fun List<CircuitGroupWithDevices>.toDomainModelList(): List<CircuitGroup
 
 private fun CircuitGroup.toEntity(): CircuitGroupEntity {
     return CircuitGroupEntity(
-        groupId = groupId,
+        groupId = 0L,
         groupNumber = groupNumber,
         roomId = roomId,
         roomName = roomName,
@@ -183,7 +187,8 @@ private fun CircuitGroup.toEntity(): CircuitGroupEntity {
         cableSection = cableSection,
         breakerType = breakerType,
         rcdRequired = rcdRequired,
-        rcdCurrent = rcdCurrent
+        rcdCurrent = rcdCurrent,
+        phase = phase.name
     )
 }
 
@@ -217,7 +222,8 @@ private fun List<CircuitGroupEntity>.toDomainModelListGroup(): List<CircuitGroup
             breakerType = entity.breakerType,
             rcdRequired = entity.rcdRequired,
             rcdCurrent = entity.rcdCurrent,
-            devices = emptyList() // Заполняется отдельно
+            devices = emptyList(), // Заполняется отдельно
+            phase = Phase.valueOf(entity.phase)
         )
     }
 }

@@ -26,8 +26,8 @@ interface GroupDao {
     @Query("SELECT * FROM groups")
     suspend fun getAllGroups() : List<CircuitGroupEntity>
 
-    @Insert(onConflict = OnConflictStrategy.ABORT)
-    suspend fun addGroup(group: CircuitGroupEntity) : Long
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun addGroup(group: CircuitGroupEntity): Long
 
     @Query("SELECT * FROM groups WHERE group_id = :id")
     suspend fun getGroupById(id: Long) : CircuitGroupEntity?

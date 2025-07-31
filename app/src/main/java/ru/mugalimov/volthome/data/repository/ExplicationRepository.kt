@@ -8,7 +8,7 @@ import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
 
 interface ExplicationRepository {
-    suspend fun observeAllGroup(): Flow<List<CircuitGroup>>
+    fun observeAllGroup(): Flow<List<CircuitGroup>>
 
     suspend fun addGroup(circuitGroups: List<CircuitGroup>)
 

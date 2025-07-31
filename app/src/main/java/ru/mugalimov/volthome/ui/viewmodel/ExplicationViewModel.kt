@@ -11,77 +11,44 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.domain.model.CircuitGroup
+import ru.mugalimov.volthome.domain.model.GroupingResult
 import ru.mugalimov.volthome.domain.use_case.GroupCalculatorFactory
 import javax.inject.Inject
 
 @HiltViewModel
 class ExplicationViewModel @Inject constructor(
-    private val explicationRepository: ExplicationRepository,
     private val groupCalculatorFactory: GroupCalculatorFactory
 ) : ViewModel() {
 
-    // Состояние UI экрана групп
     private val _uiState = MutableStateFlow<GroupScreenState>(GroupScreenState.Loading)
     val uiState: StateFlow<GroupScreenState> = _uiState.asStateFlow()
 
-    init {
-        viewModelScope.launch {
-            explicationRepository.observeAllGroup().collect { groups ->
-                _uiState.value = GroupScreenState.Success(
-                    groups = groups,
-                    totalGroups = groups.size,
-                    totalCurrent = groups.sumOf { it.nominalCurrent }
-                )
-            }
-        }
-    }
-
-//    private fun loadGroups() {
-//        viewModelScope.launch {
-//            explicationRepository.observeAllGroup()
-//                .onStart { _uiState.update { it.copy(isLoading = true) } }
-//                .catch { e ->
-//                    _uiState.update {
-//                        it.copy(
-//                            isLoading = false,
-//                            error = e
-//                        )
-//                    }
-//                }
-//                .collect { groups ->
-//                    _uiState.update {
-//                        it.copy(
-//                            groups = groups,
-//                            isLoading = false,
-//                            error = null
-//                        )
-//                    }
-//                }
-//        }
-//    }
-
-    fun getAllGroups() {
-        viewModelScope.launch {
-            try {
-                val groups = explicationRepository.getAllGroups()
-                Log.d(TAG, "Groups: $groups")
-            } catch (e: Exception) {
-                Log.e(TAG, "Error loading groups", e)
-            }
-        }
-    }
-
-    /**
-     * Запускает расчет электрических групп
-     */
     fun calculateGroups() {
         viewModelScope.launch {
+            Log.d("VM", "Запускаем расчет...")
             _uiState.value = GroupScreenState.Loading
-            val calcGroup = groupCalculatorFactory.create()
-            calcGroup.calculateGroups()
+
+            val calculator = groupCalculatorFactory.create()
+            val result = calculator.calculateGroups()
+            Log.d("VM", "Расчет завершён!")
+
+            when (result) {
+                is GroupingResult.Success -> {
+                    _uiState.value = GroupScreenState.Success(
+                        groups = result.system.groups,
+                        totalGroups = result.system.groups.size,
+                        totalCurrent = result.system.groups.sumOf { it.nominalCurrent }
+                    )
+                }
+
+                is GroupingResult.Error -> {
+                    _uiState.value = GroupScreenState.Error(result.message)
+                }
+            }
         }
     }
 }
+
 
 
 /**
