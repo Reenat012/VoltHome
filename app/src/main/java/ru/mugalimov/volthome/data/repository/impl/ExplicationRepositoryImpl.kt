@@ -22,6 +22,8 @@ import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.Phase
+import ru.mugalimov.volthome.domain.model.phase_load.GroupWithDevices
+import toDomainModel
 import javax.inject.Inject
 
 class ExplicationRepositoryImpl @Inject constructor(
@@ -39,6 +41,18 @@ class ExplicationRepositoryImpl @Inject constructor(
                 groupsWithDevices.map { it.toDomainModel() }
             }
     }
+
+    override suspend fun getGroupsWithDevices(): List<GroupWithDevices> {
+        val groups = groupDao.getAllGroups()
+        return groups.map { entity ->
+            val devices = deviceDao.getDevicesForGroup(entity.groupId)
+            GroupWithDevices(
+                group = entity.toDomainModel(devices.map { it.toDomainModel() }),
+                devices = devices.map { it.toDomainModel() }
+            )
+        }
+    }
+
 
     override suspend fun addGroup(circuitGroups: List<CircuitGroup>) {
         withContext(dispatchers) {

@@ -11,9 +11,9 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
-import ru.mugalimov.volthome.ui.screens.room.AddDeviceScreen
 import ru.mugalimov.volthome.ui.screens.explication.ExpliсationScreen
-import ru.mugalimov.volthome.ui.screens.loads.LoadsScreen
+import ru.mugalimov.volthome.ui.screens.loads.PhaseLoadScreen
+import ru.mugalimov.volthome.ui.screens.room.AddDeviceScreen
 import ru.mugalimov.volthome.ui.screens.room.RoomDetailScreen
 import ru.mugalimov.volthome.ui.screens.rooms.AddRoomScreen
 import ru.mugalimov.volthome.ui.screens.rooms.RoomsScreen
@@ -61,11 +61,17 @@ fun NavGraphApp(
             )
         }
 
-        composable(
-            route =  Screens.LoadsScreen.route
-        ) { backStackEntry ->
-            val roomId = backStackEntry.arguments?.getLong("roomId") ?: 0L
-            LoadsScreen(roomId = roomId)
+//        composable(
+//            route =  Screens.LoadsScreen.route
+//        ) { backStackEntry ->
+//            val roomId = backStackEntry.arguments?.getLong("roomId") ?: 0L
+//            LoadsScreen(roomId = roomId)
+//        }
+
+        composable(route = Screens.LoadsScreen.route) {
+            PhaseLoadScreen(
+                onBack = { navController.popBackStack() }
+            )
         }
 
         composable(
@@ -145,5 +151,13 @@ fun NavGraphApp(
                 navController
             )
         }
+
+        composable(Screens.PhaseLoadScreen.route) {
+            PhaseLoadScreen(
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+
     }
 }

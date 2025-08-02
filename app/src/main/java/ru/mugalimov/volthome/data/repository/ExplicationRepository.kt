@@ -6,6 +6,7 @@ import ru.mugalimov.volthome.data.local.entity.GroupDeviceJoin
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
+import ru.mugalimov.volthome.domain.model.phase_load.GroupWithDevices
 
 interface ExplicationRepository {
     fun observeAllGroup(): Flow<List<CircuitGroup>>
@@ -30,4 +31,7 @@ interface ExplicationRepository {
 
     suspend fun addDeviceToGroup(deviceId: Long, groupId: Long)
     suspend fun getDevicesForGroup(groupId: Long): List<Device>
+
+    suspend fun getGroupsWithDevices(): List<GroupWithDevices>
+
 }
