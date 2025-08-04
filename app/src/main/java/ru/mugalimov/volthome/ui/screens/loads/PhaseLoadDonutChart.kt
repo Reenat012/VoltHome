@@ -12,6 +12,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,28 +35,37 @@ fun PhaseLoadDonutChart(
     val totalCurrent = items.sumOf { it.totalCurrent }
     val stroke = 40f
 
-    val colors = mapOf(
-        Phase.A to MaterialTheme.colorScheme.primary,
-        Phase.B to MaterialTheme.colorScheme.secondary,
-        Phase.C to MaterialTheme.colorScheme.tertiary
+    // Цвета по ПУЭ
+    val phaseColors = mapOf(
+        Phase.A to Color(0xFFFFEB3B), // Жёлтый
+        Phase.B to Color(0xFF4CAF50), // Зелёный
+        Phase.C to Color(0xFFF44336)  // Красный
     )
+
+    val orderedPhases = listOf(Phase.A, Phase.B, Phase.C)
+    val orderedItems = orderedPhases.mapNotNull { phase -> items.find { it.phase == phase } }
 
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .height(220.dp),
-        verticalArrangement = Arrangement.Center,
+            .padding(horizontal = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(modifier = Modifier.size(180.dp)) {
+        // 1. Диаграмма
+        Box(
+            modifier = Modifier
+                .size(220.dp)
+                .padding(top = 8.dp),
+            contentAlignment = Alignment.Center
+        ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
-                var startAngle = -90f
+                var startAngle = -135f
 
-                items.forEach { item ->
+                orderedItems.forEach { item ->
                     val sweepAngle = (item.totalCurrent / totalCurrent * 360f).toFloat()
 
                     drawArc(
-                        color = colors[item.phase] ?: Color.Gray,
+                        color = phaseColors[item.phase] ?: Color.Gray,
                         startAngle = startAngle,
                         sweepAngle = sweepAngle,
                         useCenter = false,
@@ -62,27 +74,56 @@ fun PhaseLoadDonutChart(
                     startAngle += sweepAngle
                 }
             }
-        }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Легенда
-        items.forEach { item ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(12.dp)
-                        .padding(end = 8.dp)
-                        .background(
-                            color = colors[item.phase] ?: Color.Gray,
-                            shape = MaterialTheme.shapes.extraSmall
-                        )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "%.1f A".format(totalCurrent),
+                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
                 )
                 Text(
-                    text = "Фаза ${item.phase.name} — %.1f A".format(item.totalCurrent),
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
+                    text = "Суммарно",
+                    style = MaterialTheme.typography.bodyMedium
                 )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // 2. Легенда (выведена отдельно, без ограничений по высоте)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            orderedItems.forEach { item ->
+                val color = phaseColors[item.phase] ?: Color.Gray
+
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(12.dp)
+                                .background(color, shape = MaterialTheme.shapes.extraSmall)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Фаза ${item.phase.name}",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
+                        )
+                    }
+                    Text(
+                        text = "%.1f А".format(item.totalCurrent),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
             }
         }
     }
 }
+
+
+
+
