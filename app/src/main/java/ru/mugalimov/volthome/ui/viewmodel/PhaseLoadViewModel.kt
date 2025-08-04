@@ -1,11 +1,13 @@
 package ru.mugalimov.volthome.ui.viewmodel
 
+import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadUiState
 import ru.mugalimov.volthome.domain.use_case.GetPhaseLoadUiUseCase
@@ -20,23 +22,33 @@ class PhaseLoadViewModel @Inject constructor(
     val uiState: StateFlow<PhaseLoadUiState> = _uiState.asStateFlow()
 
     init {
-        loadPhaseLoads()
+        loadData()
     }
 
-    private fun loadPhaseLoads() {
+    private fun loadData() {
         viewModelScope.launch {
             try {
+                _uiState.update { it.copy(isLoading = true) }
+
                 val result = getPhaseLoadUiUseCase()
-                _uiState.value = PhaseLoadUiState(
-                    isLoading = false,
-                    data = result
-                )
+
+                _uiState.update {
+                    it.copy(
+                        data = result,
+                        isLoading = false,
+                        error = null
+                    )
+                }
             } catch (e: Exception) {
-                _uiState.value = PhaseLoadUiState(
-                    isLoading = false,
-                    error = e
-                )
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        error = e
+                    )
+                }
             }
         }
     }
 }
+
+

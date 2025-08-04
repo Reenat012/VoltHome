@@ -87,6 +87,9 @@ class GroupCalculator(
             val distributedGroups = distributeGroupsBalanced(allGroups)
             saveGroupsWithDevices(distributedGroups)
 
+            distributedGroups.forEach {
+                if (it.phase == null) throw IllegalStateException("Фаза у группы №${it.groupNumber} не установлена!")
+            }
             GroupingResult.Success(ElectricalSystem(distributedGroups))
         } catch (e: Exception) {
             GroupingResult.Error("Ошибка расчета: ${e.message}")
@@ -95,6 +98,9 @@ class GroupCalculator(
 
     private suspend fun saveGroupsWithDevices(groups: List<CircuitGroup>) {
         groupRepository.deleteAllGroups()
+        groups.forEach {
+            Log.d("SAVE_CHECK", "Группа №${it.groupNumber} -> Фаза: ${it.phase}")
+        }
         groupRepository.addGroup(groups)
     }
 

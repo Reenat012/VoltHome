@@ -47,7 +47,7 @@ class ExplicationRepositoryImpl @Inject constructor(
         return groups.map { entity ->
             val devices = deviceDao.getDevicesForGroup(entity.groupId)
             GroupWithDevices(
-                group = entity.toDomainModel(devices.map { it.toDomainModel() }),
+                group = entity.toDomainModelList(devices.map { it.toDomainModel() }),
                 devices = devices.map { it.toDomainModel() }
             )
         }
@@ -62,7 +62,10 @@ class ExplicationRepositoryImpl @Inject constructor(
                     // Сохраняем группу
                     val groupEntity = group.toEntity()
                     val groupId = groupDao.addGroup(groupEntity)
-                    Log.d("Repo", "Inserted group with ID = $groupId, номер группы = ${group.groupNumber}")
+                    Log.d(
+                        "Repo",
+                        "Inserted group with ID = $groupId, номер группы = ${group.groupNumber}"
+                    )
 
                     // Сохраняем связи с устройствами
                     group.devices.forEach { device ->
@@ -187,6 +190,24 @@ private fun CircuitGroupWithDevices.toDomainModel(): CircuitGroup {
 
 private fun List<CircuitGroupWithDevices>.toDomainModelList(): List<CircuitGroup> {
     return map { it.toDomainModel() }
+}
+
+private fun CircuitGroupEntity.toDomainModelList(devices: List<Device>): CircuitGroup {
+    return CircuitGroup(
+        groupId = this.groupId,
+        groupNumber = this.groupNumber,
+        roomName = this.roomName,
+        roomId = this.roomId,
+        groupType = DeviceType.valueOf(this.groupType),
+        devices = devices,
+        nominalCurrent = this.nominalCurrent,
+        circuitBreaker = this.circuitBreaker,
+        cableSection = this.cableSection,
+        breakerType = this.breakerType,
+        rcdRequired = this.rcdRequired,
+        rcdCurrent = this.rcdCurrent,
+        phase = Phase.valueOf(this.phase) // ОБЯЗАТЕЛЬНО
+    )
 }
 
 private fun CircuitGroup.toEntity(): CircuitGroupEntity {

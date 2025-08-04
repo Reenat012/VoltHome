@@ -15,13 +15,18 @@ fun PhaseLoadContent(
     phaseLoads: List<PhaseLoadItem>,
     modifier: Modifier = Modifier
 ) {
+    // ❗️ Новый список — только непустые фазы
+    val visiblePhases = remember(phaseLoads) {
+        phaseLoads.filter { it.groups.isNotEmpty() }
+    }
+
     Column(
         modifier = modifier
             .padding(16.dp)
             .fillMaxSize()
     ) {
         // Диаграмма
-        PhaseLoadDonutChart(phaseLoads)
+        PhaseLoadDonutChart(visiblePhases)
 
         Spacer(modifier = Modifier.height(24.dp))
 
@@ -29,9 +34,10 @@ fun PhaseLoadContent(
         LazyColumn(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(phaseLoads) { phaseLoad ->
+            items(visiblePhases) { phaseLoad ->
                 PhaseGroupTableItem(phaseLoad)
             }
         }
     }
 }
+
