@@ -17,6 +17,7 @@ import ru.mugalimov.volthome.domain.model.GroupingResult
 import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.domain.model.SafetyProfile
 import ru.mugalimov.volthome.domain.model.VoltageType
+import ru.mugalimov.volthome.domain.use_case.CurrentCalculator
 import ru.mugalimov.volthome.domain.usecase.distributeGroupsBalanced
 import javax.inject.Inject
 import kotlin.math.ceil
@@ -47,8 +48,8 @@ class GroupCalculator(
                 roomWithDevices.devices
                     .filter { it.requiresDedicatedCircuit || it.power > 2000 }
                     .forEach { device ->
-                        val nominalCurrent = calculateCurrent(device)
-                        val profile = selectBreaker(nominalCurrent, device.hasMotor)
+                        val nominalCurrent = device.nominalCurrent()
+                        val profile = selectBreaker(nominalCurrent, device.deviceType, device.hasMotor)
                         allGroups.add(
                             createDedicatedGroup(
                                 device = device,
@@ -68,9 +69,9 @@ class GroupCalculator(
                 val groupedDevices = devices.groupBy { it.deviceType }
 
                 groupedDevices.forEach { (deviceType, typeDevices) ->
-                    val maxCurrent = typeDevices.maxOfOrNull { calculateCurrent(it) } ?: 0.0
+                    val maxCurrent = typeDevices.maxOfOrNull { it.nominalCurrent() } ?: 0.0
                     val hasMotor = typeDevices.any { it.hasMotor }
-                    val profile = selectBreaker(maxCurrent, hasMotor)
+                    val profile = selectBreaker(maxCurrent, deviceType, hasMotor)
 
                     val groups = createCircuitGroups(
                         devices = typeDevices,
@@ -98,9 +99,6 @@ class GroupCalculator(
 
     private suspend fun saveGroupsWithDevices(groups: List<CircuitGroup>) {
         groupRepository.deleteAllGroups()
-        groups.forEach {
-            Log.d("SAVE_CHECK", "Группа №${it.groupNumber} -> Фаза: ${it.phase}")
-        }
         groupRepository.addGroup(groups)
     }
 
@@ -111,14 +109,14 @@ class GroupCalculator(
         startGroupNumber: Int,
         room: RoomEntity
     ): List<CircuitGroup> {
-        val sortedDevices = devices.sortedByDescending { calculateCurrent(it) }
+        val sortedDevices = devices.sortedByDescending { it.nominalCurrent() }
         val groups = mutableListOf<CircuitGroup>()
         var currentGroup = mutableListOf<DeviceEntity>()
         var currentSum = 0.0
         var groupNumber = startGroupNumber
 
         for (device in sortedDevices) {
-            val current = calculateCurrent(device)
+            val current = device.nominalCurrent()
             if (currentSum + current > profile.maxCurrent * 1.2) {
                 if (currentGroup.isNotEmpty()) {
                     groups.add(
@@ -153,8 +151,21 @@ class GroupCalculator(
         return groups
     }
 
-    private fun selectBreaker(nominalCurrent: Double, hasMotor: Boolean): GroupProfile {
+    private fun selectBreaker(nominalCurrent: Double, deviceType: DeviceType, hasMotor: Boolean): GroupProfile {
         val current = ceil(nominalCurrent).toInt()
+
+        val minRatingByType = mapOf(
+            DeviceType.LIGHTING to 10,
+            DeviceType.SOCKET to 16,
+            DeviceType.HEAVY_DUTY to 16,
+            DeviceType.OVEN to 20,
+            DeviceType.AIR_CONDITIONER to 20,
+            DeviceType.ELECTRIC_STOVE to 25
+        )
+
+        val requiredMin = minRatingByType[deviceType] ?: 10
+        val finalRequired = maxOf(current, requiredMin)
+
         val breakerOptions = listOf(
             Triple(10, 1.5, "B"),
             Triple(16, 2.5, "C"),
@@ -166,8 +177,8 @@ class GroupCalculator(
             Triple(63, 16.0, "D")
         )
 
-        val (rating, cable, type) = breakerOptions.firstOrNull { it.first >= current }
-            ?: throw IllegalArgumentException("Нет подходящего автомата для ${current}А")
+        val (rating, cable, type) = breakerOptions.firstOrNull { it.first >= finalRequired }
+            ?: throw IllegalArgumentException("Нет подходящего автомата для ${finalRequired}А")
 
         val finalType = if (hasMotor) "D" else type
 
@@ -179,14 +190,6 @@ class GroupCalculator(
         )
     }
 
-    private fun calculateCurrent(device: DeviceEntity): Double {
-        return when (device.voltage.type) {
-            VoltageType.AC_1PHASE -> device.power / (device.voltage.value * device.powerFactor)
-            VoltageType.AC_3PHASE -> device.power / (1.732 * device.voltage.value * device.powerFactor)
-            VoltageType.DC -> device.power.toDouble() / device.voltage.value
-        }
-    }
-
     private fun createGroup(
         devices: List<DeviceEntity>,
         profile: GroupProfile,
@@ -194,9 +197,7 @@ class GroupCalculator(
         groupNumber: Int,
         room: RoomEntity
     ): CircuitGroup {
-        val nominalCurrent = devices.sumOf {
-            it.power * it.demandRatio / (it.voltage.value * it.powerFactor)
-        }
+        val nominalCurrent = devices.sumOf { it.nominalCurrent() }
 
         return CircuitGroup(
             roomName = room.name,
@@ -220,7 +221,7 @@ class GroupCalculator(
         groupNumber: Int,
         room: RoomEntity
     ): CircuitGroup {
-        val nominalCurrent = calculateCurrent(device)
+        val nominalCurrent = device.nominalCurrent()
 
         return CircuitGroup(
             roomName = room.name,
@@ -236,6 +237,16 @@ class GroupCalculator(
             roomId = room.id
         )
     }
+}
+
+fun DeviceEntity.nominalCurrent(): Double {
+    return CurrentCalculator.calculateNominalCurrent(
+        power = power.toDouble(),
+        voltage = voltage.value.toDouble(),
+        powerFactor = powerFactor,
+        demandRatio = demandRatio,
+        voltageType = voltage.type
+    )
 }
 
 fun DeviceEntity.toDomainModel() = Device(
@@ -267,3 +278,5 @@ fun CircuitGroupEntity.toDomainModel(devices: List<Device>) = CircuitGroup(
     rcdRequired = rcdRequired,
     rcdCurrent = rcdCurrent
 )
+
+

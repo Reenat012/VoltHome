@@ -139,4 +139,6 @@ dependencies {
     implementation ("androidx.webkit:webkit:1.14.0")
 
     implementation ("com.google.accompanist:accompanist-flowlayout:0.32.0")
+    implementation("androidx.compose.foundation:foundation:1.5.0") // для FlowRow
+
 }

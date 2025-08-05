@@ -2,6 +2,7 @@ package ru.mugalimov.volthome.ui.screens.loads
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,11 +14,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -27,19 +31,23 @@ import androidx.compose.ui.unit.dp
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
 
+
 @Composable
 fun PhaseLoadDonutChart(
     items: List<PhaseLoadItem>,
     modifier: Modifier = Modifier
 ) {
     val totalCurrent = items.sumOf { it.totalCurrent }
-    val stroke = 40f
+    val totalGroups = items.sumOf { it.groups.size }
+    val totalDevices = items.sumOf { it.groups.sumOf { group -> group.devices.size } }
 
-    // Цвета по ПУЭ
+    val stroke = 36f
+    val showDialog = remember { mutableStateOf(false) }
+
     val phaseColors = mapOf(
-        Phase.A to Color(0xFFFFEB3B), // Жёлтый
-        Phase.B to Color(0xFF4CAF50), // Зелёный
-        Phase.C to Color(0xFFF44336)  // Красный
+        Phase.A to Color(0xFFFFF176), // Жёлтый
+        Phase.B to Color(0xFF81C784), // Зелёный
+        Phase.C to Color(0xFFE57373)  // Красный
     )
 
     val orderedPhases = listOf(Phase.A, Phase.B, Phase.C)
@@ -51,7 +59,7 @@ fun PhaseLoadDonutChart(
             .padding(horizontal = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // 1. Диаграмма
+        // Диаграмма
         Box(
             modifier = Modifier
                 .size(220.dp)
@@ -60,10 +68,8 @@ fun PhaseLoadDonutChart(
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 var startAngle = -135f
-
                 orderedItems.forEach { item ->
                     val sweepAngle = (item.totalCurrent / totalCurrent * 360f).toFloat()
-
                     drawArc(
                         color = phaseColors[item.phase] ?: Color.Gray,
                         startAngle = startAngle,
@@ -75,7 +81,13 @@ fun PhaseLoadDonutChart(
                 }
             }
 
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            // Кликабельный центральный блок
+            Column(
+                modifier = Modifier
+                    .padding(4.dp)
+                    .clickable { showDialog.value = true },
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
                 Text(
                     text = "%.1f A".format(totalCurrent),
                     style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
@@ -89,7 +101,7 @@ fun PhaseLoadDonutChart(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // 2. Легенда (выведена отдельно, без ограничений по высоте)
+        // Легенда
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -98,10 +110,7 @@ fun PhaseLoadDonutChart(
         ) {
             orderedItems.forEach { item ->
                 val color = phaseColors[item.phase] ?: Color.Gray
-
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
@@ -116,13 +125,35 @@ fun PhaseLoadDonutChart(
                     }
                     Text(
                         text = "%.1f А".format(item.totalCurrent),
-                        style = MaterialTheme.typography.bodyMedium
+                        style = MaterialTheme.typography.bodySmall
                     )
                 }
             }
         }
+
+        // Диалог с подробностями
+        if (showDialog.value) {
+            AlertDialog(
+                onDismissRequest = { showDialog.value = false },
+                title = { Text("Общая нагрузка") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Ток по всем фазам: %.1f A".format(totalCurrent))
+                        Text("Групп всего: $totalGroups")
+                        Text("Устройств всего: $totalDevices")
+                        Text("Средняя нагрузка на фазу: %.1f A".format(totalCurrent / 3))
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showDialog.value = false }) {
+                        Text("Ок")
+                    }
+                }
+            )
+        }
     }
 }
+
 
 
 
