@@ -4,6 +4,7 @@ import android.content.ContentValues.TAG
 import android.util.Log
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Phase
+import ru.mugalimov.volthome.domain.model.VoltageType
 
 /**
  * Распределяет группы по фазам (L1, L2, L3) так, чтобы суммарный ток на каждой фазе был сбалансирован.
@@ -52,3 +53,17 @@ fun distributeGroupsBalanced(groups: List<CircuitGroup>): List<CircuitGroup> {
 
     return assignedGroups
 }
+
+/** Суммирует токи по уже назначенным фазам */
+fun phaseCurrents(groups: List<CircuitGroup>): Map<Phase, Double> =
+    groups.groupBy { it.phase }
+        .mapValues { (_, gs) -> gs.sumOf { it.nominalCurrent } }
+        .withDefault { 0.0 }
+
+/** 3Ф, если реально задействовано >= 2 фаз; иначе 1Ф */
+fun inferVoltageType(groups: List<CircuitGroup>): VoltageType {
+    val used = groups.map { it.phase }.toSet()
+    return if (used.size >= 2) VoltageType.AC_3PHASE else VoltageType.AC_1PHASE
+}
+
+fun Map<Phase, Double>.getOrZero(phase: Phase): Double = getOrDefault(phase, 0.0)

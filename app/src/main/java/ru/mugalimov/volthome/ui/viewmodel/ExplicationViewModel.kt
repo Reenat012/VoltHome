@@ -13,11 +13,13 @@ import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.GroupingResult
 import ru.mugalimov.volthome.domain.use_case.GroupCalculatorFactory
+import ru.mugalimov.volthome.domain.use_case.IncomerSelector
 import javax.inject.Inject
 
 @HiltViewModel
 class ExplicationViewModel @Inject constructor(
-    private val groupCalculatorFactory: GroupCalculatorFactory
+    private val groupCalculatorFactory: GroupCalculatorFactory,
+    private val incomerSelector: IncomerSelector
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<GroupScreenState>(GroupScreenState.Loading)
@@ -25,29 +27,33 @@ class ExplicationViewModel @Inject constructor(
 
     fun calculateGroups() {
         viewModelScope.launch {
-            Log.d("VM", "Запускаем расчет...")
             _uiState.value = GroupScreenState.Loading
-
-            val calculator = groupCalculatorFactory.create()
-            val result = calculator.calculateGroups()
-            Log.d("VM", "Расчет завершён!")
-
-            when (result) {
+            val calc = groupCalculatorFactory.create()
+            when (val res = calc.calculateGroups()) {
+                is GroupingResult.Error -> _uiState.value = GroupScreenState.Error(res.message)
                 is GroupingResult.Success -> {
-                    _uiState.value = GroupScreenState.Success(
-                        groups = result.system.groups,
-                        totalGroups = result.system.groups.size,
-                        totalCurrent = result.system.groups.sumOf { it.nominalCurrent }
-                    )
-                }
+                    val groups = res.system.groups
 
-                is GroupingResult.Error -> {
-                    _uiState.value = GroupScreenState.Error(result.message)
+                    val incomer = incomerSelector.select(
+                        IncomerSelector.Params(
+                            groups = groups,
+                            preferRcbo = false,   // позже привяжем к UI
+                            hasGroupRcds = true   // позже привяжем к UI
+                        )
+                    )
+
+                    _uiState.value = GroupScreenState.Success(
+                        groups = groups,
+                        totalGroups = groups.size,
+                        totalCurrent = groups.sumOf { it.nominalCurrent },
+                        incomer = incomer
+                    )
                 }
             }
         }
     }
 }
+
 
 
 
@@ -62,7 +68,8 @@ sealed class GroupScreenState {
     data class Success(
         val groups: List<CircuitGroup>,
         val totalGroups: Int,
-        val totalCurrent: Double
+        val totalCurrent: Double,
+        val incomer: ru.mugalimov.volthome.domain.model.incomer.IncomerSpec
     ) : GroupScreenState()
 
     data class Error(val message: String) : GroupScreenState()
