@@ -4,6 +4,7 @@ import android.content.ContentValues.TAG
 import android.util.Log
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Phase
+import ru.mugalimov.volthome.domain.model.PhaseImbalance
 import ru.mugalimov.volthome.domain.model.VoltageType
 
 /**
@@ -67,3 +68,16 @@ fun inferVoltageType(groups: List<CircuitGroup>): VoltageType {
 }
 
 fun Map<Phase, Double>.getOrZero(phase: Phase): Double = getOrDefault(phase, 0.0)
+
+fun computeImbalance(perPhase: Map<Phase, Double>): PhaseImbalance {
+    val a = perPhase.getOrDefault(Phase.A, 0.0)
+    val b = perPhase.getOrDefault(Phase.B, 0.0)
+    val c = perPhase.getOrDefault(Phase.C, 0.0)
+    val iMax = maxOf(a, b, c)
+    val iMin = minOf(a, b, c)
+    val iAvg = (a + b + c) / 3.0
+    val delta = iMax - iMin
+    val pct = if (iAvg > 0) (delta / iAvg) * 100.0 else 0.0
+    val worst = when (iMax) { a -> Phase.A; b -> Phase.B; else -> Phase.C }
+    return PhaseImbalance(a, b, c, iMax, iMin, iAvg, delta, pct, worst)
+}
