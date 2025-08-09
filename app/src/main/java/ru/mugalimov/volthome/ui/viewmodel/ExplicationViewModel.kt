@@ -34,11 +34,13 @@ class ExplicationViewModel @Inject constructor(
                 is GroupingResult.Success -> {
                     val groups = res.system.groups
 
+                    val hasGroupRcds = groups.any { it.rcdRequired }
+
                     val incomer = incomerSelector.select(
                         IncomerSelector.Params(
                             groups = groups,
                             preferRcbo = false,   // позже привяжем к UI
-                            hasGroupRcds = true   // позже привяжем к UI
+                            hasGroupRcds = hasGroupRcds
                         )
                     )
 
@@ -46,7 +48,8 @@ class ExplicationViewModel @Inject constructor(
                         groups = groups,
                         totalGroups = groups.size,
                         totalCurrent = groups.sumOf { it.nominalCurrent },
-                        incomer = incomer
+                        incomer = incomer,
+                        hasGroupRcds = hasGroupRcds
                     )
                 }
             }
@@ -69,7 +72,8 @@ sealed class GroupScreenState {
         val groups: List<CircuitGroup>,
         val totalGroups: Int,
         val totalCurrent: Double,
-        val incomer: ru.mugalimov.volthome.domain.model.incomer.IncomerSpec
+        val incomer: ru.mugalimov.volthome.domain.model.incomer.IncomerSpec,
+        val hasGroupRcds: Boolean
     ) : GroupScreenState()
 
     data class Error(val message: String) : GroupScreenState()

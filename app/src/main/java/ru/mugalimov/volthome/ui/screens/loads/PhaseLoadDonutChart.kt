@@ -22,7 +22,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import ru.mugalimov.volthome.domain.model.Phase
-import ru.mugalimov.volthome.domain.usecase.computeImbalance
+import ru.mugalimov.volthome.domain.use_case.balanceUi
+import ru.mugalimov.volthome.domain.use_case.calcPhaseBalance
 
 @Composable
 fun PhaseLoadDonutChart(
@@ -33,10 +34,17 @@ fun PhaseLoadDonutChart(
     showLegend: Boolean = true,
     animate: Boolean = true
 ) {
-    val imp = remember(perPhase) { computeImbalance(perPhase) }
+    // входные значения
+    val a = perPhase[Phase.A] ?: 0.0
+    val b = perPhase[Phase.B] ?: 0.0
+    val c = perPhase[Phase.C] ?: 0.0
+
+    // единый расчёт перекоса
+    val bal = remember(a, b, c) { calcPhaseBalance(a, b, c) }
+    val (statusText, statusColor) = balanceUi(bal.pct)
 
     val phases = listOf(Phase.A, Phase.B, Phase.C)
-    val values = listOf(imp.iA, imp.iB, imp.iC) // Double
+    val values = listOf(a, b, c)
 
     val baseColors = listOf(
         Color(0xFFF6D96B), // A — жёлтый
@@ -44,14 +52,7 @@ fun PhaseLoadDonutChart(
         Color(0xFFFF8A80)  // C — красный
     )
     val colors = baseColors.mapIndexed { i, col ->
-        if (phases[i] == imp.worstPhase) col else col.copy(alpha = 0.6f)
-    }
-
-    // Статусы
-    val (statusText, statusColor) = when {
-        imp.pct < 10 -> "Баланс! Всё ок!" to MaterialTheme.colorScheme.primary
-        imp.pct < 25 -> "Небольшой перекос! Не критично" to MaterialTheme.colorScheme.tertiary
-        else -> "Сильный перекос! Плохо" to MaterialTheme.colorScheme.error
+        if (phases[i] == bal.maxPhase) col else col.copy(alpha = 0.6f)
     }
 
     val ringBg = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)
@@ -70,7 +71,7 @@ fun PhaseLoadDonutChart(
                 val stroke = Stroke(width = ringWidth.toPx(), cap = StrokeCap.Round)
                 val sizePx = Size(size.width, size.height)
 
-                // Фон кольца
+                // фон кольца
                 drawArc(
                     color = ringBg,
                     startAngle = 0f,
@@ -92,14 +93,13 @@ fun PhaseLoadDonutChart(
                     return@Canvas
                 }
 
-                val minSweep = 0.8f // чтобы тонкие сегменты не исчезали
+                val minSweep = 0.8f
                 var start = -90f
                 values.forEachIndexed { i, vD ->
                     val v = vD.toFloat()
                     var sweep = (v / total) * 360f * progress
                     if (sweep < minSweep) sweep = minSweep
 
-                    // Зазор между сегментами
                     val adjSweep = (sweep - gapDeg).coerceAtLeast(0f)
                     val adjStart = start + gapDeg / 2f
 
@@ -115,13 +115,14 @@ fun PhaseLoadDonutChart(
                 }
             }
 
-            // Центр: заголовок + метрика перекоса + статус
+            // центр: метрика перекоса + статус
             Column(
                 Modifier.align(Alignment.Center),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                val delta = (maxOf(a, b, c) - minOf(a, b, c))
                 Text(
-                    text = "ΔI ${fmt1(imp.delta)} A (${fmt0(imp.pct)}%)",
+                    text = "ΔI ${fmt1(delta)} A (${fmt0(bal.pct)}%)",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -137,9 +138,9 @@ fun PhaseLoadDonutChart(
         if (showLegend) {
             Spacer(Modifier.height(8.dp))
             PhaseLegend(
-                a = imp.iA, b = imp.iB, c = imp.iC,
-                total = (imp.iA + imp.iB + imp.iC),
-                worst = imp.worstPhase
+                a = a, b = b, c = c,
+                total = (a + b + c),
+                worst = bal.maxPhase
             )
         }
     }
@@ -170,7 +171,7 @@ private fun LegendRow(label: String, amps: Double, total: Double, color: Color, 
             Box(
                 Modifier
                     .size(10.dp)
-                    .clip(CircleShape)           // ⟵ кружок
+                    .clip(CircleShape)
                     .background(color)
             )
             Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -182,15 +183,5 @@ private fun LegendRow(label: String, amps: Double, total: Double, color: Color, 
     }
 }
 
-
 private fun fmt1(v: Double) = String.format("%.1f", v)
 private fun fmt0(v: Double) = String.format("%.0f", v)
-
-
-
-
-
-
-
-
-

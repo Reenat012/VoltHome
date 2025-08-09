@@ -11,7 +11,8 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
-import ru.mugalimov.volthome.ui.screens.explication.ExpliсationScreen
+import ru.mugalimov.volthome.ui.screens.explication.ExplicationScreen
+
 import ru.mugalimov.volthome.ui.screens.loads.PhaseLoadScreen
 import ru.mugalimov.volthome.ui.screens.room.AddDeviceScreen
 import ru.mugalimov.volthome.ui.screens.room.RoomDetailScreen
@@ -78,7 +79,7 @@ fun NavGraphApp(
             route = BottomNavItem.Exploitation.route,
 
             ) {
-            ExpliсationScreen()
+            ExplicationScreen()
         }
 
 
