@@ -14,6 +14,9 @@ interface DeviceDao {
     @Query("SELECT * FROM devices WHERE room_id = :roomId")
     fun observeDevicesByIdRoom(roomId: Long): Flow<List<DeviceEntity>>
 
+    @Query("SELECT * FROM devices")
+    fun observeDevices(): Flow<List<DeviceEntity>>
+
     //добавить устройство в комнату
     //onConflict = OnConflictStrategy.ABORT - если запись с таким же PrimeryKey существует
     //то запись прервывается

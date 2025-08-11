@@ -3,6 +3,7 @@ package ru.mugalimov.volthome.data.local.dao
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
+import kotlinx.coroutines.flow.Flow
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.data.local.entity.GroupDeviceJoin
 
@@ -27,4 +28,7 @@ interface GroupDeviceJoinDao {
             "INNER JOIN group_device_join j ON d.device_id = j.device_id " +
             "WHERE j.group_id = :groupId")
     suspend fun getDevicesForGroup(groupId: Long): List<DeviceEntity>
+
+    @Query("SELECT * FROM group_device_join")
+    fun observeJoins(): Flow<List<GroupDeviceJoin>>
 }

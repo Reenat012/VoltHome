@@ -58,4 +58,6 @@ interface GroupDao {
     @Transaction
     @Query("SELECT * FROM groups WHERE group_id = :groupId")
     suspend fun getGroupWithDevicesById(groupId: Long): CircuitGroupWithDevices?
+
+
 }

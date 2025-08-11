@@ -71,7 +71,7 @@ fun NavGraphApp(
 
         composable(route = Screens.LoadsScreen.route) {
             PhaseLoadScreen(
-                onBack = { navController.popBackStack() }
+
             )
         }
 
@@ -155,7 +155,6 @@ fun NavGraphApp(
 
         composable(Screens.PhaseLoadScreen.route) {
             PhaseLoadScreen(
-                onBack = { navController.popBackStack() }
             )
         }
 

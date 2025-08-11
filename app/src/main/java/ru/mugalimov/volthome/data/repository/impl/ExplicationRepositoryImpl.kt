@@ -6,6 +6,7 @@ import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import ru.mugalimov.volthome.core.error.GroupNotFoundException
@@ -51,6 +52,34 @@ class ExplicationRepositoryImpl @Inject constructor(
                 devices = devices.map { it.toDomainModel() }
             )
         }
+    }
+
+    override fun observeGroupsWithDevices(): Flow<List<CircuitGroupWithDevices>> {
+        val groupsFlow  = groupDao.observeAllGroups()         // Flow<List<CircuitGroupEntity>>
+//        val devicesFlow = deviceDao.observeDevicesByIdRoom    // ← этого мало!
+        // ↑ нужен поток ВСЕХ устройств, а не только по комнате. Добавим общий:
+        // В DeviceDao:
+        // @Query("SELECT * FROM devices")
+        // fun observeAllDevices(): Flow<List<DeviceEntity>>
+
+        val allDevicesFlow = deviceDao.observeDevices()
+        val joinsFlow   = groupDeviceJoinDao.observeJoins()   // Flow<List<GroupDeviceJoin>>
+
+        return combine(groupsFlow, allDevicesFlow, joinsFlow) { groups, devices, joins ->
+            Log.d("LOADS_REPO", "groups=${groups.size} devices=${devices.size} joins=${joins.size}")
+            // Готовим быстрый доступ
+            val devicesById = devices.associateBy { it.deviceId }
+            val deviceIdsByGroup: Map<Long, Set<Long>> =
+                joins.groupBy({ it.groupId }, { it.deviceId })
+                    .mapValues { (_, ids) -> ids.toHashSet() }
+
+            groups.map { g ->
+                val ids = deviceIdsByGroup[g.groupId].orEmpty()
+                val devs = ids.mapNotNull { devicesById[it] }
+                CircuitGroupWithDevices(group = g, devices = devs)
+            }
+        }
+        // .distinctUntilChanged() // можно включить, если будут дубли
     }
 
 
@@ -262,3 +291,7 @@ private fun List<CircuitGroupEntity>.toDomainModelListGroup(): List<CircuitGroup
         )
     }
 }
+
+
+private fun List<DeviceEntity>.filterByGroupRoomId(roomId: Long): List<DeviceEntity> =
+    this.filter { it.roomId == roomId }
