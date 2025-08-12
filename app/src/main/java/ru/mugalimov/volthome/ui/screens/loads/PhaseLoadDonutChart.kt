@@ -21,7 +21,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.min
 import ru.mugalimov.volthome.domain.model.Phase
+import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
 import ru.mugalimov.volthome.domain.use_case.balanceUi
 import ru.mugalimov.volthome.domain.use_case.calcPhaseBalance
 
@@ -32,7 +34,8 @@ fun PhaseLoadDonutChart(
     ringWidth: Dp = 18.dp,
     gapDeg: Float = 2f,
     showLegend: Boolean = true,
-    animate: Boolean = true
+    animate: Boolean = true,
+    chartSizeDp: Dp = 220.dp
 ) {
     // входные значения
     val a = perPhase[Phase.A] ?: 0.0
@@ -65,8 +68,15 @@ fun PhaseLoadDonutChart(
     )
 
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(240.dp)) {
-            Canvas(Modifier.fillMaxSize()) {
+
+        Box(
+            modifier = modifier,            // родитель задаёт отступы/ширину контейнера item’а
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas( modifier = Modifier
+                .size(chartSizeDp)
+                .padding(12.dp)
+            ) {
                 val total = values.sum().toFloat()
                 val stroke = Stroke(width = ringWidth.toPx(), cap = StrokeCap.Round)
                 val sizePx = Size(size.width, size.height)
@@ -167,7 +177,10 @@ private fun LegendRow(label: String, amps: Double, total: Double, color: Color, 
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Box(
                 Modifier
                     .size(10.dp)

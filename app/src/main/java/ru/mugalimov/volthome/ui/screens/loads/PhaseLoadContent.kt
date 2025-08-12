@@ -16,41 +16,62 @@ fun PhaseLoadContent(
     phaseLoads: List<PhaseLoadItem>,
     modifier: Modifier = Modifier
 ) {
-    // показываем все фазы, чтобы ключи не прыгали
+    // Показываем ВСЕ фазы (A,B,C), чтобы ключи были стабильны
     val allPhases = remember(phaseLoads) {
         val byPhase = phaseLoads.associateBy { it.phase }
-        listOf(Phase.A, Phase.B, Phase.C).map { p -> byPhase[p] ?: PhaseLoadItem(p, 0.0, 0.0, emptyList()) }
+        listOf(Phase.A, Phase.B, Phase.C).map { p ->
+            byPhase[p] ?: PhaseLoadItem(p, 0.0, 0.0, emptyList())
+        }
     }
 
-    // стабильные saveable-флаги на фиксированных ключах
+    // Стабильные saveable-флаги
     var aExpanded by rememberSaveable("phase_expanded_A") { mutableStateOf(false) }
     var bExpanded by rememberSaveable("phase_expanded_B") { mutableStateOf(false) }
     var cExpanded by rememberSaveable("phase_expanded_C") { mutableStateOf(false) }
 
-    fun isExpanded(p: Phase) = when (p) { Phase.A -> aExpanded; Phase.B -> bExpanded; Phase.C -> cExpanded }
-    fun toggle(p: Phase)     = when (p) { Phase.A -> aExpanded = !aExpanded; Phase.B -> bExpanded = !bExpanded; Phase.C -> cExpanded = !cExpanded }
+    fun isExpanded(p: Phase) = when (p) {
+        Phase.A -> aExpanded
+        Phase.B -> bExpanded
+        Phase.C -> cExpanded
+    }
 
-    // derivedStateOf вместо remember(...) с «липкими» ссылками
-    val perPhase by remember(allPhases) {
-        derivedStateOf {
-            allPhases.associate { it.phase to it.totalCurrent }
+    fun toggle(p: Phase) {
+        when (p) {
+            Phase.A -> aExpanded = !aExpanded
+            Phase.B -> bExpanded = !bExpanded
+            Phase.C -> cExpanded = !cExpanded
         }
     }
 
-    Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        PhaseLoadDonutChart(perPhase = perPhase, modifier = Modifier.fillMaxWidth())
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
-            items(allPhases, key = { it.phase }) { item ->
-                PhaseGroupTableItem(
-                    item = item,
-                    expanded = isExpanded(item.phase),
-                    onToggle = { toggle(item.phase) }
-                )
-            }
+    // Ток по фазам для доната
+    val perPhase by remember(allPhases) {
+        derivedStateOf { allPhases.associate { it.phase to it.totalCurrent } }
+    }
+
+    LazyColumn(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item(key = "donut") {
+            // Контейнер на всю ширину, сам круг — фиксированного размера и по центру
+            PhaseLoadDonutChart(
+                perPhase = perPhase,
+                modifier = Modifier.fillMaxWidth(),
+                chartSizeDp = 220.dp // при желании: 200.dp / 240.dp
+            )
+        }
+
+        item { Spacer(Modifier.height(4.dp)) }
+
+        // Таблица по фазам
+        items(allPhases, key = { it.phase }) { item ->
+            PhaseGroupTableItem(
+                item = item,
+                expanded = isExpanded(item.phase),
+                onToggle = { toggle(item.phase) }
+            )
         }
     }
 }
-
-
-
-

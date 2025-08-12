@@ -3,13 +3,16 @@ package ru.mugalimov.volthome.data.local.entity
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
+import androidx.room.Index
 import androidx.room.PrimaryKey
+
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.Voltage
 import java.util.Date
 
 @Entity(
     tableName = "devices",
+    indices = [Index(value = ["room_id", "name"], unique = true)],
     foreignKeys = [ForeignKey(
         entity = RoomEntity::class,
         parentColumns = ["id"],

@@ -31,4 +31,7 @@ interface GroupDeviceJoinDao {
 
     @Query("SELECT * FROM group_device_join")
     fun observeJoins(): Flow<List<GroupDeviceJoin>>
+
+    @Query("SELECT COUNT(*) FROM devices")
+    suspend fun countAll(): Int
 }

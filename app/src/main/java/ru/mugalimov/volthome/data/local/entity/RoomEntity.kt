@@ -2,11 +2,14 @@ package ru.mugalimov.volthome.data.local.entity
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import ru.mugalimov.volthome.domain.model.RoomType
 import java.util.Date
 
-@Entity(tableName = "rooms")
+@Entity(tableName = "rooms",
+    indices = [Index(value = ["name"], unique = true)]
+)
 data class RoomEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,

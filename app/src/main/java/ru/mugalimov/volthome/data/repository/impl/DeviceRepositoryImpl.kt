@@ -7,6 +7,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
@@ -33,6 +34,10 @@ class DeviceRepositoryImpl @Inject constructor(
     @IoDispatcher private val dispatchers: CoroutineDispatcher,
     @ApplicationContext private val context: Context
 ) : DeviceRepository {
+    // ✅ парсим каталог один раз за жизнь процесса
+    private val defaultDevicesCache by lazy(LazyThreadSafetyMode.NONE) {
+        JsonParser.parseDevices(context)   // -> List<Device>
+    }
 
     //получение списка комнат через DAO
     //используется для получения изменения данных
@@ -134,6 +139,7 @@ class DeviceRepositoryImpl @Inject constructor(
                 throw DeviceNotFoundException()
             }
         }
+
 }
 
 //преобразования объектов из Entity в Domain
