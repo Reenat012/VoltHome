@@ -1,10 +1,7 @@
 package ru.mugalimov.volthome.domain.use_case
 
-import GroupCalculator
-import kotlinx.coroutines.CoroutineDispatcher
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.data.repository.RoomRepository
-import ru.mugalimov.volthome.di.database.IoDispatcher
 import javax.inject.Inject
 
 class GroupCalculatorFactory @Inject constructor(

@@ -1,0 +1,35 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- Контур домика -->
+    <path
+        android:fillColor="#1E3A8A"
+        android:pathData="M12,2 L4,8 V20 C4,21.1 4.9,22 6,22 H18 C19.1,22 20,21.1 20,20 V8 L12,2 Z" />
+
+    <!-- Молния -->
+    <path
+        android:fillColor="#F59E0B"
+        android:pathData="M11,17 L15,10 H12 L13,7 L9,14 H12 L11,17 Z" />
+
+    <!-- Листочек PDF в углу -->
+    <path
+        android:fillColor="#EAF0FF"
+        android:pathData="M16,14 h5 v6 h-5 z" />
+
+    <!-- Загиб уголка -->
+    <path
+        android:fillColor="#CAD9FF"
+        android:pathData="M21,14 v2 h-2 z" />
+
+    <!-- Текст PDF -->
+    <path
+        android:fillColor="#D32F2F"
+        android:pathData="M16.6,18 v-2 h0.9 c0.4,0 0.6,0.2 0.6,0.5 c0,0.2 -0.1,0.4 -0.3,0.5 c0.2,0.1 0.3,0.3 0.3,0.5 c0,0.4 -0.2,0.5 -0.6,0.5 h-0.9 z
+                          M17.1,17.2 h0.4 c0.1,0 0.2,-0.1 0.2,-0.2 c0,-0.1 -0.1,-0.2 -0.2,-0.2 h-0.4 v0.4 z
+                          M18.5,18 v-2 h0.6 c0.5,0 0.9,0.4 0.9,0.9 s-0.4,0.9 -0.9,0.9 h-0.6 z
+                          M19,17.4 c0.2,0 0.4,-0.1 0.4,-0.4 c0,-0.2 -0.1,-0.4 -0.4,-0.4 h-0.3 v0.8 h0.3 z
+                          M20.3,18 v-2 h1.2 v0.4 h-0.8 v0.4 h0.7 v0.4 h-0.7 v0.4 h0.8 v0.4 h-1.2 z" />
+</vector>

@@ -1,13 +1,11 @@
-import android.content.ContentValues.TAG
-import android.util.Log
-import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.withContext
+package ru.mugalimov.volthome.domain.use_case
+
+import distributeGroupsBalanced
 import ru.mugalimov.volthome.data.local.entity.CircuitGroupEntity
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.data.local.entity.RoomEntity
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.data.repository.RoomRepository
-import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
@@ -16,12 +14,7 @@ import ru.mugalimov.volthome.domain.model.GroupProfile
 import ru.mugalimov.volthome.domain.model.GroupingResult
 import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.domain.model.SafetyProfile
-import ru.mugalimov.volthome.domain.model.VoltageType
-import ru.mugalimov.volthome.domain.use_case.CurrentCalculator
-import ru.mugalimov.volthome.domain.usecase.distributeGroupsBalanced
-import javax.inject.Inject
 import kotlin.math.ceil
-
 
 class GroupCalculator(
     private val roomRepository: RoomRepository,
@@ -41,116 +34,80 @@ class GroupCalculator(
             var totalGroupNumber = 1
             val allGroups = mutableListOf<CircuitGroup>()
 
+            // 1) Выделенные линии: только «явно тяжёлые»/по флагу
             rooms.forEach { roomWithDevices ->
                 val room = roomWithDevices.room
-                val safetyProfile = roomSafetyProfiles[room.roomType] ?: SafetyProfile()
+                val safety = roomSafetyProfiles[room.roomType] ?: SafetyProfile()
 
                 roomWithDevices.devices
-                    .filter { it.requiresDedicatedCircuit || it.power > 2000 }
-                    .forEach { device ->
-                        val nominalCurrent = device.nominalCurrent()
-                        val profile = selectBreaker(nominalCurrent, device.deviceType, device.hasMotor)
-                        allGroups.add(
-                            createDedicatedGroup(
-                                device = device,
-                                profile = profile,
-                                safetyProfile = safetyProfile,
-                                groupNumber = totalGroupNumber++,
-                                room = room
-                            )
+                    .filter(::isHeavy)
+                    .forEach { d ->
+                        val profile = selectBreaker(d.nominalCurrent(), d.deviceType, d.hasMotor)
+                        allGroups += createDedicatedGroup(
+                            device = d,
+                            profile = profile,
+                            safetyProfile = safety,
+                            groupNumber = totalGroupNumber++,
+                            room = room
                         )
                     }
             }
 
+            // 2) Обычные группы: FFD‑упаковка по типам, лимит ≤ номинала автомата
             rooms.forEach { roomWithDevices ->
                 val room = roomWithDevices.room
-                val safetyProfile = roomSafetyProfiles[room.roomType] ?: SafetyProfile()
-                val devices = roomWithDevices.devices.filterNot { it.requiresDedicatedCircuit || it.power > 2000 }
-                val groupedDevices = devices.groupBy { it.deviceType }
+                val safety = roomSafetyProfiles[room.roomType] ?: SafetyProfile()
+                val commonDevices = roomWithDevices.devices.filterNot(::isHeavy)
+                val byType = commonDevices.groupBy { it.deviceType }
 
-                groupedDevices.forEach { (deviceType, typeDevices) ->
-                    val maxCurrent = typeDevices.maxOfOrNull { it.nominalCurrent() } ?: 0.0
-                    val hasMotor = typeDevices.any { it.hasMotor }
-                    val profile = selectBreaker(maxCurrent, deviceType, hasMotor)
+                byType.forEach { (deviceType, devicesOfType) ->
+                    val maxI = devicesOfType.maxOfOrNull { it.nominalCurrent() } ?: 0.0
+                    val hasMotor = devicesOfType.any { it.hasMotor }
+                    val profile = selectBreaker(maxI, deviceType, hasMotor)
 
                     val groups = createCircuitGroups(
-                        devices = typeDevices,
+                        devices = devicesOfType,
                         profile = profile,
-                        safetyProfile = safetyProfile,
+                        safetyProfile = safety,
                         startGroupNumber = totalGroupNumber,
                         room = room
                     )
-                    allGroups.addAll(groups)
+                    allGroups += groups
                     totalGroupNumber += groups.size
                 }
             }
 
-            val distributedGroups = distributeGroupsBalanced(allGroups)
-            saveGroupsWithDevices(distributedGroups)
+            // 3) Нормализуем номера ровно один раз
+            val normalized = allGroups
+                .sortedWith(compareBy<CircuitGroup> { it.roomId }.thenBy { it.groupNumber })
+                .mapIndexed { idx, g -> g.copy(groupNumber = idx + 1) }
 
-            distributedGroups.forEach {
-                if (it.phase == null) throw IllegalStateException("Фаза у группы №${it.groupNumber} не установлена!")
-            }
-            GroupingResult.Success(ElectricalSystem(distributedGroups))
+            // 4) Балансировка фаз (номера групп не меняем внутри)
+            val distributed = distributeGroupsBalanced(normalized)
+
+            // 5) Валидация до сохранения
+            validateBeforeSave(distributed)
+
+            // 6) Сохранение (желательно транзакционное в репозитории)
+            saveGroupsWithDevices(distributed)
+
+            GroupingResult.Success(ElectricalSystem(distributed))
         } catch (e: Exception) {
-            GroupingResult.Error("Ошибка расчета: ${e.message}")
+            GroupingResult.Error("Ошибка расчёта: ${e.message}")
         }
     }
 
-    private suspend fun saveGroupsWithDevices(groups: List<CircuitGroup>) {
-        groupRepository.deleteAllGroups()
-        groupRepository.addGroup(groups)
-    }
-
-    private fun createCircuitGroups(
-        devices: List<DeviceEntity>,
-        profile: GroupProfile,
-        safetyProfile: SafetyProfile,
-        startGroupNumber: Int,
-        room: RoomEntity
-    ): List<CircuitGroup> {
-        val sortedDevices = devices.sortedByDescending { it.nominalCurrent() }
-        val groups = mutableListOf<CircuitGroup>()
-        var currentGroup = mutableListOf<DeviceEntity>()
-        var currentSum = 0.0
-        var groupNumber = startGroupNumber
-
-        for (device in sortedDevices) {
-            val current = device.nominalCurrent()
-            if (currentSum + current > profile.maxCurrent * 1.2) {
-                if (currentGroup.isNotEmpty()) {
-                    groups.add(
-                        createGroup(
-                            devices = currentGroup,
-                            profile = profile,
-                            safetyProfile = safetyProfile,
-                            groupNumber = groupNumber++,
-                            room = room
-                        )
-                    )
-                }
-                currentGroup = mutableListOf()
-                currentSum = 0.0
-            }
-            currentGroup.add(device)
-            currentSum += current
+    /** Явные критерии выделенных линий. */
+    private fun isHeavy(d: DeviceEntity): Boolean =
+        d.requiresDedicatedCircuit || when (d.deviceType) {
+            DeviceType.OVEN,
+            DeviceType.AIR_CONDITIONER,
+            DeviceType.ELECTRIC_STOVE,
+            DeviceType.HEAVY_DUTY -> true
+            else -> false // розетки/освещение не уносим только из‑за мощности
         }
 
-        if (currentGroup.isNotEmpty()) {
-            groups.add(
-                createGroup(
-                    devices = currentGroup,
-                    profile = profile,
-                    safetyProfile = safetyProfile,
-                    groupNumber = groupNumber,
-                    room = room
-                )
-            )
-        }
-
-        return groups
-    }
-
+    /** Подбор автомата/кабеля/кривой по подгруппе. */
     private fun selectBreaker(nominalCurrent: Double, deviceType: DeviceType, hasMotor: Boolean): GroupProfile {
         val current = ceil(nominalCurrent).toInt()
 
@@ -166,6 +123,7 @@ class GroupCalculator(
         val requiredMin = minRatingByType[deviceType] ?: 10
         val finalRequired = maxOf(current, requiredMin)
 
+        // (rating A, cable mm^2, curve)
         val breakerOptions = listOf(
             Triple(10, 1.5, "B"),
             Triple(16, 2.5, "C"),
@@ -177,17 +135,68 @@ class GroupCalculator(
             Triple(63, 16.0, "D")
         )
 
-        val (rating, cable, type) = breakerOptions.firstOrNull { it.first >= finalRequired }
+        val (rating, cable, baseCurve) = breakerOptions.firstOrNull { it.first >= finalRequired }
             ?: throw IllegalArgumentException("Нет подходящего автомата для ${finalRequired}А")
 
-        val finalType = if (hasMotor) "D" else type
+        // D — только для реально больших пусков; малые моторы оставляем на C
+        val finalCurve = when {
+            hasMotor && rating >= 25 -> "D"
+            hasMotor -> "C"
+            else -> baseCurve
+        }
 
         return GroupProfile(
             maxCurrent = rating.toDouble(),
             breakerRating = rating,
             cableSection = cable,
-            breakerType = finalType
+            breakerType = finalCurve
         )
+    }
+
+    /** FFD‑упаковка устройств в группы с лимитом по номиналу автомата. */
+    private fun createCircuitGroups(
+        devices: List<DeviceEntity>,
+        profile: GroupProfile,
+        safetyProfile: SafetyProfile,
+        startGroupNumber: Int,
+        room: RoomEntity
+    ): List<CircuitGroup> {
+        val sorted = devices.sortedByDescending { it.nominalCurrent() }
+        val limit = profile.maxCurrent
+        val eps = 1e-6
+
+        // Одиночное устройство не должно превышать лимит группы
+        val tooBig = sorted.firstOrNull { it.nominalCurrent() - limit > eps }
+        require(tooBig == null) {
+            "Устройство '${tooBig?.name}' в комнате '${room.name}' требует " +
+                    "ток ${"%.2f".format(tooBig!!.nominalCurrent())} А > лимита группы ${limit} А. Нужна выделенная линия."
+        }
+
+        val bins = mutableListOf<MutableList<DeviceEntity>>()
+        val sums = mutableListOf<Double>()
+
+        for (d in sorted) {
+            val cur = d.nominalCurrent()
+            val idx = sums.indices.firstOrNull { sums[it] + cur <= limit + eps }
+            if (idx != null) {
+                bins[idx].add(d)
+                sums[idx] += cur
+            } else {
+                bins += mutableListOf(d)
+                sums += cur
+            }
+        }
+
+        var number = startGroupNumber
+        return bins.map { bin ->
+            createGroup(
+                devices = bin,
+                profile = profile,
+                safetyProfile = safetyProfile,
+                groupNumber = number++,
+                room = room
+            )
+        }
     }
 
     private fun createGroup(
@@ -198,7 +207,6 @@ class GroupCalculator(
         room: RoomEntity
     ): CircuitGroup {
         val nominalCurrent = devices.sumOf { it.nominalCurrent() }
-
         return CircuitGroup(
             roomName = room.name,
             groupType = devices.first().deviceType,
@@ -222,10 +230,9 @@ class GroupCalculator(
         room: RoomEntity
     ): CircuitGroup {
         val nominalCurrent = device.nominalCurrent()
-
         return CircuitGroup(
             roomName = room.name,
-            groupType = DeviceType.HEAVY_DUTY,
+            groupType = device.deviceType, // НЕ хардкодим HEAVY_DUTY
             devices = listOf(device.toDomainModel()),
             nominalCurrent = nominalCurrent,
             circuitBreaker = profile.breakerRating,
@@ -237,17 +244,38 @@ class GroupCalculator(
             roomId = room.id
         )
     }
+
+    private suspend fun saveGroupsWithDevices(groups: List<CircuitGroup>) {
+        // РЕКОМЕНДАЦИЯ: реализовать транзакционный метод в репозитории (replaceAll)
+        groupRepository.deleteAllGroups()
+        groupRepository.addGroup(groups)
+    }
+
+    private fun validateBeforeSave(groups: List<CircuitGroup>) {
+        val eps = 1e-6
+        groups.forEach { g ->
+            requireNotNull(g.phase) { "Группа №${g.groupNumber} без фазы" }
+            require(g.nominalCurrent <= g.circuitBreaker + eps) {
+                "Группа №${g.groupNumber}: ${"%.2f".format(g.nominalCurrent)} А > ${g.circuitBreaker} А"
+            }
+            require(g.devices.isNotEmpty()) { "Группа №${g.groupNumber} не содержит устройств" }
+            require(g.devices.all { it.deviceType == g.groupType }) {
+                "Группа №${g.groupNumber}: тип группы ${g.groupType} не совпадает с типами устройств"
+            }
+        }
+    }
 }
 
-fun DeviceEntity.nominalCurrent(): Double {
-    return CurrentCalculator.calculateNominalCurrent(
+// --- Extensions / мапперы ---
+
+fun DeviceEntity.nominalCurrent(): Double =
+    CurrentCalculator.calculateNominalCurrent(
         power = power.toDouble(),
         voltage = voltage.value.toDouble(),
         powerFactor = powerFactor,
         demandRatio = demandRatio,
         voltageType = voltage.type
     )
-}
 
 fun DeviceEntity.toDomainModel() = Device(
     id = deviceId,
@@ -278,5 +306,3 @@ fun CircuitGroupEntity.toDomainModel(devices: List<Device>) = CircuitGroup(
     rcdRequired = rcdRequired,
     rcdCurrent = rcdCurrent
 )
-
-

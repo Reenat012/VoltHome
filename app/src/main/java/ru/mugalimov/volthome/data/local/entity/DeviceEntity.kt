@@ -12,7 +12,7 @@ import java.util.Date
 
 @Entity(
     tableName = "devices",
-    indices = [Index(value = ["room_id", "name"], unique = true)],
+    indices = [Index(value = ["room_id", "name"])],
     foreignKeys = [ForeignKey(
         entity = RoomEntity::class,
         parentColumns = ["id"],

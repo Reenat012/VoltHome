@@ -24,7 +24,7 @@ import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.phase_load.GroupWithDevices
-import toDomainModel
+import ru.mugalimov.volthome.domain.use_case.toDomainModel
 import javax.inject.Inject
 
 class ExplicationRepositoryImpl @Inject constructor(

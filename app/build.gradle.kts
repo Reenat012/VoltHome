@@ -141,4 +141,6 @@ dependencies {
     implementation ("com.google.accompanist:accompanist-flowlayout:0.32.0")
     implementation("androidx.compose.foundation:foundation:1.5.0") // для FlowRow
 
+    implementation (libs.blurview)
+
 }

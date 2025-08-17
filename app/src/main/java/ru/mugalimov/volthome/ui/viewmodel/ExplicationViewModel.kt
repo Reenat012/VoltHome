@@ -15,6 +15,12 @@ import ru.mugalimov.volthome.domain.model.GroupingResult
 import ru.mugalimov.volthome.domain.use_case.GroupCalculatorFactory
 import ru.mugalimov.volthome.domain.use_case.IncomerSelector
 import javax.inject.Inject
+import ru.mugalimov.volthome.domain.model.Phase
+import ru.mugalimov.volthome.domain.model.report.*
+import ru.mugalimov.volthome.domain.use_case.getOrZero
+import ru.mugalimov.volthome.domain.use_case.phaseCurrents
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 @HiltViewModel
 class ExplicationViewModel @Inject constructor(
@@ -84,3 +90,55 @@ data class GroupUiState(
     val isLoading: Boolean = true,
     val error: Throwable? = null
 )
+
+fun ExplicationViewModel.buildReportData(): Pair<ReportMeta, List<ReportPhase>>? {
+    val s = uiState.value as? GroupScreenState.Success ?: return null
+    val date = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(System.currentTimeMillis())
+
+    val perPhase = phaseCurrents(s.groups)
+    val meta = ReportMeta(
+        date = date,
+        incomer = with(s.incomer) {
+            // Собираем короткое описание вводного аппарата
+            buildString {
+                append(kind.name)    // RCBO/MCB_ONLY/MCB_PLUS_RCD
+                append(", ")
+                append("${poles}P, ")
+                append("${mcbRating}A ${mcbCurve}, Icn ${icn}")
+                rcdType?.let { append(", RCD ${it} ${rcdSensitivityMa ?: 30}mA") }
+            }
+        },
+        totalGroups = s.totalGroups,
+        totalCurrent = s.totalCurrent,
+        phaseCurrents = mapOf(
+            "A" to perPhase.getOrZero(Phase.A),
+            "B" to perPhase.getOrZero(Phase.B),
+            "C" to perPhase.getOrZero(Phase.C)
+        )
+    )
+
+    // Группируем по фазам и готовим секции
+    val phases = s.groups
+        .groupBy { it.phase }
+        .toSortedMap(compareBy { it.name }) // A,B,C
+        .map { (phase, groups) ->
+            ReportPhase(
+                name = "Фаза ${phase.name}",
+                groups = groups.sortedBy { it.groupNumber }.map { g ->
+                    ReportGroup(
+                        title = "Группа #${g.groupNumber} — ${g.roomName}",
+                        devices = g.devices.map { d ->
+                            val pKw = d.power / 1000.0
+                            val iA = d.current
+                            ReportDevice(
+                                name = d.name,
+                                spec = "${"%.1f".format(pKw)} кВт, ${"%.1f".format(iA)} А"
+                            )
+                        }
+                    )
+                }
+            )
+        }
+
+    return meta to phases
+}

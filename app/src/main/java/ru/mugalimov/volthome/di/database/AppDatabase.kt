@@ -27,7 +27,7 @@ import kotlin.synchronized
         LoadEntity::class,
         GroupDeviceJoin::class,
         CircuitGroupEntity::class],
-    version = 15,
+    version = 16,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {

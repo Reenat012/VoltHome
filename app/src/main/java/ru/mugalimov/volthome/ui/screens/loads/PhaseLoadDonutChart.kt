@@ -138,7 +138,7 @@ fun PhaseLoadDonutChart(
                 )
                 Text(
                     text = statusText,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = statusColor,
                     fontWeight = FontWeight.Medium
                 )
