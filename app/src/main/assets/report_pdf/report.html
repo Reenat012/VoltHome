@@ -19,23 +19,31 @@
         .header__logo{width:42pt;height:42pt;object-fit:contain}
         .header__title{font-size:18pt;font-weight:700;line-height:1.1}
 
-        /* KPI */
+        /* Заголовки + KPI */
         h2{font-size:13.5pt;margin:14pt 0 6pt}
+        .h2-tight{margin-top:6pt;margin-bottom:6pt;}
         .kpi{margin:2pt 0 10pt;line-height:1.35}
         .muted{color:var(--muted)}
-        .divider{height:1px;background:var(--line);margin:8pt 0 12pt}
+        .divider{height:1px;background:var(--line);margin:8pt 0 2pt;}
 
-        /* Таблицы/чипы — компактнее */
+        /* Форсированный разрыв страницы */
+        .pagebreak{
+          page-break-before: always;   /* старое имя */
+          break-before: page;          /* новое имя (современные браузеры) */
+          height:0; line-height:0; margin:0; padding:0; border:0;
+        }
+
+        /* Таблицы компактнее */
         .table{width:100%;border-collapse:collapse}
         .table td{padding:5pt 6pt;vertical-align:top}
         .chip{display:inline-block;padding:2pt 7pt;border-radius:7pt;border:1px solid #d8d8d8;background:#fafafa;font-size:10pt}
         .li{margin:2pt 0}
 
-        /* Переносы */
-        .section{page-break-inside:avoid}
-        .row{page-break-inside:avoid}
+        /* Переносы/разрывы (мягкие) */
+        .section{ page-break-inside:auto; break-inside:auto; }
+        .table tr{ page-break-inside:avoid; break-inside:avoid; }
 
-        /* ВОДЯНОЙ ЗНАК (опционально) */
+        /* ВОДЯНОЙ ЗНАК */
         .watermark{
           position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
           pointer-events:none; opacity:.06;
@@ -51,6 +59,7 @@
         .footer .line{position:absolute;left:0;right:0;top:-6mm;height:1px;background:var(--line)}
     </style>
 
+    <!-- локальный шрифт (если используешь) -->
     <link rel="preload" href="file:///android_asset/fonts/NotoSans-Regular.ttf" as="font" type="font/ttf" crossorigin>
     <style>
         @font-face{
@@ -62,7 +71,6 @@
 </head>
 <body>
 
-<!-- Водяной знак для Free -->
 {{#watermark}}
 <div class="watermark">
     <img src="img/logo.png" alt="VoltHome"/>
@@ -90,7 +98,10 @@
 {{/donut}}
 
 <div class="divider"></div>
-<h2>Экспликация по фазам</h2>
+
+<!-- Жёстко начинаем новую страницу для экспликации -->
+<div class="pagebreak"></div>
+<h2 class="h2-tight">Экспликация по фазам</h2>
 
 {{#phases}}
 <div class="section">
