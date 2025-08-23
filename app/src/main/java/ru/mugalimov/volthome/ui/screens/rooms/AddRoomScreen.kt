@@ -55,7 +55,11 @@ fun AddRoomSheet(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Добавить комнату", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                Text(
+                    "Добавить комнату",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.weight(1f)
+                )
 
                 IconButton(onClick = {
                     val selected = defaultDevices.mapNotNull { d ->
@@ -127,12 +131,18 @@ private fun RoomTypeRow(
     selected: RoomType,
     onSelect: (RoomType) -> Unit
 ) {
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
         types.forEach { t ->
             val isSel = t == selected
             Surface(
                 shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.dp, if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
+                border = BorderStroke(
+                    1.dp,
+                    if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                ),
                 color = if (isSel) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface
             ) {
                 Text(
@@ -176,7 +186,11 @@ private fun DeviceRowExpandable(
                     Text(device.name, style = MaterialTheme.typography.titleMedium)
                     if (!expanded) {
                         Text(
-                            "${device.power} Вт · PF ${device.powerFactor.format(2)} · DR ${device.demandRatio.format(2)}",
+                            "${device.power} Вт · PF ${device.powerFactor.format(2)} · DR ${
+                                device.demandRatio.format(
+                                    2
+                                )
+                            }",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -261,8 +275,8 @@ private fun Chip(text: String) {
 private fun roomTypeLabel(type: RoomType): String = when (type) {
     RoomType.STANDARD -> "Стандартная"
     RoomType.BATHROOM -> "Ванная (УЗО)"
-    RoomType.KITCHEN  -> "Кухня (УЗО)"
-    RoomType.OUTDOOR  -> "Улица (УЗО)"
+    RoomType.KITCHEN -> "Кухня (УЗО)"
+    RoomType.OUTDOOR -> "Улица (УЗО)"
 }
 
 private fun Double.format(digits: Int) = "%.${digits}f".format(this).replace(',', '.')
@@ -295,17 +309,20 @@ private fun applyPresetFor(
             addFirstOf(DeviceType.LIGHTING, 1)
             addFirstOf(DeviceType.SOCKET, 1)
         }
+
         RoomType.BATHROOM -> {
             addFirstOf(DeviceType.LIGHTING, 1)
             addFirstOf(DeviceType.SOCKET, 1)
             addFirstOf(DeviceType.HEAVY_DUTY, 1) // например, бойлер, если есть
         }
+
         RoomType.KITCHEN -> {
             addFirstOf(DeviceType.LIGHTING, 1)
             // розеточные чаще кратно двум
             addFirstOf(DeviceType.SOCKET, 2)
             addFirstOf(DeviceType.HEAVY_DUTY, 1) // духовой шкаф/варочная, если есть
         }
+
         RoomType.OUTDOOR -> {
             addFirstOf(DeviceType.SOCKET, 1)
             // подсветка по желанию
