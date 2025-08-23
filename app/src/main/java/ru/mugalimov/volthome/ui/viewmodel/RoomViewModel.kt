@@ -23,7 +23,7 @@ import ru.mugalimov.volthome.domain.model.RoomType
 import java.util.Date
 
 @HiltViewModel //viewModel будет управляться Hilt
-//класс отвечает за управление состоянием экрана (например, списка комнат)
+// класс отвечает за управление состоянием экрана (например, списка комнат)
 // и взаимодействие с данными через репозиторий.
 class RoomViewModel @Inject constructor( // @Inject constructor помечает конструктор как доступный для внедрения зависимостей
     private val roomRepository: RoomRepository,

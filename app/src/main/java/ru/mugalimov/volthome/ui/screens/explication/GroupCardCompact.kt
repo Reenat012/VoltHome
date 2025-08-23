@@ -34,8 +34,7 @@ fun GroupCardCompact(
 
     // каталог дефолтных устройств
     val roomVm: RoomDetailViewModel = hiltViewModel()
-    LaunchedEffect(Unit) { roomVm.loadDefaultDevices() }
-    val defaultDevices by roomVm.defaultDevices.collectAsState(initial = emptyList())
+    val defaultDevices by roomVm.defaultDevices.collectAsState() // ← оставили ОДНУ строку
 
     // единый BottomSheet для всего
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -73,7 +72,6 @@ fun GroupCardCompact(
 
             Spacer(Modifier.height(8.dp))
 
-            // Параметр-бейджи: Автомат • Мощность • Ток — клики открывают bottom sheet
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -107,7 +105,6 @@ fun GroupCardCompact(
                 }
             }
 
-            // Чипы устройств — кликабельные
             if (group.devices.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
                 DeviceChips(
@@ -118,6 +115,8 @@ fun GroupCardCompact(
                         sheetDevice = DeviceSpecUi(
                             name = name,
                             power = found?.power ?: (real?.power ?: 0),
+                            // Если у DefaultDevice/Device voltage — это Int, то оставь так.
+                            // Если это Voltage(value,type) — возможно нужно .value
                             voltage = found?.voltage?.value ?: real?.voltage?.value,
                             demandRatio = found?.demandRatio,
                             powerFactor = found?.powerFactor ?: real?.powerFactor,
@@ -133,7 +132,6 @@ fun GroupCardCompact(
                 )
             }
 
-            // Загрузка
             Spacer(Modifier.height(12.dp))
             val load = (if (group.circuitBreaker > 0) group.nominalCurrent / group.circuitBreaker else 0.0)
                 .coerceAtLeast(0.0)
@@ -147,14 +145,15 @@ fun GroupCardCompact(
                 Spacer(Modifier.width(8.dp))
                 LinearProgressIndicator(
                     progress = load.coerceAtMost(1.0).toFloat(),
-                    modifier = Modifier.weight(1f).height(8.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(8.dp),
                     color = barColor
                 )
                 Spacer(Modifier.width(8.dp))
                 Text("${"%.0f".format(load * 100)}%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
-            // Разворачиваемые детали
             AnimatedVisibility(visible = expanded) {
                 Column {
                     Spacer(Modifier.height(12.dp)); Divider(); Spacer(Modifier.height(12.dp))
@@ -169,7 +168,6 @@ fun GroupCardCompact(
         }
     }
 
-    // ЕДИНЫЙ bottom sheet: если выбран девайс — показываем его карточку, иначе — текст подсказки
     if (sheetDevice != null || hint != null) {
         ModalBottomSheet(
             onDismissRequest = {

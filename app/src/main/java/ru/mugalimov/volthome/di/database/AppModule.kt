@@ -15,6 +15,7 @@ import ru.mugalimov.volthome.data.local.dao.GroupDao
 import ru.mugalimov.volthome.data.local.dao.GroupDeviceJoinDao
 import ru.mugalimov.volthome.data.local.dao.LoadDao
 import ru.mugalimov.volthome.data.local.dao.RoomDao
+import ru.mugalimov.volthome.data.local.dao.RoomsTxDao
 import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.data.repository.LoadsRepository
@@ -23,6 +24,8 @@ import ru.mugalimov.volthome.data.repository.impl.DeviceRepositoryImpl
 import ru.mugalimov.volthome.data.repository.impl.ExplicationRepositoryImpl
 import ru.mugalimov.volthome.data.repository.impl.LoadsRepositoryImpl
 import ru.mugalimov.volthome.data.repository.impl.RoomRepositoryImpl
+import ru.mugalimov.volthome.domain.model.provider.DeviceDefaultsProvider
+import ru.mugalimov.volthome.domain.model.provider.StaticDeviceDefaultsProvider
 import javax.inject.Singleton
 
 @Module
@@ -62,7 +65,12 @@ object DatabaseModule {
     fun provideGroupDao(database: AppDatabase): GroupDao = database.groupDao()
 
     @Provides
-    fun provideGroupDeviceJoinDao(database: AppDatabase): GroupDeviceJoinDao = database.groupDeviceJoinDao()
+    fun provideGroupDeviceJoinDao(database: AppDatabase): GroupDeviceJoinDao =
+        database.groupDeviceJoinDao()
+
+    @Provides
+    fun provideRoomsTxDao(database: AppDatabase): RoomsTxDao =
+        database.roomsTxDao()
 }
 
 // di/RepositoryModule.kt
@@ -86,4 +94,14 @@ abstract class RepositoryModule {
 
     @Binds
     abstract fun bindExplicationRepository(impl: ExplicationRepositoryImpl): ExplicationRepository
+}
+
+@Module
+@InstallIn(SingletonComponent::class)
+abstract class DefaultsModule {
+    @Binds
+    @Singleton
+    abstract fun bindDeviceDefaultsProvider(
+        impl: StaticDeviceDefaultsProvider
+    ): DeviceDefaultsProvider
 }

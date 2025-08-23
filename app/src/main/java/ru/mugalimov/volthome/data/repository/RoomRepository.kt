@@ -6,6 +6,9 @@ import ru.mugalimov.volthome.domain.model.Room
 import ru.mugalimov.volthome.domain.model.RoomWithDevice
 import ru.mugalimov.volthome.domain.model.RoomWithDevicesEntity
 import ru.mugalimov.volthome.domain.model.RoomWithLoad
+import ru.mugalimov.volthome.domain.model.create.CreatedRoomResult
+import ru.mugalimov.volthome.domain.model.create.DeviceCreateRequest
+import ru.mugalimov.volthome.domain.model.create.RoomCreateRequest
 
 interface RoomRepository {
     //поток данных с актуальным списком комнат
@@ -30,4 +33,8 @@ interface RoomRepository {
     suspend fun getDefaultRooms(): Flow<List<DefaultRoom>>
 
     suspend fun getAllRoom(): List<Room>
+
+    suspend fun addRoomWithDevices(req: RoomCreateRequest): CreatedRoomResult
+    suspend fun addDevicesToRoom(roomId: Long, devices: List<DeviceCreateRequest>): List<Long>
+    suspend fun deleteDevices(deviceIds: List<Long>)
 }

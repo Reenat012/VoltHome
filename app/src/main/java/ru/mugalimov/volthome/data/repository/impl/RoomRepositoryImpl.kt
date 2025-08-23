@@ -17,6 +17,7 @@ import ru.mugalimov.volthome.data.local.entity.LoadEntity
 import ru.mugalimov.volthome.data.local.entity.RoomEntity
 import ru.mugalimov.volthome.core.error.RoomAlreadyExistsException
 import ru.mugalimov.volthome.core.error.RoomNotFoundException
+import ru.mugalimov.volthome.data.local.dao.RoomsTxDao
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.Load
@@ -28,6 +29,10 @@ import ru.mugalimov.volthome.domain.model.DefaultRoom
 import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.domain.model.RoomWithDevice
 import ru.mugalimov.volthome.domain.model.RoomWithDevicesEntity
+import ru.mugalimov.volthome.domain.model.create.CreatedRoomResult
+import ru.mugalimov.volthome.domain.model.create.DeviceCreateRequest
+import ru.mugalimov.volthome.domain.model.create.RoomCreateRequest
+import ru.mugalimov.volthome.domain.model.provider.DeviceDefaultsProvider
 import ru.mugalimov.volthome.ui.components.JsonParser
 import java.util.Date
 import javax.inject.Inject
@@ -37,6 +42,8 @@ class RoomRepositoryImpl @Inject constructor(
     private val deviceDao: DeviceDao,
     private val loadDao: LoadDao,
     private val explicationRepository: ExplicationRepository,
+    private val roomsTxDao: RoomsTxDao,
+    private val deviceDefaults: DeviceDefaultsProvider,
     //свойство dispatchers, которое хранит диспетчер для запуска корутин
     //в фоновых потоках, подходящих для IO-задач
     @IoDispatcher private val dispatchers: CoroutineDispatcher,
@@ -143,6 +150,64 @@ class RoomRepositoryImpl @Inject constructor(
                 throw RoomNotFoundException()
             }
         }
+
+    override suspend fun addRoomWithDevices(req: RoomCreateRequest): CreatedRoomResult =
+        withContext(dispatchers) {
+            if (roomDao.existsByName(req.name)) {
+                throw IllegalArgumentException("Комната '${req.name}' уже существует")
+            }
+
+            val room = RoomEntity(
+                id = 0L,
+                name = req.name,
+                roomType = req.roomType,
+                createdAt = java.util.Date()      // ← Date по твоей модели
+            )
+
+            // Собираем устройства без roomId — он появится в транзакции
+            val devices = expand(req.devices, roomId = null)
+
+            val (roomId, deviceIds) = roomsTxDao.insertRoomWithDevices(room, devices)
+            CreatedRoomResult(roomId = roomId, deviceIds = deviceIds)
+        }
+
+
+    override suspend fun addDevicesToRoom(
+        roomId: Long,
+        devices: List<DeviceCreateRequest>
+    ): List<Long> = withContext(dispatchers) {
+        val entities = expand(devices, roomId = roomId) // сразу с FK
+        roomsTxDao.insertDevices(entities)
+    }
+
+    override suspend fun deleteDevices(deviceIds: List<Long>) = withContext(dispatchers) {
+        if (deviceIds.isNotEmpty()) roomsTxDao.deleteDevicesByIds(deviceIds)
+    }
+
+    private fun expand(
+        reqs: List<DeviceCreateRequest>,
+        roomId: Long? = null
+    ): List<DeviceEntity> = reqs.flatMap { r ->
+        val def = deviceDefaults[r.type]
+        val qty = r.count.coerceAtLeast(0)
+        (0 until qty).map {
+            DeviceEntity(
+                deviceId = 0L,
+                name = r.title,                                   // ← твоё поле name
+                power = r.ratedPowerW ?: def.power,               // ← Int
+                voltage = r.voltage ?: def.voltage,               // ← Voltage (класс)
+                demandRatio = r.demandRatio ?: def.demandRatio,   // ← Double
+                createdAt = java.util.Date(),                     // ← Date()
+                roomId = roomId ?: 0L,                            // ← FK — проставим в транзакции
+                deviceType = r.type,                              // ← enum DeviceType
+                powerFactor = r.powerFactor ?: def.powerFactor,   // ← Double
+                hasMotor = def.hasMotor,
+                requiresDedicatedCircuit = def.requiresDedicatedCircuit,
+                requiresSocketConnection = def.requiresSocketConnection
+            )
+        }
+    }
+
 }
 
 //преобразования объектов из Entity в Domain

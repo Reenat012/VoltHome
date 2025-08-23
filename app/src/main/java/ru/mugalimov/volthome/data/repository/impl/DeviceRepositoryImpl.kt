@@ -123,7 +123,7 @@ class DeviceRepositoryImpl @Inject constructor(
             }
         }
 
-    override suspend fun getDefaultDevices(): Flow<List<DefaultDevice>> {
+    override fun getDefaultDevices(): Flow<List<DefaultDevice>> {
         return try {
             JsonParser.parseDevices(context)
         } catch (e: Exception) {

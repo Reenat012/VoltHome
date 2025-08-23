@@ -22,7 +22,7 @@ interface DeviceRepository {
     suspend fun getAllDevicesByRoomId(roomId: Long): List<Device>
 
     // Получение устройств из каталога json файла
-    suspend fun getDefaultDevices(): Flow<List<DefaultDevice>>
+    fun getDefaultDevices(): Flow<List<DefaultDevice>>
 
     // Получение всех устройств
     suspend fun getAllDevices(): List<Device>

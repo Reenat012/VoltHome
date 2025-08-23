@@ -1,120 +1,102 @@
 package ru.mugalimov.volthome.ui.viewmodel
 
-import android.content.ContentValues.TAG
 import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import ru.mugalimov.volthome.domain.model.Room
-import ru.mugalimov.volthome.data.repository.RoomRepository
-import javax.inject.Inject
-import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.launchIn
-import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import ru.mugalimov.volthome.data.local.entity.DeviceEntity
-import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.data.repository.DeviceRepository
+import ru.mugalimov.volthome.data.repository.RoomRepository
 import ru.mugalimov.volthome.domain.model.DefaultDevice
+import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
+import ru.mugalimov.volthome.domain.model.Room
 import ru.mugalimov.volthome.domain.model.Voltage
+import ru.mugalimov.volthome.domain.model.create.DeviceCreateRequest
+import ru.mugalimov.volthome.domain.use_case.AddDevicesToRoomUseCase
+import ru.mugalimov.volthome.domain.use_case.DeleteDevicesUseCase
 import java.util.Date
-import java.util.Random
 
+/**
+ * Детальная VM комнаты:
+ * - Загружает данные комнаты и наблюдает устройства этой комнаты
+ * - Пакетно добавляет выбранные устройства (multi-select + qty)
+ * - Поддерживает Undo для дозагрузки устройств
+ * - Сохраняет классический одиночный addDevice(...) для совместимости
+ */
 @HiltViewModel
 class RoomDetailViewModel @Inject constructor(
     private val roomRepository: RoomRepository,
     private val deviceRepository: DeviceRepository,
-    savedStateHandle: SavedStateHandle // Конверт с запросом (ID комнаты)
+    private val addDevicesToRoomUseCase: AddDevicesToRoomUseCase,
+    private val deleteDevicesUseCase: DeleteDevicesUseCase,
+    savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
-    private val _roomId = savedStateHandle.get<Long>("roomId") ?: 0
-    val roomId = _roomId
+    // --------------------------------------
+    // Input arguments
+    // --------------------------------------
+    private val _roomId: Long = savedStateHandle.get<Long>("roomId") ?: 0L
+    val roomId: Long get() = _roomId
 
-    //хранилище комнат
+    // --------------------------------------
+    // UI state
+    // --------------------------------------
     private val _room = MutableStateFlow<Room?>(null)
     val room: StateFlow<Room?> = _room.asStateFlow()
 
-    //приватное состояние, хранящее данные для UI (список устройств, загрузка, ошибки).
-    // Используется mutableStateOf (из Jetpack Compose) для реактивного обновления UI.
     private val _uiState = MutableStateFlow(DeviceUiState())
-
-    //публичное свойство, предоставляющее доступ к _uiState
     val uiState: StateFlow<DeviceUiState> = _uiState.asStateFlow()
 
-    // Получаем устройства из каталога
+    // Каталог/пресеты устройств для листа «Все устройства»
     private val _defaultDevices = MutableStateFlow<List<DefaultDevice>>(emptyList())
     val defaultDevices: StateFlow<List<DefaultDevice>> = _defaultDevices.asStateFlow()
 
-    private val _error = MutableSharedFlow<String>() // Для одноразовых событий
-    val error: SharedFlow<String> = _error
+    // Одноразовые события для UI: снекбары/Undo/ошибки
+    private val _actions = MutableSharedFlow<RoomDetailAction>(
+        replay = 0, extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    val actions: SharedFlow<RoomDetailAction> = _actions
 
     init {
-        if (roomId.toInt() == 0) {
-            Log.e(TAG, "Ошибка: roomId не передан или равен 0")
-            // Можно выбросить исключение или показать ошибку в UI
+        if (_roomId == 0L) {
+            Log.e("RoomDetailViewModel", "roomId не передан или равен 0")
         }
-
-        loadRooms()
+        loadRoom()
         observeDevices()
         loadDefaultDevices()
     }
 
-    fun loadDefaultDevices() {
-        viewModelScope.launch {
-            deviceRepository.getDefaultDevices()
-                .collect { devices ->
-                    _defaultDevices.value = devices
-                    Log.d("DeviceLoad", "Loaded ${devices.size} devices")
-                }
-        }
-    }
+    // --------------------------------------
+    // Data loading
+    // --------------------------------------
 
-    private fun loadRooms() {
+    private fun loadRoom() {
         viewModelScope.launch {
             try {
-                //ищем комнату по roomId
-                val foundRoom = roomRepository.getRoomById(roomId)
-
-                //записываем комнату в хранилище
-                _room.value = foundRoom
-            } catch (e: Exception) {
-                //если комната не найдена, оставляем хранилище пустым
+                _room.value = roomRepository.getRoomById(roomId)
+            } catch (_: Throwable) {
                 _room.value = null
             }
         }
     }
 
-
-    //наблюдение за данными
     private fun observeDevices() {
         viewModelScope.launch {
-            deviceRepository.observeDevicesByIdRoom(_roomId)
-                //начинаем поиск
+            deviceRepository.observeDevicesByIdRoom(roomId)
                 .onStart { _uiState.update { it.copy(isLoading = true) } }
-                // Обрабатываем ошибки
-                .catch { e ->
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            error = e
-                        )
-                    }
-                }
-                // Обновляем список комнат
+                .catch { e -> _uiState.update { it.copy(isLoading = false, error = e) } }
                 .collect { devices ->
                     _uiState.update {
                         it.copy(
@@ -127,7 +109,66 @@ class RoomDetailViewModel @Inject constructor(
         }
     }
 
-    //добавление комнаты
+    private fun loadDefaultDevices() {
+        viewModelScope.launch {
+            deviceRepository.getDefaultDevices()
+                .catch { /* заглушка, каталог не критичен */ }
+                .collect { list -> _defaultDevices.value = list }
+        }
+    }
+
+    // --------------------------------------
+    // New flow: пакетное добавление устройств + Undo
+    // --------------------------------------
+
+    /**
+     * Добавляет в текущую комнату набор устройств (multi-select + qty).
+     * Вызывать после подтверждения в bottom sheet «Все устройства».
+     */
+    fun addDevicesToCurrentRoom(selected: List<Pair<DefaultDevice, Int>>) {
+        viewModelScope.launch {
+            startLoading()
+            try {
+                val reqs: List<DeviceCreateRequest> = selected
+                    .filter { it.second > 0 }
+                    .map { (d, qty) -> d.toCreateRequest(qty) }
+
+                if (reqs.isEmpty()) {
+                    _actions.emit(RoomDetailAction.UserMessage("Выберите устройства"))
+                    stopLoading()
+                    return@launch
+                }
+
+                val insertedIds = addDevicesToRoomUseCase(roomId, reqs)
+                _actions.emit(RoomDetailAction.DevicesAdded(roomId, insertedIds))
+                clearError()
+            } catch (t: Throwable) {
+                _actions.emit(RoomDetailAction.Error(t))
+                handleError(t)
+            } finally {
+                stopLoading()
+            }
+        }
+    }
+
+    /**
+     * Undo для дозагрузки: удаляет только что добавленные устройства по их id.
+     */
+    fun undoAddDevices(deviceIds: List<Long>) {
+        viewModelScope.launch {
+            try {
+                deleteDevicesUseCase(deviceIds)
+            } catch (_: Throwable) {
+                // ошибку отката можно тихо игнорировать, чтобы не раздражать пользователя
+            }
+        }
+    }
+
+    // --------------------------------------
+    // Classic single-add (оставляем для совместимости)
+    // --------------------------------------
+
+    @Deprecated("Используйте addDevicesToCurrentRoom() с мультивыбором и qty")
     fun addDevice(
         name: String,
         power: Int,
@@ -140,24 +181,15 @@ class RoomDetailViewModel @Inject constructor(
         requiresDedicatedCircuit: Boolean
     ) {
         viewModelScope.launch {
-            //TODO удалить после отладки
-            Log.d(TAG, "Заходим в метод")
             try {
-                _uiState.update {
+                _uiState.update { it.copy(isLoading = true) }
 
-                    //TODO удалить после отладки
-                    Log.d(TAG, "loading")
-
-                    it.copy(isLoading = true)
-                }
-
-                // Проверяем валидность параметров
+                // простая валидация (оставил как у вас)
                 validateName(name)
                 validatePower(power)
                 validateVoltage(voltage)
                 validateDemandRatio(demandRatio)
 
-                // Добавляем комнату через репозиторий
                 deviceRepository.addDevice(
                     Device(
                         name = name,
@@ -171,98 +203,91 @@ class RoomDetailViewModel @Inject constructor(
                         requiresDedicatedCircuit = requiresDedicatedCircuit
                     )
                 )
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(
-                        error = e,
-                        isLoading = false
-                    )
-                }
-            }
 
+                clearError()
+            } catch (e: Exception) {
+                handleError(e)
+            } finally {
+                _uiState.update { it.copy(isLoading = false) }
+            }
         }
     }
 
-    // Удаление комнаты
+    // Удаление одного устройства (как и было)
     fun deleteDevice(deviceId: Long) {
         viewModelScope.launch {
-            executeOperation {
-                deviceRepository.deleteDevice(deviceId)
-            }
+            executeOperation { deviceRepository.deleteDevice(deviceId) }
         }
     }
 
-    /**
-     * Выполняет операцию с обработкой состояния загрузки и ошибок.
-     * @param block Блок кода, который нужно выполнить.
-     */
-    private suspend fun <T> executeOperation(
-        block: suspend () -> T
-    ) {
-        startLoading() // Начинаем загрузку
+    // --------------------------------------
+    // Helpers / Validation / State
+    // --------------------------------------
+
+    private suspend fun <T> executeOperation(block: suspend () -> T) {
+        startLoading()
         try {
-            block() // Выполняем операцию
-            clearError() // Очищаем ошибки, если операция успешна
+            block()
+            clearError()
         } catch (e: Exception) {
-            handleError(e) // Обрабатываем ошибку
+            handleError(e)
         } finally {
-            stopLoading() // Завершаем загрузку
+            stopLoading()
         }
     }
 
     private fun validateName(name: String) {
-        if (name.isBlank()) {
-            throw IllegalArgumentException("Имя комнаты не может быть пустым")
-        }
+        if (name.isBlank()) throw IllegalArgumentException("Имя комнаты не может быть пустым")
     }
 
     private fun validatePower(power: Int) {
-        if (power.toString().isBlank()) {
-            throw IllegalArgumentException("Поле мощности (кВт) не может быть пустым")
-        }
+        if (power.toString().isBlank()) throw IllegalArgumentException("Поле мощности (Вт) не может быть пустым")
     }
 
     private fun validateVoltage(voltage: Voltage) {
-        if (voltage.toString().isBlank()) {
-            throw IllegalArgumentException("Поле напряжения (В) не может быть пустым")
-        }
+        if (voltage.toString().isBlank()) throw IllegalArgumentException("Поле напряжения (В) не может быть пустым")
     }
 
     private fun validateDemandRatio(demandRatio: Double) {
-        if (demandRatio.toString().isBlank()) {
-            throw IllegalArgumentException("Поле коэффициента спроса (В) не может быть пустым")
-        }
+        if (demandRatio.toString().isBlank()) throw IllegalArgumentException("Коэффициент спроса не может быть пустым")
     }
 
-    //обновляем список комнат в состоянии UI
     private fun updateDevices(devices: List<Device>) {
         _uiState.update { it.copy(devices = devices, error = null) }
     }
 
-    //обрабатываем ошибку
     private fun handleError(e: Throwable) {
         _uiState.update { it.copy(error = e) }
     }
 
-    //начинаем загрузку и обновляем состояние UI
     private fun startLoading() {
         _uiState.update { it.copy(isLoading = true) }
     }
 
-    //завершаем загрузку и обновляем состояние UI
     private fun stopLoading() {
         _uiState.update { it.copy(isLoading = false) }
     }
 
-    //сброс ошибки в состоянии UI
     private fun clearError() {
         _uiState.update { it.copy(error = null) }
     }
 }
 
-// Класс описывает состояние UI
+/** Состояние UI экрана комнаты */
 data class DeviceUiState(
     val devices: List<Device> = emptyList(),
     val isLoading: Boolean = true,
     val error: Throwable? = null
 )
+
+/** Маппер пресета каталога в запрос на создание */
+private fun DefaultDevice.toCreateRequest(qty: Int): DeviceCreateRequest =
+    DeviceCreateRequest(
+        title = this.name,
+        type = this.deviceType,
+        count = qty.coerceAtLeast(1),
+        ratedPowerW = this.power,
+        powerFactor = this.powerFactor,
+        demandRatio = this.demandRatio,
+        voltage = this.voltage
+    )

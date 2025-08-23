@@ -22,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ru.mugalimov.volthome.domain.model.Room
 
@@ -65,10 +66,11 @@ fun RoomCard(
                 Spacer(modifier = Modifier.width(16.dp))
 
                 Text(
-                    text = room.name,
+                    text = room.name.ifBlank { "Без названия" },
                     style = MaterialTheme.typography.headlineSmall,
                     color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.padding(end = 16.dp)
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 
