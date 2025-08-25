@@ -1,193 +1,184 @@
-package ru.mugalimov.volthome.ui.screens.room
+ package ru.mugalimov.volthome.ui.screens.room
 
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
-import kotlinx.coroutines.launch
-import ru.mugalimov.volthome.domain.model.DefaultDevice
-import ru.mugalimov.volthome.domain.model.Device
-import ru.mugalimov.volthome.ui.viewmodel.RoomDetailAction
-import ru.mugalimov.volthome.ui.viewmodel.RoomDetailViewModel
-import ru.mugalimov.volthome.ui.sheets.AllDevicesSheet
+ import androidx.compose.foundation.layout.*
+ import androidx.compose.foundation.shape.CircleShape
+ import androidx.compose.foundation.shape.RoundedCornerShape
+ import androidx.compose.material.icons.Icons
+ import androidx.compose.material.icons.rounded.Add
+ import androidx.compose.material.icons.rounded.ArrowBack
+ import androidx.compose.material.icons.rounded.Bathtub
+ import androidx.compose.material.icons.rounded.Home
+ import androidx.compose.material.icons.rounded.Kitchen
+ import androidx.compose.material.icons.rounded.Park
+ import androidx.compose.material3.*
+ import androidx.compose.runtime.*
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
+ import androidx.compose.ui.draw.clip
+ import androidx.compose.ui.text.style.TextOverflow
+ import androidx.compose.ui.unit.dp
+ import androidx.hilt.navigation.compose.hiltViewModel
+ import ru.mugalimov.volthome.domain.model.DefaultDevice
+ import ru.mugalimov.volthome.domain.model.Room
+ import ru.mugalimov.volthome.domain.model.RoomType
+ import ru.mugalimov.volthome.ui.sheets.AllDevicesSheet
+ import ru.mugalimov.volthome.ui.viewmodel.RoomDetailViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun RoomDetailScreen(
-    vm: RoomDetailViewModel = hiltViewModel()
-) {
-    val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
+ @OptIn(ExperimentalMaterial3Api::class)
+ @Composable
+ fun RoomDetailScreen(
+     onBack: () -> Unit,
+     vm: RoomDetailViewModel = hiltViewModel()
+ ) {
+     val room: Room? by vm.room.collectAsState()
+     val uiState by vm.uiState.collectAsState()
+     val defaultDevices by vm.defaultDevices.collectAsState()
 
-    // состояние из VM
-    val ui by vm.uiState.collectAsState()
-    val room by vm.room.collectAsState()
-    val defaultDevices by vm.defaultDevices.collectAsState()
+     var showAllDevices by remember { mutableStateOf(false) }
 
-    // локальное состояние: показать лист устройств
-    var showAllDevices by remember { mutableStateOf(false) }
+     Scaffold(
+         topBar = {
+             TopAppBar(
+                 navigationIcon = {
+                     IconButton(onClick = onBack) {
+                         Icon(Icons.Rounded.ArrowBack, contentDescription = "Назад")
+                     }
+                 },
+                 title = {
+                     Row(verticalAlignment = Alignment.CenterVertically) {
+                         RoomTypeAvatar(
+                             type = room?.roomType ?: RoomType.STANDARD,
+                             modifier = Modifier
+                                 .size(40.dp)
+                                 .clip(CircleShape)
+                         )
+                         Spacer(Modifier.width(12.dp))
+                         Column {
+                             Text(
+                                 text = room?.name ?: "Комната",
+                                 style = MaterialTheme.typography.titleLarge,
+                                 maxLines = 1,
+                                 overflow = TextOverflow.Ellipsis
+                             )
+                             Text(
+                                 text = "Тип комнаты: ${roomTypeLabel(room?.roomType ?: RoomType.STANDARD)}",
+                                 style = MaterialTheme.typography.bodySmall,
+                                 color = MaterialTheme.colorScheme.onSurfaceVariant
+                             )
+                         }
+                     }
+                 }
+             )
+         },
+         floatingActionButton = {
+             ExtendedFloatingActionButton(
+                 onClick = { showAllDevices = true },
+                 icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
+                 text = { Text("Добавить устройства") }
+             )
+         }
+     ) { padding ->
+         Column(
+             modifier = Modifier
+                 .padding(padding)
+                 .fillMaxSize()
+         ) {
+             RoomSummary(
+                 count = uiState.devices.size,
+                 totalPowerW = uiState.devices.sumOf { it.power }
+             )
+             androidx.compose.foundation.layout.Spacer(Modifier.height(8.dp))
+             DeviceList(
+                 devices = uiState.devices,
+                 modifier = Modifier.fillMaxSize()
+             )
+         }
+     }
 
-    // обработка одноразовых событий VM
-    LaunchedEffect(Unit) {
-        vm.actions.collect { action ->
-            when (action) {
-                is RoomDetailAction.DevicesAdded -> {
-                    val res = snackbarHostState.showSnackbar(
-                        message = "Добавлено ${action.deviceIds.size} устройств",
-                        actionLabel = "Отменить",
-                        withDismissAction = true
-                    )
-                    if (res == SnackbarResult.ActionPerformed) {
-                        vm.undoAddDevices(action.deviceIds)
-                    }
-                }
-                is RoomDetailAction.UserMessage -> snackbarHostState.showSnackbar(action.message)
-                is RoomDetailAction.Error -> snackbarHostState.showSnackbar(
-                    "Ошибка: ${action.throwable.localizedMessage ?: "неизвестная"}"
-                )
-            }
-        }
-    }
+     if (showAllDevices) {
+         AllDevicesSheet(
+             defaultDevices = defaultDevices,
+             onConfirm = { selected: List<DefaultDevice> ->
+                 val pairs: List<Pair<DefaultDevice, Int>> =
+                     selected.groupingBy { it }.eachCount().map { (dev, qty) -> dev to qty }
+                 vm.addDevicesToCurrentRoom(pairs)
+                 showAllDevices = false
+             },
+             onDismiss = { showAllDevices = false }
+         )
+     }
+ }
 
-    val fabDisabled = ui.isLoading
-    val fabAlpha = if (fabDisabled) 0.5f else 1f
+ /* ---------- Room summary: акцентные статистические бейджи ---------- */
 
-    Scaffold(
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Text(
-                        text = room?.name ?: "Комната",
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            )
-        },
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { if (!fabDisabled) showAllDevices = true },
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text("Добавить устройства") },
-                modifier = Modifier.alpha(fabAlpha)
-            )
-        }
-    ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
-            when {
-                ui.isLoading && ui.devices.isEmpty() -> {
-                    // первичная загрузка
-                    LoadingState()
-                }
-                ui.error != null && ui.devices.isEmpty() -> {
-                    ErrorState(message = ui.error?.localizedMessage ?: "Ошибка загрузки")
-                }
-                else -> {
-                    if (ui.devices.isEmpty()) {
-                        EmptyState(onAdd = { showAllDevices = true })
-                    } else {
-                        DevicesList(devices = ui.devices)
-                    }
-                }
-            }
-        }
-    }
+ @Composable
+ private fun RoomSummary(count: Int, totalPowerW: Int) {
+     Surface(
+         shape = RoundedCornerShape(16.dp),
+         color = MaterialTheme.colorScheme.primaryContainer,
+         modifier = Modifier
+             .padding(horizontal = 16.dp, vertical = 8.dp)
+             .fillMaxWidth()
+     ) {
+         Row(
+             modifier = Modifier.padding(14.dp),
+             horizontalArrangement = Arrangement.spacedBy(10.dp),
+             verticalAlignment = Alignment.CenterVertically
+         ) {
+             StatBadge(text = "$count устройств(а)")
+             StatBadge(text = "${(totalPowerW / 1000.0).format(2)} кВт")
+         }
+     }
+ }
 
-    if (showAllDevices) {
-        AllDevicesSheet(
-            defaultDevices = defaultDevices,
-            onConfirm = { selected: List<DefaultDevice> ->
-                val withQty: List<Pair<DefaultDevice, Int>> = selected.map { it to 1 }
-                vm.addDevicesToCurrentRoom(withQty)
-                showAllDevices = false
-            },
-            onDismiss = { showAllDevices = false }
-        )
-    }
-}
+ @Composable
+ private fun StatBadge(text: String) {
+     Surface(
+         shape = RoundedCornerShape(14.dp),
+         color = MaterialTheme.colorScheme.surface,               // без обводки
+         contentColor = MaterialTheme.colorScheme.onSurface
+     ) {
+         Text(
+             text = text,
+             style = MaterialTheme.typography.labelLarge,
+             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+         )
+     }
+ }
 
-/* ===================== UI-элементы экрана ===================== */
+ /* ---------- UI helpers (без изменений) ---------- */
 
-@Composable
-private fun LoadingState() {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator()
-    }
-}
+ @Composable
+ private fun RoomTypeAvatar(type: RoomType, modifier: Modifier = Modifier) {
+     val bg = when (type) {
+         RoomType.STANDARD -> MaterialTheme.colorScheme.primaryContainer
+         RoomType.BATHROOM -> MaterialTheme.colorScheme.tertiaryContainer
+         RoomType.KITCHEN  -> MaterialTheme.colorScheme.secondaryContainer
+         RoomType.OUTDOOR  -> MaterialTheme.colorScheme.surfaceVariant
+     }
+     val fg = when (type) {
+         RoomType.STANDARD -> MaterialTheme.colorScheme.onPrimaryContainer
+         RoomType.BATHROOM -> MaterialTheme.colorScheme.onTertiaryContainer
+         RoomType.KITCHEN  -> MaterialTheme.colorScheme.onSecondaryContainer
+         RoomType.OUTDOOR  -> MaterialTheme.colorScheme.onSurfaceVariant
+     }
+     val icon = when (type) {
+         RoomType.STANDARD -> Icons.Rounded.Home
+         RoomType.BATHROOM -> Icons.Rounded.Bathtub
+         RoomType.KITCHEN  -> Icons.Rounded.Kitchen
+         RoomType.OUTDOOR  -> Icons.Rounded.Park
+     }
+     Surface(color = bg, contentColor = fg, modifier = modifier) {
+         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+             Icon(icon, contentDescription = null)
+         }
+     }
+ }
 
-@Composable
-private fun ErrorState(message: String) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
-    }
-}
-
-@Composable
-private fun DevicesList(
-    devices: List<Device>,
-    // onClick: (Device) -> Unit = {}
-) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(vertical = 8.dp, horizontal = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        items(devices, key = { it.id ?: it.hashCode().toLong() }) { d ->
-            DeviceRow(d)
-        }
-    }
-}
-
-@Composable
-private fun DeviceRow(d: Device) {
-    // Подстрой поля под твою модель Device, ниже — частые поля:
-    // name, power (Вт), powerFactor, demandRatio, voltage (value/type)
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(Modifier.padding(12.dp)) {
-            Text(d.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-
-            Spacer(Modifier.height(6.dp))
-
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                AssistChip(label = { Text("${d.power} Вт") }, onClick = {}, enabled = false)
-                AssistChip(label = { Text("PF ${trim2(d.powerFactor)}") }, onClick = {}, enabled = false)
-                AssistChip(label = { Text("DR ${trim2(d.demandRatio)}") }, onClick = {}, enabled = false)
-                val v = d.voltage
-                AssistChip(
-                    label = { Text("${v.value}V • ${v.type.name}") },
-                    onClick = {},
-                    enabled = false
-                )
-            }
-        }
-    }
-}
-
-/* ===================== helpers ===================== */
-
-private fun trim2(x: Double): String = "%,.2f".format(x)
-
-@Composable
-private fun EmptyState(onAdd: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text("В этой комнате пока нет устройств")
-        Spacer(Modifier.height(8.dp))
-        Button(onClick = onAdd) { Text("Добавить устройства") }
-    }
-}
+ private fun Double.format(d: Int) = "%.${d}f".format(this).replace(',', '.')
+ private fun roomTypeLabel(type: RoomType): String = when (type) {
+     RoomType.STANDARD -> "Стандартная"
+     RoomType.BATHROOM -> "Ванная"
+     RoomType.KITCHEN  -> "Кухня"
+     RoomType.OUTDOOR  -> "Улица"
+ }

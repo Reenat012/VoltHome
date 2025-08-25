@@ -186,7 +186,7 @@ private fun DeviceRowExpandable(
                     Text(device.name, style = MaterialTheme.typography.titleMedium)
                     if (!expanded) {
                         Text(
-                            "${device.power} Вт · PF ${device.powerFactor.format(2)} · DR ${
+                            "${device.power} Вт · Cos ф = ${device.powerFactor.format(2)} · К-т спроса = ${
                                 device.demandRatio.format(
                                     2
                                 )
@@ -249,8 +249,8 @@ private fun Counter(qty: Int, onInc: () -> Unit, onDec: () -> Unit) {
 private fun ParamChips(device: DefaultDevice) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Chip("${device.power} Вт")
-        Chip("PF ${device.powerFactor.format(2)}")
-        Chip("DR ${device.demandRatio.format(2)}")
+        Chip("cos ф ${device.powerFactor.format(2)}")
+        Chip("к-т спроса ${device.demandRatio.format(2)}")
         Chip(device.voltage.asLabel())
         Chip("Тип: ${device.deviceType.name}")
     }

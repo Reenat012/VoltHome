@@ -41,6 +41,9 @@ class RoomViewModel @Inject constructor( // @Inject constructor помечает
     private val _defaultRooms = MutableStateFlow<List<DefaultRoom>>(emptyList())
     val defaultRooms: StateFlow<List<DefaultRoom>> = _defaultRooms.asStateFlow()
 
+    private val _deviceCounts = MutableStateFlow<Map<Long, Int>>(emptyMap())
+    val deviceCounts: StateFlow<Map<Long, Int>> = _deviceCounts.asStateFlow()
+
     //Блок init вызывается при создании ViewModel.
     //Здесь запускается метод observeRooms(),
     //который начинает наблюдать (подписывается) за изменениями в списке комнат.
@@ -71,6 +74,14 @@ class RoomViewModel @Inject constructor( // @Inject constructor помечает
                             error = null
                         )
                     }
+
+                    // считаем количества устройств по комнатам
+                    // (если хочешь — сделай через async/awaitAll, но так тоже ок)
+                    val counts = rooms.associate { room ->
+                        val cnt = deviceRepository.getAllDevicesByRoomId(room.id).size
+                        room.id to cnt
+                    }
+                    _deviceCounts.value = counts
                 } // Обновляем список комнат
         }
     }

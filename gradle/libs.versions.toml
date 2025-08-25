@@ -37,6 +37,7 @@ firebaseCrashlyticsBuildtools = "3.0.4"
 litertSupportApi = "1.3.0"
 storage = "1.5.0"
 foundationDesktop = "1.7.0"
+appcompat = "1.7.1"
 
 [libraries]
 androidx-activity-compose-v182 = { module = "androidx.activity:activity-compose", version.ref = "activityComposeVersion" }
@@ -83,6 +84,7 @@ firebase-crashlytics-buildtools = { group = "com.google.firebase", name = "fireb
 litert-support-api = { group = "com.google.ai.edge.litert", name = "litert-support-api", version.ref = "litertSupportApi" }
 androidx-storage = { group = "androidx.test.services", name = "storage", version.ref = "storage" }
 androidx-foundation-desktop = { group = "androidx.compose.foundation", name = "foundation-desktop", version.ref = "foundationDesktop" }
+androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

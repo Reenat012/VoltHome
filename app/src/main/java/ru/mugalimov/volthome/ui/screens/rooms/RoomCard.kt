@@ -14,9 +14,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.graphics.vector.ImageVector
 import ru.mugalimov.volthome.domain.model.Room
 import ru.mugalimov.volthome.domain.model.RoomType
 
@@ -31,11 +32,21 @@ fun RoomCard(
     val needsRcd = room.roomType in setOf(RoomType.BATHROOM, RoomType.KITCHEN, RoomType.OUTDOOR)
     val count = devicesCount ?: room.devices.size
 
+    // ---- мягкая тонировка фона по типу комнаты (без прозрачности) ----
+    val base = MaterialTheme.colorScheme.surface
+    val tone = when (room.roomType) {
+        RoomType.STANDARD -> MaterialTheme.colorScheme.primaryContainer
+        RoomType.BATHROOM -> MaterialTheme.colorScheme.tertiaryContainer
+        RoomType.KITCHEN  -> MaterialTheme.colorScheme.secondaryContainer
+        RoomType.OUTDOOR  -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val cardBg = tone.copy(alpha = 0.50f).compositeOver(base)
+
     ElevatedCard(
         modifier = modifier.clickable { onClick() },
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.elevatedCardColors(),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
+        colors = CardDefaults.elevatedCardColors(containerColor = cardBg),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp)
     ) {
         Row(
             modifier = Modifier
@@ -43,7 +54,7 @@ fun RoomCard(
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Крупная иконка-аватар слева
+            // Крупная иконка-аватар слева (цвет по типу)
             RoomTypeAvatar(
                 type = room.roomType,
                 modifier = Modifier
@@ -66,7 +77,7 @@ fun RoomCard(
                         )
                         Spacer(Modifier.height(2.dp))
                         Text(
-                            text = "Тип комнаты: ${roomTypeLabel(room.roomType)}",
+                            text = roomTypeLabel(room.roomType),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -105,22 +116,36 @@ fun RoomCard(
 
 @Composable
 private fun RoomTypeAvatar(type: RoomType, modifier: Modifier = Modifier) {
-    val icon: ImageVector = when (type) {
-        RoomType.STANDARD -> Icons.Rounded.Home
-        RoomType.BATHROOM -> Icons.Rounded.Bathtub
-        RoomType.KITCHEN  -> Icons.Rounded.Kitchen
-        RoomType.OUTDOOR  -> Icons.Rounded.Park
+    val (bg, fg, icon) = when (type) {
+        RoomType.STANDARD -> Triple(
+            MaterialTheme.colorScheme.primaryContainer,
+            MaterialTheme.colorScheme.onPrimaryContainer,
+            Icons.Rounded.Home
+        )
+        RoomType.BATHROOM -> Triple(
+            MaterialTheme.colorScheme.tertiaryContainer,
+            MaterialTheme.colorScheme.onTertiaryContainer,
+            Icons.Rounded.Bathtub
+        )
+        RoomType.KITCHEN -> Triple(
+            MaterialTheme.colorScheme.secondaryContainer,
+            MaterialTheme.colorScheme.onSecondaryContainer,
+            Icons.Rounded.Kitchen
+        )
+        RoomType.OUTDOOR -> Triple(
+            MaterialTheme.colorScheme.surfaceVariant,
+            MaterialTheme.colorScheme.onSurfaceVariant,
+            Icons.Rounded.Park
+        )
     }
+
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(22.dp), // круг при size=44.dp
-        color = MaterialTheme.colorScheme.primaryContainer,
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+        shape = RoundedCornerShape(22.dp),
+        color = bg,
+        contentColor = fg
     ) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Icon(icon, contentDescription = null)
         }
     }
@@ -130,7 +155,7 @@ private fun RoomTypeAvatar(type: RoomType, modifier: Modifier = Modifier) {
 private fun SoftChip(text: String) {
     Surface(
         shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         Text(

@@ -4,22 +4,8 @@ import android.annotation.SuppressLint
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -36,16 +22,16 @@ import ru.mugalimov.volthome.ui.viewmodel.RoomsViewModel
 @Composable
 fun RoomsScreen(
     onClickRoom: (Long) -> Unit,
-    onAddRoom: () -> Unit, // legacy — не используется, оставлен как раньше
+    onAddRoom: () -> Unit, // legacy
     viewModel: RoomViewModel = hiltViewModel(),
     addViewModel: RoomsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val defaultDevices by addViewModel.defaultDevices.collectAsState()
     val isBusy by addViewModel.isBusy.collectAsState()
+    val deviceCounts by viewModel.deviceCounts.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
-
     var showAddRoom by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -81,9 +67,7 @@ fun RoomsScreen(
             FloatingActionButton(
                 onClick = { if (!fabDisabled) showAddRoom = true },
                 modifier = Modifier.alpha(fabAlpha)
-            ) {
-                Icon(Icons.Filled.Add, contentDescription = "Добавить")
-            }
+            ) { Icon(Icons.Filled.Add, contentDescription = "Добавить") }
         }
     ) { padding ->
         when {
@@ -91,6 +75,7 @@ fun RoomsScreen(
             uiState.error != null -> ErrorView(uiState.error!!)
             else -> RoomList(
                 rooms = uiState.rooms,
+                deviceCounts = deviceCounts,          // ← ВАЖНО
                 onDelete = viewModel::deleteRoom,
                 modifier = Modifier.padding(padding),
                 onClickRoom = onClickRoom

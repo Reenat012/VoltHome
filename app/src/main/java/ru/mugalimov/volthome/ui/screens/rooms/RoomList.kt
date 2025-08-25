@@ -34,7 +34,7 @@ fun RoomList(
 
             RoomCard(
                 room = room,
-                devicesCount = count,
+                devicesCount = deviceCounts[room.id] ?: room.devices.size, // ← ВАЖНО
                 onClick = { onClickRoom(room.id) },
                 onDelete = { onDelete(room.id) }
             )

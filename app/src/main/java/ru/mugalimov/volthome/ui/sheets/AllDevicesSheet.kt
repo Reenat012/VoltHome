@@ -106,7 +106,7 @@ fun AllDevicesSheet(
                                     Text(device.name, style = MaterialTheme.typography.titleMedium)
                                     if (!expanded) {
                                         Text(
-                                            "${device.power} Вт · PF ${device.powerFactor.format(2)} · DR ${device.demandRatio.format(2)}",
+                                            "${device.power} Вт · Cos ф = ${device.powerFactor.format(2)} · К-т спроса = ${device.demandRatio.format(2)}",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -199,8 +199,8 @@ private fun CounterPill(qty: Int, onDec: () -> Unit, onInc: () -> Unit) {
 private fun ParamChips(device: DefaultDevice) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Chip("${device.power} Вт")
-        Chip("PF ${device.powerFactor.format(2)}")
-        Chip("DR ${device.demandRatio.format(2)}")
+        Chip("Cos ф ${device.powerFactor.format(2)}")
+        Chip("К-т мощ-ти ${device.demandRatio.format(2)}")
         Chip(device.voltage.asLabel())
         Chip("Тип: ${device.deviceType.name}")
     }

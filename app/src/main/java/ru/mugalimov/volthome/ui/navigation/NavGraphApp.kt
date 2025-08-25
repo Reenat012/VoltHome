@@ -90,7 +90,10 @@ fun NavGraphApp(
         ) { backStackEntry ->
             // Важно: VM берём с backStackEntry, чтобы SavedStateHandle получил roomId
             val vm: RoomDetailViewModel = hiltViewModel(backStackEntry)
-            RoomDetailScreen(vm = vm)
+            RoomDetailScreen(
+                vm = vm,
+                onBack = { navController.popBackStack() }
+            )
         }
 
 //        composable(
