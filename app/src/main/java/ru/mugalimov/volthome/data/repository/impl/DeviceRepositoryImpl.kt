@@ -7,7 +7,6 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
@@ -19,6 +18,8 @@ import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.di.database.IoDispatcher
+import ru.mugalimov.volthome.domain.mapper.mapToDomainDevices
+import ru.mugalimov.volthome.domain.mapper.toDomainDevice
 import ru.mugalimov.volthome.domain.model.DefaultDevice
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.ui.components.JsonParser
@@ -44,7 +45,7 @@ class DeviceRepositoryImpl @Inject constructor(
     override suspend fun observeDevicesByIdRoom(roomId: Long): Flow<List<Device>> {
         return deviceDao.observeDevicesByIdRoom(roomId)
             //преобразуем список DeviceEntity в список Device
-            .map { entities -> entities.toDomainModelListDevice() }
+            .map { entities -> entities.mapToDomainDevices() }
             .flowOn(dispatchers)
     }
 
@@ -105,7 +106,7 @@ class DeviceRepositoryImpl @Inject constructor(
                 val entity = deviceDao.getDeviceById(deviceId)
 
                 //преобразовываем из Entity в модель удобную для чтения
-                entity?.toDomainModelListDevice()
+                entity?.toDomainDevice()
             } catch (e: Exception) {
                 throw DeviceNotFoundException()
             }
@@ -116,7 +117,7 @@ class DeviceRepositoryImpl @Inject constructor(
             return@withContext try {
                 val listDeviceEntity = deviceDao.getAllDevicesByRoomId(roomId)
 
-                listDeviceEntity.toDomainModelListDevice()
+                listDeviceEntity.mapToDomainDevices()
 
             } catch (e: Exception) {
                 throw RoomNotFoundException()
@@ -134,40 +135,9 @@ class DeviceRepositoryImpl @Inject constructor(
     override suspend fun getAllDevices(): List<Device> =
         withContext(dispatchers) {
             return@withContext try {
-                deviceDao.getAllDevices().toDomainModelListDevice()
+                deviceDao.getAllDevices().mapToDomainDevices()
             } catch (e: Exception) {
                 throw DeviceNotFoundException()
             }
         }
-
 }
-
-//преобразования объектов из Entity в Domain
-private fun List<DeviceEntity>.toDomainModelListDevice(): List<Device> {
-    return map { entity ->
-        Device(
-            id = entity.deviceId,
-            name = entity.name,
-            power = entity.power,
-            voltage = entity.voltage,
-            demandRatio = entity.demandRatio,
-            roomId = entity.roomId,
-            createdAt = entity.createdAt,
-            deviceType = entity.deviceType,
-            powerFactor = entity.powerFactor
-        )
-    }
-}
-
-
-private fun DeviceEntity.toDomainModelListDevice() = Device(
-    id = deviceId,
-    name = name,
-    power = power,
-    demandRatio = demandRatio,
-    voltage = voltage,
-    roomId = roomId,
-    createdAt = createdAt,
-    deviceType = deviceType,
-    powerFactor = powerFactor
-)

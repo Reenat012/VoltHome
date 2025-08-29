@@ -11,7 +11,7 @@ object CurrentCalculator {
         demandRatio: Double,
         voltageType: VoltageType
     ): Double {
-        val pf = (powerFactor ?: 1.0).coerceIn(0.8, 1.0)
+        val pf = (powerFactor ?: 1.0).coerceAtLeast(0.2) // защита от нуля/мусора
         val volt = if (voltage > 0) voltage else 230.0
 
         return when (voltageType) {

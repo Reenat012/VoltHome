@@ -1,6 +1,7 @@
 package ru.mugalimov.volthome.ui.screens.explication
 
 import androidx.activity.ComponentActivity
+import androidx.annotation.ContentView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -24,7 +25,7 @@ import ru.mugalimov.volthome.ui.viewmodel.GroupScreenState
 
 @Composable
 fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
-    LaunchedEffect(Unit) { viewModel.calculateGroups() }
+    LaunchedEffect(Unit) { viewModel.recalcAndSaveGroups() }
 
     val state by viewModel.uiState.collectAsState()
     val ctx = LocalContext.current
@@ -33,7 +34,7 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
         is GroupScreenState.Loading -> LoadingState()
         is GroupScreenState.Error -> ErrorState(
             message = s.message,
-            onRetry = { viewModel.calculateGroups() }
+            onRetry = { viewModel.recalcAndSaveGroups() }
         )
         is GroupScreenState.Success -> {
             val groups = s.groups
@@ -102,6 +103,8 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
                 }
             }
         }
+
+        null -> ContentView()
     }
 }
 

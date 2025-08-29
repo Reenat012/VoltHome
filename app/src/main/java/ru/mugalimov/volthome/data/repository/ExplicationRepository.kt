@@ -37,4 +37,7 @@ interface ExplicationRepository {
 
     fun observeGroupsWithDevices(): Flow<List<CircuitGroupWithDevices>>
 
+    suspend fun replaceAllGroupsTransactional(
+        groups: List<CircuitGroup>
+    )
 }

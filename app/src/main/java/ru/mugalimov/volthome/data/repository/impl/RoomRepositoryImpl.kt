@@ -1,11 +1,9 @@
 package ru.mugalimov.volthome.data.repository.impl
 
 import android.content.Context
-import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
@@ -19,16 +17,16 @@ import ru.mugalimov.volthome.core.error.RoomAlreadyExistsException
 import ru.mugalimov.volthome.core.error.RoomNotFoundException
 import ru.mugalimov.volthome.data.local.dao.RoomsTxDao
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
-import ru.mugalimov.volthome.domain.model.Device
-import ru.mugalimov.volthome.domain.model.Load
 import ru.mugalimov.volthome.domain.model.Room
 import ru.mugalimov.volthome.domain.model.RoomWithLoad
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.data.repository.RoomRepository
+import ru.mugalimov.volthome.domain.mapper.mapToDomainRooms
+import ru.mugalimov.volthome.domain.mapper.toDomainModelGroup
+import ru.mugalimov.volthome.domain.mapper.toDomainModelListRoomWithDevices
+import ru.mugalimov.volthome.domain.mapper.toEntityRoom
 import ru.mugalimov.volthome.domain.model.DefaultRoom
-import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.domain.model.RoomWithDevice
-import ru.mugalimov.volthome.domain.model.RoomWithDevicesEntity
 import ru.mugalimov.volthome.domain.model.create.CreatedRoomResult
 import ru.mugalimov.volthome.domain.model.create.DeviceCreateRequest
 import ru.mugalimov.volthome.domain.model.create.RoomCreateRequest
@@ -54,7 +52,7 @@ class RoomRepositoryImpl @Inject constructor(
     //используется для получения изменения данных
     override fun observeRooms(): Flow<List<Room>> {
         return roomDao.observeAllRooms()
-            .map { entities -> entities.toDomainModelListRoom() }
+            .map { entities -> entities.mapToDomainRooms() }
             .flowOn(dispatchers)
     }
 
@@ -83,7 +81,7 @@ class RoomRepositoryImpl @Inject constructor(
     override suspend fun updateRoom(room: Room) {
         withContext(dispatchers) {
             try {
-                val roomEntity = room.toDomainModelRoomEntity()
+                val roomEntity = room.toEntityRoom()
 
                 roomDao.updateRoom(roomEntity)
             } catch (e: Exception) {
@@ -145,7 +143,7 @@ class RoomRepositoryImpl @Inject constructor(
     override suspend fun getAllRoom(): List<Room> =
         withContext(dispatchers) {
             return@withContext try {
-                roomDao.getAllRooms().toDomainModelListRoom()
+                roomDao.getAllRooms().mapToDomainRooms()
             } catch (e: Exception) {
                 throw RoomNotFoundException()
             }
@@ -210,58 +208,10 @@ class RoomRepositoryImpl @Inject constructor(
 
 }
 
-//преобразования объектов из Entity в Domain
-private fun List<RoomEntity>.toDomainModelListRoom(): List<Room> {
-    return map { entity ->
-        Room(
-            id = entity.id,
-            name = entity.name,
-            createdAt = entity.createdAt,
-            roomType = entity.roomType
-        )
-    }
-}
-
-// Преобразования объектов из Domain в Entity
-
-private fun Room.toDomainModelRoomEntity() = RoomEntity(
-    id = id,
-    name = name,
-    createdAt = createdAt,
-    roomType = roomType
-)
-
-private fun DeviceEntity.toDomainModelListDevice() = Device(
-    id = deviceId,
-    name = name,
-    power = power,
-    demandRatio = demandRatio,
-    voltage = voltage,
-    createdAt = createdAt,
-    roomId = roomId,
-    deviceType = deviceType,
-    powerFactor = powerFactor
-)
 
 
-private fun RoomWithDevicesEntity.toDomainModelGroup(): Room {
-    return Room(
-        id = room.id,
-        name = room.name,
-        createdAt = room.createdAt,
-        devices = devices.map { it.toDomainModelListDevice() },
-        roomType = room.roomType
-    )
-}
 
-private fun List<RoomWithDevicesEntity>.toDomainModelListRoomWithDevices(): List<RoomWithDevice> {
-    return map { entity ->
-        RoomWithDevice(
-            room = entity.room,
-            devices = entity.devices
-        )
-    }
-}
+
 
 
 

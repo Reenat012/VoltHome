@@ -1,20 +1,20 @@
 package ru.mugalimov.volthome.domain.use_case
 
-import distributeGroupsBalanced
-import ru.mugalimov.volthome.data.local.entity.CircuitGroupEntity
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.data.local.entity.RoomEntity
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.data.repository.RoomRepository
+import ru.mugalimov.volthome.domain.mapper.toDomainDevice
 import ru.mugalimov.volthome.domain.model.CircuitGroup
-import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.ElectricalSystem
 import ru.mugalimov.volthome.domain.model.GroupProfile
 import ru.mugalimov.volthome.domain.model.GroupingResult
 import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.domain.model.SafetyProfile
+import ru.mugalimov.volthome.domain.use_case.PhaseDistributor.distributeGroupsBalanced
 import kotlin.math.ceil
+
 
 class GroupCalculator(
     private val roomRepository: RoomRepository,
@@ -210,7 +210,7 @@ class GroupCalculator(
         return CircuitGroup(
             roomName = room.name,
             groupType = devices.first().deviceType,
-            devices = devices.map { it.toDomainModel() },
+            devices = devices.map { it.toDomainDevice() },
             nominalCurrent = nominalCurrent,
             circuitBreaker = profile.breakerRating,
             cableSection = profile.cableSection,
@@ -233,7 +233,7 @@ class GroupCalculator(
         return CircuitGroup(
             roomName = room.name,
             groupType = device.deviceType, // НЕ хардкодим HEAVY_DUTY
-            devices = listOf(device.toDomainModel()),
+            devices = listOf(device.toDomainDevice()),
             nominalCurrent = nominalCurrent,
             circuitBreaker = profile.breakerRating,
             cableSection = profile.cableSection,
@@ -270,39 +270,10 @@ class GroupCalculator(
 
 fun DeviceEntity.nominalCurrent(): Double =
     CurrentCalculator.calculateNominalCurrent(
-        power = power.toDouble(),
-        voltage = voltage.value.toDouble(),
+        power       = power.toDouble(),
+        voltage     = (voltage.value.takeIf { it > 0 } ?: 230).toDouble(),
         powerFactor = powerFactor,
         demandRatio = demandRatio,
         voltageType = voltage.type
     )
 
-fun DeviceEntity.toDomainModel() = Device(
-    id = deviceId,
-    name = name,
-    power = power,
-    voltage = voltage,
-    demandRatio = demandRatio,
-    powerFactor = powerFactor,
-    hasMotor = hasMotor,
-    requiresDedicatedCircuit = requiresDedicatedCircuit,
-    deviceType = deviceType,
-    roomId = roomId
-)
-
-fun List<DeviceEntity>.toDomainModels() = map { it.toDomainModel() }
-
-fun CircuitGroupEntity.toDomainModel(devices: List<Device>) = CircuitGroup(
-    groupId = 0L,
-    groupNumber = groupNumber,
-    roomName = roomName,
-    roomId = roomId,
-    groupType = DeviceType.valueOf(groupType),
-    devices = devices,
-    nominalCurrent = nominalCurrent,
-    circuitBreaker = circuitBreaker,
-    cableSection = cableSection,
-    breakerType = breakerType,
-    rcdRequired = rcdRequired,
-    rcdCurrent = rcdCurrent
-)

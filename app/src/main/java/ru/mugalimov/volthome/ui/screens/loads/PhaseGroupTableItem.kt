@@ -98,7 +98,7 @@ fun PhaseGroupTableItem(
                                 group.devices.forEach { deviceName ->
                                     AssistChip(
                                         onClick = {},
-                                        label = { Text(deviceName) },
+                                        label = { Text(deviceName.name) },
                                         border = AssistChipDefaults.assistChipBorder(false)
                                     )
                                 }

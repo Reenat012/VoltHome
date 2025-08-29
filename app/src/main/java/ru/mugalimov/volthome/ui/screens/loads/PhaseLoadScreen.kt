@@ -18,7 +18,7 @@ fun PhaseLoadScreen(
     viewModel: PhaseLoadViewModel = hiltViewModel()
 ) {
     val explicationVm: ExplicationViewModel = hiltViewModel()
-    LaunchedEffect(Unit) { explicationVm.calculateGroups() }
+    LaunchedEffect(Unit) { explicationVm.recalcAndSaveGroups() }
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 

@@ -4,7 +4,6 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
@@ -18,6 +17,7 @@ import ru.mugalimov.volthome.data.local.entity.LoadEntity
 import ru.mugalimov.volthome.domain.model.Load
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.data.repository.LoadsRepository
+import ru.mugalimov.volthome.domain.mapper.toDomainModelListLoad
 import java.util.Date
 import javax.inject.Inject
 
@@ -93,28 +93,3 @@ class LoadsRepositoryImpl @Inject constructor(
         loadDao.observeLoads().first()
     }
 }
-
-private fun List<LoadEntity>.toDomainModelListLoad(): List<Load> {
-    return map { entity ->
-        Load(
-            id = entity.id,
-            name = entity.name,
-            current = entity.currentRoom,
-            sumPower = entity.powerRoom,
-            countDevices = entity.countDevices,
-            createdAt = entity.createdAt,
-            roomId = entity.roomId
-        )
-    }
-}
-
-
-private fun LoadEntity.toDomainModelLoad() = Load(
-    id = id,
-    name = name,
-    current = currentRoom,
-    sumPower = powerRoom,
-    countDevices = countDevices,
-    createdAt = createdAt,
-    roomId = roomId
-)

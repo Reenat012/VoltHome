@@ -1,105 +1,140 @@
+package ru.mugalimov.volthome.domain.use_case
+
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Phase
-import ru.mugalimov.volthome.domain.model.PhaseImbalance
-import ru.mugalimov.volthome.domain.model.VoltageType
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 
 /**
- * Жадное распределение по фазам + небольшая локальная оптимизация первых topN.
- * ВАЖНО: номер группы (groupNumber) НЕ меняем — только phase.
+ * Распределяет однофазные группы по фазам A/B/C так, чтобы минимизировать перекос.
+ * Алгоритм: жадная раскладка + локальная оптимизация topN «тяжёлых» групп.
+ *
+ * Важно:
+ * - Номера групп не меняем.
+ * - phase переприсваиваем только в результате.
  */
-fun distributeGroupsBalanced(
-    groups: List<CircuitGroup>,
-    topN: Int = 10,
-    maxPasses: Int = 2
-): List<CircuitGroup> {
-    if (groups.isEmpty()) return emptyList()
+object PhaseDistributor {
 
-    val phases = listOf(Phase.A, Phase.B, Phase.C)
+    // ⬇ изменено: чуть глубже локальная оптимизация
+    private const val TOP_N = 15
+    private const val MAX_PASSES = 3
 
-    // детерминированно: по току ↓, при равенстве — по номеру ↑
-    val sorted = groups.sortedWith(
-        compareByDescending<CircuitGroup> { it.nominalCurrent }
-            .thenBy { it.groupNumber }
-    )
-
-    // 1) Жадная раскладка
-    val loads = doubleArrayOf(0.0, 0.0, 0.0)
-    val phaseOf = IntArray(sorted.size) { -1 }
-    sorted.forEachIndexed { idx, g ->
-        val pi = loads.indices.minBy { loads[it] }
-        loads[pi] += g.nominalCurrent
-        phaseOf[idx] = pi
+    /**
+     * Крошечный детерминированный «шум» для устойчивых тай-брейков при равных нагрузках.
+     * Не влияет на итоговые суммы заметно (±0.005 A), но убирает прилипание к фазе A.
+     */
+    // ⬇ добавлено
+    private fun weightWithEpsilon(value: Double, seed: Int): Double {
+        // Линейный конгруэнтный генератор от seed (берём groupNumber как seed)
+        val x = seed * 1103515245 + 12345
+        val u = ((x ushr 16) and 0xFFFF) / 65535.0 // 0..1
+        return value + (u - 0.5) * 0.01           // ±0.005 A
     }
 
-    // 2) Локальная оптимизация для первых topN тяжёлых
-    val K = minOf(topN, sorted.size)
-    repeat(maxPasses.coerceAtLeast(0)) {
-        var improved = false
-        for (i in 0 until K) {
-            val g = sorted[i]
-            val curPi = phaseOf[i]
-            var bestPi = curPi
-            var bestImb = imbalance(loads)
+    fun distributeGroupsBalanced(input: List<CircuitGroup>): List<CircuitGroup> {
+        if (input.isEmpty()) return emptyList()
 
-            for (pi in 0..2) if (pi != curPi) {
-                val test = loads.copyOf()
-                test[curPi] -= g.nominalCurrent
-                test[pi]    += g.nominalCurrent
-                val imb = imbalance(test)
-                if (imb + 1e-9 < bestImb) { bestImb = imb; bestPi = pi }
-            }
+        val phases = arrayOf(Phase.A, Phase.B, Phase.C)
 
-            if (bestPi != curPi) {
-                loads[curPi] -= g.nominalCurrent
-                loads[bestPi] += g.nominalCurrent
-                phaseOf[i] = bestPi
-                improved = true
-            }
+        // 1) Отсортируем по току (тяжёлые раньше), тай-брейк через микрошум
+        // ⬇ изменено
+        val sorted = input.sortedWith(compareByDescending<CircuitGroup> {
+            weightWithEpsilon(it.nominalCurrent, it.groupNumber)
+        }.thenBy { it.groupNumber })
+
+        // Текущие нагрузки по фазам
+        val loads = doubleArrayOf(0.0, 0.0, 0.0)
+
+        // Списки назначенных групп по фазам
+        val assigned = arrayOf(mutableListOf<CircuitGroup>(), mutableListOf<CircuitGroup>(), mutableListOf<CircuitGroup>())
+
+        // 2) Жадная раскладка: кладём каждую группу в «самую лёгкую» фазу с устойчивым тай-брейком
+        // ⬇ изменено
+        for (g in sorted) {
+            val idx = loads.withIndex().minBy { weightWithEpsilon(it.value, g.groupNumber) }.index
+            loads[idx] += g.nominalCurrent
+            assigned[idx] += g.copy(phase = phases[idx]) // фаза только в результате
         }
-        if (!improved) return@repeat
+
+        // 3) Локальная оптимизация: пробуем переставлять топ-N тяжёлых между фазами
+        //    уменьшая (max - min)
+        // ⬇ усилено
+        val heavy = sorted.take(min(TOP_N, sorted.size)).toMutableList()
+
+        repeat(MAX_PASSES) {
+            var improved = false
+
+            // перебор кандидатных перестановок: берём тяжёлую группу и пробуем переместить её в другую фазу,
+            // если это уменьшает перекос
+            for (g in heavy) {
+                val srcIdx = findPhaseIndex(assigned, g.groupNumber)
+                if (srcIdx == -1) continue
+
+                val srcLoadBefore = loads[srcIdx]
+                val loadIfRemove = srcLoadBefore - g.nominalCurrent
+
+                var bestIdx = srcIdx
+                var bestDelta = currentDelta(loads)
+
+                for (dstIdx in 0..2) {
+                    if (dstIdx == srcIdx) continue
+                    val dstLoadBefore = loads[dstIdx]
+                    val maxAfter = maxOf(
+                        if (srcIdx == 0) loadIfRemove else loads[0],
+                        if (srcIdx == 1) loadIfRemove else loads[1],
+                        if (srcIdx == 2) loadIfRemove else loads[2],
+                        if (dstIdx == 0) dstLoadBefore + g.nominalCurrent else loads[0],
+                        if (dstIdx == 1) dstLoadBefore + g.nominalCurrent else loads[1],
+                        if (dstIdx == 2) dstLoadBefore + g.nominalCurrent else loads[2],
+                    )
+                    val minAfter = minOf(
+                        if (srcIdx == 0) loadIfRemove else loads[0],
+                        if (srcIdx == 1) loadIfRemove else loads[1],
+                        if (srcIdx == 2) loadIfRemove else loads[2],
+                        if (dstIdx == 0) dstLoadBefore + g.nominalCurrent else loads[0],
+                        if (dstIdx == 1) dstLoadBefore + g.nominalCurrent else loads[1],
+                        if (dstIdx == 2) dstLoadBefore + g.nominalCurrent else loads[2],
+                    )
+                    val delta = maxAfter - minAfter
+                    if (delta + 1e-9 < bestDelta) {
+                        bestDelta = delta
+                        bestIdx = dstIdx
+                    }
+                }
+
+                if (bestIdx != srcIdx) {
+                    // применяем перемещение
+                    assigned[srcIdx].removeIf { it.groupNumber == g.groupNumber }
+                    loads[srcIdx] -= g.nominalCurrent
+
+                    assigned[bestIdx].add(g.copy(phase = phases[bestIdx]))
+                    loads[bestIdx] += g.nominalCurrent
+
+                    improved = true
+                }
+            }
+
+            if (!improved) return@repeat
+        }
+
+        // 4) Собираем результат, возвращаем в порядке номеров групп (как у тебя принято)
+        val result = (assigned[0] + assigned[1] + assigned[2])
+            .sortedBy { it.groupNumber }
+
+        return result
     }
 
-    // Формируем результат: НЕ трогаем номера групп
-    val assigned = sorted.mapIndexed { idx, g ->
-        g.copy(phase = phases[phaseOf[idx]])
+    private fun currentDelta(loads: DoubleArray): Double {
+        val max = max(loads[0], max(loads[1], loads[2]))
+        val min = min(loads[0], min(loads[1], loads[2]))
+        return max - min
     }
-    return assigned.sortedBy { it.groupNumber }
-}
 
-/** Перекос по фазам = max(load) - min(load) */
-private fun imbalance(loads: DoubleArray): Double {
-    var mn = Double.POSITIVE_INFINITY
-    var mx = Double.NEGATIVE_INFINITY
-    for (x in loads) { if (x < mn) mn = x; if (x > mx) mx = x }
-    return mx - mn
-}
-
-/** Суммирует токи по уже назначенным фазам (безопасно к null) */
-fun phaseCurrents(groups: List<CircuitGroup>): Map<Phase, Double> =
-    groups.filter { it.phase != null }
-        .groupBy { it.phase!! }
-        .mapValues { (_, gs) -> gs.sumOf { it.nominalCurrent } }
-        .withDefault { 0.0 }
-
-/** 3Ф, если задействовано ≥ 2 фаз; иначе 1Ф */
-fun inferVoltageType(groups: List<CircuitGroup>): VoltageType {
-    val used = groups.mapNotNull { it.phase }.toSet()
-    return if (used.size >= 2) VoltageType.AC_3PHASE else VoltageType.AC_1PHASE
-}
-
-/** Удобный геттер (если где-то нужна карта с нулями) */
-fun Map<Phase, Double>.getOrZero(phase: Phase): Double = getOrDefault(phase, 0.0)
-
-/** Компоновка метрик перекоса (для UI) */
-fun computeImbalance(perPhase: Map<Phase, Double>): PhaseImbalance {
-    val a = perPhase.getOrDefault(Phase.A, 0.0)
-    val b = perPhase.getOrDefault(Phase.B, 0.0)
-    val c = perPhase.getOrDefault(Phase.C, 0.0)
-    val iMax = maxOf(a, b, c)
-    val iMin = minOf(a, b, c)
-    val iAvg = (a + b + c) / 3.0
-    val delta = iMax - iMin
-    val pct = if (iAvg > 0) (delta / iAvg) * 100.0 else 0.0
-    val worst = when (iMax) { a -> Phase.A; b -> Phase.B; else -> Phase.C }
-    return PhaseImbalance(a, b, c, iMax, iMin, iAvg, delta, pct, worst)
+    private fun findPhaseIndex(buckets: Array<MutableList<CircuitGroup>>, groupNumber: Int): Int {
+        for (i in buckets.indices) {
+            if (buckets[i].any { it.groupNumber == groupNumber }) return i
+        }
+        return -1
+    }
 }

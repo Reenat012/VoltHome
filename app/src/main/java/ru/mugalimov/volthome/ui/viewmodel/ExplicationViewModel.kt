@@ -1,63 +1,81 @@
 package ru.mugalimov.volthome.ui.viewmodel
 
-import android.content.ContentValues.TAG
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
+import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.GroupingResult
+import ru.mugalimov.volthome.domain.model.Phase
+import ru.mugalimov.volthome.domain.model.report.ReportDevice
+import ru.mugalimov.volthome.domain.model.report.ReportGroup
+import ru.mugalimov.volthome.domain.model.report.ReportMeta
+import ru.mugalimov.volthome.domain.model.report.ReportPhase
 import ru.mugalimov.volthome.domain.use_case.GroupCalculatorFactory
 import ru.mugalimov.volthome.domain.use_case.IncomerSelector
-import javax.inject.Inject
-import ru.mugalimov.volthome.domain.model.Phase
-import ru.mugalimov.volthome.domain.model.report.*
 import ru.mugalimov.volthome.domain.use_case.getOrZero
 import ru.mugalimov.volthome.domain.use_case.phaseCurrents
 import java.text.SimpleDateFormat
 import java.util.Locale
+import javax.inject.Inject
 
 @HiltViewModel
 class ExplicationViewModel @Inject constructor(
+    private val repo: ExplicationRepository,
     private val groupCalculatorFactory: GroupCalculatorFactory,
-    private val incomerSelector: IncomerSelector
+    @IoDispatcher private val dispatchers: CoroutineDispatcher
 ) : ViewModel() {
-
     private val _uiState = MutableStateFlow<GroupScreenState>(GroupScreenState.Loading)
-    val uiState: StateFlow<GroupScreenState> = _uiState.asStateFlow()
+    val uiState: StateFlow<GroupScreenState> = _uiState
 
-    fun calculateGroups() {
-        viewModelScope.launch {
-            _uiState.value = GroupScreenState.Loading
-            val calc = groupCalculatorFactory.create()
-            when (val res = calc.calculateGroups()) {
-                is GroupingResult.Error -> _uiState.value = GroupScreenState.Error(res.message)
-                is GroupingResult.Success -> {
-                    val groups = res.system.groups
+    private val _isRecalculating = MutableStateFlow(false)
+    val isRecalculating: StateFlow<Boolean> = _isRecalculating
 
-                    val hasGroupRcds = groups.any { it.rcdRequired }
+    fun recalcAndSaveGroups() {
+        viewModelScope.launch(dispatchers) {
+            _uiState.value = GroupScreenState.Loading            // ← явно показываем загрузку
+            try {
+                val calc = groupCalculatorFactory.create()
+                when (val res = calc.calculateGroups()) {
+                    is GroupingResult.Error -> {
+                        _uiState.value = GroupScreenState.Error(res.message)
+                    }
+                    is GroupingResult.Success -> {
+                        val groups: List<CircuitGroup> = res.system.groups
 
-                    val incomer = incomerSelector.select(
-                        IncomerSelector.Params(
+                        // 1) Сохраняем в БД
+                        repo.replaceAllGroupsTransactional(groups)
+
+                        // 2) Готовим метаданные для экрана (инкомер и пр.)
+                        val totalGroups = groups.size
+                        val totalCurrent = groups.sumOf { it.nominalCurrent }
+                        val hasGroupRcds = groups.any { it.rcdRequired }
+
+                        val incomer = IncomerSelector().select(
+                            IncomerSelector.Params(
+                                groups = groups,
+                                preferRcbo = false,          // если нужно — поднимем в Settings
+                                hasGroupRcds = hasGroupRcds
+                            )
+                        )
+
+                        // 3) Отдаём на экран именно “распределённые” группы
+                        _uiState.value = GroupScreenState.Success(
                             groups = groups,
-                            preferRcbo = false,   // позже привяжем к UI
+                            totalGroups = totalGroups,
+                            totalCurrent = totalCurrent,
+                            incomer = incomer,
                             hasGroupRcds = hasGroupRcds
                         )
-                    )
-
-                    _uiState.value = GroupScreenState.Success(
-                        groups = groups,
-                        totalGroups = groups.size,
-                        totalCurrent = groups.sumOf { it.nominalCurrent },
-                        incomer = incomer,
-                        hasGroupRcds = hasGroupRcds
-                    )
+                    }
                 }
+            } catch (t: Throwable) {
+                _uiState.value = GroupScreenState.Error(t.message ?: "Неизвестная ошибка")
             }
         }
     }
@@ -84,12 +102,6 @@ sealed class GroupScreenState {
 
     data class Error(val message: String) : GroupScreenState()
 }
-
-data class GroupUiState(
-    val groups: List<CircuitGroup> = emptyList(),
-    val isLoading: Boolean = true,
-    val error: Throwable? = null
-)
 
 fun ExplicationViewModel.buildReportData(): Pair<ReportMeta, List<ReportPhase>>? {
     val s = uiState.value as? GroupScreenState.Success ?: return null
