@@ -144,4 +144,6 @@ dependencies {
 
     implementation (libs.blurview)
 
+    implementation("com.yandex.android:mobmetricalib:5.3.7")
+
 }
