@@ -14,6 +14,7 @@ import ru.mugalimov.volthome.domain.model.Device
 fun DeviceList(
     devices: List<Device>,
     modifier: Modifier = Modifier,
+    onDelete: (Long) -> Unit,
     contentPadding: PaddingValues = PaddingValues(
         start = 16.dp, end = 16.dp, top = 8.dp, bottom = 88.dp
     )
@@ -25,7 +26,8 @@ fun DeviceList(
     ) {
         items(devices, key = { it.id }) { device ->
             // ВАЖНО: Никаких обёрток вокруг CardDevice
-            CardDevice(device = device)
+            CardDevice(device = device,
+                onDeleteClick = onDelete)
         }
     }
 }

@@ -109,14 +109,14 @@ fun GroupCardCompact(
                 Spacer(Modifier.height(10.dp))
                 DeviceChips(
                     devices = group.devices.map { it.name },
+                    maxVisible = 3,
+                    groupKey = group.groupNumber, // состояние разворота привязано к группе
                     onDeviceClick = { name ->
                         val found = defaultDevices.firstOrNull { it.name == name }
                         val real = group.devices.firstOrNull { it.name == name }
                         sheetDevice = DeviceSpecUi(
                             name = name,
                             power = found?.power ?: (real?.power ?: 0),
-                            // Если у DefaultDevice/Device voltage — это Int, то оставь так.
-                            // Если это Voltage(value,type) — возможно нужно .value
                             voltage = found?.voltage?.value ?: real?.voltage?.value,
                             demandRatio = found?.demandRatio,
                             powerFactor = found?.powerFactor ?: real?.powerFactor,
@@ -239,8 +239,8 @@ private fun groupHintContent(hint: GroupHint, group: CircuitGroup): Pair<String,
 }
 
 // --- helpers ---
-private fun kw(watts: Int): String = "%.1f".format(watts / 1000.0)
-private fun amp(a: Double): String = "%.1f".format(a)
+private fun kw(watts: Int): String = "%.2f".format(watts / 1000.0)
+private fun amp(a: Double): String = "%.2f".format(a)
 private fun CircuitGroup.devicesPowerW(): Int = devices.sumOf { it.power ?: 0 }
 
 // контекстное пояснение по кривой автомата

@@ -247,8 +247,7 @@ class GroupCalculator(
 
     private suspend fun saveGroupsWithDevices(groups: List<CircuitGroup>) {
         // РЕКОМЕНДАЦИЯ: реализовать транзакционный метод в репозитории (replaceAll)
-        groupRepository.deleteAllGroups()
-        groupRepository.addGroup(groups)
+        groupRepository.replaceAllGroupsTransactional(groups)
     }
 
     private fun validateBeforeSave(groups: List<CircuitGroup>) {

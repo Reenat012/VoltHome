@@ -90,7 +90,8 @@
              androidx.compose.foundation.layout.Spacer(Modifier.height(8.dp))
              DeviceList(
                  devices = uiState.devices,
-                 modifier = Modifier.fillMaxSize()
+                 modifier = Modifier.fillMaxSize(),
+                 onDelete = { id -> vm.deleteDevice(id)}
              )
          }
      }

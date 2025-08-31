@@ -5,7 +5,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.rounded.AcUnit
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Lightbulb
 import androidx.compose.material.icons.rounded.Power
 import androidx.compose.material.icons.rounded.Settings
@@ -13,6 +15,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -32,12 +35,11 @@ private enum class InfoTopic { POWER, POWER_FACTOR, DEMAND_RATIO, VOLTAGE }
 @Composable
 fun CardDevice(
     device: Device,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onDeleteClick: (Long) -> Unit = {}
 ) {
-    // состояние листа-пояснения
     var info by remember { mutableStateOf<InfoTopic?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val scope = rememberCoroutineScope()
 
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -50,19 +52,18 @@ fun CardDevice(
                 .padding(end = 12.dp)
         )
 
-        // Мягкая, но заметная тонировка по типу устройства (непрозрачный итоговый цвет)
         val base = MaterialTheme.colorScheme.surface
         val tone = when (device.deviceType) {
-            DeviceType.LIGHTING        -> MaterialTheme.colorScheme.tertiaryContainer
-            DeviceType.SOCKET          -> MaterialTheme.colorScheme.secondaryContainer
-            DeviceType.HEAVY_DUTY      -> MaterialTheme.colorScheme.errorContainer
+            DeviceType.LIGHTING -> MaterialTheme.colorScheme.tertiaryContainer
+            DeviceType.SOCKET -> MaterialTheme.colorScheme.secondaryContainer
+            DeviceType.HEAVY_DUTY -> MaterialTheme.colorScheme.errorContainer
             DeviceType.AIR_CONDITIONER -> MaterialTheme.colorScheme.primaryContainer
             DeviceType.ELECTRIC_STOVE,
-            DeviceType.OVEN            -> MaterialTheme.colorScheme.secondaryContainer
+            DeviceType.OVEN -> MaterialTheme.colorScheme.secondaryContainer
             DeviceType.WASHING_MACHINE,
-            DeviceType.DISHWASHER      -> MaterialTheme.colorScheme.tertiaryContainer
-            DeviceType.WATER_HEATER    -> MaterialTheme.colorScheme.primaryContainer
-            DeviceType.OTHER, null     -> MaterialTheme.colorScheme.surfaceVariant
+            DeviceType.DISHWASHER -> MaterialTheme.colorScheme.tertiaryContainer
+            DeviceType.WATER_HEATER -> MaterialTheme.colorScheme.primaryContainer
+            DeviceType.OTHER, null -> MaterialTheme.colorScheme.surfaceVariant
         }
         val cardBg = tone.copy(alpha = 0.5f).compositeOver(base)
 
@@ -70,63 +71,83 @@ fun CardDevice(
             shape = RoundedCornerShape(16.dp),
             elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
             colors = CardDefaults.elevatedCardColors(containerColor = cardBg),
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Column(Modifier.padding(12.dp)) {
-                // Заголовок + тип
-                Text(
-                    text = device.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = deviceTypeLabel(device.deviceType),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+            Box(Modifier.fillMaxWidth().padding(12.dp)) {
 
-                Spacer(Modifier.height(10.dp))
-
-                // ОСНОВНЫЕ параметры: мощность и питание
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                // основной контент карточки
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(end = 40.dp) // запас справа под корзину
                 ) {
-                    Pill(
-                        text = "Мощность: ${device.power} Вт",
-                        onClick = { info = InfoTopic.POWER }
+                    Text(
+                        text = device.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
-                    Pill(
-                        text = device.voltage.toReadableLabel(),
-                        onClick = { info = InfoTopic.VOLTAGE }
+                    Text(
+                        text = deviceTypeLabel(device.deviceType),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
+
+                    Spacer(Modifier.height(10.dp))
+
+                    // параметры
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Pill(
+                            text = "Мощность: ${device.power} Вт",
+                            onClick = { info = InfoTopic.POWER }
+                        )
+                        Pill(
+                            text = device.voltage.toReadableLabel(),
+                            onClick = { info = InfoTopic.VOLTAGE }
+                        )
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Pill(
+                            text = "cos φ = ${device.powerFactor.format(2)}",
+                            onClick = { info = InfoTopic.POWER_FACTOR }
+                        )
+                        Pill(
+                            text = "Коэф. спроса = ${device.demandRatio.format(2)}",
+                            onClick = { info = InfoTopic.DEMAND_RATIO }
+                        )
+                    }
                 }
 
-                Spacer(Modifier.height(8.dp))
-
-                // ДОП параметры: cos φ и коэффициент спроса
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                // кнопка удалить внутри карточки справа по центру
+                IconButton(
+                    onClick = { onDeleteClick(device.id) },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .size(24.dp)
                 ) {
-                    Pill(
-                        text = "cos φ = ${device.powerFactor.format(2)}",
-                        onClick = { info = InfoTopic.POWER_FACTOR }
-                    )
-                    Pill(
-                        text = "Коэф. спроса = ${device.demandRatio.format(2)}",
-                        onClick = { info = InfoTopic.DEMAND_RATIO }
+                    Icon(
+                        imageVector = Icons.Rounded.Delete,
+                        contentDescription = "Удалить устройство",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant // серый цвет
                     )
                 }
             }
         }
     }
 
-    // Нижний лист с пояснением
+    // лист пояснений остаётся без изменений
     if (info != null) {
         ModalBottomSheet(
             onDismissRequest = { info = null },
@@ -146,7 +167,6 @@ fun CardDevice(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(Modifier.height(8.dp))
             }
         }
     }
@@ -157,31 +177,34 @@ fun CardDevice(
 @Composable
 private fun DeviceAvatar(type: DeviceType?, modifier: Modifier = Modifier) {
     val icon = when (type) {
-        DeviceType.LIGHTING        -> Icons.Rounded.Lightbulb
+        DeviceType.LIGHTING -> Icons.Rounded.Lightbulb
         DeviceType.SOCKET,
-        DeviceType.HEAVY_DUTY      -> Icons.Rounded.Power
+        DeviceType.HEAVY_DUTY -> Icons.Rounded.Power
+
         DeviceType.AIR_CONDITIONER -> Icons.Rounded.AcUnit
-        else                       -> Icons.Rounded.Settings
+        else -> Icons.Rounded.Settings
     }
     val bg = when (type) {
-        DeviceType.LIGHTING        -> MaterialTheme.colorScheme.tertiaryContainer
-        DeviceType.SOCKET          -> MaterialTheme.colorScheme.secondaryContainer
-        DeviceType.HEAVY_DUTY      -> MaterialTheme.colorScheme.errorContainer
+        DeviceType.LIGHTING -> MaterialTheme.colorScheme.tertiaryContainer
+        DeviceType.SOCKET -> MaterialTheme.colorScheme.secondaryContainer
+        DeviceType.HEAVY_DUTY -> MaterialTheme.colorScheme.errorContainer
         DeviceType.AIR_CONDITIONER -> MaterialTheme.colorScheme.primaryContainer
         DeviceType.ELECTRIC_STOVE,
-        DeviceType.OVEN            -> MaterialTheme.colorScheme.secondaryContainer
+        DeviceType.OVEN -> MaterialTheme.colorScheme.secondaryContainer
+
         DeviceType.WASHING_MACHINE,
-        DeviceType.DISHWASHER      -> MaterialTheme.colorScheme.tertiaryContainer
-        DeviceType.WATER_HEATER    -> MaterialTheme.colorScheme.primaryContainer
-        DeviceType.OTHER, null     -> MaterialTheme.colorScheme.surfaceVariant
+        DeviceType.DISHWASHER -> MaterialTheme.colorScheme.tertiaryContainer
+
+        DeviceType.WATER_HEATER -> MaterialTheme.colorScheme.primaryContainer
+        DeviceType.OTHER, null -> MaterialTheme.colorScheme.surfaceVariant
     }
     val fg =
         if (bg == MaterialTheme.colorScheme.errorContainer) MaterialTheme.colorScheme.onErrorContainer
         else when (bg) {
-            MaterialTheme.colorScheme.primaryContainer   -> MaterialTheme.colorScheme.onPrimaryContainer
+            MaterialTheme.colorScheme.primaryContainer -> MaterialTheme.colorScheme.onPrimaryContainer
             MaterialTheme.colorScheme.secondaryContainer -> MaterialTheme.colorScheme.onSecondaryContainer
-            MaterialTheme.colorScheme.tertiaryContainer  -> MaterialTheme.colorScheme.onTertiaryContainer
-            else                                         -> MaterialTheme.colorScheme.onSurfaceVariant
+            MaterialTheme.colorScheme.tertiaryContainer -> MaterialTheme.colorScheme.onTertiaryContainer
+            else -> MaterialTheme.colorScheme.onSurfaceVariant
         }
 
     Surface(
@@ -221,22 +244,22 @@ private fun Voltage.toReadableLabel(): String {
     val phase = when (this.type) {
         VoltageType.AC_1PHASE -> "1‑фаза"
         VoltageType.AC_3PHASE -> "3‑фазы"
-        VoltageType.DC        -> "пост. ток"
+        VoltageType.DC -> "пост. ток"
     }
     return "${this.value} В, $phase"
 }
 
 private fun deviceTypeLabel(type: DeviceType?): String = when (type) {
-    DeviceType.LIGHTING        -> "Освещение"
-    DeviceType.SOCKET          -> "Розетка"
-    DeviceType.HEAVY_DUTY      -> "Мощное устройство"
+    DeviceType.LIGHTING -> "Освещение"
+    DeviceType.SOCKET -> "Розетка"
+    DeviceType.HEAVY_DUTY -> "Мощное устройство"
     DeviceType.AIR_CONDITIONER -> "Кондиционер"
-    DeviceType.ELECTRIC_STOVE  -> "Электроплита"
-    DeviceType.OVEN            -> "Духовой шкаф"
+    DeviceType.ELECTRIC_STOVE -> "Электроплита"
+    DeviceType.OVEN -> "Духовой шкаф"
     DeviceType.WASHING_MACHINE -> "Стиральная машина"
-    DeviceType.DISHWASHER      -> "Посудомоечная машина"
-    DeviceType.WATER_HEATER    -> "Водонагреватель"
-    DeviceType.OTHER, null     -> "Другое"
+    DeviceType.DISHWASHER -> "Посудомоечная машина"
+    DeviceType.WATER_HEATER -> "Водонагреватель"
+    DeviceType.OTHER, null -> "Другое"
 }
 
 /* --------- Тексты для листа-пояснения --------- */
@@ -245,10 +268,13 @@ private fun deviceTypeLabel(type: DeviceType?): String = when (type) {
 private fun InfoTopic.titleAndText(): Pair<String, String> = when (this) {
     InfoTopic.POWER -> "Мощность (Вт)" to
             "Номинальная потребляемая мощность устройства. Нужна для расчёта нагрузки и выбора автомата/кабеля."
+
     InfoTopic.POWER_FACTOR -> "cos φ — коэффициент мощности" to
             "Показывает соотношение активной и полной мощности. Чем ближе к 1.00, тем эффективнее устройство и ниже реактивные потери."
+
     InfoTopic.DEMAND_RATIO -> "Коэффициент спроса" to
             "Доля времени, когда устройство реально нагружает сеть в максимуме. Используется для расчёта суммарной нагрузки (учёт неполной одновременности)."
+
     InfoTopic.VOLTAGE -> "Питание" to
             "Рабочее напряжение и тип питания: «1‑фаза» — однофазная сеть 220–230 В, «3‑фазы» — трёхфазная 380–400 В, «пост. ток» — питание DC."
 }

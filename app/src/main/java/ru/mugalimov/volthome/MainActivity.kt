@@ -27,9 +27,6 @@ class MainActivity : ComponentActivity() {
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
 
         setContent {
-            // просто инициализируем, init{} внутри запустит авто‑пересчёт
-//            val _appSyncVm: AppSyncViewModel = hiltViewModel()
-
             // Используем VoltHomeApp как корневой компонент
             VoltHomeApp()
         }
@@ -53,7 +50,7 @@ fun VoltHomeApp() {
     // Определяем начальный экран
     val startDestination = when {
         isFirstLaunch.value -> Screens.WelcomeScreen.route
-        !isOnboardingShown.value -> Screens.OnBoardingScreen.route
+//        !isOnboardingShown.value -> Screens.OnBoardingScreen.route
         else -> Screens.MainApp.route
     }
 
@@ -63,10 +60,6 @@ fun VoltHomeApp() {
             onFirstLaunchCompleted = {
                 prefs.edit().putBoolean("first_launch", false).apply()
                 isFirstLaunch.value = false
-            },
-            onOnboardingCompleted = {
-                prefs.edit().putBoolean("onboarding_shown", true).apply()
-                isOnboardingShown.value = true
             }
         )
     }

@@ -213,10 +213,16 @@ class RoomDetailViewModel @Inject constructor(
         }
     }
 
-    // Удаление одного устройства (как и было)
+//    // Удаление одного устройства (как и было)
+//    fun deleteDevice(deviceId: Long) {
+//        viewModelScope.launch {
+//            executeOperation { deviceRepository.deleteDevice(deviceId) }
+//        }
+//    }
+
     fun deleteDevice(deviceId: Long) {
         viewModelScope.launch {
-            executeOperation { deviceRepository.deleteDevice(deviceId) }
+            deleteDevicesUseCase(listOf(deviceId))
         }
     }
 

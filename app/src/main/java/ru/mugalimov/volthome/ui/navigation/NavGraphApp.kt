@@ -15,7 +15,7 @@ import ru.mugalimov.volthome.ui.screens.explication.ExplicationScreen
 import ru.mugalimov.volthome.ui.screens.loads.PhaseLoadScreen
 import ru.mugalimov.volthome.ui.screens.room.RoomDetailScreen
 import ru.mugalimov.volthome.ui.screens.rooms.RoomsScreen
-import ru.mugalimov.volthome.ui.utilities.AlgorithmExplanationScreen
+import ru.mugalimov.volthome.ui.screens.algoritm_about.AlgorithmExplanationScreen
 import ru.mugalimov.volthome.ui.viewmodel.RoomDetailViewModel
 
 /**
@@ -116,7 +116,7 @@ fun NavGraphApp(
         composable(Screens.SettingsScreen.route) {
             SettingsScreen(
                 onBack = { navController.popBackStack() },
-                onShowOnboarding = showOnboarding // Передаем в настройки
+                onShowOnboarding = showOnboarding
             )
         }
 
