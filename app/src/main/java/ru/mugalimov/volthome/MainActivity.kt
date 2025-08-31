@@ -32,7 +32,7 @@ class MainActivity : ComponentActivity() {
         // Инициализация AppMetrica — один раз за процесс
         if (!metricaInit) {
             val config = YandexMetricaConfig
-                .newConfigBuilder(Secrets.APP_METRICA_API_KEY)
+                .newConfigBuilder(Secret.APP_METRICA_API_KEY)
                 .withLogs()
                 .build()
 
