@@ -18,8 +18,8 @@ android {
         minSdk = 24
         //noinspection EditedTargetSdkVersion
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -78,6 +78,7 @@ dependencies {
     implementation(libs.firebase.crashlytics.buildtools)
     implementation(libs.litert.support.api)
     implementation(libs.androidx.storage)
+    implementation(libs.androidx.appcompat)
 //    implementation(libs.androidx.foundation.desktop)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
@@ -137,4 +138,10 @@ dependencies {
 
     // WebView для Compose
     implementation ("androidx.webkit:webkit:1.14.0")
+
+    implementation ("com.google.accompanist:accompanist-flowlayout:0.32.0")
+    implementation("androidx.compose.foundation:foundation:1.5.0") // для FlowRow
+
+    implementation (libs.blurview)
+
 }

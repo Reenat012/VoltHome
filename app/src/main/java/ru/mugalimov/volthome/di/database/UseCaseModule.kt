@@ -4,11 +4,13 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineDispatcher
 import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.data.repository.RoomRepository
 import ru.mugalimov.volthome.domain.use_case.CalcLoads
 import ru.mugalimov.volthome.domain.use_case.GroupCalculatorFactory
+import ru.mugalimov.volthome.domain.use_case.IncomerSelector
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -29,6 +31,9 @@ object UseCaseModule {
     ): GroupCalculatorFactory {
         return GroupCalculatorFactory(roomRepo, explicationRepo)
     }
+
+    @Provides
+    fun provideIncomerSelector(): IncomerSelector = IncomerSelector()
 //
 //    @Provides
 //    fun provideCalculateGroupUseCase(

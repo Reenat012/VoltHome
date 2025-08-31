@@ -23,7 +23,7 @@ import ru.mugalimov.volthome.domain.model.RoomType
 import java.util.Date
 
 @HiltViewModel //viewModel будет управляться Hilt
-//класс отвечает за управление состоянием экрана (например, списка комнат)
+// класс отвечает за управление состоянием экрана (например, списка комнат)
 // и взаимодействие с данными через репозиторий.
 class RoomViewModel @Inject constructor( // @Inject constructor помечает конструктор как доступный для внедрения зависимостей
     private val roomRepository: RoomRepository,
@@ -40,6 +40,9 @@ class RoomViewModel @Inject constructor( // @Inject constructor помечает
     // Получаем готовый список комнат для выпадающего меню
     private val _defaultRooms = MutableStateFlow<List<DefaultRoom>>(emptyList())
     val defaultRooms: StateFlow<List<DefaultRoom>> = _defaultRooms.asStateFlow()
+
+    private val _deviceCounts = MutableStateFlow<Map<Long, Int>>(emptyMap())
+    val deviceCounts: StateFlow<Map<Long, Int>> = _deviceCounts.asStateFlow()
 
     //Блок init вызывается при создании ViewModel.
     //Здесь запускается метод observeRooms(),
@@ -71,6 +74,14 @@ class RoomViewModel @Inject constructor( // @Inject constructor помечает
                             error = null
                         )
                     }
+
+                    // считаем количества устройств по комнатам
+                    // (если хочешь — сделай через async/awaitAll, но так тоже ок)
+                    val counts = rooms.associate { room ->
+                        val cnt = deviceRepository.getAllDevicesByRoomId(room.id).size
+                        room.id to cnt
+                    }
+                    _deviceCounts.value = counts
                 } // Обновляем список комнат
         }
     }

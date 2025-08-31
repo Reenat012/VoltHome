@@ -5,20 +5,26 @@ import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
+import androidx.hilt.navigation.compose.hiltViewModel
 import dagger.hilt.android.AndroidEntryPoint
 import ru.mugalimov.volthome.ui.navigation.RootNavGraph
 import ru.mugalimov.volthome.ui.navigation.Screens
 import ru.mugalimov.volthome.ui.screens.welcome.AppTheme
+import ru.mugalimov.volthome.ui.viewmodel.AppSyncViewModel
 
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // 🚫 Запрещаем ночной режим на уровне всего приложения
+        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
 
         setContent {
             // Используем VoltHomeApp как корневой компонент
@@ -44,7 +50,7 @@ fun VoltHomeApp() {
     // Определяем начальный экран
     val startDestination = when {
         isFirstLaunch.value -> Screens.WelcomeScreen.route
-        !isOnboardingShown.value -> Screens.OnBoardingScreen.route
+//        !isOnboardingShown.value -> Screens.OnBoardingScreen.route
         else -> Screens.MainApp.route
     }
 
@@ -54,10 +60,6 @@ fun VoltHomeApp() {
             onFirstLaunchCompleted = {
                 prefs.edit().putBoolean("first_launch", false).apply()
                 isFirstLaunch.value = false
-            },
-            onOnboardingCompleted = {
-                prefs.edit().putBoolean("onboarding_shown", true).apply()
-                isOnboardingShown.value = true
             }
         )
     }

@@ -1,269 +1,331 @@
-package ru.mugalimov.volthome.ui.screens.rooms
+package ru.mugalimov.volthome.ui.sheets
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.CenterAlignedTopAppBar
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import ru.mugalimov.volthome.R
-import ru.mugalimov.volthome.domain.model.DefaultRoom
+import ru.mugalimov.volthome.domain.model.DefaultDevice
+import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.RoomType
-import ru.mugalimov.volthome.ui.viewmodel.RoomViewModel
+import ru.mugalimov.volthome.domain.model.Voltage
+import ru.mugalimov.volthome.domain.model.VoltageType
 
-/**
- * Экран добавления новой комнаты.
- * @param onBack Обработчик возврата на предыдущий экран
- */
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddRoomScreen(
-    onBack: () -> Unit,
-    viewModel: RoomViewModel = hiltViewModel()
+fun AddRoomSheet(
+    defaultDevices: List<DefaultDevice>,
+    roomTypes: List<RoomType>,
+    onConfirm: (name: String, roomType: RoomType, selected: List<Pair<DefaultDevice, Int>>) -> Unit,
+    onDismiss: () -> Unit
 ) {
-    val defaultRooms by viewModel.defaultRooms.collectAsStateWithLifecycle()
-    var expanded by remember { mutableStateOf(false) }
-    var selectedRoom by remember { mutableStateOf<DefaultRoom?>(null) }
-    var roomName by remember { mutableStateOf("") }
-    var isUzo by remember { mutableStateOf("") }
-    var roomType by remember { mutableStateOf<RoomType?>(null) }
-    val scrollState = rememberScrollState()
-    val focusManager = LocalFocusManager.current
+    var name by remember { mutableStateOf("") }
+    var selectedType by remember { mutableStateOf(roomTypes.firstOrNull() ?: RoomType.STANDARD) }
 
-    Scaffold(
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = {
+    val qtyMap = remember { mutableStateMapOf<String, Int>() }
+    val expandedMap = remember { mutableStateMapOf<String, Boolean>() }
 
-                    Text(
-                        text = "Добавить комнату",
-                        style = MaterialTheme.typography.headlineSmall
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.Filled.ArrowBack,
-                            contentDescription = "Назад",
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                },
-                actions = {
-                    FilledTonalButton(
-                        onClick = {
-                            roomType?.let { viewModel.addRoom(roomName, it) }
-                            onBack()
-                        },
-                        enabled = roomName.isNotBlank(),
-                        modifier = Modifier.padding(end = 8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = "Сохранить",
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface
-                )
-            )
-        }
-    ) { innerPadding ->
+    // Пресет при открытии
+    LaunchedEffect(Unit) { applyPresetFor(selectedType, defaultDevices, qtyMap) }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        dragHandle = { BottomSheetDefaults.DragHandle() }
+    ) {
         Column(
             modifier = Modifier
-                .padding(innerPadding)
-                .fillMaxSize()
-                .verticalScroll(scrollState)
-                .padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp)
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
-            // Секция выбора шаблона
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Заголовок + кнопка-галочка
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
-                    text = "Шаблоны комнат",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    "Добавить комнату",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.weight(1f)
                 )
 
-                ExposedDropdownMenuBox(
-                    expanded = expanded,
-                    onExpandedChange = { expanded = it },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    OutlinedTextField(
-                        value = selectedRoom?.name ?: "Выберите шаблон",
-                        onValueChange = {},
-                        readOnly = true,
-                        trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
-                        },
-                        leadingIcon = {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_template),
-                                contentDescription = "Шаблоны",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        },
-                        colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(
-                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest
-                        ),
-                        shape = MaterialTheme.shapes.extraLarge,
-                        modifier = Modifier
-                            .menuAnchor()
-                            .fillMaxWidth()
-                    )
-
-                    ExposedDropdownMenu(
-                        expanded = expanded,
-                        onDismissRequest = { expanded = false },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        defaultRooms.forEach { room ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = room.name,
-                                        style = MaterialTheme.typography.bodyLarge
-                                    )
-                                },
-                                onClick = {
-                                    selectedRoom = room
-                                    expanded = false
-                                    roomName = room.name
-                                    focusManager.clearFocus()
-                                    isUzo = room.roomType.toString()
-                                    roomType = room.roomType
-                                }
-                            )
-                        }
+                IconButton(onClick = {
+                    val selected = defaultDevices.mapNotNull { d ->
+                        val q = qtyMap[d.id.toString()] ?: 0
+                        if (q > 0) d to q else null
                     }
+                    onConfirm(
+                        name.ifBlank { roomTypeLabel(selectedType) },
+                        selectedType,
+                        selected
+                    )
+                }) {
+                    Icon(Icons.Rounded.Check, contentDescription = "Создать")
                 }
             }
 
-            // Секция ввода названия
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Spacer(Modifier.height(12.dp))
+
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("Название комнаты") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(Modifier.height(10.dp))
+
+            RoomTypeRow(
+                types = roomTypes,
+                selected = selectedType,
+                onSelect = {
+                    selectedType = it
+                    applyPresetFor(it, defaultDevices, qtyMap)
+                }
+            )
+
+            Spacer(Modifier.height(12.dp))
+            Text("Устройства", style = MaterialTheme.typography.titleMedium)
+
+            Spacer(Modifier.height(8.dp))
+
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(bottom = 88.dp)
+            ) {
+                items(defaultDevices, key = { it.id }) { device ->
+                    val key = device.id.toString()
+                    val expanded = expandedMap[key] == true
+                    val qty = qtyMap[key] ?: 0
+
+                    DeviceRowExpandable(
+                        device = device,
+                        expanded = expanded,
+                        qty = qty,
+                        onToggle = { expandedMap[key] = !(expandedMap[key] ?: false) },
+                        onInc = { qtyMap[key] = (qtyMap[key] ?: 0) + 1 },
+                        onDec = { if ((qtyMap[key] ?: 0) > 0) qtyMap[key] = (qtyMap[key] ?: 0) - 1 }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RoomTypeRow(
+    types: List<RoomType>,
+    selected: RoomType,
+    onSelect: (RoomType) -> Unit
+) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        types.forEach { t ->
+            val isSel = t == selected
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(
+                    1.dp,
+                    if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                ),
+                color = if (isSel) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface
+            ) {
                 Text(
-                    text = "Название комнаты",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    roomTypeLabel(t),
+                    modifier = Modifier
+                        .clickable { onSelect(t) }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelLarge
                 )
+            }
+        }
+    }
+}
 
-                OutlinedTextField(
-                    value = roomName,
-                    onValueChange = { roomName = it },
-                    placeholder = {
+/** Карточка устройства: клик по левой части раскрывает read‑only параметры, справа — счётчик */
+@Composable
+private fun DeviceRowExpandable(
+    device: DefaultDevice,
+    expanded: Boolean,
+    qty: Int,
+    onToggle: () -> Unit,
+    onInc: () -> Unit,
+    onDec: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 12.dp, vertical = 10.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onToggle() }
+                ) {
+                    Text(device.name, style = MaterialTheme.typography.titleMedium)
+                    if (!expanded) {
                         Text(
-                            "Например: Гостиная",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                            "${device.power} Вт · Cos ф = ${device.powerFactor.format(2)} · К-т спроса = ${
+                                device.demandRatio.format(
+                                    2
+                                )
+                            }",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                        focusedLabelColor = MaterialTheme.colorScheme.primary,
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow
-                    ),
-                    shape = MaterialTheme.shapes.extraLarge,
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    leadingIcon = {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_edit),
-                            contentDescription = "Название",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(
-                        onDone = { focusManager.clearFocus() }
-                    ),
+                    }
+                }
 
+                Counter(qty = qty, onInc = onInc, onDec = onDec)
+
+                Icon(
+                    imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                    contentDescription = null
                 )
             }
 
-            // Подсказка
-            Text(
-                text = "Используйте уникальные названия для удобства управления",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 8.dp)
-            )
+            AnimatedVisibility(visible = expanded) {
+                Column(modifier = Modifier.padding(top = 8.dp)) {
+                    ParamChips(device)
+                }
+            }
+        }
+    }
+}
 
-            // Требуется ли УЗО
-//            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-//                Text(
-//                    text = "Требуется ли УЗО",
-//                    style = MaterialTheme.typography.labelLarge,
-//                    color = MaterialTheme.colorScheme.onSurfaceVariant
-//                )
-//
-//                OutlinedTextField(
-//                    value = isUzo,
-//                    onValueChange = { isUzo = it },
-//                    placeholder = {
-//                        Text(
-//                            "Например: Не требуется",
-//                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-//                        )
-//                    },
-//                    colors = OutlinedTextFieldDefaults.colors(
-//                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-//                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-//                        focusedLabelColor = MaterialTheme.colorScheme.primary,
-//                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow
-//                    ),
-//                    shape = MaterialTheme.shapes.extraLarge,
-//                    modifier = Modifier.fillMaxWidth(),
-//                    singleLine = true,
-//                    leadingIcon = {
-//                        Icon(
-//                            painter = painterResource(R.drawable.ic_edit),
-//                            contentDescription = "УЗО",
-//                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-//                        )
-//                    },
-//                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-//                    keyboardActions = KeyboardActions(
-//                        onDone = { focusManager.clearFocus() }
-//                    )
-//                )
-//            }
+@Composable
+private fun Counter(qty: Int, onInc: () -> Unit, onDec: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "-",
+                    modifier = Modifier
+                        .clickable { onDec() }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Text(qty.toString(), modifier = Modifier.padding(horizontal = 8.dp))
+                Text(
+                    "+",
+                    modifier = Modifier
+                        .clickable { onInc() }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.titleSmall
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ParamChips(device: DefaultDevice) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Chip("${device.power} Вт")
+        Chip("cos ф ${device.powerFactor.format(2)}")
+        Chip("к-т спроса ${device.demandRatio.format(2)}")
+        Chip(device.voltage.asLabel())
+        Chip("Тип: ${device.deviceType.name}")
+    }
+}
+
+@Composable
+private fun Chip(text: String) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+private fun roomTypeLabel(type: RoomType): String = when (type) {
+    RoomType.STANDARD -> "Стандартная"
+    RoomType.BATHROOM -> "Ванная (УЗО)"
+    RoomType.KITCHEN -> "Кухня (УЗО)"
+    RoomType.OUTDOOR -> "Улица (УЗО)"
+}
+
+private fun Double.format(digits: Int) = "%.${digits}f".format(this).replace(',', '.')
+
+private fun Voltage.asLabel(): String {
+    val phase = when (this.type) {
+        VoltageType.AC_1PHASE -> "1ф"
+        VoltageType.AC_3PHASE -> "3ф"
+        VoltageType.DC -> "DC"
+    }
+    return if (this.type == VoltageType.DC) "${this.value}V • DC" else "${this.value}V • $phase"
+}
+
+/* ====== ПРЕСЕТЫ ПОД ТИП КОМНАТЫ ====== */
+
+private fun applyPresetFor(
+    type: RoomType,
+    all: List<DefaultDevice>,
+    qtyMap: MutableMap<String, Int>
+) {
+    qtyMap.clear()
+
+    fun addFirstOf(dt: DeviceType, count: Int = 1) {
+        val item = all.firstOrNull { it.deviceType == dt } ?: return
+        qtyMap[item.id.toString()] = count
+    }
+
+    when (type) {
+        RoomType.STANDARD -> {
+            addFirstOf(DeviceType.LIGHTING, 1)
+            addFirstOf(DeviceType.SOCKET, 1)
+        }
+
+        RoomType.BATHROOM -> {
+            addFirstOf(DeviceType.LIGHTING, 1)
+            addFirstOf(DeviceType.SOCKET, 1)
+            addFirstOf(DeviceType.HEAVY_DUTY, 1) // например, бойлер, если есть
+        }
+
+        RoomType.KITCHEN -> {
+            addFirstOf(DeviceType.LIGHTING, 1)
+            // розеточные чаще кратно двум
+            addFirstOf(DeviceType.SOCKET, 2)
+            addFirstOf(DeviceType.HEAVY_DUTY, 1) // духовой шкаф/варочная, если есть
+        }
+
+        RoomType.OUTDOOR -> {
+            addFirstOf(DeviceType.SOCKET, 1)
+            // подсветка по желанию
         }
     }
 }

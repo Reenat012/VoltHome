@@ -6,6 +6,7 @@ import androidx.room.ForeignKey
 import androidx.room.PrimaryKey
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
+import ru.mugalimov.volthome.domain.model.Phase
 import java.util.Date
 
 @Entity(
@@ -54,5 +55,8 @@ data class CircuitGroupEntity(
     val rcdCurrent: Int = 30,    // Ток утечки для УЗО (мА)
 
     @ColumnInfo(name = "created_at")
-    val createdAt: Date = Date() // Дата создания группы
+    val createdAt: Date = Date(), // Дата создания группы
+
+    @ColumnInfo(name = "phase")
+    val phase: String = Phase.A.name
 )

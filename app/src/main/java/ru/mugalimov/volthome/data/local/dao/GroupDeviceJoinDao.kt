@@ -2,7 +2,9 @@ package ru.mugalimov.volthome.data.local.dao
 
 import androidx.room.Dao
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import kotlinx.coroutines.flow.Flow
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.data.local.entity.GroupDeviceJoin
 
@@ -11,6 +13,12 @@ interface GroupDeviceJoinDao {
 
     @Insert
     suspend fun insertJoin(join: GroupDeviceJoin)
+
+    @Query("DELETE FROM group_device_join") // ← имя вашей таблицы
+    suspend fun deleteAll()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(joins: List<GroupDeviceJoin>)
 
     @Query("DELETE FROM group_device_join WHERE group_id IN (SELECT group_id FROM groups WHERE room_id = :roomId)")
     suspend fun deleteJoinsForRoom(roomId: Long)
@@ -27,4 +35,10 @@ interface GroupDeviceJoinDao {
             "INNER JOIN group_device_join j ON d.device_id = j.device_id " +
             "WHERE j.group_id = :groupId")
     suspend fun getDevicesForGroup(groupId: Long): List<DeviceEntity>
+
+    @Query("SELECT * FROM group_device_join")
+    fun observeJoins(): Flow<List<GroupDeviceJoin>>
+
+    @Query("SELECT COUNT(*) FROM devices")
+    suspend fun countAll(): Int
 }

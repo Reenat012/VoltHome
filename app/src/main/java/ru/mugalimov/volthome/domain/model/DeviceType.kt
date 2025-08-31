@@ -1,7 +1,19 @@
 package ru.mugalimov.volthome.domain.model
 
 enum class DeviceType {
-    SOCKET, // Розеточная группа
-    LIGHTING, // Осветительная группа
-    HEAVY_DUTY // Мощные устройства (кондиционеры, бойлеры и т.д.)
+    // Стандартные группы
+    LIGHTING,         // Освещение
+    SOCKET,        // Розетки общего назначения
+    HEAVY_DUTY,    // Мощные устройства (2200+ Вт, требует выделения)
+
+    // Специализированные группы (по желанию, для будущего расширения)
+    AIR_CONDITIONER,
+    ELECTRIC_STOVE,
+    OVEN,
+    WASHING_MACHINE,
+    DISHWASHER,
+    WATER_HEATER,
+
+    // Прочие
+    OTHER
 }

@@ -54,4 +54,10 @@ interface RoomDao {
 
     @Query("SELECT * FROM rooms")
     suspend fun getAllRooms() : List<RoomEntity>
+
+    @Query("SELECT COUNT(*) FROM rooms")
+    suspend fun countAll(): Int
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAll(entities: List<RoomEntity>): List<Long>
 }

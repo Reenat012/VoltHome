@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 
@@ -13,6 +14,9 @@ interface DeviceDao {
     //возвращает flow для автоматического обновления при изменениях в БД
     @Query("SELECT * FROM devices WHERE room_id = :roomId")
     fun observeDevicesByIdRoom(roomId: Long): Flow<List<DeviceEntity>>
+
+    @Query("SELECT * FROM devices")
+    fun observeDevices(): Flow<List<DeviceEntity>>
 
     //добавить устройство в комнату
     //onConflict = OnConflictStrategy.ABORT - если запись с таким же PrimeryKey существует
@@ -44,4 +48,16 @@ interface DeviceDao {
     )
 """)
     suspend fun getDevicesForGroup(groupId: Long): List<DeviceEntity>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insert(entity: DeviceEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAll(entities: List<DeviceEntity>): List<Long>
+
+    @Update
+    suspend fun update(entity: DeviceEntity)
+
+    @Query("SELECT * FROM devices WHERE room_id = :roomId AND name = :name LIMIT 1")
+    suspend fun findByRoomAndName(roomId: Long, name: String): DeviceEntity?
 }

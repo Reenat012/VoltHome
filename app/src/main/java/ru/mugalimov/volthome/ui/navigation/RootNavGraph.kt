@@ -22,8 +22,7 @@ import ru.mugalimov.volthome.ui.screens.onboarding.OnboardingScreen
 @Composable
 fun RootNavGraph(
     startDestination: String,
-    onFirstLaunchCompleted: () -> Unit,
-    onOnboardingCompleted: () -> Unit
+    onFirstLaunchCompleted: () -> Unit
 ) {
     val rootNavController = rememberNavController()
 
@@ -35,36 +34,36 @@ fun RootNavGraph(
             WelcomeScreen(
                 onContinue = {
                     onFirstLaunchCompleted()
-                    rootNavController.navigate(Screens.OnBoardingScreen.route) {
-                        popUpTo(0)
-                    }
+//                    rootNavController.navigate(Screens.OnBoardingScreen.route) {
+//                        popUpTo(0)
+//                    }
                 }
             )
         }
 
         // Запуск анимации
-        composable(Screens.OnBoardingScreen.route) {
-            OnboardingScreen(
-                onComplete = {
-                    // Всегда переходим на главный экран
-                    rootNavController.navigate(Screens.MainApp.route) {
-                        popUpTo(0)
-                    }
-
-                    // Вызываем завершение ТОЛЬКО при первом запуске
-                    if (rootNavController.previousBackStackEntry?.destination?.route != Screens.MainApp.route) {
-                        onOnboardingCompleted()
-                    }
-                },
-                animationResources = listOf(
-                    "lottie/1.json",
-                    "lottie/2.json",
-                    "lottie/3.json",
-                    "lottie/4.json",
-                    "lottie/5.json"
-                )
-            )
-        }
+//        composable(Screens.OnBoardingScreen.route) {
+//            OnboardingScreen(
+//                onComplete = {
+//                    // Всегда переходим на главный экран
+//                    rootNavController.navigate(Screens.MainApp.route) {
+//                        popUpTo(0)
+//                    }
+//
+//                    // Вызываем завершение ТОЛЬКО при первом запуске
+//                    if (rootNavController.previousBackStackEntry?.destination?.route != Screens.MainApp.route) {
+//                        onOnboardingCompleted()
+//                    }
+//                },
+//                animationResources = listOf(
+//                    "lottie/1.json",
+//                    "lottie/2.json",
+//                    "lottie/3.json",
+//                    "lottie/4.json",
+//                    "lottie/5.json"
+//                )
+//            )
+//        }
 
         composable(Screens.MainApp.route) {
             MainApp(rootNavController = rootNavController)

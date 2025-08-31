@@ -11,6 +11,7 @@ import ru.mugalimov.volthome.data.local.dao.GroupDao
 import ru.mugalimov.volthome.data.local.dao.GroupDeviceJoinDao
 import ru.mugalimov.volthome.data.local.dao.LoadDao
 import ru.mugalimov.volthome.data.local.dao.RoomDao
+import ru.mugalimov.volthome.data.local.dao.RoomsTxDao
 import ru.mugalimov.volthome.data.local.entity.CircuitGroupEntity
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.data.local.entity.GroupDeviceJoin
@@ -27,7 +28,7 @@ import kotlin.synchronized
         LoadEntity::class,
         GroupDeviceJoin::class,
         CircuitGroupEntity::class],
-    version = 13,
+    version = 16,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -36,6 +37,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun loadDao(): LoadDao
     abstract fun groupDao(): GroupDao
     abstract fun groupDeviceJoinDao(): GroupDeviceJoinDao
+    abstract fun roomsTxDao(): RoomsTxDao
 
     companion object {
         //Singlton-паттерн для экземпляра БД, хранит единственный экземпляр БД
