@@ -42,6 +42,7 @@ class GetPhaseLoadUiUseCase @Inject constructor(
                     groupNumber = g.groupNumber,
                     roomName = g.roomName,
                     devices = deviceRows,
+                    roomId = g.roomId,
                     totalPower = g.devices.sumOf { it.power.toDouble() },
                     totalCurrent = g.devices.sumOf { it.calculateCurrent() }
                 )
