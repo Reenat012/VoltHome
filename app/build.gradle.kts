@@ -18,8 +18,8 @@ android {
         minSdk = 24
         //noinspection EditedTargetSdkVersion
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.4"
+        versionCode = 5
+        versionName = "1.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -143,5 +143,7 @@ dependencies {
     implementation("androidx.compose.foundation:foundation:1.5.0") // для FlowRow
 
     implementation (libs.blurview)
+
+    implementation("com.yandex.android:mobmetricalib:5.3.7")
 
 }
