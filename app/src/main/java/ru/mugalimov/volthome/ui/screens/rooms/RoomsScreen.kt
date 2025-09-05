@@ -9,6 +9,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.ui.components.ErrorView
 import ru.mugalimov.volthome.ui.components.LoadingView
@@ -30,6 +31,7 @@ fun RoomsScreen(
     val defaultDevices by addViewModel.defaultDevices.collectAsState()
     val isBusy by addViewModel.isBusy.collectAsState()
     val deviceCounts by viewModel.deviceCounts.collectAsState()
+    val phaseMode by viewModel.phaseMode.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
     var showAddRoom by remember { mutableStateOf(false) }
@@ -48,6 +50,7 @@ fun RoomsScreen(
                         addViewModel.undoCreateRoom(action.roomId)
                     }
                 }
+
                 is RoomsAction.DevicesAdded -> Unit
                 is RoomsAction.UserMessage -> snackbarHostState.showSnackbar(action.message)
                 is RoomsAction.Error -> snackbarHostState.showSnackbar(
@@ -61,7 +64,14 @@ fun RoomsScreen(
     val fabAlpha = if (fabDisabled) 0.5f else 1f
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Комнаты") }) },
+        topBar = {
+            TopAppBar(
+                title = { Text("Комнаты") },
+                actions = {
+                    PhaseModeMenu(selected = phaseMode, onSelect = viewModel::setPhaseMode)
+                }
+            )
+        },
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         floatingActionButton = {
             FloatingActionButton(

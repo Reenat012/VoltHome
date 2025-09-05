@@ -8,16 +8,20 @@ import ru.mugalimov.volthome.data.repository.RoomRepository
 import javax.inject.Inject
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.core.error.RoomNotFoundException
 import ru.mugalimov.volthome.data.repository.DeviceRepository
+import ru.mugalimov.volthome.data.repository.PreferencesRepository
 import ru.mugalimov.volthome.domain.model.DefaultRoom
+import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.Room
 import ru.mugalimov.volthome.domain.model.RoomType
 import java.util.Date
@@ -27,7 +31,8 @@ import java.util.Date
 // и взаимодействие с данными через репозиторий.
 class RoomViewModel @Inject constructor( // @Inject constructor помечает конструктор как доступный для внедрения зависимостей
     private val roomRepository: RoomRepository,
-    private val deviceRepository: DeviceRepository
+    private val deviceRepository: DeviceRepository,
+    private val preferencesRepository: PreferencesRepository
 ) : ViewModel() {
 
     //приватное состояние, хранящее данные для UI (список комнат, загрузка, ошибки).
@@ -44,6 +49,11 @@ class RoomViewModel @Inject constructor( // @Inject constructor помечает
     private val _deviceCounts = MutableStateFlow<Map<Long, Int>>(emptyMap())
     val deviceCounts: StateFlow<Map<Long, Int>> = _deviceCounts.asStateFlow()
 
+    // Текущее значение режима для UI (с дефолтом THREE)
+    val phaseMode: StateFlow<PhaseMode> =
+        preferencesRepository.phaseMode
+            .stateIn(viewModelScope, SharingStarted.Lazily, PhaseMode.THREE)
+
     //Блок init вызывается при создании ViewModel.
     //Здесь запускается метод observeRooms(),
     //который начинает наблюдать (подписывается) за изменениями в списке комнат.
@@ -51,6 +61,10 @@ class RoomViewModel @Inject constructor( // @Inject constructor помечает
         observeRooms()
         loadDefaultRooms()
 
+    }
+
+    fun setPhaseMode(mode: PhaseMode) {
+        viewModelScope.launch { preferencesRepository.setPhaseMode(mode) }
     }
 
     //наблюдение за данными

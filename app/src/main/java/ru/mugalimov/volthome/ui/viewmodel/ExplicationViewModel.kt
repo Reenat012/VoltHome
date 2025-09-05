@@ -6,12 +6,15 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
+import ru.mugalimov.volthome.data.repository.PreferencesRepository
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.GroupingResult
 import ru.mugalimov.volthome.domain.model.Phase
+import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.report.ReportDevice
 import ru.mugalimov.volthome.domain.model.report.ReportGroup
 import ru.mugalimov.volthome.domain.model.report.ReportMeta
@@ -28,6 +31,7 @@ import javax.inject.Inject
 class ExplicationViewModel @Inject constructor(
     private val repo: ExplicationRepository,
     private val groupCalculatorFactory: GroupCalculatorFactory,
+    private val preferencesRepository: PreferencesRepository,
     @IoDispatcher private val dispatchers: CoroutineDispatcher
 ) : ViewModel() {
     private val _uiState = MutableStateFlow<GroupScreenState>(GroupScreenState.Loading)
@@ -36,22 +40,36 @@ class ExplicationViewModel @Inject constructor(
     private val _isRecalculating = MutableStateFlow(false)
     val isRecalculating: StateFlow<Boolean> = _isRecalculating
 
+    // Необязательное авто-пересчитывание при смене режима:
+    init {
+        viewModelScope.launch(dispatchers) {
+            preferencesRepository.phaseMode.collect {
+                // Пересчитать (дебаунсить при необходимости)
+                recalcAndSaveGroups()
+            }
+        }
+    }
+
     fun recalcAndSaveGroups() {
         viewModelScope.launch(dispatchers) {
-            _uiState.value = GroupScreenState.Loading            // ← явно показываем загрузку
+            _uiState.value = GroupScreenState.Loading
             try {
+                // 1) Получаем текущий режим (SINGLE / THREE)
+                val mode: PhaseMode = preferencesRepository.phaseMode.first()
+
+                // 2) Считаем группы с учётом режима
                 val calc = groupCalculatorFactory.create()
-                when (val res = calc.calculateGroups()) {
+                when (val res = calc.calculateGroups(mode)) { // ← ВАЖНО: передаём mode
                     is GroupingResult.Error -> {
                         _uiState.value = GroupScreenState.Error(res.message)
                     }
                     is GroupingResult.Success -> {
                         val groups: List<CircuitGroup> = res.system.groups
 
-                        // 1) Сохраняем в БД
+                        // 3) Сохраняем в БД (транзакционно, как и раньше)
                         repo.replaceAllGroupsTransactional(groups)
 
-                        // 2) Готовим метаданные для экрана (инкомер и пр.)
+                        // 4) Подготавливаем метаданные для UI
                         val totalGroups = groups.size
                         val totalCurrent = groups.sumOf { it.nominalCurrent }
                         val hasGroupRcds = groups.any { it.rcdRequired }
@@ -59,12 +77,12 @@ class ExplicationViewModel @Inject constructor(
                         val incomer = IncomerSelector().select(
                             IncomerSelector.Params(
                                 groups = groups,
-                                preferRcbo = false,          // если нужно — поднимем в Settings
+                                preferRcbo = false,  // как у тебя — можно вынести в настройки
                                 hasGroupRcds = hasGroupRcds
                             )
                         )
 
-                        // 3) Отдаём на экран именно “распределённые” группы
+                        // 5) Отдаём в UI итог
                         _uiState.value = GroupScreenState.Success(
                             groups = groups,
                             totalGroups = totalGroups,
