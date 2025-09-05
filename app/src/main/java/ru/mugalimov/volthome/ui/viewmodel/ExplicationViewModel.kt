@@ -15,6 +15,7 @@ import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.GroupingResult
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.PhaseMode
+import ru.mugalimov.volthome.domain.model.VoltageType
 import ru.mugalimov.volthome.domain.model.report.ReportDevice
 import ru.mugalimov.volthome.domain.model.report.ReportGroup
 import ru.mugalimov.volthome.domain.model.report.ReportMeta
@@ -63,6 +64,7 @@ class ExplicationViewModel @Inject constructor(
                     is GroupingResult.Error -> {
                         _uiState.value = GroupScreenState.Error(res.message)
                     }
+
                     is GroupingResult.Success -> {
                         val groups: List<CircuitGroup> = res.system.groups
 
@@ -78,7 +80,11 @@ class ExplicationViewModel @Inject constructor(
                             IncomerSelector.Params(
                                 groups = groups,
                                 preferRcbo = false,  // как у тебя — можно вынести в настройки
-                                hasGroupRcds = hasGroupRcds
+                                hasGroupRcds = hasGroupRcds,
+                                voltageTypeOverride = when (mode) {
+                                    PhaseMode.SINGLE -> VoltageType.AC_1PHASE
+                                    PhaseMode.THREE -> VoltageType.AC_3PHASE
+                                }
                             )
                         )
 
@@ -98,8 +104,6 @@ class ExplicationViewModel @Inject constructor(
         }
     }
 }
-
-
 
 
 /**
@@ -123,7 +127,8 @@ sealed class GroupScreenState {
 
 fun ExplicationViewModel.buildReportData(): Pair<ReportMeta, List<ReportPhase>>? {
     val s = uiState.value as? GroupScreenState.Success ?: return null
-    val date = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(System.currentTimeMillis())
+    val date =
+        SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(System.currentTimeMillis())
 
     val perPhase = phaseCurrents(s.groups)
     val meta = ReportMeta(
