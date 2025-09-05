@@ -2,12 +2,14 @@ package ru.mugalimov.volthome.ui.screens.rooms
 
 import android.annotation.SuppressLint
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ru.mugalimov.volthome.domain.model.RoomType
@@ -68,7 +70,13 @@ fun RoomsScreen(
             TopAppBar(
                 title = { Text("Комнаты") },
                 actions = {
-                    PhaseModeMenu(selected = phaseMode, onSelect = viewModel::setPhaseMode)
+                    PhaseModeMenu(
+                        mode = phaseMode,
+                        onSelect = viewModel::setPhaseMode,
+                        modifier = Modifier
+                            .padding(end = 8.dp)     // небольшой отступ справа
+                            .widthIn(min = 170.dp, max = 170.dp) // ограничиваем ширину
+                    )
                 }
             )
         },

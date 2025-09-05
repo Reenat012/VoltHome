@@ -44,7 +44,15 @@ class GetPhaseLoadUiUseCase @Inject constructor(
                     devices = deviceRows,
                     roomId = g.roomId,
                     totalPower = g.devices.sumOf { it.power.toDouble() },
-                    totalCurrent = g.devices.sumOf { it.calculateCurrent() }
+                    totalCurrent = g.devices.sumOf { d ->
+                        CurrentCalculator.calculateNominalCurrent(
+                            power       = d.power.toDouble(),
+                            voltage     = (d.voltage.value.takeIf { it > 0 } ?: 230).toDouble(),
+                            powerFactor = d.powerFactor,
+                            demandRatio = d.demandRatio,
+                            voltageType = d.voltage.type
+                        )
+                    }
                 )
             }
 

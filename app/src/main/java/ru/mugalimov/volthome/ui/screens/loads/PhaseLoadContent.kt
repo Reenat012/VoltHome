@@ -264,22 +264,63 @@ private fun AdviceCardSinglePhase(
     } else 0.0
 
     val tips = buildList {
+        val loadPct = if (incomer > 0) (totalA / incomer) * 100.0 else 0.0
+        val reserveA = (incomer - totalA).coerceAtLeast(0.0)
+
+        // ряд номиналов проекта — только для справочной подсказки
+        val nominalRow = listOf(6, 10, 16, 20, 25, 32, 40, 50, 63, 80, 100, 125, 160)
+        val nextUpNominal = nominalRow.firstOrNull { it > incomer }
+
+        // 1) Общая загрузка вводного + запас
         if (incomer > 0) {
             when {
-                loadPct >= alertPct -> add("Высокая загрузка вводного (${fmt0(loadPct)}%). Контролируйте одновременное включение мощных потребителей; при необходимости — номинал выше (учёт сечения и Icu).")
-                loadPct >= warnPct  -> add("Умеренная загрузка вводного (${fmt0(loadPct)}%). Пики возможны при одновременной работе крупных приборов.")
-                else                -> add("Запас по току достаточный (${fmt0(100 - loadPct)}%).")
+                loadPct >= alertPct -> {
+                    add("Высокая загрузка вводного (${fmt0(loadPct)}%). Запас всего ${fmt1(reserveA)} A.")
+                    if (nextUpNominal != null) {
+                        add("Если высокие пики регулярны — рассмотрите вводной на ${nextUpNominal} A (убедитесь в допустимом сечении и Icu).")
+                    } else {
+                        add("Следующего номинала в ряду нет — контролируйте одновременную работу мощных приборов.")
+                    }
+                }
+                loadPct >= warnPct -> {
+                    add("Умеренная загрузка вводного (${fmt0(loadPct)}%). Запас ${fmt1(reserveA)} A — следите за пиковыми сценариями.")
+                }
+                else -> {
+                    add("Запас по току достаточный: ${fmt1(reserveA)} A (${fmt0(100 - loadPct)}%).")
+                }
             }
         }
-        if (topRoom != null && topRoomPct >= 35.0) {
-            add("${topRoom.first} формирует ${fmt0(topRoomPct)}% нагрузки. Желательно распределить мощные приборы по разным группам.")
-        }
-        if (roomShares.size >= 3) {
-            val total = roomShares.sumOf { it.second }
-            val sumTop3 = roomShares.take(3).sumOf { it.second }
-            if (total > 0 && (sumTop3 / total) > 0.7) {
-                add("Три зоны дают более 70% нагрузки. Учитывайте их одновременную работу.")
+
+        // 2) Доминирующие помещения (по roomShares)
+        if (roomShares.isNotEmpty()) {
+            val totalRoomsA = roomShares.sumOf { it.second }.coerceAtLeast(0.0001)
+            val top1 = roomShares[0]
+            val top1PctOfTotal = (top1.second / totalRoomsA) * 100.0
+            val top1PctOfIncomer = if (incomer > 0) (top1.second / incomer) * 100.0 else 0.0
+
+            if (top1PctOfTotal >= 35.0) {
+                add("${top1.first} даёт ${fmt0(top1PctOfTotal)}% общей нагрузки (${fmt1(top1.second)} A, ${fmt0(top1PctOfIncomer)}% вводного). Желательно разнести мощные приборы этой зоны по разным группам/времени.")
             }
+
+            val top2 = roomShares.getOrNull(1)
+            if (top2 != null) {
+                val pairSum = top1.second + top2.second
+                val pairPctTotal = (pairSum / totalRoomsA) * 100.0
+                val pairPctIncomer = if (incomer > 0) (pairSum / incomer) * 100.0 else 0.0
+                if (pairPctTotal >= 60.0) {
+                    add("Две зоны лидируют: ${top1.first} + ${top2.first} = ${fmt0(pairPctTotal)}% нагрузки (${fmt0(pairPctIncomer)}% вводного). Сведите их одновременную работу к минимуму.")
+                }
+            }
+        }
+
+        // 3) Критический малый запас по амперам
+        if (reserveA in 0.0..10.0 && incomer > 0) {
+            add("Запас менее 10 A — пиковые включения (чайник+духовка/бойлер) могут давать срабатывания.")
+        }
+
+        // 4) Когда всё хорошо и «узких мест» не найдено
+        if (isEmpty()) {
+            add("Ситуация стабильна: концентрации нагрузки по зонам нет, запас по току комфортный.")
         }
     }
 
