@@ -5,8 +5,24 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
@@ -36,7 +52,7 @@ fun RoomsScreen(
     val phaseMode by viewModel.phaseMode.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
-    var showAddRoom by remember { mutableStateOf(false) }
+    val showAddRoom: MutableState<Boolean> = remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         addViewModel.actions.collect { action: RoomsAction ->
@@ -52,7 +68,6 @@ fun RoomsScreen(
                         addViewModel.undoCreateRoom(action.roomId)
                     }
                 }
-
                 is RoomsAction.DevicesAdded -> Unit
                 is RoomsAction.UserMessage -> snackbarHostState.showSnackbar(action.message)
                 is RoomsAction.Error -> snackbarHostState.showSnackbar(
@@ -74,8 +89,8 @@ fun RoomsScreen(
                         mode = phaseMode,
                         onSelect = viewModel::setPhaseMode,
                         modifier = Modifier
-                            .padding(end = 8.dp)     // небольшой отступ справа
-                            .widthIn(min = 170.dp, max = 170.dp) // ограничиваем ширину
+                            .padding(end = 8.dp)
+                            .widthIn(min = 170.dp, max = 170.dp)
                     )
                 }
             )
@@ -83,9 +98,13 @@ fun RoomsScreen(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = { if (!fabDisabled) showAddRoom = true },
-                modifier = Modifier.alpha(fabAlpha)
-            ) { Icon(Icons.Filled.Add, contentDescription = "Добавить") }
+                onClick = { if (!fabDisabled) showAddRoom.value = true },
+                modifier = Modifier.alpha(fabAlpha),
+//                containerColor = MaterialTheme.colorScheme.primary,
+//                contentColor = MaterialTheme.colorScheme.onPrimary
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = "Добавить")
+            }
         }
     ) { padding ->
         when {
@@ -93,7 +112,7 @@ fun RoomsScreen(
             uiState.error != null -> ErrorView(uiState.error!!)
             else -> RoomList(
                 rooms = uiState.rooms,
-                deviceCounts = deviceCounts,          // ← ВАЖНО
+                deviceCounts = deviceCounts,
                 onDelete = viewModel::deleteRoom,
                 modifier = Modifier.padding(padding),
                 onClickRoom = onClickRoom
@@ -101,15 +120,21 @@ fun RoomsScreen(
         }
     }
 
-    if (showAddRoom) {
+    if (showAddRoom.value) {
         AddRoomSheet(
             defaultDevices = defaultDevices,
-            roomTypes = RoomType.values().toList(),
-            onConfirm = { name, type, selected ->
-                addViewModel.createRoomWithDevices(name, type, selected)
-                showAddRoom = false
+            roomTypes = RoomType.entries,
+            // ВАЖНО: используем новую сигнатуру — передаем уже кастомизированные устройства,
+            // как на экране «Комната» (имя + мощность (Вт) до вставки)
+            onConfirm = { name, type, customizedRequests ->
+                addViewModel.createRoomWithDevicesCustomized(
+                    name = name,
+                    roomType = type,
+                    devices = customizedRequests
+                )
+                showAddRoom.value = false
             },
-            onDismiss = { showAddRoom = false }
+            onDismiss = { showAddRoom.value = false }
         )
     }
 }

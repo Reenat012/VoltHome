@@ -287,7 +287,7 @@ data class DeviceUiState(
 )
 
 /** Маппер пресета каталога в запрос на создание */
-private fun DefaultDevice.toCreateRequest(qty: Int): DeviceCreateRequest =
+fun DefaultDevice.toCreateRequest(qty: Int): DeviceCreateRequest =
     DeviceCreateRequest(
         title = this.name,
         type = this.deviceType,

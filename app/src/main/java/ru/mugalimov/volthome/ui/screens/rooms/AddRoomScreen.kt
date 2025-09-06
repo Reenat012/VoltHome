@@ -3,7 +3,17 @@ package ru.mugalimov.volthome.ui.sheets
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -11,31 +21,69 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.Remove
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Divider
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import ru.mugalimov.volthome.domain.model.DefaultDevice
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.domain.model.Voltage
 import ru.mugalimov.volthome.domain.model.VoltageType
+import ru.mugalimov.volthome.domain.model.create.DeviceCreateRequest
 
-
+/**
+ * ВАЖНО: Это обновлённый AddRoomSheet, который повторяет функциональность выбора устройств
+ * «1 в 1» как на экране «Комната» (DevicePickerSheet):
+ *  - выбор пресетов
+ *  - степпер (– N +)
+ *  - возможность сразу отредактировать Название и Мощность (всегда в Вт) перед вставкой
+ *  - остальные параметры — read-only с иконкой замка
+ *
+ * Изменение SIG: onConfirm теперь возвращает список DeviceCreateRequest, т.к. мы сохраняем
+ * кастомные поля инстансов (title + ratedPowerW) уже на этапе создания комнаты.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddRoomSheet(
     defaultDevices: List<DefaultDevice>,
     roomTypes: List<RoomType>,
-    onConfirm: (name: String, roomType: RoomType, selected: List<Pair<DefaultDevice, Int>>) -> Unit,
+    onConfirm: (name: String, roomType: RoomType, devices: List<DeviceCreateRequest>) -> Unit,
     onDismiss: () -> Unit
 ) {
     var name by remember { mutableStateOf("") }
     var selectedType by remember { mutableStateOf(roomTypes.firstOrNull() ?: RoomType.STANDARD) }
 
+    // Количество по id
     val qtyMap = remember { mutableStateMapOf<String, Int>() }
+    // Раскрытие карточек
     val expandedMap = remember { mutableStateMapOf<String, Boolean>() }
+    // Переименования по id
+    val nameOverride = remember { mutableStateMapOf<String, String>() }
+    // Кастомная мощность (в текстовом виде) по id
+    val powerOverride = remember { mutableStateMapOf<String, String>() }
 
     // Пресет при открытии
     LaunchedEffect(Unit) { applyPresetFor(selectedType, defaultDevices, qtyMap) }
@@ -47,10 +95,9 @@ fun AddRoomSheet(
         Column(
             modifier = Modifier
                 .navigationBarsPadding()
-                .imePadding()
                 .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
-            // Заголовок + кнопка-галочка
+            // Заголовок + кнопка-галочка (без текста)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -62,21 +109,23 @@ fun AddRoomSheet(
                 )
 
                 IconButton(onClick = {
-                    val selected = defaultDevices.mapNotNull { d ->
-                        val q = qtyMap[d.id.toString()] ?: 0
-                        if (q > 0) d to q else null
-                    }
+                    val requests = buildRequests(
+                        defaults = defaultDevices,
+                        qtyMap = qtyMap,
+                        nameOverride = nameOverride,
+                        powerOverride = powerOverride
+                    )
                     onConfirm(
                         name.ifBlank { roomTypeLabel(selectedType) },
                         selectedType,
-                        selected
+                        requests
                     )
                 }) {
                     Icon(Icons.Rounded.Check, contentDescription = "Создать")
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.padding(top = 12.dp))
 
             OutlinedTextField(
                 value = name,
@@ -86,7 +135,7 @@ fun AddRoomSheet(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.padding(top = 10.dp))
 
             RoomTypeRow(
                 types = roomTypes,
@@ -97,10 +146,10 @@ fun AddRoomSheet(
                 }
             )
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.padding(top = 12.dp))
             Text("Устройства", style = MaterialTheme.typography.titleMedium)
 
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.padding(top = 8.dp))
 
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -111,13 +160,17 @@ fun AddRoomSheet(
                     val expanded = expandedMap[key] == true
                     val qty = qtyMap[key] ?: 0
 
-                    DeviceRowExpandable(
+                    DeviceRowEditable(
                         device = device,
                         expanded = expanded,
                         qty = qty,
+                        title = nameOverride[key] ?: device.name,
+                        powerText = powerOverride[key] ?: device.power.toString(),
                         onToggle = { expandedMap[key] = !(expandedMap[key] ?: false) },
-                        onInc = { qtyMap[key] = (qtyMap[key] ?: 0) + 1 },
-                        onDec = { if ((qtyMap[key] ?: 0) > 0) qtyMap[key] = (qtyMap[key] ?: 0) - 1 }
+                        onInc = { qtyMap[key] = (qtyMap[key] ?: 0).plus(1).coerceAtMost(99) },
+                        onDec = { qtyMap[key] = (qtyMap[key] ?: 0).minus(1).coerceAtLeast(0) },
+                        onTitleChange = { nameOverride[key] = it },
+                        onPowerChange = { powerOverride[key] = it.replace(',', '.') }
                     )
                 }
             }
@@ -158,15 +211,24 @@ private fun RoomTypeRow(
     }
 }
 
-/** Карточка устройства: клик по левой части раскрывает read‑only параметры, справа — счётчик */
+/**
+ * Карточка устройства (как в DevicePickerSheet):
+ *  - верх: название пресета + текущая мощность + степпер (– N +) и стрелка
+ *  - при раскрытии: редактируемые поля Название и Мощность (Вт),
+ *    затем — read-only поля с замком: Тип устройства, cos φ, Коэфф. спроса, Напряжение
+ */
 @Composable
-private fun DeviceRowExpandable(
+private fun DeviceRowEditable(
     device: DefaultDevice,
     expanded: Boolean,
     qty: Int,
+    title: String,
+    powerText: String,
     onToggle: () -> Unit,
     onInc: () -> Unit,
-    onDec: () -> Unit
+    onDec: () -> Unit,
+    onTitleChange: (String) -> Unit,
+    onPowerChange: (String) -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -186,28 +248,74 @@ private fun DeviceRowExpandable(
                     Text(device.name, style = MaterialTheme.typography.titleMedium)
                     if (!expanded) {
                         Text(
-                            "${device.power} Вт · Cos ф = ${device.powerFactor.format(2)} · К-т спроса = ${
-                                device.demandRatio.format(
-                                    2
-                                )
-                            }",
+                            "${device.power} Вт",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
 
-                Counter(qty = qty, onInc = onInc, onDec = onDec)
+                // Степпер (– N +) с выравниванием по центру
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    IconButton(onClick = onDec) {
+                        Icon(Icons.Rounded.Remove, contentDescription = "Уменьшить")
+                    }
+                    Box(Modifier.width(28.dp), contentAlignment = Alignment.Center) {
+                        Text(qty.toString())
+                    }
+                    IconButton(onClick = onInc) {
+                        Icon(Icons.Rounded.Add, contentDescription = "Увеличить")
+                    }
+                }
 
-                Icon(
-                    imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                    contentDescription = null
-                )
+                IconButton(onClick = { onToggle() }) {
+                    Icon(
+                        if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                        contentDescription = null
+                    )
+                }
             }
 
             AnimatedVisibility(visible = expanded) {
                 Column(modifier = Modifier.padding(top = 8.dp)) {
-                    ParamChips(device)
+
+                    // Редактируемые поля
+                    OutlinedTextField(
+                        value = title,
+                        onValueChange = onTitleChange,
+                        label = { Text("Название") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(Modifier.padding(top = 8.dp))
+
+                    OutlinedTextField(
+                        value = powerText,
+                        onValueChange = onPowerChange,
+                        label = { Text("Мощность (Вт)") },
+                        singleLine = true,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            keyboardType = KeyboardType.Decimal
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(Modifier.padding(top = 12.dp))
+                    Divider()
+                    Spacer(Modifier.padding(top = 12.dp))
+
+                    // Read-only поля с замком
+                    ReadonlyField(label = "Тип устройства", value = deviceTypeLabel(device.deviceType))
+                    Spacer(Modifier.padding(top = 8.dp))
+                    ReadonlyField(label = "Cos φ", value = device.powerFactor.format(2))
+                    Spacer(Modifier.padding(top = 8.dp))
+                    ReadonlyField(label = "Коэфф. спроса", value = device.demandRatio.format(2))
+                    Spacer(Modifier.padding(top = 8.dp))
+                    ReadonlyField(label = "Напряжение", value = voltageHuman(device.voltage))
                 }
             }
         }
@@ -215,62 +323,54 @@ private fun DeviceRowExpandable(
 }
 
 @Composable
-private fun Counter(qty: Int, onInc: () -> Unit, onDec: () -> Unit) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Surface(
-            shape = RoundedCornerShape(8.dp),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "-",
-                    modifier = Modifier
-                        .clickable { onDec() }
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    style = MaterialTheme.typography.titleSmall
-                )
-                Text(qty.toString(), modifier = Modifier.padding(horizontal = 8.dp))
-                Text(
-                    "+",
-                    modifier = Modifier
-                        .clickable { onInc() }
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    style = MaterialTheme.typography.titleSmall
-                )
-            }
-        }
-    }
+private fun ReadonlyField(label: String, value: String) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = {},
+        label = { Text(label) },
+        trailingIcon = { Icon(Icons.Rounded.Lock, contentDescription = null) },
+        enabled = false,
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth()
+    )
 }
 
-@Composable
-private fun ParamChips(device: DefaultDevice) {
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Chip("${device.power} Вт")
-        Chip("cos ф ${device.powerFactor.format(2)}")
-        Chip("к-т спроса ${device.demandRatio.format(2)}")
-        Chip(device.voltage.asLabel())
-        Chip("Тип: ${device.deviceType.name}")
-    }
-}
+/* ====== СБОРКА ЗАПРОСОВ СО ВСЕМИ КАСТОМАМИ (как в DevicePickerSheet) ====== */
 
-@Composable
-private fun Chip(text: String) {
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-    ) {
-        Text(
-            text = text,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+private fun buildRequests(
+    defaults: List<DefaultDevice>,
+    qtyMap: Map<String, Int>,
+    nameOverride: Map<String, String>,
+    powerOverride: Map<String, String>
+): List<DeviceCreateRequest> {
+    val byId = defaults.associateBy { it.id.toString() }
+    val out = mutableListOf<DeviceCreateRequest>()
+    for ((key, count) in qtyMap) {
+        if (count <= 0) continue
+        val def = byId[key] ?: continue
+
+        val title = (nameOverride[key] ?: def.name).trim().ifEmpty { def.name }
+        val powerRaw = (powerOverride[key] ?: def.power.toString())
+            .replace(',', '.')
+            .toDoubleOrNull()
+            ?.takeIf { it > 0.0 }
+            ?: def.power.toDouble()
+        val watts = powerRaw.toInt().coerceAtLeast(1) // всегда Вт
+
+        out += DeviceCreateRequest(
+            title = title,
+            type = def.deviceType,
+            count = count,
+            ratedPowerW = watts,
+            powerFactor = def.powerFactor,
+            demandRatio = def.demandRatio,
+            voltage = def.voltage
         )
     }
+    return out
 }
+
+/* ====== ХЕЛПЕРЫ UI ====== */
 
 private fun roomTypeLabel(type: RoomType): String = when (type) {
     RoomType.STANDARD -> "Стандартная"
@@ -279,18 +379,11 @@ private fun roomTypeLabel(type: RoomType): String = when (type) {
     RoomType.OUTDOOR -> "Улица (УЗО)"
 }
 
+private fun deviceTypeLabel(type: DeviceType): String = type.name
+
 private fun Double.format(digits: Int) = "%.${digits}f".format(this).replace(',', '.')
 
-private fun Voltage.asLabel(): String {
-    val phase = when (this.type) {
-        VoltageType.AC_1PHASE -> "1ф"
-        VoltageType.AC_3PHASE -> "3ф"
-        VoltageType.DC -> "DC"
-    }
-    return if (this.type == VoltageType.DC) "${this.value}V • DC" else "${this.value}V • $phase"
-}
-
-/* ====== ПРЕСЕТЫ ПОД ТИП КОМНАТЫ ====== */
+private fun voltageHuman(v: Voltage): String = "${v.value} В"
 
 private fun applyPresetFor(
     type: RoomType,
@@ -309,23 +402,18 @@ private fun applyPresetFor(
             addFirstOf(DeviceType.LIGHTING, 1)
             addFirstOf(DeviceType.SOCKET, 1)
         }
-
         RoomType.BATHROOM -> {
             addFirstOf(DeviceType.LIGHTING, 1)
             addFirstOf(DeviceType.SOCKET, 1)
-            addFirstOf(DeviceType.HEAVY_DUTY, 1) // например, бойлер, если есть
+            addFirstOf(DeviceType.HEAVY_DUTY, 1)
         }
-
         RoomType.KITCHEN -> {
             addFirstOf(DeviceType.LIGHTING, 1)
-            // розеточные чаще кратно двум
             addFirstOf(DeviceType.SOCKET, 2)
-            addFirstOf(DeviceType.HEAVY_DUTY, 1) // духовой шкаф/варочная, если есть
+            addFirstOf(DeviceType.HEAVY_DUTY, 1)
         }
-
         RoomType.OUTDOOR -> {
             addFirstOf(DeviceType.SOCKET, 1)
-            // подсветка по желанию
         }
     }
 }

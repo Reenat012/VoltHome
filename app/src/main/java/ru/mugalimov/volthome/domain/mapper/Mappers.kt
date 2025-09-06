@@ -7,6 +7,7 @@ import ru.mugalimov.volthome.data.local.entity.GroupDeviceJoin
 import ru.mugalimov.volthome.data.local.entity.LoadEntity
 import ru.mugalimov.volthome.data.local.entity.RoomEntity
 import ru.mugalimov.volthome.domain.model.CircuitGroup
+import ru.mugalimov.volthome.domain.model.DefaultDevice
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.Load
@@ -14,6 +15,7 @@ import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.Room
 import ru.mugalimov.volthome.domain.model.RoomWithDevice
 import ru.mugalimov.volthome.domain.model.RoomWithDevicesEntity
+import ru.mugalimov.volthome.domain.model.create.DeviceCreateRequest
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Вспомогательные парсеры для enum-строк
@@ -223,4 +225,16 @@ fun GroupDeviceJoin.toEntityJoin(): GroupDeviceJoin =
     GroupDeviceJoin(
         groupId  = groupId,
         deviceId = deviceId
+    )
+
+/** Маппер из DefaultDevice в DeviceCreateRequest для старого потока (сохраняем совместимость). */
+private fun DefaultDevice.toCreateRequest(qty: Int): DeviceCreateRequest =
+    DeviceCreateRequest(
+        title = this.name,              // имя по каталогу (без кастомизации)
+        type = this.deviceType,         // DeviceType
+        count = qty.coerceAtLeast(1),
+        ratedPowerW = this.power,       // всегда Вт
+        powerFactor = this.powerFactor,
+        demandRatio = this.demandRatio,
+        voltage = this.voltage
     )
