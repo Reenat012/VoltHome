@@ -6,12 +6,15 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.data.repository.PreferencesRepository
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.model.CircuitGroup
+import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.GroupingResult
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.PhaseMode
@@ -33,6 +36,7 @@ class ExplicationViewModel @Inject constructor(
     private val repo: ExplicationRepository,
     private val groupCalculatorFactory: GroupCalculatorFactory,
     private val preferencesRepository: PreferencesRepository,
+    private val deviceRepository: DeviceRepository,
     @IoDispatcher private val dispatchers: CoroutineDispatcher
 ) : ViewModel() {
     private val _uiState = MutableStateFlow<GroupScreenState>(GroupScreenState.Loading)
@@ -40,6 +44,10 @@ class ExplicationViewModel @Inject constructor(
 
     private val _isRecalculating = MutableStateFlow(false)
     val isRecalculating: StateFlow<Boolean> = _isRecalculating
+
+    // выбранный инстанс устройства для показа в шите
+    private val _selectedDevice = MutableStateFlow<Device?>(null)
+    val selectedDevice: StateFlow<Device?> = _selectedDevice.asStateFlow()
 
     // Необязательное авто-пересчитывание при смене режима:
     init {
@@ -49,6 +57,18 @@ class ExplicationViewModel @Inject constructor(
                 recalcAndSaveGroups()
             }
         }
+    }
+
+    /** ВАЖНО: берём ИНСТАНС устройства по id из репозитория, без дефолтов. */
+    fun onDeviceClick(deviceId: Long) {
+        viewModelScope.launch {
+            val dev = deviceRepository.getDeviceById(deviceId.toInt())
+            _selectedDevice.value = dev // может быть null, если не нашли
+        }
+    }
+
+    fun clearSelected() {
+        _selectedDevice.value = null
     }
 
     fun recalcAndSaveGroups() {

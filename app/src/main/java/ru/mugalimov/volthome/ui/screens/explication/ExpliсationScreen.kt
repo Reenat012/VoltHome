@@ -40,27 +40,26 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
             val groups = s.groups
             val bg = MaterialTheme.colorScheme.background
 
-            // Агрегаты
+            // Агрегаты (как у тебя было)
             val perPhase = remember(groups) { phaseCurrents(groups) }
             val sections = remember(groups) { groups.groupBy { it.phase ?: Phase.A } }
 
-            // Обертка для FAB поверх контента
-            Box(modifier = Modifier
-                .fillMaxSize()
-                .background(bg)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(bg)
             ) {
-                // Твой основной контент
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp)
                 ) {
-                    // Вводной аппарат
+                    // Вводной
                     item {
                         ShieldOverviewCard(
                             incomer = s.incomer,
                             groups = groups,
                             hasGroupRcds = s.hasGroupRcds,
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxSize()
                         )
                         Spacer(Modifier.height(16.dp))
                     }
@@ -77,7 +76,11 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
                                 list,
                                 key = { stableGroupKey(ph, it) }
                             ) { g ->
-                                GroupCardCompact(group = g)
+                                // ⬇️ Передаём обработчик клика по устройству (id инстанса)
+                                GroupCardCompact(
+                                    group = g,
+                                    onDeviceClick = { deviceId -> viewModel.onDeviceClick(deviceId) }
+                                )
                                 Spacer(Modifier.height(12.dp))
                             }
                             item { Spacer(Modifier.height(8.dp)) }
@@ -103,7 +106,6 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
                 }
             }
         }
-
         null -> ContentView()
     }
 }

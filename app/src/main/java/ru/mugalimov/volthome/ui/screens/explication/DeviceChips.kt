@@ -13,16 +13,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import ru.mugalimov.volthome.domain.model.Device
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DeviceChips(
-    devices: List<String>,
-    onDeviceClick: (String) -> Unit = {},
+    devices: List<Device>,
+    onDeviceClick: (Long) -> Unit,
     maxVisible: Int = 3,
-    groupKey: Any? = null // передавай, например, group.groupNumber
+    groupKey: Any? = null // привязываем state раскрытия к группе
 ) {
-    val rememberKey = groupKey ?: devices.joinToString("|")
+    val rememberKey = groupKey ?: devices.joinToString("|") { it.id.toString() }
     val (expanded, setExpanded) = rememberSaveable(rememberKey) { mutableStateOf(false) }
 
     val total = devices.size
@@ -34,11 +35,11 @@ fun DeviceChips(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // чипы устройств
-        visible.forEach { name ->
+        // Чипы инстансов устройств (показываем кастомные name/power)
+        visible.forEach { d ->
             AssistChip(
-                onClick = { onDeviceClick(name) },
-                label = { Text(name, style = MaterialTheme.typography.labelLarge) },
+                onClick = { onDeviceClick(d.id) },
+                label = { Text("${d.name}", style = MaterialTheme.typography.labelLarge) },
                 colors = AssistChipDefaults.assistChipColors()
             )
         }
