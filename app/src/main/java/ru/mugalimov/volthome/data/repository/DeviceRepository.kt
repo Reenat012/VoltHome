@@ -26,4 +26,7 @@ interface DeviceRepository {
 
     // Получение всех устройств
     suspend fun getAllDevices(): List<Device>
+
+    // Обновление инстанса устройства (имя/мощность и др.)
+    suspend fun updateDevice(device: Device)
 }
