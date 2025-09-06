@@ -2,13 +2,16 @@ package ru.mugalimov.volthome.ui.screens.rooms
 
 import android.annotation.SuppressLint
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.ui.components.ErrorView
 import ru.mugalimov.volthome.ui.components.LoadingView
@@ -30,6 +33,7 @@ fun RoomsScreen(
     val defaultDevices by addViewModel.defaultDevices.collectAsState()
     val isBusy by addViewModel.isBusy.collectAsState()
     val deviceCounts by viewModel.deviceCounts.collectAsState()
+    val phaseMode by viewModel.phaseMode.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
     var showAddRoom by remember { mutableStateOf(false) }
@@ -48,6 +52,7 @@ fun RoomsScreen(
                         addViewModel.undoCreateRoom(action.roomId)
                     }
                 }
+
                 is RoomsAction.DevicesAdded -> Unit
                 is RoomsAction.UserMessage -> snackbarHostState.showSnackbar(action.message)
                 is RoomsAction.Error -> snackbarHostState.showSnackbar(
@@ -61,7 +66,20 @@ fun RoomsScreen(
     val fabAlpha = if (fabDisabled) 0.5f else 1f
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Комнаты") }) },
+        topBar = {
+            TopAppBar(
+                title = { Text("Комнаты") },
+                actions = {
+                    PhaseModeMenu(
+                        mode = phaseMode,
+                        onSelect = viewModel::setPhaseMode,
+                        modifier = Modifier
+                            .padding(end = 8.dp)     // небольшой отступ справа
+                            .widthIn(min = 170.dp, max = 170.dp) // ограничиваем ширину
+                    )
+                }
+            )
+        },
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         floatingActionButton = {
             FloatingActionButton(

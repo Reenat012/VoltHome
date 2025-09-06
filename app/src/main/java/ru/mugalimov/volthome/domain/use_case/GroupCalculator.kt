@@ -10,6 +10,8 @@ import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.ElectricalSystem
 import ru.mugalimov.volthome.domain.model.GroupProfile
 import ru.mugalimov.volthome.domain.model.GroupingResult
+import ru.mugalimov.volthome.domain.model.Phase
+import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.domain.model.SafetyProfile
 import ru.mugalimov.volthome.domain.use_case.PhaseDistributor.distributeGroupsBalanced
@@ -28,13 +30,13 @@ class GroupCalculator(
         RoomType.STANDARD to SafetyProfile(rcdRequired = false)
     )
 
-    suspend fun calculateGroups(): GroupingResult {
+    suspend fun calculateGroups(mode: PhaseMode): GroupingResult {
         return try {
             val rooms = roomRepository.getRoomsWithDevices()
             var totalGroupNumber = 1
             val allGroups = mutableListOf<CircuitGroup>()
 
-            // 1) Выделенные линии: только «явно тяжёлые»/по флагу
+            // 1) Выделенные линии
             rooms.forEach { roomWithDevices ->
                 val room = roomWithDevices.room
                 val safety = roomSafetyProfiles[room.roomType] ?: SafetyProfile()
@@ -53,7 +55,7 @@ class GroupCalculator(
                     }
             }
 
-            // 2) Обычные группы: FFD‑упаковка по типам, лимит ≤ номинала автомата
+            // 2) Обычные группы: FFD по типам
             rooms.forEach { roomWithDevices ->
                 val room = roomWithDevices.room
                 val safety = roomSafetyProfiles[room.roomType] ?: SafetyProfile()
@@ -77,25 +79,29 @@ class GroupCalculator(
                 }
             }
 
-            // 3) Нормализуем номера ровно один раз
+            // 3) Нормализуем номера один раз
             val normalized = allGroups
                 .sortedWith(compareBy<CircuitGroup> { it.roomId }.thenBy { it.groupNumber })
                 .mapIndexed { idx, g -> g.copy(groupNumber = idx + 1) }
 
-            // 4) Балансировка фаз (номера групп не меняем внутри)
-            val distributed = distributeGroupsBalanced(normalized)
+            // 4) Балансировка фаз / режим 1 фаза
+            val distributed: List<CircuitGroup> =
+                if (mode == PhaseMode.THREE) {
+                    distributeGroupsBalanced(normalized)
+                } else {
+                    normalized.map { it.copy(phase = Phase.A) }
+                }
 
             // 5) Валидация до сохранения
             validateBeforeSave(distributed)
 
-            // 6) Сохранение (желательно транзакционное в репозитории)
-            saveGroupsWithDevices(distributed)
-
+            // 6) НИКАКОГО сохранения здесь (если сохраняешь в VM)
             GroupingResult.Success(ElectricalSystem(distributed))
         } catch (e: Exception) {
             GroupingResult.Error("Ошибка расчёта: ${e.message}")
         }
     }
+
 
     /** Явные критерии выделенных линий. */
     private fun isHeavy(d: DeviceEntity): Boolean =

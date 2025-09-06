@@ -7,10 +7,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MaterialTheme.colorScheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -18,12 +18,12 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.min
 import ru.mugalimov.volthome.domain.model.Phase
-import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
+import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.use_case.balanceUi
 import ru.mugalimov.volthome.domain.use_case.calcPhaseBalance
 
@@ -35,51 +35,137 @@ fun PhaseLoadDonutChart(
     gapDeg: Float = 2f,
     showLegend: Boolean = true,
     animate: Boolean = true,
-    chartSizeDp: Dp = 220.dp
+    chartSizeDp: Dp = 220.dp,
+    mode: PhaseMode = PhaseMode.THREE,
+    incomerRating: Int? = null, // номинал вводного; нужен только в 1-фазе
+    warnPct: Int = 60,          // ≤warn — зелёный
+    alertPct: Int = 80          // ≥alert — красный
 ) {
-    // входные значения
     val a = perPhase[Phase.A] ?: 0.0
     val b = perPhase[Phase.B] ?: 0.0
     val c = perPhase[Phase.C] ?: 0.0
 
-    // единый расчёт перекоса
-    val bal = remember(a, b, c) { calcPhaseBalance(a, b, c) }
+    val colorSurfaceVariant = colorScheme.surfaceVariant
+
+    // ===== 1-фаза: индикатор загрузки вводного =====
+    if (mode == PhaseMode.SINGLE) {
+        val totalRated = (incomerRating ?: 0).coerceAtLeast(1)
+        val pct = ((a / totalRated) * 100.0).coerceIn(0.0, 100.0)
+
+        val color = when {
+            pct >= alertPct -> MaterialTheme.colorScheme.error
+            pct >= warnPct  -> MaterialTheme.colorScheme.tertiary
+            else            -> MaterialTheme.colorScheme.primary
+        }
+
+        val progress by animateFloatAsState(
+            targetValue = pct.toFloat() / 100f,
+            animationSpec = tween(durationMillis = if (animate) 800 else 0),
+            label = "progress"
+        )
+
+        Box(
+            modifier = modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(modifier = Modifier.size(chartSizeDp)) {
+                val stroke = Stroke(width = ringWidth.toPx(), cap = StrokeCap.Round)
+
+                // фон
+                drawArc(
+                    color = colorSurfaceVariant,
+                    startAngle = -90f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    style = stroke,
+                    size = size
+                )
+                // заполнение
+                drawArc(
+                    color = color,
+                    startAngle = -90f,
+                    sweepAngle = 360f * progress,
+                    useCenter = false,
+                    style = stroke,
+                    size = size
+                )
+            }
+
+            // центр: только "A из I_incomer" и "%", без длинных текстов
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "${fmt1(a)} A из $totalRated A",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "${fmt0(pct)}%",
+                    color = color,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                val reserveA = (totalRated - a).coerceAtLeast(0.0)
+                Text(
+                    text = "Запас: ${fmt1(reserveA)} A",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        // длинные тексты — НИЖЕ круга, чтобы не залезали на дугу
+        val reserveA = (totalRated - a).coerceAtLeast(0.0)
+        Spacer(Modifier.height(6.dp))
+
+        if (showLegend) {
+            Spacer(Modifier.height(12.dp))
+            // мини-легенда своей реализацией
+            LegendRow(
+                label = "Фаза A",
+                amps = a,
+                total = a.coerceAtLeast(0.0001), // чтобы было 100%
+                color = MaterialTheme.colorScheme.primary,
+                bold = true
+            )
+        }
+        return
+    }
+
+    // ===== 3-фазы: классический донат =====
+    val bal = calcPhaseBalance(a, b, c)
     val (statusText, statusColor) = balanceUi(bal.pct)
 
-    val phases = listOf(Phase.A, Phase.B, Phase.C)
     val values = listOf(a, b, c)
-
     val baseColors = listOf(
         Color(0xFFF6D96B), // A — жёлтый
         Color(0xFF7ED492), // B — зелёный
         Color(0xFFFF8A80)  // C — красный
     )
-    val colors = baseColors.mapIndexed { i, col ->
-        if (phases[i] == bal.maxPhase) col else col.copy(alpha = 0.6f)
+    val colors = listOf(Phase.A, Phase.B, Phase.C).mapIndexed { i, _ ->
+        if (listOf(Phase.A, Phase.B, Phase.C)[i] == bal.maxPhase) baseColors[i]
+        else baseColors[i].copy(alpha = 0.6f)
     }
 
     val ringBg = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)
     val outlineColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
 
     val progress by animateFloatAsState(
-        targetValue = if (animate) 1f else 1f,
+        targetValue = 1f,
         animationSpec = tween(if (animate) 700 else 0),
         label = "donutProgress"
     )
 
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-
         Box(
-            modifier = modifier,            // родитель задаёт отступы/ширину контейнера item’а
+            modifier = modifier,
             contentAlignment = Alignment.Center
         ) {
-            Canvas( modifier = Modifier
-                .size(chartSizeDp)
-                .padding(12.dp)
+            Canvas(
+                modifier = Modifier
+                    .size(chartSizeDp)
+                    .padding(12.dp)
             ) {
                 val total = values.sum().toFloat()
                 val stroke = Stroke(width = ringWidth.toPx(), cap = StrokeCap.Round)
-                val sizePx = Size(size.width, size.height)
 
                 // фон кольца
                 drawArc(
@@ -88,7 +174,7 @@ fun PhaseLoadDonutChart(
                     sweepAngle = 360f,
                     useCenter = false,
                     style = stroke,
-                    size = sizePx
+                    size = size
                 )
 
                 if (total <= 0f) {
@@ -98,7 +184,7 @@ fun PhaseLoadDonutChart(
                         sweepAngle = 360f,
                         useCenter = false,
                         style = stroke,
-                        size = sizePx
+                        size = size
                     )
                     return@Canvas
                 }
@@ -118,8 +204,8 @@ fun PhaseLoadDonutChart(
                         startAngle = adjStart,
                         sweepAngle = adjSweep,
                         useCenter = false,
-                        style = stroke,
-                        size = sizePx
+                        style = Stroke(width = ringWidth.toPx(), cap = StrokeCap.Round),
+                        size = size
                     )
                     start += sweep
                 }

@@ -11,23 +11,31 @@ class IncomerSelector {
     data class Params(
         val groups: List<CircuitGroup>,
         val preferRcbo: Boolean = false,
-        val hasGroupRcds: Boolean = true
+        val hasGroupRcds: Boolean = true,
+        // Явный тип сети (источник правды из настроек). Если null — как раньше, по группам.
+        val voltageTypeOverride: VoltageType? = null
     )
 
     fun select(p: Params): IncomerSpec {
-        val vType: VoltageType = inferVoltageType(p.groups)     // <-- из PhaseDistributor.kt
+        val vType: VoltageType = p.voltageTypeOverride ?: inferVoltageType(p.groups)
         val is3 = vType == VoltageType.AC_3PHASE
 
         val perPhase = phaseCurrents(p.groups)                   // <-- из PhaseDistributor.kt
         val iBase = if (is3) {
-            maxOf(perPhase.getOrZero(Phase.A), perPhase.getOrZero(Phase.B), perPhase.getOrZero(Phase.C))
+            maxOf(
+                perPhase.getOrZero(Phase.A),
+                perPhase.getOrZero(Phase.B),
+                perPhase.getOrZero(Phase.C)
+            )
         } else {
-            perPhase.values.sum()
+            // В 1Ф режиме считаем строго по фазе A
+            perPhase.getOrZero(Phase.A)
         }
 
         val iRequired = (iBase / 0.8).coerceAtLeast(6.0)        // +20% резерв
-        val row = listOf(6,10,16,20,25,32,40,50,63,80,100)
-        val mcb = row.first { it >= ceil(iRequired).toInt() }
+        val row = listOf(6,10,16,20,25,32,40,50,63,80,100,125,160)
+        val target = ceil(iRequired).toInt()
+        val mcb = row.firstOrNull { it >= target } ?: row.last()
         val poles = if (is3) 4 else 2
 
         val needRcdByRooms = p.groups.any { it.rcdRequired }
@@ -35,11 +43,15 @@ class IncomerSelector {
         val (kind, rcdType, sens, sel) = when {
             !needRcdByRooms && !p.hasGroupRcds ->
                 Quad(IncomerKind.MCB_ONLY, null, null, RcdSelectivity.NONE)
+
             p.preferRcbo ->
                 Quad(IncomerKind.RCBO, RcdType.A, if (is3) 100 else 30, RcdSelectivity.NONE)
+
             else ->
-                Quad(IncomerKind.MCB_PLUS_RCD, RcdType.A, if (is3) 300 else 100,
-                    if (p.hasGroupRcds) RcdSelectivity.S else RcdSelectivity.NONE)
+                Quad(
+                    IncomerKind.MCB_PLUS_RCD, RcdType.A, if (is3) 300 else 100,
+                    if (p.hasGroupRcds) RcdSelectivity.S else RcdSelectivity.NONE
+                )
         }
 
         return IncomerSpec(
@@ -54,5 +66,5 @@ class IncomerSelector {
         )
     }
 
-    private data class Quad<A,B,C,D>(val a:A,val b:B,val c:C,val d:D)
+    private data class Quad<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
 }

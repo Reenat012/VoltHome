@@ -18,7 +18,9 @@ import ru.mugalimov.volthome.domain.model.Voltage
 import ru.mugalimov.volthome.domain.model.create.DeviceCreateRequest
 import ru.mugalimov.volthome.domain.model.create.RoomCreateRequest
 import ru.mugalimov.volthome.data.repository.DeviceRepository   // твой репозиторий с пресетами
+import ru.mugalimov.volthome.data.repository.PreferencesRepository
 import ru.mugalimov.volthome.domain.model.DefaultDevice        // если у тебя так называется
+import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.use_case.AddDevicesToRoomUseCase
 import ru.mugalimov.volthome.domain.use_case.CreateRoomWithDevicesUseCase
 import ru.mugalimov.volthome.domain.use_case.DeleteDevicesUseCase
@@ -30,6 +32,7 @@ class RoomsViewModel @Inject constructor(
     private val addDevices: AddDevicesToRoomUseCase,
     private val deleteRoom: DeleteRoomUseCase,
     private val deleteDevices: DeleteDevicesUseCase,
+    private val preferencesRepository: PreferencesRepository,
     deviceRepository: DeviceRepository
 ) : ViewModel() {
 
@@ -46,6 +49,11 @@ class RoomsViewModel @Inject constructor(
     /** Простой UI state для кнопок (можно расширить при желании) */
     private val _isBusy = kotlinx.coroutines.flow.MutableStateFlow(false)
     val isBusy: StateFlow<Boolean> = _isBusy
+
+    // Текущее значение режима для UI (с дефолтом THREE)
+    val phaseMode: StateFlow<PhaseMode> =
+        preferencesRepository.phaseMode
+            .stateIn(viewModelScope, SharingStarted.Lazily, PhaseMode.THREE)
 
     /**
      * Создать комнату с устройствами за один вызов.
@@ -90,6 +98,10 @@ class RoomsViewModel @Inject constructor(
                 _isBusy.value = false
             }
         }
+    }
+
+    fun setPhaseMode(mode: PhaseMode) {
+        viewModelScope.launch { preferencesRepository.setPhaseMode(mode) }
     }
 
     /**
