@@ -1,67 +1,36 @@
 package ru.mugalimov.volthome.ui.sheets
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.ExpandLess
-import androidx.compose.material.icons.rounded.ExpandMore
-import androidx.compose.material.icons.rounded.Lock
-import androidx.compose.material.icons.rounded.Remove
-import androidx.compose.material3.BottomSheetDefaults
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.Divider
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.rounded.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
-import javax.inject.Inject
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import ru.mugalimov.volthome.core.validation.InputConstraints
 import ru.mugalimov.volthome.domain.model.DefaultDevice
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.Voltage
 import ru.mugalimov.volthome.domain.model.create.DeviceCreateRequest as DomainDeviceCreateRequest
 import ru.mugalimov.volthome.domain.use_case.AddDevicesToRoomUseCase
+import javax.inject.Inject
 
 /**
  * BottomSheet добавления устройств с немедленной кастомизацией.
- * Требования:
- *  - Степпер (– N +) с ровным выравниванием
- *  - Редактируемые поля: Название, Мощность (всегда Вт)
- *  - Остальные параметры — read-only (с иконкой замка)
- *  - Кнопка добавления в шапке и нижняя — только иконка галочки
- *  - Заголовок "Добавить устройства" всегда виден
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -79,6 +48,9 @@ fun DevicePickerSheet(
     val qty = remember { mutableStateMapOf<Long, Int>() }
     val nameOverride = remember { mutableStateMapOf<Long, String>() }
     val powerOverride = remember { mutableStateMapOf<Long, String>() }
+    val powerErrors = remember { mutableStateMapOf<Long, String?>() }
+
+    val bringIntoViewRequester = remember { BringIntoViewRequester() }
 
     val filtered = remember(search, defaultDevices) {
         val q = search.trim().lowercase()
@@ -94,10 +66,8 @@ fun DevicePickerSheet(
                     .fillMaxWidth()
                     .padding(top = 6.dp, bottom = 4.dp)
             ) {
-                // стандартный хэндл
                 BottomSheetDefaults.DragHandle()
                 Spacer(Modifier.height(6.dp))
-                // Заголовок + кнопка-галочка (без текста)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -107,27 +77,41 @@ fun DevicePickerSheet(
                 ) {
                     Text(text = "Добавить устройства")
                     val totalTop = qty.values.sum()
+                    val hasErrorsTop = powerErrors.values.any { it != null }
                     IconButton(
                         onClick = {
                             scope.launch {
-                                val reqs = buildRequests(defaultDevices, qty, nameOverride, powerOverride)
-                                if (reqs.isEmpty()) { onDismiss(); return@launch }
+                                val reqs =
+                                    buildRequests(defaultDevices, qty, nameOverride, powerOverride)
+                                if (reqs.isEmpty()) {
+                                    onDismiss(); return@launch
+                                }
                                 val ids = helperVm.add(roomId, reqs)
                                 onAdded(ids); onDismiss()
                             }
                         },
-                        enabled = totalTop > 0
+                        enabled = totalTop > 0 && !hasErrorsTop
                     ) { Icon(Icons.Rounded.Check, contentDescription = "Добавить") }
                 }
             }
         }
     ) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-
+        Column(
+            Modifier
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .bringIntoViewRequester(bringIntoViewRequester)
+                .imePadding()
+        ) {
             OutlinedTextField(
                 value = search,
                 onValueChange = { search = it },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth(0.95f)
+                    .onFocusChanged {
+                        if (it.isFocused) scope.launch {
+                            delay(150); bringIntoViewRequester.bringIntoView()
+                        }
+                    },
                 singleLine = true,
                 placeholder = { Text("Поиск устройства…") }
             )
@@ -136,7 +120,7 @@ fun DevicePickerSheet(
 
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = PaddingValues(bottom = 96.dp) // запас под нижнюю панель
+                contentPadding = PaddingValues(bottom = 96.dp)
             ) {
                 items(filtered, key = { it.id }) { def ->
                     var expanded by remember { mutableStateOf(false) }
@@ -144,7 +128,6 @@ fun DevicePickerSheet(
 
                     Card {
                         Column(Modifier.padding(12.dp)) {
-                            // Заголовок + степпер (ровное выравнивание)
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -162,7 +145,6 @@ fun DevicePickerSheet(
                                         onClick = { qty[def.id] = (count - 1).coerceAtLeast(0) }
                                     ) { Icon(Icons.Rounded.Remove, contentDescription = "Уменьшить") }
 
-                                    // фиксированная ширина для стабильного центрирования цифры
                                     Box(Modifier.width(28.dp), contentAlignment = Alignment.Center) {
                                         Text(text = count.toString(), textAlign = TextAlign.Center)
                                     }
@@ -184,41 +166,100 @@ fun DevicePickerSheet(
                                 Column {
                                     Spacer(Modifier.height(10.dp))
 
-                                    // Название — редактируемое
+                                    // 1) «Название» — на всю ширину, единый визуал
                                     OutlinedTextField(
                                         value = nameOverride[def.id] ?: def.name,
                                         onValueChange = { nameOverride[def.id] = it },
                                         label = { Text("Название") },
                                         singleLine = true,
-                                        modifier = Modifier.fillMaxWidth()
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(min = 56.dp)
+                                            .onFocusChanged {
+                                                if (it.isFocused) scope.launch {
+                                                    delay(150); bringIntoViewRequester.bringIntoView()
+                                                }
+                                            }
                                     )
 
-                                    Spacer(Modifier.height(8.dp))
+                                    Spacer(Modifier.height(10.dp))
 
-                                    // Мощность — только Вт
-                                    OutlinedTextField(
-                                        value = powerOverride[def.id] ?: def.power.toString(),
-                                        onValueChange = { powerOverride[def.id] = it.replace(',', '.') },
-                                        label = { Text("Мощность (Вт)") },
-                                        singleLine = true,
-                                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                                            keyboardType = KeyboardType.Decimal
-                                        ),
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
+                                    // 2) Остальные поля — сетка 2×3
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        // Ряд 1: Мощность | Тип устройства
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                            verticalAlignment = Alignment.Top
+                                        ) {
+                                            val currentPowerText = powerOverride[def.id] ?: def.power.toString()
+                                            val error = powerErrors[def.id]
 
-                                    Spacer(Modifier.height(12.dp))
-                                    Divider()
-                                    Spacer(Modifier.height(12.dp))
+                                            OutlinedTextField(
+                                                value = currentPowerText,
+                                                onValueChange = { new ->
+                                                    val norm = new.replace(',', '.')
+                                                    powerOverride[def.id] = norm
+                                                    val v = norm.toDoubleOrNull()
+                                                    powerErrors[def.id] = when {
+                                                        v == null || v <= 0.0 -> "Введите число > 0"
+                                                        v.toInt() > InputConstraints.MAX_POWER_W ->
+                                                            "Максимум ${InputConstraints.MAX_POWER_W} Вт"
+                                                        else -> null
+                                                    }
+                                                },
+                                                label = { Text("Мощность (Вт)") },
+                                                singleLine = true,
+                                                isError = error != null,
+                                                supportingText = { error?.let { Text(it) } },
+                                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                                    keyboardType = KeyboardType.Decimal
+                                                ),
+                                                shape = RoundedCornerShape(12.dp),
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .heightIn(min = 56.dp)
+                                                    .onFocusChanged {
+                                                        if (it.isFocused) scope.launch {
+                                                            delay(150); bringIntoViewRequester.bringIntoView()
+                                                        }
+                                                    }
+                                            )
 
-                                    // Остальные параметры — read-only (с замком)
-                                    ReadonlyField(label = "Тип устройства", value = deviceTypeLabel(def.deviceType))
-                                    Spacer(Modifier.height(8.dp))
-                                    ReadonlyField(label = "Коэфф. мощности (PF)", value = def.powerFactor.toString())
-                                    Spacer(Modifier.height(8.dp))
-                                    ReadonlyField(label = "Коэфф. спроса", value = def.demandRatio.toString())
-                                    Spacer(Modifier.height(8.dp))
-                                    ReadonlyField(label = "Напряжение", value = voltageHuman(def.voltage))
+                                            // ReadonlyField без изменения сигнатуры: участвует в сетке через weight
+                                            Box(Modifier.weight(1f)) {
+                                                ReadonlyField("Тип устройства", deviceTypeLabel(def.deviceType))
+                                            }
+                                        }
+
+                                        // Ряд 2: Cos φ | Коэфф. спроса
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                        ) {
+                                            Box(Modifier.weight(1f)) {
+                                                ReadonlyField("Коэфф. мощности (PF)", def.powerFactor.toString())
+                                            }
+                                            Box(Modifier.weight(1f)) {
+                                                ReadonlyField("Коэфф. спроса", def.demandRatio.toString())
+                                            }
+                                        }
+
+                                        // Ряд 3: Напряжение | пустая ячейка (резерв)
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                        ) {
+                                            Box(Modifier.weight(1f)) {
+                                                ReadonlyField("Напряжение", voltageHuman(def.voltage))
+                                            }
+                                            Spacer(Modifier.weight(1f))
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -226,12 +267,12 @@ fun DevicePickerSheet(
                 }
             }
 
-            // Нижняя панель: галочка (без текста) и Отмена
             Spacer(Modifier.height(8.dp))
             val total = qty.values.sum()
+            val hasErrorsBottom = powerErrors.values.any { it != null }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(
-                    enabled = total > 0,
+                    enabled = total > 0 && !hasErrorsBottom,
                     onClick = {
                         scope.launch {
                             val reqs = buildRequests(defaultDevices, qty, nameOverride, powerOverride)
@@ -258,9 +299,13 @@ private fun ReadonlyField(label: String, value: String) {
         onValueChange = {},
         label = { Text(label) },
         trailingIcon = { Icon(Icons.Rounded.Lock, contentDescription = null) },
+        readOnly = true,
         enabled = false,
         singleLine = true,
-        modifier = Modifier.fillMaxWidth()
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
     )
 }
 
@@ -287,8 +332,10 @@ private fun buildRequests(
         val title = (nameOverride[id] ?: def.name).trim().ifEmpty { def.name }
         val rawText = (powerOverride[id] ?: def.power.toString()).replace(',', '.')
         val raw = rawText.toDoubleOrNull()?.takeIf { it > 0.0 } ?: def.power.toDouble()
-        val watts = raw.toInt().coerceAtLeast(1) // всегда Вт
-
+        val watts = raw.toInt().coerceIn(
+            InputConstraints.MIN_POWER_W,
+            InputConstraints.MAX_POWER_W
+        )
         out += DomainDeviceCreateRequest(
             title = title,
             type = def.deviceType,
@@ -303,6 +350,4 @@ private fun buildRequests(
 }
 
 private fun deviceTypeLabel(type: DeviceType): String = type.toString()
-
-/** Требование: "написать человеческим языком и выводить только value" */
 private fun voltageHuman(v: Voltage): String = "${v.value} В"

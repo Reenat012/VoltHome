@@ -1,69 +1,37 @@
-package ru.mugalimov.volthome.ui.sheets
+package ru.mugalimov.volthome.ui.screens.rooms
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.ExpandLess
-import androidx.compose.material.icons.rounded.ExpandMore
-import androidx.compose.material.icons.rounded.Lock
-import androidx.compose.material.icons.rounded.Remove
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material3.BottomSheetDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Divider
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.rounded.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import ru.mugalimov.volthome.domain.model.DefaultDevice
-import ru.mugalimov.volthome.domain.model.DeviceType
-import ru.mugalimov.volthome.domain.model.RoomType
-import ru.mugalimov.volthome.domain.model.Voltage
-import ru.mugalimov.volthome.domain.model.VoltageType
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import ru.mugalimov.volthome.domain.model.*
 import ru.mugalimov.volthome.domain.model.create.DeviceCreateRequest
 
+// ✅ ДОБАВЛЕНО:
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.collectLatest
+
 /**
- * ВАЖНО: Это обновлённый AddRoomSheet, который повторяет функциональность выбора устройств
- * «1 в 1» как на экране «Комната» (DevicePickerSheet):
- *  - выбор пресетов
- *  - степпер (– N +)
- *  - возможность сразу отредактировать Название и Мощность (всегда в Вт) перед вставкой
- *  - остальные параметры — read-only с иконкой замка
- *
- * Изменение SIG: onConfirm теперь возвращает список DeviceCreateRequest, т.к. мы сохраняем
- * кастомные поля инстансов (title + ratedPowerW) уже на этапе создания комнаты.
+ * Экран добавления комнаты с устройствами.
+ * Реализован на BottomSheetScaffold.
+ * Контент внутри реагирует на клавиатуру через imePadding().
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -76,85 +44,109 @@ fun AddRoomSheet(
     var name by remember { mutableStateOf("") }
     var selectedType by remember { mutableStateOf(roomTypes.firstOrNull() ?: RoomType.STANDARD) }
 
-    // Количество по id
     val qtyMap = remember { mutableStateMapOf<String, Int>() }
-    // Раскрытие карточек
     val expandedMap = remember { mutableStateMapOf<String, Boolean>() }
-    // Переименования по id
     val nameOverride = remember { mutableStateMapOf<String, String>() }
-    // Кастомная мощность (в текстовом виде) по id
     val powerOverride = remember { mutableStateMapOf<String, String>() }
 
-    // Пресет при открытии
+    val bringIntoViewRequester = remember { BringIntoViewRequester() }
+    val scope = rememberCoroutineScope()
+
+    val scaffoldState = rememberBottomSheetScaffoldState(
+        bottomSheetState = rememberStandardBottomSheetState(
+            initialValue = SheetValue.Expanded,
+            skipHiddenState = false
+        )
+    )
+
     LaunchedEffect(Unit) { applyPresetFor(selectedType, defaultDevices, qtyMap) }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        dragHandle = { BottomSheetDefaults.DragHandle() }
-    ) {
-        Column(
-            modifier = Modifier
-                .navigationBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-        ) {
-            // Заголовок + кнопка-галочка (без текста)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "Добавить комнату",
-                    style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.weight(1f)
-                )
-
-                IconButton(onClick = {
-                    val requests = buildRequests(
-                        defaults = defaultDevices,
-                        qtyMap = qtyMap,
-                        nameOverride = nameOverride,
-                        powerOverride = powerOverride
-                    )
-                    onConfirm(
-                        name.ifBlank { roomTypeLabel(selectedType) },
-                        selectedType,
-                        requests
-                    )
-                }) {
-                    Icon(Icons.Rounded.Check, contentDescription = "Создать")
+    // ✅ ДОБАВЛЕНО: при свайпе вниз состояние уходит в Hidden — вызываем onDismiss(),
+    // чтобы внешний флаг показа шита сбросился и его можно было открыть снова.
+    LaunchedEffect(scaffoldState.bottomSheetState) {
+        snapshotFlow { scaffoldState.bottomSheetState.currentValue }
+            .collectLatest { value ->
+                // При sheetPeekHeight = 0.dp свайп вниз приводит к PartiallyExpanded (высота 0),
+                // поэтому считаем это полноценным закрытием.
+                if (value == SheetValue.Hidden || value == SheetValue.PartiallyExpanded) {
+                    onDismiss()
                 }
             }
+    }
 
-            Spacer(Modifier.padding(top = 12.dp))
-
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                label = { Text("Название комнаты") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(Modifier.padding(top = 10.dp))
-
-            RoomTypeRow(
-                types = roomTypes,
-                selected = selectedType,
-                onSelect = {
-                    selectedType = it
-                    applyPresetFor(it, defaultDevices, qtyMap)
-                }
-            )
-
-            Spacer(Modifier.padding(top = 12.dp))
-            Text("Устройства", style = MaterialTheme.typography.titleMedium)
-
-            Spacer(Modifier.padding(top = 8.dp))
-
+    BottomSheetScaffold(
+        scaffoldState = scaffoldState,
+        sheetPeekHeight = 0.dp,
+        sheetShape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+        sheetContent = {
             LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = PaddingValues(bottom = 88.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .imePadding() // 👈 здесь обрабатываем клавиатуру
+                    .bringIntoViewRequester(bringIntoViewRequester),
+                contentPadding = PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = 12.dp,
+                    bottom = 88.dp
+                ),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Добавить комнату",
+                            style = MaterialTheme.typography.titleLarge,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = {
+                            val requests = buildRequests(defaultDevices, qtyMap, nameOverride, powerOverride)
+                            onConfirm(
+                                name.ifBlank { roomTypeLabel(selectedType) },
+                                selectedType,
+                                requests
+                            )
+                            onDismiss()
+                        }) {
+                            Icon(Icons.Rounded.Check, contentDescription = "Создать")
+                        }
+                    }
+                }
+
+                item {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text("Название комнаты") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onFocusChanged {
+                                if (it.isFocused) scope.launch {
+                                    delay(200); bringIntoViewRequester.bringIntoView()
+                                }
+                            }
+                    )
+                }
+
+                item {
+                    RoomTypeRow(
+                        types = roomTypes,
+                        selected = selectedType,
+                        onSelect = {
+                            selectedType = it
+                            applyPresetFor(it, defaultDevices, qtyMap)
+                        }
+                    )
+                }
+
+                item {
+                    Text("Устройства", style = MaterialTheme.typography.titleMedium)
+                }
+
                 items(defaultDevices, key = { it.id }) { device ->
                     val key = device.id.toString()
                     val expanded = expandedMap[key] == true
@@ -170,12 +162,15 @@ fun AddRoomSheet(
                         onInc = { qtyMap[key] = (qtyMap[key] ?: 0).plus(1).coerceAtMost(99) },
                         onDec = { qtyMap[key] = (qtyMap[key] ?: 0).minus(1).coerceAtLeast(0) },
                         onTitleChange = { nameOverride[key] = it },
-                        onPowerChange = { powerOverride[key] = it.replace(',', '.') }
+                        onPowerChange = { powerOverride[key] = it.replace(',', '.') },
+                        bringIntoViewRequester = bringIntoViewRequester,
+                        scope = scope
                     )
                 }
             }
-        }
-    }
+        },
+        content = { /* основной экран здесь пустой */ }
+    )
 }
 
 @Composable
@@ -196,14 +191,16 @@ private fun RoomTypeRow(
                     1.dp,
                     if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
                 ),
-                color = if (isSel) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface
+                color = if (isSel) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                else MaterialTheme.colorScheme.surface
             ) {
                 Text(
                     roomTypeLabel(t),
                     modifier = Modifier
                         .clickable { onSelect(t) }
                         .padding(horizontal = 10.dp, vertical = 6.dp),
-                    color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (isSel) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.labelLarge
                 )
             }
@@ -211,12 +208,6 @@ private fun RoomTypeRow(
     }
 }
 
-/**
- * Карточка устройства (как в DevicePickerSheet):
- *  - верх: название пресета + текущая мощность + степпер (– N +) и стрелка
- *  - при раскрытии: редактируемые поля Название и Мощность (Вт),
- *    затем — read-only поля с замком: Тип устройства, cos φ, Коэфф. спроса, Напряжение
- */
 @Composable
 private fun DeviceRowEditable(
     device: DefaultDevice,
@@ -228,17 +219,16 @@ private fun DeviceRowEditable(
     onInc: () -> Unit,
     onDec: () -> Unit,
     onTitleChange: (String) -> Unit,
-    onPowerChange: (String) -> Unit
+    onPowerChange: (String) -> Unit,
+    bringIntoViewRequester: BringIntoViewRequester,
+    scope: CoroutineScope
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
-        Column(
-            modifier = Modifier
-                .padding(horizontal = 12.dp, vertical = 10.dp)
-        ) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(
                     modifier = Modifier
@@ -254,8 +244,6 @@ private fun DeviceRowEditable(
                         )
                     }
                 }
-
-                // Степпер (– N +) с выравниванием по центру
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -270,7 +258,6 @@ private fun DeviceRowEditable(
                         Icon(Icons.Rounded.Add, contentDescription = "Увеличить")
                     }
                 }
-
                 IconButton(onClick = { onToggle() }) {
                     Icon(
                         if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
@@ -282,40 +269,96 @@ private fun DeviceRowEditable(
             AnimatedVisibility(visible = expanded) {
                 Column(modifier = Modifier.padding(top = 8.dp)) {
 
-                    // Редактируемые поля
+                    // 1) Поле "Название" — оставляем на всю ширину
                     OutlinedTextField(
                         value = title,
                         onValueChange = onTitleChange,
                         label = { Text("Название") },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 56.dp)
+                            .onFocusChanged {
+                                if (it.isFocused) scope.launch {
+                                    delay(200); bringIntoViewRequester.bringIntoView()
+                                }
+                            }
                     )
 
-                    Spacer(Modifier.padding(top = 8.dp))
+                    // После поля "Название" замените ваш текущий блок на этот:
 
-                    OutlinedTextField(
-                        value = powerText,
-                        onValueChange = onPowerChange,
-                        label = { Text("Мощность (Вт)") },
-                        singleLine = true,
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                            keyboardType = KeyboardType.Decimal
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    Spacer(Modifier.height(10.dp))
 
-                    Spacer(Modifier.padding(top = 12.dp))
-                    Divider()
-                    Spacer(Modifier.padding(top = 12.dp))
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Ряд 1: Мощность | Тип устройства
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            OutlinedTextField(
+                                value = powerText,
+                                onValueChange = onPowerChange,
+                                label = { Text("Мощность (Вт)") },
+                                singleLine = true,
+                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                    keyboardType = KeyboardType.Decimal
+                                ),
+                                trailingIcon = { Icon(Icons.Rounded.ElectricBolt, contentDescription = null) },
+                                supportingText = { Text("1–20 000 Вт") },
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 56.dp)
+                                    .onFocusChanged {
+                                        if (it.isFocused) scope.launch {
+                                            delay(200); bringIntoViewRequester.bringIntoView()
+                                        }
+                                    }
+                            )
+                            ReadonlyField(
+                                label = "Тип устройства",
+                                value = deviceTypeLabel(device.deviceType),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
 
-                    // Read-only поля с замком
-                    ReadonlyField(label = "Тип устройства", value = deviceTypeLabel(device.deviceType))
-                    Spacer(Modifier.padding(top = 8.dp))
-                    ReadonlyField(label = "Cos φ", value = device.powerFactor.format(2))
-                    Spacer(Modifier.padding(top = 8.dp))
-                    ReadonlyField(label = "Коэфф. спроса", value = device.demandRatio.format(2))
-                    Spacer(Modifier.padding(top = 8.dp))
-                    ReadonlyField(label = "Напряжение", value = voltageHuman(device.voltage))
+                        // Ряд 2: Cos φ | Коэфф. спроса
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            ReadonlyField(
+                                label = "Cos φ",
+                                value = device.powerFactor.format(2),
+                                modifier = Modifier.weight(1f)
+                            )
+                            ReadonlyField(
+                                label = "Коэфф. спроса",
+                                value = device.demandRatio.format(2),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        // Ряд 3: Напряжение | (пустая ячейка для симметрии, при желании сюда можно добавить поле в будущем)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            ReadonlyField(
+                                label = "Напряжение",
+                                value = voltageHuman(device.voltage),
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(Modifier.weight(1f))
+                        }
+                    }
                 }
             }
         }
@@ -335,7 +378,7 @@ private fun ReadonlyField(label: String, value: String) {
     )
 }
 
-/* ====== СБОРКА ЗАПРОСОВ СО ВСЕМИ КАСТОМАМИ (как в DevicePickerSheet) ====== */
+/* ====== Хелперы ====== */
 
 private fun buildRequests(
     defaults: List<DefaultDevice>,
@@ -348,15 +391,13 @@ private fun buildRequests(
     for ((key, count) in qtyMap) {
         if (count <= 0) continue
         val def = byId[key] ?: continue
-
         val title = (nameOverride[key] ?: def.name).trim().ifEmpty { def.name }
         val powerRaw = (powerOverride[key] ?: def.power.toString())
             .replace(',', '.')
             .toDoubleOrNull()
             ?.takeIf { it > 0.0 }
             ?: def.power.toDouble()
-        val watts = powerRaw.toInt().coerceAtLeast(1) // всегда Вт
-
+        val watts = powerRaw.toInt().coerceAtLeast(1)
         out += DeviceCreateRequest(
             title = title,
             type = def.deviceType,
@@ -370,8 +411,6 @@ private fun buildRequests(
     return out
 }
 
-/* ====== ХЕЛПЕРЫ UI ====== */
-
 private fun roomTypeLabel(type: RoomType): String = when (type) {
     RoomType.STANDARD -> "Стандартная"
     RoomType.BATHROOM -> "Ванная (УЗО)"
@@ -380,9 +419,7 @@ private fun roomTypeLabel(type: RoomType): String = when (type) {
 }
 
 private fun deviceTypeLabel(type: DeviceType): String = type.name
-
 private fun Double.format(digits: Int) = "%.${digits}f".format(this).replace(',', '.')
-
 private fun voltageHuman(v: Voltage): String = "${v.value} В"
 
 private fun applyPresetFor(
@@ -391,12 +428,10 @@ private fun applyPresetFor(
     qtyMap: MutableMap<String, Int>
 ) {
     qtyMap.clear()
-
     fun addFirstOf(dt: DeviceType, count: Int = 1) {
         val item = all.firstOrNull { it.deviceType == dt } ?: return
         qtyMap[item.id.toString()] = count
     }
-
     when (type) {
         RoomType.STANDARD -> {
             addFirstOf(DeviceType.LIGHTING, 1)
@@ -412,8 +447,28 @@ private fun applyPresetFor(
             addFirstOf(DeviceType.SOCKET, 2)
             addFirstOf(DeviceType.HEAVY_DUTY, 1)
         }
-        RoomType.OUTDOOR -> {
-            addFirstOf(DeviceType.SOCKET, 1)
-        }
+        RoomType.OUTDOOR -> addFirstOf(DeviceType.SOCKET, 1)
     }
+}
+
+@Composable
+private fun ReadonlyField(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = {},
+        label = { Text(label) },
+        readOnly = true,
+        enabled = false,
+        singleLine = true,
+        trailingIcon = { Icon(Icons.Rounded.Lock, contentDescription = null) },
+        shape = RoundedCornerShape(12.dp),
+        // базовые цвета M3 и так корректные в disabled, можно не переопределять
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+    )
 }

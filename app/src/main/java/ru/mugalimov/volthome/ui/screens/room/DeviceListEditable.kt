@@ -40,22 +40,11 @@ fun DeviceListEditable(
         contentPadding = contentPadding
     ) {
         items(devices, key = { it.id }) { device ->
-            Box {
-                // Используем твою существующую карточку:
-                CardDevice(device = device, onDeleteClick = onDelete)
-
-                FloatingActionButton(
-                    onClick = { editingId.value = device.id },
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .offset(x = (-8).dp, y = 8.dp)
-                        .size(36.dp),
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                ) {
-                    Icon(Icons.Rounded.Edit, contentDescription = "Изменить")
-                }
-            }
+            CardDevice(
+                device = device,
+                onEditClick = { editingId.value = it },  // меню → Редактировать
+                onDeleteClick = onDelete                 // меню → Удалить
+            )
         }
     }
 
@@ -63,7 +52,7 @@ fun DeviceListEditable(
         DeviceEditSheet(
             deviceId = id,
             onDismiss = { editingId.value = null },
-            onSaved = { editingId.value = null }
+            onSaved   = { editingId.value = null }
         )
     }
 }

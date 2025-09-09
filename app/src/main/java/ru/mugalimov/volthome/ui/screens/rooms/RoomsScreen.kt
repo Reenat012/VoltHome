@@ -31,7 +31,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.ui.components.ErrorView
 import ru.mugalimov.volthome.ui.components.LoadingView
-import ru.mugalimov.volthome.ui.sheets.AddRoomSheet
 import ru.mugalimov.volthome.ui.viewmodel.RoomViewModel
 import ru.mugalimov.volthome.ui.viewmodel.RoomsAction
 import ru.mugalimov.volthome.ui.viewmodel.RoomsViewModel

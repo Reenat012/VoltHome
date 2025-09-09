@@ -3,23 +3,24 @@ package ru.mugalimov.volthome.ui.screens.room
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.rounded.AcUnit
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Lightbulb
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Power
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.Voltage
@@ -36,6 +37,7 @@ private enum class InfoTopic { POWER, POWER_FACTOR, DEMAND_RATIO, VOLTAGE }
 fun CardDevice(
     device: Device,
     modifier: Modifier = Modifier,
+    onEditClick: (Long) -> Unit = {},
     onDeleteClick: (Long) -> Unit = {}
 ) {
     var info by remember { mutableStateOf<InfoTopic?>(null) }
@@ -63,7 +65,7 @@ fun CardDevice(
             DeviceType.WASHING_MACHINE,
             DeviceType.DISHWASHER -> MaterialTheme.colorScheme.tertiaryContainer
             DeviceType.WATER_HEATER -> MaterialTheme.colorScheme.primaryContainer
-            DeviceType.OTHER, null -> MaterialTheme.colorScheme.surfaceVariant
+            DeviceType.OTHER -> MaterialTheme.colorScheme.surfaceVariant
         }
         val cardBg = tone.copy(alpha = 0.5f).compositeOver(base)
 
@@ -73,13 +75,17 @@ fun CardDevice(
             colors = CardDefaults.elevatedCardColors(containerColor = cardBg),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Box(Modifier.fillMaxWidth().padding(12.dp)) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp)
+            ) {
 
                 // основной контент карточки
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(end = 40.dp) // запас справа под корзину
+                        .padding(end = 40.dp) // запас справа под меню
                 ) {
                     Text(
                         text = device.name,
@@ -130,18 +136,44 @@ fun CardDevice(
                     }
                 }
 
-                // кнопка удалить внутри карточки справа по центру
-                IconButton(
-                    onClick = { onDeleteClick(device.id) },
+                // меню действий (Редактировать / Удалить) в правом верхнем углу
+                var menuExpanded by remember { mutableStateOf(false) }
+
+                Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .size(24.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Delete,
-                        contentDescription = "Удалить устройство",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant // серый цвет
-                    )
+                    IconButton(
+                        onClick = { menuExpanded = true },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.MoreVert,
+                            contentDescription = "Меню"
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
+                            text = { Text("Редактировать") },
+                            onClick = {
+                                menuExpanded = false
+                                onEditClick(device.id)
+                            }
+                        )
+                        DropdownMenuItem(
+                            leadingIcon = { Icon(Icons.Rounded.Delete, contentDescription = null) },
+                            text = { Text("Удалить") },
+                            onClick = {
+                                menuExpanded = false
+                                onDeleteClick(device.id)
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -242,8 +274,8 @@ private fun Double.format(d: Int) = "%.${d}f".format(this).replace(',', '.')
 
 private fun Voltage.toReadableLabel(): String {
     val phase = when (this.type) {
-        VoltageType.AC_1PHASE -> "1‑фаза"
-        VoltageType.AC_3PHASE -> "3‑фазы"
+        VoltageType.AC_1PHASE -> "1-фаза"
+        VoltageType.AC_3PHASE -> "3-фазы"
         VoltageType.DC -> "пост. ток"
     }
     return "${this.value} В, $phase"
@@ -276,5 +308,5 @@ private fun InfoTopic.titleAndText(): Pair<String, String> = when (this) {
             "Доля времени, когда устройство реально нагружает сеть в максимуме. Используется для расчёта суммарной нагрузки (учёт неполной одновременности)."
 
     InfoTopic.VOLTAGE -> "Питание" to
-            "Рабочее напряжение и тип питания: «1‑фаза» — однофазная сеть 220–230 В, «3‑фазы» — трёхфазная 380–400 В, «пост. ток» — питание DC."
+            "Рабочее напряжение и тип питания: «1-фаза» — однофазная сеть 220–230 В, «3-фазы» — трёхфазная 380–400 В, «пост. ток» — питание DC."
 }

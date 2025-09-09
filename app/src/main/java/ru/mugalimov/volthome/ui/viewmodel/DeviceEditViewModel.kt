@@ -23,10 +23,17 @@ class DeviceEditViewModel @Inject constructor(
         val powerText: String = "",   // текст в текущих единицах
         val unit: PowerUnit = PowerUnit.W,
         val isSaving: Boolean = false,
-        val error: String? = null
+        val error: String? = null,
+        val powerError: String? = null,
+
+        // readonly — для отображения в сетке 2×3
+        val deviceTypeLabel: String = "",
+        val powerFactorText: String = "",
+        val demandRatioText: String = "",
+        val voltageText: String = ""
     )
 
-    enum class PowerUnit { W, kW }
+    enum class PowerUnit { W }
 
     private val _ui = MutableStateFlow(UiState())
     val ui: StateFlow<UiState> = _ui.asStateFlow()
@@ -39,7 +46,12 @@ class DeviceEditViewModel @Inject constructor(
                 deviceId = device.id,
                 name = device.name,
                 powerText = device.power.toString(),
-                unit = PowerUnit.W
+                unit = PowerUnit.W,
+                deviceTypeLabel = device.deviceType.toString(),
+                powerFactorText = device.powerFactor.toString(),
+                demandRatioText = device.demandRatio.toString(),
+                voltageText = device.voltage.value.toString()
+
             )
         }
     }
@@ -58,7 +70,6 @@ class DeviceEditViewModel @Inject constructor(
         }
         val newText = when (unit) {
             PowerUnit.W  -> (raw * 1000.0).toInt().toString()      // kW -> W
-            PowerUnit.kW -> "%.3f".format(raw / 1000.0)            // W  -> kW
         }
         _ui.value = s.copy(unit = unit, powerText = newText)
     }
@@ -80,7 +91,6 @@ class DeviceEditViewModel @Inject constructor(
         }
         val powerW = when (s.unit) {
             PowerUnit.W  -> raw.toInt()
-            PowerUnit.kW -> (raw * 1000.0).toInt()
         }.coerceAtLeast(1)
 
         viewModelScope.launch {
