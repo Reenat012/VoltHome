@@ -27,6 +27,7 @@ import ru.mugalimov.volthome.domain.model.create.DeviceCreateRequest
 // ✅ ДОБАВЛЕНО:
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.collectLatest
+import ru.mugalimov.volthome.core.validation.InputConstraints
 
 /**
  * Экран добавления комнаты с устройствами.
@@ -48,6 +49,7 @@ fun AddRoomSheet(
     val expandedMap = remember { mutableStateMapOf<String, Boolean>() }
     val nameOverride = remember { mutableStateMapOf<String, String>() }
     val powerOverride = remember { mutableStateMapOf<String, String>() }
+    val powerErrors = remember { mutableStateMapOf<String, String?>() }
 
     val bringIntoViewRequester = remember { BringIntoViewRequester() }
     val scope = rememberCoroutineScope()
@@ -60,6 +62,14 @@ fun AddRoomSheet(
     )
 
     LaunchedEffect(Unit) { applyPresetFor(selectedType, defaultDevices, qtyMap) }
+
+    // агрегированное состояние валидности:
+    val hasAnyQty by remember {
+        derivedStateOf { qtyMap.values.any { it > 0 } }
+    }
+    val hasErrors by remember {
+        derivedStateOf { qtyMap.any { (k, v) -> v > 0 && powerErrors[k] != null } }
+    }
 
     // ✅ ДОБАВЛЕНО: при свайпе вниз состояние уходит в Hidden — вызываем onDismiss(),
     // чтобы внешний флаг показа шита сбросился и его можно было открыть снова.
@@ -102,15 +112,23 @@ fun AddRoomSheet(
                             style = MaterialTheme.typography.titleLarge,
                             modifier = Modifier.weight(1f)
                         )
-                        IconButton(onClick = {
-                            val requests = buildRequests(defaultDevices, qtyMap, nameOverride, powerOverride)
-                            onConfirm(
-                                name.ifBlank { roomTypeLabel(selectedType) },
-                                selectedType,
-                                requests
-                            )
-                            onDismiss()
-                        }) {
+                        IconButton(
+                            enabled = hasAnyQty && !hasErrors,
+                            onClick = {
+                                val requests =
+                                    buildRequests(
+                                        defaultDevices,
+                                        qtyMap,
+                                        nameOverride,
+                                        powerOverride
+                                    )
+                                onConfirm(
+                                    name.ifBlank { roomTypeLabel(selectedType) },
+                                    selectedType,
+                                    requests
+                                )
+                                onDismiss()
+                            }) {
                             Icon(Icons.Rounded.Check, contentDescription = "Создать")
                         }
                     }
@@ -151,6 +169,7 @@ fun AddRoomSheet(
                     val key = device.id.toString()
                     val expanded = expandedMap[key] == true
                     val qty = qtyMap[key] ?: 0
+                    val err = powerErrors[key]
 
                     DeviceRowEditable(
                         device = device,
@@ -162,7 +181,22 @@ fun AddRoomSheet(
                         onInc = { qtyMap[key] = (qtyMap[key] ?: 0).plus(1).coerceAtMost(99) },
                         onDec = { qtyMap[key] = (qtyMap[key] ?: 0).minus(1).coerceAtLeast(0) },
                         onTitleChange = { nameOverride[key] = it },
-                        onPowerChange = { powerOverride[key] = it.replace(',', '.') },
+                        onPowerChange = { newText ->
+                            val norm = newText.replace(',', '.')
+                            powerOverride[key] = norm
+                            val v = norm.toDoubleOrNull()?.toInt()
+                            powerErrors[key] = when {
+                                v == null -> "Введите число > 0"
+                                v < InputConstraints.MIN_POWER_W ->
+                                    "Минимум ${InputConstraints.MIN_POWER_W} Вт"
+
+                                v > InputConstraints.MAX_POWER_W ->
+                                    "Максимум ${InputConstraints.MAX_POWER_W} Вт"
+
+                                else -> null
+                            }
+                        },
+                        powerError = err,
                         bringIntoViewRequester = bringIntoViewRequester,
                         scope = scope
                     )
@@ -215,6 +249,7 @@ private fun DeviceRowEditable(
     qty: Int,
     title: String,
     powerText: String,
+    powerError: String?,
     onToggle: () -> Unit,
     onInc: () -> Unit,
     onDec: () -> Unit,
@@ -308,8 +343,19 @@ private fun DeviceRowEditable(
                                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                                     keyboardType = KeyboardType.Decimal
                                 ),
-                                trailingIcon = { Icon(Icons.Rounded.ElectricBolt, contentDescription = null) },
-                                supportingText = { Text("1–20 000 Вт") },
+                                trailingIcon = {
+                                    Icon(
+                                        Icons.Rounded.ElectricBolt,
+                                        contentDescription = null
+                                    )
+                                },
+                                isError = powerError != null,
+                                supportingText = {
+                                    Text(
+                                        powerError
+                                            ?: "Допустимо от ${InputConstraints.MIN_POWER_W} до ${InputConstraints.MAX_POWER_W} Вт"
+                                    )
+                                },
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier
                                     .weight(1f)
@@ -365,19 +411,6 @@ private fun DeviceRowEditable(
     }
 }
 
-@Composable
-private fun ReadonlyField(label: String, value: String) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = {},
-        label = { Text(label) },
-        trailingIcon = { Icon(Icons.Rounded.Lock, contentDescription = null) },
-        enabled = false,
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth()
-    )
-}
-
 /* ====== Хелперы ====== */
 
 private fun buildRequests(
@@ -397,7 +430,9 @@ private fun buildRequests(
             .toDoubleOrNull()
             ?.takeIf { it > 0.0 }
             ?: def.power.toDouble()
-        val watts = powerRaw.toInt().coerceAtLeast(1)
+        // Дополнительная страховка в UI: приводим к диапазону MIN..MAX; домен всё равно проверит валидатором.
+        val watts =
+            powerRaw.toInt().coerceIn(InputConstraints.MIN_POWER_W, InputConstraints.MAX_POWER_W)
         out += DeviceCreateRequest(
             title = title,
             type = def.deviceType,
@@ -437,16 +472,19 @@ private fun applyPresetFor(
             addFirstOf(DeviceType.LIGHTING, 1)
             addFirstOf(DeviceType.SOCKET, 1)
         }
+
         RoomType.BATHROOM -> {
             addFirstOf(DeviceType.LIGHTING, 1)
             addFirstOf(DeviceType.SOCKET, 1)
             addFirstOf(DeviceType.HEAVY_DUTY, 1)
         }
+
         RoomType.KITCHEN -> {
             addFirstOf(DeviceType.LIGHTING, 1)
             addFirstOf(DeviceType.SOCKET, 2)
             addFirstOf(DeviceType.HEAVY_DUTY, 1)
         }
+
         RoomType.OUTDOOR -> addFirstOf(DeviceType.SOCKET, 1)
     }
 }

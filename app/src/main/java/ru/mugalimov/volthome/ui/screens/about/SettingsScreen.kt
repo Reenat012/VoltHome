@@ -54,7 +54,7 @@ fun SettingsScreen(
             TopAppBar(
                 title = {
                     Text(
-                        "Настройки",
+                        "Информация",
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -161,7 +161,7 @@ private fun SettingsContent(
             SettingsTile(
                 icon = Icons.Filled.Info,
                 title = "О приложении",
-                subtitle = "Версия 1.4\nРазработчик: Ринат Мугалимов",
+                subtitle = "Версия 1.7\nРазработчик: Ринат Мугалимов",
                 onClick = {
                     // поведение не меняем — оставь пустым или добавь свой обработчик позже
                 }

@@ -76,13 +76,35 @@ class DeviceEditViewModel @Inject constructor(
     }
 
     fun setPowerText(value: String) {
-        val norm = value.replace(',', '.')
-        val asInt = norm.toDoubleOrNull()?.toInt()
-        val err = asInt?.let {
-            if (it <= 0) "Введите число > 0"
-            else ru.mugalimov.volthome.core.validation.PowerValidator.errorMessage(it)
-        } ?: "Введите число > 0"
-        _ui.value = _ui.value.copy(powerText = norm, powerError = err)
+        // 1) Нормализация ввода:
+        //   - запятая -> точка
+        //   - удаляем все пробелы, включая NBSP (U+00A0) и узкий NBSP (U+202F)
+        //   - фильтруем посторонние символы, оставляя цифры и одну точку
+        val raw = value.replace(',', '.')
+        val noSpaces = raw.replace(Regex("[\\s\\u00A0\\u202F]"), "")
+        val cleaned = buildString(noSpaces.length) {
+            var dotSeen = false
+            for (ch in noSpaces) {
+                when {
+                    ch.isDigit() -> append(ch)
+                    ch == '.' && !dotSeen -> {
+                        append(ch); dotSeen = true
+                    }
+
+                    else -> Unit // игнорируем всё лишнее
+                }
+            }
+        }
+
+        // 2) Парсинг и валидация диапазона
+        val asInt = cleaned.toDoubleOrNull()?.toInt()
+        val err = when {
+            cleaned.isEmpty() -> "Введите число > 0"
+            asInt == null || asInt <= 0 -> "Введите число > 0"
+            else -> ru.mugalimov.volthome.core.validation.PowerValidator.errorMessage(asInt)
+        }
+
+        _ui.value = _ui.value.copy(powerText = cleaned, powerError = err)
     }
 
     fun save(onSuccess: () -> Unit, onError: (String) -> Unit) {
@@ -92,13 +114,14 @@ class DeviceEditViewModel @Inject constructor(
         if (name.isEmpty()) {
             onError("Введите имя устройства"); return
         }
-        val raw = s.powerText.replace(',', '.').toDoubleOrNull()
+        val rawText = s.powerText.replace(',', '.').replace(Regex("[\\s\\u00A0\\u202F]"), "")
+        val raw = rawText.toDoubleOrNull()
         if (raw == null || raw <= 0.0) {
             onError("Укажите корректную мощность"); return
         }
 
         val powerW = when (s.unit) {
-            PowerUnit.W  -> raw.toInt()
+            PowerUnit.W -> raw.toInt()
         }.coerceAtLeast(1)
 
         PowerValidator.errorMessage(powerW)?.let { msg ->
