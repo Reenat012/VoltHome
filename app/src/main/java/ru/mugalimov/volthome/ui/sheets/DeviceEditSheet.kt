@@ -38,6 +38,7 @@ import ru.mugalimov.volthome.ui.viewmodel.DeviceEditViewModel.PowerUnit
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import ru.mugalimov.volthome.core.validation.InputConstraints
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -109,7 +110,7 @@ fun DeviceEditSheet(
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         isError = ui.powerError != null,
-                        supportingText = { ui.powerError?.let { Text(it) } },
+                        supportingText = { Text(ui.powerError ?: "Допустимо от ${ru.mugalimov.volthome.core.validation.InputConstraints.MIN_POWER_W} до ${InputConstraints.MAX_POWER_W} Вт") },
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .weight(1f)

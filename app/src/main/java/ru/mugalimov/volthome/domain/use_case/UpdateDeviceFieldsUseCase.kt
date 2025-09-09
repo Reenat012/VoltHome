@@ -3,6 +3,7 @@ package ru.mugalimov.volthome.domain.use_case
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import ru.mugalimov.volthome.core.validation.PowerValidator
 import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.data.repository.PreferencesRepository
 import ru.mugalimov.volthome.di.database.IoDispatcher
@@ -32,8 +33,8 @@ class UpdateDeviceFieldsUseCase @Inject constructor(
     ) = withContext(io) {
         val name = newName.trim()
         require(name.isNotEmpty()) { "Имя не может быть пустым" }
-        require(newPowerW > 0) { "Мощность должна быть > 0 Вт" }
-        require(newPowerW <= 500_000) { "Слишком большая мощность" }
+        val rangeError = PowerValidator.errorMessage(newPowerW)
+        require(rangeError == null) { rangeError!! }
 
         val current: Device = deviceRepository.getDeviceById(deviceId.toInt())
             ?: error("Устройство не найдено: $deviceId")

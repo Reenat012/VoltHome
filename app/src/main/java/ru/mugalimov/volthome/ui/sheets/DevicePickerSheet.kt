@@ -54,7 +54,9 @@ fun DevicePickerSheet(
 
     val filtered = remember(search, defaultDevices) {
         val q = search.trim().lowercase()
-        if (q.isEmpty()) defaultDevices else defaultDevices.filter { it.name.lowercase().contains(q) }
+        if (q.isEmpty()) defaultDevices else defaultDevices.filter {
+            it.name.lowercase().contains(q)
+        }
     }
 
     ModalBottomSheet(
@@ -143,9 +145,17 @@ fun DevicePickerSheet(
                                 ) {
                                     IconButton(
                                         onClick = { qty[def.id] = (count - 1).coerceAtLeast(0) }
-                                    ) { Icon(Icons.Rounded.Remove, contentDescription = "Уменьшить") }
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.Remove,
+                                            contentDescription = "Уменьшить"
+                                        )
+                                    }
 
-                                    Box(Modifier.width(28.dp), contentAlignment = Alignment.Center) {
+                                    Box(
+                                        Modifier.width(28.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
                                         Text(text = count.toString(), textAlign = TextAlign.Center)
                                     }
 
@@ -196,7 +206,8 @@ fun DevicePickerSheet(
                                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                                             verticalAlignment = Alignment.Top
                                         ) {
-                                            val currentPowerText = powerOverride[def.id] ?: def.power.toString()
+                                            val currentPowerText =
+                                                powerOverride[def.id] ?: def.power.toString()
                                             val error = powerErrors[def.id]
 
                                             OutlinedTextField(
@@ -206,16 +217,20 @@ fun DevicePickerSheet(
                                                     powerOverride[def.id] = norm
                                                     val v = norm.toDoubleOrNull()
                                                     powerErrors[def.id] = when {
-                                                        v == null || v <= 0.0 -> "Введите число > 0"
+                                                        v == null -> "Введите число > 0"
+                                                        v.toInt() < InputConstraints.MIN_POWER_W ->
+                                                            "Минимум ${InputConstraints.MIN_POWER_W} Вт"
+
                                                         v.toInt() > InputConstraints.MAX_POWER_W ->
                                                             "Максимум ${InputConstraints.MAX_POWER_W} Вт"
+
                                                         else -> null
                                                     }
                                                 },
                                                 label = { Text("Мощность (Вт)") },
                                                 singleLine = true,
                                                 isError = error != null,
-                                                supportingText = { error?.let { Text(it) } },
+                                                supportingText = { Text(error ?: "Допустимо от ${InputConstraints.MIN_POWER_W} до ${InputConstraints.MAX_POWER_W} Вт") },
                                                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                                                     keyboardType = KeyboardType.Decimal
                                                 ),
@@ -232,7 +247,10 @@ fun DevicePickerSheet(
 
                                             // ReadonlyField без изменения сигнатуры: участвует в сетке через weight
                                             Box(Modifier.weight(1f)) {
-                                                ReadonlyField("Тип устройства", deviceTypeLabel(def.deviceType))
+                                                ReadonlyField(
+                                                    "Тип устройства",
+                                                    deviceTypeLabel(def.deviceType)
+                                                )
                                             }
                                         }
 
@@ -242,10 +260,16 @@ fun DevicePickerSheet(
                                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                                         ) {
                                             Box(Modifier.weight(1f)) {
-                                                ReadonlyField("Коэфф. мощности (PF)", def.powerFactor.toString())
+                                                ReadonlyField(
+                                                    "Коэфф. мощности (PF)",
+                                                    def.powerFactor.toString()
+                                                )
                                             }
                                             Box(Modifier.weight(1f)) {
-                                                ReadonlyField("Коэфф. спроса", def.demandRatio.toString())
+                                                ReadonlyField(
+                                                    "Коэфф. спроса",
+                                                    def.demandRatio.toString()
+                                                )
                                             }
                                         }
 
@@ -255,7 +279,10 @@ fun DevicePickerSheet(
                                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                                         ) {
                                             Box(Modifier.weight(1f)) {
-                                                ReadonlyField("Напряжение", voltageHuman(def.voltage))
+                                                ReadonlyField(
+                                                    "Напряжение",
+                                                    voltageHuman(def.voltage)
+                                                )
                                             }
                                             Spacer(Modifier.weight(1f))
                                         }
@@ -275,8 +302,11 @@ fun DevicePickerSheet(
                     enabled = total > 0 && !hasErrorsBottom,
                     onClick = {
                         scope.launch {
-                            val reqs = buildRequests(defaultDevices, qty, nameOverride, powerOverride)
-                            if (reqs.isEmpty()) { onDismiss(); return@launch }
+                            val reqs =
+                                buildRequests(defaultDevices, qty, nameOverride, powerOverride)
+                            if (reqs.isEmpty()) {
+                                onDismiss(); return@launch
+                            }
                             val ids = helperVm.add(roomId, reqs)
                             onAdded(ids)
                             onDismiss()

@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import ru.mugalimov.volthome.core.validation.PowerValidator
 import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.domain.use_case.UpdateDeviceFieldsUseCase
 
@@ -69,13 +70,19 @@ class DeviceEditViewModel @Inject constructor(
             _ui.value = s.copy(unit = unit); return
         }
         val newText = when (unit) {
-            PowerUnit.W  -> (raw * 1000.0).toInt().toString()      // kW -> W
+            PowerUnit.W -> (raw * 1000.0).toInt().toString()      // kW -> W
         }
         _ui.value = s.copy(unit = unit, powerText = newText)
     }
 
     fun setPowerText(value: String) {
-        _ui.value = _ui.value.copy(powerText = value.replace(',', '.'))
+        val norm = value.replace(',', '.')
+        val asInt = norm.toDoubleOrNull()?.toInt()
+        val err = asInt?.let {
+            if (it <= 0) "Введите число > 0"
+            else ru.mugalimov.volthome.core.validation.PowerValidator.errorMessage(it)
+        } ?: "Введите число > 0"
+        _ui.value = _ui.value.copy(powerText = norm, powerError = err)
     }
 
     fun save(onSuccess: () -> Unit, onError: (String) -> Unit) {
@@ -89,9 +96,15 @@ class DeviceEditViewModel @Inject constructor(
         if (raw == null || raw <= 0.0) {
             onError("Укажите корректную мощность"); return
         }
+
         val powerW = when (s.unit) {
             PowerUnit.W  -> raw.toInt()
         }.coerceAtLeast(1)
+
+        PowerValidator.errorMessage(powerW)?.let { msg ->
+            _ui.value = _ui.value.copy(powerError = msg)
+            onError(msg); return
+        }
 
         viewModelScope.launch {
             try {
