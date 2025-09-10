@@ -13,7 +13,10 @@ import java.io.InputStreamReader
 import java.text.DecimalFormat
 import java.text.DecimalFormatSymbols
 import java.util.Locale
-import kotlin.math.*
+import kotlin.math.cos
+import kotlin.math.max
+import kotlin.math.roundToInt
+import kotlin.math.sin
 
 class HtmlReportBuilder(private val context: Context) {
 
@@ -40,13 +43,11 @@ class HtmlReportBuilder(private val context: Context) {
     )
     private val groupCableAliases = listOf("cableLabel", "lineLabel", "wireLabel", "cableInfo", "lineInfo")
 
-    // Вставляемый CSS: футер в потоке, запрет разрывов внутри группы, устранение двойных линий
+    // Вставляемый CSS: одна таблица на фазу, повтор шапки при печати, выделение групп
     private val INLINE_STYLE = """
         <style>
-          /* Резерв под футер (футер в потоке, не fixed) */
           body { padding-bottom: 96px; }
 
-          /* Футер как обычный блок внизу документа */
           .footer {
             margin-top: 24px;
             padding-top: 8px;
@@ -54,36 +55,47 @@ class HtmlReportBuilder(private val context: Context) {
             font-size: 11px;
             color: #6B7280;
           }
-
-          /* Страховочный спейсер (если используется плейсхолдер {{footerSpacer}}) */
           .footer-spacer { height: 72px; }
 
-          /* Таблица по фазе — базовые границы */
-          .phase-table { width: 100%; border-collapse: collapse; }
-          .phase-table th, .phase-table td { padding: 10px 0; }
+          /* Таблица фазы: одна на фазу */
+          table.phase-table { width: 100%; border-collapse: collapse; margin: 0 0 12px 0; }
+          table.phase-table th, table.phase-table td { padding: 10px 0; }
+          table.phase-table th.center, table.phase-table td.center { text-align: left; }
+          table.phase-table th.num, table.phase-table td.num { text-align: right; white-space: nowrap; }
 
-          /* Каждая группа — неделимый блок, чтобы шапка/мета не отрывались от устройств */
-          tbody.group-block { break-inside: avoid; page-break-inside: avoid; }
+          thead.phase-head th { border-bottom: 1px solid #E5E7EB; }
+          /* ПОВТОР ШАПКИ НА КАЖДОЙ СТРАНИЦЕ */
+          thead.phase-head { display: table-header-group; }
 
-          /* Единый разделитель между группами */
-          .phase-table td, .phase-table th { border-bottom: 1px solid #E5E7EB; }
-          thead tr.hdr th { border-bottom-width: 1px; }
+          /* Разделители строк устройств */
+          table.phase-table tbody tr.dev td { border-bottom: 1px solid #E5E7EB; }
+          table.phase-table tbody tr.dev:last-child td { border-bottom: 0; }
 
-          /* Убираем дублирование линий: у последнего устройства группы нет нижней границы,
-             у шапки группы рисуем верхнюю границу как разделитель между группами */
-          tbody.group-block tr.dev:last-child td { border-bottom: 0; }
-          tbody.group-block tr.group-row td { border-top: 1px solid #E5E7EB; border-bottom: 0; }
-          tbody.group-block tr.group-meta td { border-bottom: 1px solid #E5E7EB; }
-
-          /* Подстраховка разрывов у ключевых строк */
-          tr.group-row, tr.group-meta, tr.hdr, tr.dev {
-            break-inside: avoid; page-break-inside: avoid;
+          /* Строка начала группы (чип + мета в одну строку), визуальное выделение */
+          tr.group-start td {
+            border-top: 2px solid #CBD5E1; /* толще, чтобы группа читалась */
+            border-bottom: 0;
+            background: #F9FAFB;          /* светлый фон для отделения от устройств */
+          }
+          .chip {
+            display:inline-block;
+            padding:4px 10px;
+            border-radius:9999px;
+            background:#F3F4F6;
+            margin-right:10px;
+            font-weight:600;
+          }
+          .meta-inline {
+            display:inline-block;
+            font-size:12px;
+            color:#6B7280;
+            vertical-align:middle;
           }
 
-          /* Вспомогательные выравнивания */
-          th.center, td.center { text-align: left; }
-          th.num, td.num { text-align: right; white-space: nowrap; }
-          .chip { display:inline-block; padding:4px 10px; border-radius:9999px; background:#F3F4F6; }
+          /* Неразрывность: чип+мета+первое устройство едут вместе */
+          tbody.group-block { break-inside: avoid; page-break-inside: avoid; }
+          tr.group-start, thead.phase-head { break-inside: avoid; page-break-inside: avoid; }
+
           .h2-tight { margin: 0 0 8px 0; }
         </style>
     """.trimIndent()
@@ -103,7 +115,6 @@ class HtmlReportBuilder(private val context: Context) {
         html = if (html.contains("</head>", ignoreCase = true)) {
             html.replace(Regex("</head>", RegexOption.IGNORE_CASE), "$INLINE_STYLE</head>")
         } else {
-            // если head отсутствует, просто префиксуем стилем
             "$INLINE_STYLE$html"
         }
 
@@ -137,22 +148,19 @@ class HtmlReportBuilder(private val context: Context) {
         return html
     }
 
-    /** KPI (скрываем B/C для 1-ф; добавляем «Всего групп/Суммарный ток», если они присутствуют в модели). */
+    /** KPI: приводим вводной аппарат к человекочитаемому виду. */
     private fun buildKpiBlock(meta: ReportMeta): String {
         val iA = formatA(meta.headlineCurrents["A"])
         val iB = formatA(meta.headlineCurrents["B"])
         val iC = formatA(meta.headlineCurrents["C"])
         val isSingle = meta.donut is DonutModel.IncomerLoad
 
-        // Попробуем взять totalGroups/totalCurrentA, если вдруг есть
         val totalGroups = runCatching { meta.totalGroups }.getOrNull()
         val totalCurrentA = runCatching {
             meta.javaClass.getDeclaredField("totalCurrentA").apply { isAccessible = true }.get(meta) as? Double
         }.getOrNull()
 
-        val incomerHuman = humanizeIncomer(
-            runCatching { meta.incomerLabel }.getOrDefault("")
-        )
+        val incomerHuman = humanizeIncomer(meta.incomerLabel ?: "")
 
         return buildString {
             append("""<div class="kpi">""")
@@ -203,7 +211,12 @@ class HtmlReportBuilder(private val context: Context) {
         """.trimIndent()
     }
 
-    /** Одна таблица на фазу: шапка один раз; каждая группа — отдельный tbody.group-block (без разрывов и двойных линий). */
+    /**
+     * ОДНА таблица на фазу.
+     * Для каждой группы — отдельный <tbody class="group-block">:
+     *   - первая строка tbody: чип + мета (в одной ячейке)
+     *   - далее строки устройств
+     */
     private fun buildPhasesTables(phases: List<ReportPhase>): String {
         if (phases.isEmpty()) return ""
         return buildString {
@@ -214,19 +227,21 @@ class HtmlReportBuilder(private val context: Context) {
                     appendLine("""<div class="group empty">—</div>""")
                 } else {
                     appendLine("""<table class="phase-table">""")
-                    appendLine(
-                        """<thead><tr class="hdr"><th class="center">Устройство</th><th class="num">Мощность</th><th class="num">Ток</th></tr></thead>"""
-                    )
-                    // Каждая группа — отдельный tbody.group-block
+                    appendLine("""<thead class="phase-head"><tr><th class="center">Устройство</th><th class="num">Мощность</th><th class="num">Ток</th></tr></thead>""")
                     phase.groups.forEach { g: ReportGroup ->
-                        appendLine("""<tbody class="group-block">""")
-                        // Заголовок группы (чип)
-                        appendLine("""<tr class="group-row"><td class="center" colspan="3"><span class="chip">${escape(g.title)}</span></td></tr>""")
-                        // Метаданные под чипом (аппарат/кабель), если есть
                         val metaLine = buildGroupMeta(g)
-                        if (metaLine.isNotEmpty()) {
-                            appendLine("""<tr class="group-meta"><td class="center" colspan="3">${escape(metaLine)}</td></tr>""")
-                        }
+                        appendLine("""<tbody class="group-block">""")
+                        // Старт группы: чип + мета — в одной строке/ячейке
+                        appendLine(
+                            """
+                            <tr class="group-start">
+                              <td class="center" colspan="3">
+                                <span class="chip">${escape(g.title)}</span>
+                                ${if (metaLine.isNotEmpty()) """<span class="meta-inline">${escape(metaLine)}</span>""" else ""}
+                              </td>
+                            </tr>
+                            """.trimIndent()
+                        )
                         // Устройства
                         g.devices.forEach { d ->
                             val (p, c) = pickDeviceNumbers(d)
@@ -242,7 +257,7 @@ class HtmlReportBuilder(private val context: Context) {
                         }
                         appendLine("</tbody>")
                     }
-                    appendLine("""</table>""")
+                    appendLine("</table>")
                 }
                 appendLine("""</div>""")
             }
@@ -269,11 +284,10 @@ class HtmlReportBuilder(private val context: Context) {
 
     /**
      * Берём power/current из любых алиас-полей, иначе парсим legacy spec.
-     * Если ток не найден, но есть мощность — считаем I = P/230 В.
-     * Возвращаем отформатированные строки: Pair("2 200 Вт", "11,80 А").
+     * Если ток не найден, но есть мощность — считаем I = P/230 В (для рендера).
+     * Возвращаем отформатированные строки.
      */
     private fun pickDeviceNumbers(d: ReportDevice): Pair<String?, String?> {
-        // 1) читаем алиас-поля рефлексией
         fun getNumber(obj: Any, names: List<String>): Number? {
             for (n in names) {
                 val num = runCatching {
@@ -294,14 +308,12 @@ class HtmlReportBuilder(private val context: Context) {
         var pw: Double? = (getNumber(d, powerFieldAliases))?.toDouble()
         var ia: Double? = (getNumber(d, currentFieldAliases))?.toDouble()
 
-        // 2) если что-то отсутствует — парсим spec
         if ((pw == null || ia == null) && d.spec.isNotBlank()) {
             val parsed = parseSpec(d.spec)
             if (pw == null) pw = parsed.first?.toDouble()
             if (ia == null) ia = parsed.second
         }
 
-        // 3) если есть только мощность — считаем ток (упрощённо для рендера)
         if (ia == null && pw != null) ia = pw / VOLTAGE_DEFAULT
 
         val pStr = pw?.let { "${df0.format(it)} Вт" }
@@ -309,9 +321,8 @@ class HtmlReportBuilder(private val context: Context) {
         return pStr to cStr
     }
 
-    /** Парсинг строк вида "2.2 кВт, 11.8 А" / "2200 Вт, 11,8 А" (порядок свободный). */
+    /** Парсинг строк вида "2.2 кВт, 11.8 А" / "2200 Вт, 11,8 А". */
     private fun parseSpec(spec: String): Pair<Int?, Double?> {
-        // Нормализуем: запятая → точка, убираем неразрывные пробелы
         val s = spec.replace('\u00A0', ' ')
             .lowercase(Locale.getDefault())
             .replace(',', '.')
@@ -319,7 +330,6 @@ class HtmlReportBuilder(private val context: Context) {
         var pW: Int? = null
         var cA: Double? = null
 
-        // мощность
         Regex("""${num.pattern}\s*(квт|kw|кw|вт|w)""").findAll(s).forEach { m ->
             val unitToken = m.groupValues[1]
             val v = num.find(m.value)?.value?.toDoubleOrNull() ?: return@forEach
@@ -330,7 +340,6 @@ class HtmlReportBuilder(private val context: Context) {
             }
         }
 
-        // ток
         Regex("""${num.pattern}\s*(a|а)""").findAll(s).forEach { m ->
             val v = num.find(m.value)?.value?.toDoubleOrNull()
             if (v != null) cA = v
@@ -341,7 +350,6 @@ class HtmlReportBuilder(private val context: Context) {
 
     /**
      * Донаты — инлайн SVG.
-     * 3-ф: дуги <path> без щелей. 1-ф: прогресс-кольцо.
      */
     private fun buildDonutSection(model: DonutModel): String {
         return when (model) {
@@ -412,46 +420,73 @@ class HtmlReportBuilder(private val context: Context) {
         }
     }
 
-    private fun humanizeIncomer(raw: String): String {
-        // Примеры: "MCB_PLUS_RCD, 4P, 25A C, Icn 6000, RCD A 300mA"
-        val parts = raw.split(',', '·', '•').map { it.trim() }.filter { it.isNotEmpty() }
-        val out = mutableListOf<String>()
+    /** Переводит «сырой» incomerLabel в человеческий русский. */
+    private fun humanizeIncomer(raw0: String): String {
+        if (raw0.isBlank()) return ""
+        val parts = raw0
+            .replace('•', ',')
+            .replace('·', ',')
+            .split(',')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
 
-        parts.forEach { p0 ->
-            val p = p0.trim()
-            when {
-                p.contains("MCB_PLUS_RCD", true) -> out += "Автомат + УЗО"
-                p.matches(Regex("""\dP""", RegexOption.IGNORE_CASE)) -> {
-                    val poles = p.lowercase().removeSuffix("p").toIntOrNull()
-                    if (poles != null) out += "$poles полюса"
-                }
-                Regex("""(\d+)\s*A\s*([ABCD])?""", RegexOption.IGNORE_CASE).find(p) != null -> {
-                    val m = Regex("""(\d+)\s*A\s*([ABCD])?""", RegexOption.IGNORE_CASE).find(p)
-                    val a = m?.groupValues?.getOrNull(1)
-                    val ch = m?.groupValues?.getOrNull(2)?.uppercase()
-                    out += buildString {
-                        append("${a ?: ""} A")
-                        if (!ch.isNullOrBlank()) append(", характеристика $ch")
-                    }
-                }
-                p.contains("ICN", true) -> {
-                    val n = Regex("""\d+""").find(p)?.value
-                    if (n != null) out += "отключающая способность ${df0.format(n.toInt())} $UNIT_A"
-                }
-                p.contains("RCD", true) -> {
-                    val type = Regex("""RCD\s*([ABCD])""", RegexOption.IGNORE_CASE).find(p)?.groupValues?.getOrNull(1)?.uppercase()
-                    val sens = Regex("""(\d+)\s*mA""", RegexOption.IGNORE_CASE).find(p)?.groupValues?.getOrNull(1)
-                    val text = buildString {
-                        append("тип УЗО")
-                        if (!type.isNullOrBlank()) append(" $type")
-                        if (!sens.isNullOrBlank()) append(", чувствительность ${df0.format(sens.toInt())} мА")
-                    }
-                    out += text
-                }
-                else -> out += p // оставим как есть (линейка/производитель)
+        val out = mutableListOf<String>()
+        for (p in parts) {
+            val lower = p.lowercase(Locale.getDefault())
+
+            if (p.equals("MCB_ONLY", true) || lower.contains("mcb only")) {
+                out += "Автомат"; continue
+            } else if (p.equals("MCB_PLUS_RCD", true) || lower.contains("mcb+rcd") || lower.contains("mcb_plus_rcd")) {
+                out += "Автомат + УЗО"; continue
+            } else if (p.equals("RCBO", true) || lower.contains("rcbo")) {
+                out += "Диффавтомат"; continue
             }
+
+            // Полюса: 1P / 2P / 3P / 4P / "4 poles"
+            val polesMatch = Regex("""^\s*(\d+)\s*(p|pol(e|es))?\s*$""", RegexOption.IGNORE_CASE).matchEntire(p)
+            if (polesMatch != null) {
+                val n = polesMatch.groupValues[1].toIntOrNull()
+                if (n != null) out += "$n ${if (n == 1) "полюс" else "полюса"}" else out += p
+                continue
+            }
+
+            // Номинал и кривая: "16A C" или "16 A, C"
+            val nomMatch = Regex("""(\d+)\s*A\s*,?\s*([ABCD])?""", RegexOption.IGNORE_CASE).find(p)
+            if (nomMatch != null) {
+                val a = nomMatch.groupValues.getOrNull(1)
+                val curve = nomMatch.groupValues.getOrNull(2)?.uppercase()
+                val sb = StringBuilder()
+                sb.append("${a} А")
+                if (!curve.isNullOrBlank()) sb.append(", характеристика $curve")
+                out += sb.toString()
+                continue
+            }
+
+            // Icn 6000 / 10kA
+            if (lower.contains("icn") || lower.contains("ka") || lower.contains("ка")) {
+                val ka = Regex("""(\d+(?:[\.,]\d+)?)\s*k?a""", RegexOption.IGNORE_CASE).find(p)?.groupValues?.getOrNull(1)
+                val onlyNum = Regex("""\d+""").find(p)?.value
+                val amps = if (ka != null) (ka.replace(',', '.').toDoubleOrNull() ?: 0.0) * 1000.0 else onlyNum?.toDoubleOrNull()
+                if (amps != null) { out += "отключающая способность ${df0.format(amps)} $UNIT_A"; continue }
+            }
+
+            // RCD A 30mA / RCD AC 100 mA
+            if (lower.contains("rcd")) {
+                val type = Regex("""rcd\s*([A-Z]+)""", RegexOption.IGNORE_CASE).find(p)?.groupValues?.getOrNull(1)?.uppercase()
+                val sens = Regex("""(\d+)\s*mA""", RegexOption.IGNORE_CASE).find(p)?.groupValues?.getOrNull(1)
+                val text = buildString {
+                    append("тип УЗО")
+                    if (!type.isNullOrBlank()) append(" $type")
+                    if (!sens.isNullOrBlank()) append(", чувствительность ${df0.format(sens.toInt())} мА")
+                }
+                out += text
+                continue
+            }
+
+            out += p
         }
-        return out.joinToString(" • ").ifBlank { raw }
+
+        return out.joinToString(" • ").ifBlank { raw0 }
     }
 
     private fun loadTemplate(path: String): String {
