@@ -1,43 +1,40 @@
 package ru.mugalimov.volthome.ui.screens.explication.export_pdf
 
+import android.app.Activity
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
-import ru.mugalimov.volthome.ui.utilities.*
+import ru.mugalimov.volthome.ui.utilities.HtmlReportBuilder
+import ru.mugalimov.volthome.ui.utilities.PdfPrinter
 import ru.mugalimov.volthome.ui.viewmodel.ExplicationViewModel
-import ru.mugalimov.volthome.ui.viewmodel.GroupScreenState
-import ru.mugalimov.volthome.domain.model.Phase
-import ru.mugalimov.volthome.domain.use_case.getOrZero
-import ru.mugalimov.volthome.domain.use_case.phaseCurrents
 import ru.mugalimov.volthome.ui.viewmodel.buildReportData
 
-fun exportExplicationPdf(activity: ComponentActivity, vm: ExplicationViewModel) {
-    val pair = vm.buildReportData() ?: return
-    val (meta, phases) = pair
+/**
+ * Экспорт отчёта экспликации в PDF.
+ * HTML формируется с учётом режима сети (1/3 фазы).
+ */
+fun exportExplicationPdf(activity: Activity, vm: ExplicationViewModel) {
+    val data = vm.buildReportData() ?: return
+    val (meta, phases) = data
 
-    activity.lifecycleScope.launch {
-        // Рендер доната из твоего компонента, с теми же данными
-        val state = vm.uiState.value as? GroupScreenState.Success
-        val perPhase = state?.groups?.let { phaseCurrents(it) } ?: emptyMap()
-        val donutB64 = renderComposableToBase64Png(
-            activity = activity, widthPx = 1080, heightPx = 1080
-        ) {
-            ru.mugalimov.volthome.ui.screens.loads.PhaseLoadDonutChart(
-                perPhase = mapOf(
-                    Phase.A to (perPhase.getOrZero(Phase.A)),
-                    Phase.B to (perPhase.getOrZero(Phase.B)),
-                    Phase.C to (perPhase.getOrZero(Phase.C))
-                ),
-                showLegend = true
-            )
+    val html = HtmlReportBuilder(activity).build(
+        meta = meta,
+        phases = phases,
+        isPro = false // при появлении реального флага — подставим сюда
+    )
+
+    when (activity) {
+        is ComponentActivity -> {
+            activity.lifecycleScope.launch {
+                PdfPrinter(activity).printHtml(html)
+            }
         }
 
-        val html = HtmlReportBuilder(activity).build(
-            meta = meta,
-            phases = phases,
-            donutDataUri = donutB64,
-            isPro = /* vm.isPro */ false // <- поставь true/false как нужно
-        )
-        PdfPrinter(activity).printHtml(html)
+        else -> {
+            // На случай, если это не ComponentActivity: обеспечим вызов с UI-потока.
+            activity.runOnUiThread {
+                PdfPrinter(activity).printHtml(html)
+            }
+        }
     }
 }

@@ -78,6 +78,7 @@ dependencies {
     implementation(libs.litert.support.api)
     implementation(libs.androidx.storage)
     implementation(libs.androidx.appcompat)
+    implementation(libs.androidx.compose.ui.tooling.preview)
 //    implementation(libs.androidx.foundation.desktop)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
@@ -98,6 +99,7 @@ dependencies {
 
     // Room
     implementation (libs.androidx.room.runtime)
+    debugImplementation(libs.androidx.compose.ui.tooling)
     kapt ("androidx.room:room-compiler:2.7.2")
     implementation (libs.androidx.room.ktx)
 

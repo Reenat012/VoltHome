@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.ui.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -19,6 +20,8 @@ import ru.mugalimov.volthome.domain.model.GroupingResult
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.VoltageType
+import ru.mugalimov.volthome.domain.model.incomer.IncomerSpec
+import ru.mugalimov.volthome.domain.model.report.DonutModel
 import ru.mugalimov.volthome.domain.model.report.ReportDevice
 import ru.mugalimov.volthome.domain.model.report.ReportGroup
 import ru.mugalimov.volthome.domain.model.report.ReportMeta
@@ -27,6 +30,8 @@ import ru.mugalimov.volthome.domain.use_case.GroupCalculatorFactory
 import ru.mugalimov.volthome.domain.use_case.IncomerSelector
 import ru.mugalimov.volthome.domain.use_case.getOrZero
 import ru.mugalimov.volthome.domain.use_case.phaseCurrents
+import ru.mugalimov.volthome.domain.formatter.GroupMetaFormatter
+import ru.mugalimov.volthome.domain.util.PowerCurrentNormalizer
 import java.text.SimpleDateFormat
 import java.util.Locale
 import javax.inject.Inject
@@ -39,11 +44,16 @@ class ExplicationViewModel @Inject constructor(
     private val deviceRepository: DeviceRepository,
     @IoDispatcher private val dispatchers: CoroutineDispatcher
 ) : ViewModel() {
+
     private val _uiState = MutableStateFlow<GroupScreenState>(GroupScreenState.Loading)
     val uiState: StateFlow<GroupScreenState> = _uiState
 
     private val _isRecalculating = MutableStateFlow(false)
     val isRecalculating: StateFlow<Boolean> = _isRecalculating
+
+    // последний известный режим фаз (для buildReportData)
+    private val _phaseMode = MutableStateFlow(PhaseMode.THREE)
+    val phaseMode: StateFlow<PhaseMode> = _phaseMode.asStateFlow()
 
     // выбранный инстанс устройства для показа в шите
     private val _selectedDevice = MutableStateFlow<Device?>(null)
@@ -52,8 +62,9 @@ class ExplicationViewModel @Inject constructor(
     // Необязательное авто-пересчитывание при смене режима:
     init {
         viewModelScope.launch(dispatchers) {
-            preferencesRepository.phaseMode.collect {
-                // Пересчитать (дебаунсить при необходимости)
+            preferencesRepository.phaseMode.collect { mode ->
+                _phaseMode.value = mode
+                // Пересчитать (при необходимости можно задебаунсить)
                 recalcAndSaveGroups()
             }
         }
@@ -99,7 +110,7 @@ class ExplicationViewModel @Inject constructor(
                         val incomer = IncomerSelector().select(
                             IncomerSelector.Params(
                                 groups = groups,
-                                preferRcbo = false,  // как у тебя — можно вынести в настройки
+                                preferRcbo = false,  // можно вынести в настройки
                                 hasGroupRcds = hasGroupRcds,
                                 voltageTypeOverride = when (mode) {
                                     PhaseMode.SINGLE -> VoltageType.AC_1PHASE
@@ -138,23 +149,54 @@ sealed class GroupScreenState {
         val groups: List<CircuitGroup>,
         val totalGroups: Int,
         val totalCurrent: Double,
-        val incomer: ru.mugalimov.volthome.domain.model.incomer.IncomerSpec,
+        val incomer: IncomerSpec,
         val hasGroupRcds: Boolean
     ) : GroupScreenState()
 
     data class Error(val message: String) : GroupScreenState()
 }
 
+/**
+ * Формирование данных отчёта для PDF/превью.
+ * Поддерживает оба режима:
+ *  - THREE: донат распределения по фазам, headline A/B/C
+ *  - SINGLE: донат загрузки вводного, headline только A
+ */
 fun ExplicationViewModel.buildReportData(): Pair<ReportMeta, List<ReportPhase>>? {
     val s = uiState.value as? GroupScreenState.Success ?: return null
     val date =
         SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(System.currentTimeMillis())
 
+    val mode = phaseMode.value
     val perPhase = phaseCurrents(s.groups)
+
+    // Заголовочные токи (что показываем в шапке отчёта)
+    val headlineCurrents: Map<String, Double> = when (mode) {
+        PhaseMode.THREE -> mapOf(
+            "A" to perPhase.getOrZero(Phase.A),
+            "B" to perPhase.getOrZero(Phase.B),
+            "C" to perPhase.getOrZero(Phase.C)
+        )
+        PhaseMode.SINGLE -> mapOf(
+            "A" to perPhase.getOrZero(Phase.A)
+        )
+    }
+
+    // Донат: распределение по фазам (3-ф) или загрузка вводного (1-ф)
+    val donut: DonutModel = when (mode) {
+        PhaseMode.THREE -> DonutModel.PhaseDistribution(valuesA = perPhase)
+        PhaseMode.SINGLE -> {
+            val usedA = perPhase.getOrZero(Phase.A)
+            // номинал берём из вводного автомата
+            val limitA = s.incomer.mcbRating.toDouble()
+            DonutModel.IncomerLoad(usedA = usedA, limitA = limitA)
+        }
+    }
+
     val meta = ReportMeta(
         date = date,
-        incomer = with(s.incomer) {
-            // Собираем короткое описание вводного аппарата
+        incomerLabel = with(s.incomer) {
+            // Короткое описание вводного аппарата
             buildString {
                 append(kind.name)    // RCBO/MCB_ONLY/MCB_PLUS_RCD
                 append(", ")
@@ -163,13 +205,9 @@ fun ExplicationViewModel.buildReportData(): Pair<ReportMeta, List<ReportPhase>>?
                 rcdType?.let { append(", RCD ${it} ${rcdSensitivityMa ?: 30}mA") }
             }
         },
-        totalGroups = s.totalGroups,
-        totalCurrent = s.totalCurrent,
-        phaseCurrents = mapOf(
-            "A" to perPhase.getOrZero(Phase.A),
-            "B" to perPhase.getOrZero(Phase.B),
-            "C" to perPhase.getOrZero(Phase.C)
-        )
+        headlineCurrents = headlineCurrents,
+        donut = donut,
+        totalGroups = s.totalGroups
     )
 
     // Группируем по фазам и готовим секции
@@ -182,12 +220,28 @@ fun ExplicationViewModel.buildReportData(): Pair<ReportMeta, List<ReportPhase>>?
                 groups = groups.sortedBy { it.groupNumber }.map { g ->
                     ReportGroup(
                         title = "Группа #${g.groupNumber} — ${g.roomName}",
+                        // Метки аппарата/кабеля — формируем на этапе маппинга
+                        switchLabel = GroupMetaFormatter.buildSwitchLabel(g),
+                        cableLabel = GroupMetaFormatter.buildCableLabel(g),
                         devices = g.devices.map { d ->
-                            val pKw = d.power / 1000.0
-                            val iA = d.current
+                            // Двусторонняя нормализация P/I для отчёта
+                            val (powerW, currentA) = PowerCurrentNormalizer.ensurePAndI(
+                                powerW = d.power.takeIf { it > 0 },
+                                currentA = d.calculateCurrent().takeIf { it > 0.0 },
+                                voltage = d.voltage,
+                                powerFactor = d.powerFactor
+                            )
+                            // Диагностика аномалий (не влияет на UI/PDF)
+                            if (d.deviceType.name == "LIGHTING" && (powerW ?: 0) >= 1000) {
+                                Log.w(
+                                    "ReportNormalizer",
+                                    "Lighting device anomalous power: ${d.name} = ${powerW}W"
+                                )
+                            }
                             ReportDevice(
                                 name = d.name,
-                                spec = "${"%.1f".format(pKw)} кВт, ${"%.1f".format(iA)} А"
+                                powerW = powerW,
+                                currentA = currentA
                             )
                         }
                     )
