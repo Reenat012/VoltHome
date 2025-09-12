@@ -13,37 +13,31 @@ import java.io.InputStreamReader
 import java.text.DecimalFormat
 import java.text.DecimalFormatSymbols
 import java.util.Locale
-import kotlin.math.cos
-import kotlin.math.max
-import kotlin.math.roundToInt
-import kotlin.math.sin
+import kotlin.math.*
 
 class HtmlReportBuilder(private val context: Context) {
-
     private val ruSymbols = DecimalFormatSymbols(Locale("ru", "RU")).apply {
         decimalSeparator = ','
         groupingSeparator = ' '
     }
-    private val df2 = DecimalFormat("#,##0.00", ruSymbols) // ток — сотые
+    private val df2 = DecimalFormat("#,##0.00", ruSymbols)
     private val df1 = DecimalFormat("#,##0.0", ruSymbols)
     private val df0 = DecimalFormat("#,##0", ruSymbols)
 
-    private val UNIT_A = "\u0410" // кириллическая «А»
+    private val UNIT_A = "\u0410"
     private val VOLTAGE_DEFAULT = 230.0
     private val eps = 1e-6
 
-    // Алиасы для чтения числовых полей из ReportDevice
     private val powerFieldAliases = listOf("powerW", "power", "watt", "pW")
     private val currentFieldAliases = listOf("currentA", "amp", "a")
 
-    // Алиасы для мета-информации групп
     private val groupSwitchAliases = listOf(
         "switchLabel", "groupSwitchLabel", "apparatusLabel",
         "protectionLabel", "breakerLabel", "rcdLabel", "deviceLabel"
     )
     private val groupCableAliases = listOf("cableLabel", "lineLabel", "wireLabel", "cableInfo", "lineInfo")
 
-    // Вставляемый CSS: одна таблица на фазу, повтор шапки при печати, выделение групп
+    // —— ТОЛЬКО CSS изменён: добавлены жёсткие запреты разрыва и префиксы ——
     private val INLINE_STYLE = """
         <style>
           body { padding-bottom: 96px; }
@@ -57,44 +51,44 @@ class HtmlReportBuilder(private val context: Context) {
           }
           .footer-spacer { height: 72px; }
 
-          /* Таблица фазы: одна на фазу */
           table.phase-table { width: 100%; border-collapse: collapse; margin: 0 0 12px 0; }
           table.phase-table th, table.phase-table td { padding: 10px 0; }
           table.phase-table th.center, table.phase-table td.center { text-align: left; }
           table.phase-table th.num, table.phase-table td.num { text-align: right; white-space: nowrap; }
 
           thead.phase-head th { border-bottom: 1px solid #E5E7EB; }
-          /* ПОВТОР ШАПКИ НА КАЖДОЙ СТРАНИЦЕ */
           thead.phase-head { display: table-header-group; }
 
-          /* Разделители строк устройств */
           table.phase-table tbody tr.dev td { border-bottom: 1px solid #E5E7EB; }
           table.phase-table tbody tr.dev:last-child td { border-bottom: 0; }
 
-          /* Строка начала группы (чип + мета в одну строку), визуальное выделение */
           tr.group-start td {
-            border-top: 2px solid #CBD5E1; /* толще, чтобы группа читалась */
+            border-top: 2px solid #CBD5E1;
             border-bottom: 0;
-            background: #F9FAFB;          /* светлый фон для отделения от устройств */
+            background: #F9FAFB;
           }
           .chip {
-            display:inline-block;
-            padding:4px 10px;
-            border-radius:9999px;
-            background:#F3F4F6;
-            margin-right:10px;
-            font-weight:600;
+            display:inline-block; padding:4px 10px; border-radius:9999px;
+            background:#F3F4F6; margin-right:10px; font-weight:600;
           }
-          .meta-inline {
-            display:inline-block;
-            font-size:12px;
-            color:#6B7280;
-            vertical-align:middle;
-          }
+          .meta-inline { display:inline-block; font-size:12px; color:#6B7280; vertical-align:middle; }
 
-          /* Неразрывность: чип+мета+первое устройство едут вместе */
-          tbody.group-block { break-inside: avoid; page-break-inside: avoid; }
-          tr.group-start, thead.phase-head { break-inside: avoid; page-break-inside: avoid; }
+          /* ————— Антиорфаны: запираем разрывы везде, где это возможно ————— */
+          tbody.group-block {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+            -webkit-column-break-inside: avoid !important;
+            -webkit-region-break-inside: avoid !important;
+          }
+          tr.group-start,
+          tr.dev {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+            -webkit-column-break-inside: avoid !important;
+            -webkit-region-break-inside: avoid !important;
+          }
+          /* сцепляем чип с первой строкой устройств */
+          tr.group-start { page-break-after: avoid !important; }
 
           .h2-tight { margin: 0 0 8px 0; }
         </style>
@@ -106,49 +100,36 @@ class HtmlReportBuilder(private val context: Context) {
         phases: List<ReportPhase>,
         isPro: Boolean = false
     ): String {
-        // template.html → report.html → fallback
         var html = runCatching { loadTemplate("report_pdf/template.html") }
             .recoverCatching { loadTemplate("report_pdf/report.html") }
             .getOrElse { FALLBACK_TEMPLATE }
 
-        // Инъекция CSS перед </head> (если в шаблоне есть <head>)
         html = if (html.contains("</head>", ignoreCase = true)) {
             html.replace(Regex("</head>", RegexOption.IGNORE_CASE), "$INLINE_STYLE</head>")
         } else {
             "$INLINE_STYLE$html"
         }
 
-        // Шапка
         html = html.replace("{{projectName}}", "")
-        html = html.replace("{{date}}", escape(meta.date))
-        html = html.replace("{{kpiBlock}}", buildKpiBlock(meta))
+            .replace("{{date}}", escape(meta.date))
+            .replace("{{kpiBlock}}", buildKpiBlock(meta))
+            .replace("{{donutSection}}", buildDonutSection(meta.donut))
+            .replace("{{legendSection}}", buildLegend(meta.donut))
 
-        // Донат + легенда
-        html = html.replace("{{donutSection}}", buildDonutSection(meta.donut))
-        html = html.replace("{{legendSection}}", buildLegend(meta.donut))
-
-        // Экспликация
         val phasesHtml = buildPhasesTables(phases)
         html = html.replace("{{phasesHtml}}", phasesHtml)
-        html = html.replace("{{phases}}", phasesHtml)
+            .replace("{{phases}}", phasesHtml)
 
-        // Водяной знак
         html = if (!isPro) {
-            html.replace(
-                "{{watermark}}",
+            html.replace("{{watermark}}",
                 """<div class="watermark"><img src="img/logo.png" alt="VoltHome" onerror="this.outerHTML='VoltHome'"/></div>"""
             )
-        } else {
-            html.replace("{{watermark}}", "")
-        }
+        } else html.replace("{{watermark}}", "")
 
-        // Запас перед футером в потоке
         html = html.replace("{{footerSpacer}}", """<div class="footer-spacer"></div>""")
-
         return html
     }
 
-    /** KPI: приводим вводной аппарат к человекочитаемому виду. */
     private fun buildKpiBlock(meta: ReportMeta): String {
         val iA = formatA(meta.headlineCurrents["A"])
         val iB = formatA(meta.headlineCurrents["B"])
@@ -178,7 +159,6 @@ class HtmlReportBuilder(private val context: Context) {
         }
     }
 
-    /** Легенда только для 3-ф. */
     private fun buildLegend(donut: DonutModel): String {
         if (donut !is DonutModel.PhaseDistribution) return ""
         val a = donut.valuesA[Phase.A] ?: 0.0
@@ -211,12 +191,6 @@ class HtmlReportBuilder(private val context: Context) {
         """.trimIndent()
     }
 
-    /**
-     * ОДНА таблица на фазу.
-     * Для каждой группы — отдельный <tbody class="group-block">:
-     *   - первая строка tbody: чип + мета (в одной ячейке)
-     *   - далее строки устройств
-     */
     private fun buildPhasesTables(phases: List<ReportPhase>): String {
         if (phases.isEmpty()) return ""
         return buildString {
@@ -231,7 +205,6 @@ class HtmlReportBuilder(private val context: Context) {
                     phase.groups.forEach { g: ReportGroup ->
                         val metaLine = buildGroupMeta(g)
                         appendLine("""<tbody class="group-block">""")
-                        // Старт группы: чип + мета — в одной строке/ячейке
                         appendLine(
                             """
                             <tr class="group-start">
@@ -242,7 +215,6 @@ class HtmlReportBuilder(private val context: Context) {
                             </tr>
                             """.trimIndent()
                         )
-                        // Устройства
                         g.devices.forEach { d ->
                             val (p, c) = pickDeviceNumbers(d)
                             appendLine(
@@ -264,7 +236,6 @@ class HtmlReportBuilder(private val context: Context) {
         }
     }
 
-    /** Собираем строку «Аппарат • Кабель» из алиасов. */
     private fun buildGroupMeta(g: ReportGroup): String {
         fun firstNonBlank(names: List<String>): String? {
             for (n in names) {
@@ -282,11 +253,6 @@ class HtmlReportBuilder(private val context: Context) {
         return listOfNotNull(sw, cable).joinToString(" • ")
     }
 
-    /**
-     * Берём power/current из любых алиас-полей, иначе парсим legacy spec.
-     * Если ток не найден, но есть мощность — считаем I = P/230 В (для рендера).
-     * Возвращаем отформатированные строки.
-     */
     private fun pickDeviceNumbers(d: ReportDevice): Pair<String?, String?> {
         fun getNumber(obj: Any, names: List<String>): Number? {
             for (n in names) {
@@ -321,7 +287,6 @@ class HtmlReportBuilder(private val context: Context) {
         return pStr to cStr
     }
 
-    /** Парсинг строк вида "2.2 кВт, 11.8 А" / "2200 Вт, 11,8 А". */
     private fun parseSpec(spec: String): Pair<Int?, Double?> {
         val s = spec.replace('\u00A0', ' ')
             .lowercase(Locale.getDefault())
@@ -348,9 +313,6 @@ class HtmlReportBuilder(private val context: Context) {
         return pW to cA
     }
 
-    /**
-     * Донаты — инлайн SVG.
-     */
     private fun buildDonutSection(model: DonutModel): String {
         return when (model) {
             is DonutModel.PhaseDistribution -> {
@@ -420,49 +382,22 @@ class HtmlReportBuilder(private val context: Context) {
         }
     }
 
-    /** Переводит «сырой» incomerLabel в человеческий русский. */
     private fun humanizeIncomer(raw0: String): String {
         if (raw0.isBlank()) return ""
-        val parts = raw0
-            .replace('•', ',')
-            .replace('·', ',')
-            .split(',')
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-
+        val parts = raw0.replace('•', ',').replace('·', ',').split(',').map { it.trim() }.filter { it.isNotEmpty() }
         val out = mutableListOf<String>()
         for (p in parts) {
             val lower = p.lowercase(Locale.getDefault())
+            if (p.equals("MCB_ONLY", true) || lower.contains("mcb only")) { out += "Автомат"; continue }
+            else if (p.equals("MCB_PLUS_RCD", true) || lower.contains("mcb+rcd") || lower.contains("mcb_plus_rcd")) { out += "Автомат + УЗО"; continue }
+            else if (p.equals("RCBO", true) || lower.contains("rcbo")) { out += "Диффавтомат"; continue }
 
-            if (p.equals("MCB_ONLY", true) || lower.contains("mcb only")) {
-                out += "Автомат"; continue
-            } else if (p.equals("MCB_PLUS_RCD", true) || lower.contains("mcb+rcd") || lower.contains("mcb_plus_rcd")) {
-                out += "Автомат + УЗО"; continue
-            } else if (p.equals("RCBO", true) || lower.contains("rcbo")) {
-                out += "Диффавтомат"; continue
-            }
-
-            // Полюса: 1P / 2P / 3P / 4P / "4 poles"
             val polesMatch = Regex("""^\s*(\d+)\s*(p|pol(e|es))?\s*$""", RegexOption.IGNORE_CASE).matchEntire(p)
-            if (polesMatch != null) {
-                val n = polesMatch.groupValues[1].toIntOrNull()
-                if (n != null) out += "$n ${if (n == 1) "полюс" else "полюса"}" else out += p
-                continue
-            }
+            if (polesMatch != null) { val n = polesMatch.groupValues[1].toIntOrNull(); if (n != null) out += "$n ${if (n == 1) "полюс" else "полюса"}" else out += p; continue }
 
-            // Номинал и кривая: "16A C" или "16 A, C"
             val nomMatch = Regex("""(\d+)\s*A\s*,?\s*([ABCD])?""", RegexOption.IGNORE_CASE).find(p)
-            if (nomMatch != null) {
-                val a = nomMatch.groupValues.getOrNull(1)
-                val curve = nomMatch.groupValues.getOrNull(2)?.uppercase()
-                val sb = StringBuilder()
-                sb.append("${a} А")
-                if (!curve.isNullOrBlank()) sb.append(", характеристика $curve")
-                out += sb.toString()
-                continue
-            }
+            if (nomMatch != null) { val a = nomMatch.groupValues.getOrNull(1); val curve = nomMatch.groupValues.getOrNull(2)?.uppercase(); out += buildString { append("${a} А"); if (!curve.isNullOrBlank()) append(", характеристика $curve") }; continue }
 
-            // Icn 6000 / 10kA
             if (lower.contains("icn") || lower.contains("ka") || lower.contains("ка")) {
                 val ka = Regex("""(\d+(?:[\.,]\d+)?)\s*k?a""", RegexOption.IGNORE_CASE).find(p)?.groupValues?.getOrNull(1)
                 val onlyNum = Regex("""\d+""").find(p)?.value
@@ -470,22 +405,14 @@ class HtmlReportBuilder(private val context: Context) {
                 if (amps != null) { out += "отключающая способность ${df0.format(amps)} $UNIT_A"; continue }
             }
 
-            // RCD A 30mA / RCD AC 100 mA
             if (lower.contains("rcd")) {
                 val type = Regex("""rcd\s*([A-Z]+)""", RegexOption.IGNORE_CASE).find(p)?.groupValues?.getOrNull(1)?.uppercase()
                 val sens = Regex("""(\d+)\s*mA""", RegexOption.IGNORE_CASE).find(p)?.groupValues?.getOrNull(1)
-                val text = buildString {
-                    append("тип УЗО")
-                    if (!type.isNullOrBlank()) append(" $type")
-                    if (!sens.isNullOrBlank()) append(", чувствительность ${df0.format(sens.toInt())} мА")
-                }
-                out += text
+                out += buildString { append("тип УЗО"); if (!type.isNullOrBlank()) append(" $type"); if (!sens.isNullOrBlank()) append(", чувствительность ${df0.format(sens.toInt())} мА") }
                 continue
             }
-
             out += p
         }
-
         return out.joinToString(" • ").ifBlank { raw0 }
     }
 
@@ -500,15 +427,10 @@ class HtmlReportBuilder(private val context: Context) {
     private fun escape(s: String): String =
         s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    // координаты/длины для SVG всегда в US-формате
     private fun fmtUS(v: Double): String = String.format(Locale.US, "%.6f", v)
 
-    private fun formatA(v: Double?): String = when (v) {
-        null -> ""
-        else -> "${df2.format(v)} $UNIT_A"
-    }
+    private fun formatA(v: Double?): String = when (v) { null -> ""; else -> "${df2.format(v)} $UNIT_A" }
 
-    // Fallback на случай отсутствия ассетов
     private val FALLBACK_TEMPLATE = """
         <!doctype html>
         <html lang="ru">
