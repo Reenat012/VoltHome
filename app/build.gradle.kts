@@ -6,7 +6,6 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     id("com.google.dagger.hilt.android")
     kotlin("kapt")
-
 }
 
 android {
@@ -18,8 +17,8 @@ android {
         minSdk = 24
         //noinspection EditedTargetSdkVersion
         targetSdk = 35
-        versionCode = 6
-        versionName = "1.6"
+        versionCode = 7
+        versionName = "1.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -79,6 +78,7 @@ dependencies {
     implementation(libs.litert.support.api)
     implementation(libs.androidx.storage)
     implementation(libs.androidx.appcompat)
+    implementation(libs.androidx.compose.ui.tooling.preview)
 //    implementation(libs.androidx.foundation.desktop)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
@@ -99,6 +99,7 @@ dependencies {
 
     // Room
     implementation (libs.androidx.room.runtime)
+    debugImplementation(libs.androidx.compose.ui.tooling)
     kapt ("androidx.room:room-compiler:2.7.2")
     implementation (libs.androidx.room.ktx)
 

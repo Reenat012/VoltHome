@@ -38,6 +38,8 @@ litertSupportApi = "1.3.0"
 storage = "1.5.0"
 foundationDesktop = "1.7.0"
 appcompat = "1.7.1"
+uiToolingPreview = "1.9.0"
+uiTooling = "1.9.0"
 
 [libraries]
 androidx-activity-compose-v182 = { module = "androidx.activity:activity-compose", version.ref = "activityComposeVersion" }
@@ -85,6 +87,8 @@ litert-support-api = { group = "com.google.ai.edge.litert", name = "litert-suppo
 androidx-storage = { group = "androidx.test.services", name = "storage", version.ref = "storage" }
 androidx-foundation-desktop = { group = "androidx.compose.foundation", name = "foundation-desktop", version.ref = "foundationDesktop" }
 androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview", version.ref = "uiToolingPreview" }
+androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling", version.ref = "uiTooling" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

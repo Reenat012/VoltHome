@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>VoltHome — Экспликация</title>
+    <style>
+        @page { size: A4; margin: 14mm; }
+        :root { --text:#111; --muted:#666; --line:#e9e9e9; }
+        html,body { padding:0; margin:0; }
+        body {
+          font-family: "Noto Sans", system-ui, -apple-system, "Segoe UI", Roboto, Arial;
+          font-size: 11.5pt; color: var(--text);
+          -webkit-print-color-adjust: exact;
+          padding-bottom: 28mm; /* запас под fixed-футер на каждой странице */
+        }
+
+        /* ШАПКА */
+        .header{display:flex;align-items:center;gap:14pt;margin-bottom:10pt; position:relative; z-index:1;}
+        .header__logo{width:42pt;height:42pt;object-fit:contain}
+        .header__title{font-size:18pt;font-weight:700;line-height:1.1}
+
+        /* Заголовки + секции */
+        h2{font-size:13.5pt;margin:14pt 0 6pt; position:relative; z-index:1;}
+        .h2-tight{margin-top:6pt;margin-bottom:6pt; break-after: avoid; page-break-after: avoid;}
+        .phase-title{break-after: avoid; page-break-after: avoid;}
+        .muted{color:var(--muted)}
+        .divider{height:1px;background:var(--line);margin:12pt 0 6pt; position:relative; z-index:1;}
+
+        /* KPI */
+        .kpi{margin:2pt 0 10pt;line-height:1.45; position:relative; z-index:1;}
+        .topline{display:flex;gap:12pt;margin:8pt 0 4pt}
+        .metric{font-size:10.5pt;color:#333}
+
+        /* Донат + легенда (для 3-ф) */
+        .donut-wrap{display:flex;gap:22pt;align-items:center;margin:16pt 0 8pt; position:relative; z-index:1; flex-wrap:wrap;}
+        .donut-col{flex:0 0 auto}
+        .legend-col{flex:1 1 220px}
+        .legend{font-size:11pt;line-height:1.4}
+        .legend .row{display:flex;justify-content:space-between;gap:8pt}
+        .legend .row > div:last-child{min-width:110pt;text-align:right}
+        .legend .dot{width:8pt;height:8pt;border-radius:50%;display:inline-block;margin-right:6pt;vertical-align:middle}
+        .legend .a{background:#f2cc66}.legend .b{background:#5bbf72}.legend .c{background:#f26d6d}
+        .legend .val{font-weight:600}
+        .legend .num{font-variant-numeric: tabular-nums}
+
+        .donut-caption{margin-top:4pt;font-weight:600}
+        .donut-sub{margin-top:2pt}
+
+        /* Единая таблица на фазу */
+        .phase-table{width:100%;border-collapse:collapse;margin:6pt 0 22pt}
+        .phase-table th,
+        .phase-table td{padding:6pt 6pt;vertical-align:top}
+        thead tr.hdr th{border-bottom:1px solid #ddd}
+        .phase-table tr.dev td{border-bottom:1px dotted #eee}
+        .phase-table .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+        .phase-table .center{text-align:center}
+        .phase-table .group-row td{padding:10pt 0 2pt;border:0;text-align:center; break-after: avoid; page-break-after: avoid;}
+        .phase-table .group-meta td{padding:0 6pt 8pt;border:0;text-align:center;color:var(--muted);font-size:10.5pt}
+
+        /* повторяемая шапка таблицы на каждой странице */
+        thead { display: table-header-group; }
+
+        /* Переносы/разрывы */
+        .section{ page-break-inside:auto; break-inside:auto; position:relative; z-index:1;}
+        .phase-table tr{ page-break-inside:avoid; break-inside:avoid; }
+
+        /* spacer перед футером (если контент упёрся) */
+        .footer-spacer{height:18mm}
+
+        /* ВОДЯНОЙ ЗНАК */
+        .watermark{
+          position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+          pointer-events:none; opacity:.035; z-index:0; transform: rotate(-18deg);
+        }
+        .watermark img{width:60%; max-width:480px; object-fit:contain}
+
+        /* ФУТЕР */
+        .footer{
+          position:fixed; left:14mm; right:14mm; bottom:10mm;
+          display:flex; justify-content:space-between; align-items:center;
+          font-size:9.5pt; color:var(--muted); z-index:1;
+        }
+        .footer .line{position:absolute;left:0;right:0;top:-6mm;height:1px;background:var(--line)}
+    </style>
+
+    <!-- локальный шрифт (если используешь) -->
+    <link rel="preload" href="file:///android_asset/fonts/NotoSans-Regular.ttf" as="font" type="font/ttf" crossorigin>
+    <style>
+        @font-face{
+          font-family:"Noto Sans";
+          src:url("file:///android_asset/fonts/NotoSans-Regular.ttf");
+          font-weight:normal; font-style:normal;
+        }
+    </style>
+</head>
+<body>
+
+{{watermark}}
+
+<!-- ШАПКА -->
+<div class="header">
+    <img class="header__logo" src="img/logo.png" alt="VoltHome"/>
+    <div class="header__title">{{projectName}}VoltHome — Экспликация</div>
+</div>
+
+<!-- KPI (генерируется в билдере) -->
+{{kpiBlock}}
+
+<!-- Донат + легенда -->
+<div class="donut-wrap">
+    <div class="donut-col">{{donutSection}}</div>
+    <div class="legend-col">{{legendSection}}</div>
+</div>
+
+<div class="divider"></div>
+
+<!-- Экспликация -->
+<h2 class="h2-tight">Экспликация по фазам</h2>
+{{phasesHtml}}
+
+<!-- Спейсер перед fixed-футером -->
+{{footerSpacer}}
+
+<!-- ФУТЕР -->
+<!--<div class="footer">-->
+<!--    <div class="line"></div>-->
+<!--    <div>VoltHome</div>-->
+<!--    <div class="muted">Отчёт сгенерирован: {{date}}</div>-->
+<!--</div>-->
+
+</body>
+</html>

@@ -6,21 +6,23 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import ru.mugalimov.volthome.data.repository.DeviceRepository
+import ru.mugalimov.volthome.data.repository.PreferencesRepository
+import ru.mugalimov.volthome.domain.model.DefaultDevice
+import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.RoomType
-import ru.mugalimov.volthome.domain.model.DeviceType
-import ru.mugalimov.volthome.domain.model.Voltage
 import ru.mugalimov.volthome.domain.model.create.DeviceCreateRequest
 import ru.mugalimov.volthome.domain.model.create.RoomCreateRequest
-import ru.mugalimov.volthome.data.repository.DeviceRepository   // твой репозиторий с пресетами
-import ru.mugalimov.volthome.data.repository.PreferencesRepository
-import ru.mugalimov.volthome.domain.model.DefaultDevice        // если у тебя так называется
-import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.use_case.AddDevicesToRoomUseCase
 import ru.mugalimov.volthome.domain.use_case.CreateRoomWithDevicesUseCase
 import ru.mugalimov.volthome.domain.use_case.DeleteDevicesUseCase
@@ -37,7 +39,7 @@ class RoomsViewModel @Inject constructor(
 ) : ViewModel() {
 
     /** Пресеты/каталог для листов выбора в UI */
-    val defaultDevices = deviceRepository.getDefaultDevices()
+    val defaultDevices: StateFlow<List<DefaultDevice>> = deviceRepository.getDefaultDevices()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     /** Одноразовые события в UI: навигация, снекбары, undo */
@@ -46,9 +48,9 @@ class RoomsViewModel @Inject constructor(
     )
     val actions: SharedFlow<RoomsAction> = _actions
 
-    /** Простой UI state для кнопок (можно расширить при желании) */
-    private val _isBusy = kotlinx.coroutines.flow.MutableStateFlow(false)
-    val isBusy: StateFlow<Boolean> = _isBusy
+    /** Простой UI state для кнопок/лоадеров */
+    private val _isBusy = MutableStateFlow(false)
+    val isBusy: StateFlow<Boolean> = _isBusy.asStateFlow()
 
     // Текущее значение режима для UI (с дефолтом THREE)
     val phaseMode: StateFlow<PhaseMode> =
@@ -56,22 +58,16 @@ class RoomsViewModel @Inject constructor(
             .stateIn(viewModelScope, SharingStarted.Lazily, PhaseMode.THREE)
 
     /**
-     * Создать комнату с устройствами за один вызов.
-     * @param selected пары (DefaultDevice, qty) из листа с мультивыбором.
+     * ВАРИАНТ 1 (СОХРАНЁН ДЛЯ ОБРАТНОЙ СОВМЕСТИМОСТИ):
+     * Создать комнату с устройствами из пары (DefaultDevice, qty).
+     * Используется старым потоком — без кастомизации имени/мощности на шаге выбора.
      */
     fun createRoomWithDevices(
         name: String,
         roomType: RoomType,
         selected: List<Pair<DefaultDevice, Int>>
     ) {
-        // 1) Санитизация имени
-        val safeName = name
-            .replace("\n", " ")
-            .replace("\r", " ")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-            .take(40)
-
+        val safeName = sanitizeRoomName(name)
         if (safeName.isBlank()) {
             emitUserMessage("Введите название комнаты")
             return
@@ -81,12 +77,57 @@ class RoomsViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
+                val requests = selected
+                    .filter { it.second > 0 }
+                    .map { (d, qty) -> d.toCreateRequest(qty) }
+
                 val req = RoomCreateRequest(
-                    name = safeName,                 // 2) Используем безопасное имя
+                    name = safeName,
                     roomType = roomType,
-                    devices = selected
-                        .filter { it.second > 0 }
-                        .map { (d, qty) -> d.toCreateRequest(qty) }
+                    devices = requests
+                )
+                val result = createRoom(req)
+                _actions.emit(RoomsAction.RoomCreated(result.roomId, result.deviceIds))
+            } catch (e: IllegalArgumentException) {
+                emitUserMessage(e.message ?: "Ошибка: проверьте данные")
+            } catch (t: Throwable) {
+                _actions.emit(RoomsAction.Error(t))
+            } finally {
+                _isBusy.value = false
+            }
+        }
+    }
+
+    /**
+     * ВАРИАНТ 2 (НОВЫЙ ОСНОВНОЙ ДЛЯ «1-в-1» С ЭКРАНОМ «Комната»):
+     * Создать комнату с кастомизированными устройствами.
+     * Здесь devices уже содержат кастомные title и ratedPowerW (Вт) — как из DevicePickerSheet.
+     */
+    fun createRoomWithDevicesCustomized(
+        name: String,
+        roomType: RoomType,
+        devices: List<DeviceCreateRequest>
+    ) {
+        val safeName = sanitizeRoomName(name)
+        if (safeName.isBlank()) {
+            emitUserMessage("Введите название комнаты")
+            return
+        }
+        if (_isBusy.value) return
+        _isBusy.value = true
+
+        viewModelScope.launch {
+            try {
+                val filtered = devices.filter { it.count > 0 }
+                if (filtered.isEmpty()) {
+                    emitUserMessage("Нечего добавлять: выберите устройства")
+                    _isBusy.value = false
+                    return@launch
+                }
+                val req = RoomCreateRequest(
+                    name = safeName,
+                    roomType = roomType,
+                    devices = filtered
                 )
                 val result = createRoom(req)
                 _actions.emit(RoomsAction.RoomCreated(result.roomId, result.deviceIds))
@@ -105,7 +146,7 @@ class RoomsViewModel @Inject constructor(
     }
 
     /**
-     * Добавить в уже существующую комнату набор устройств.
+     * ВАРИАНТ 1 (СОХРАНЁН): Добавить в комнату набор устройств по парам (DefaultDevice, qty).
      */
     fun addDevicesToRoom(
         roomId: Long,
@@ -136,12 +177,41 @@ class RoomsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * ВАРИАНТ 2 (НОВЫЙ ОСНОВНОЙ): Добавить кастомизированные устройства (имя + мощность) в комнату.
+     * Список devices формируется в DevicePickerSheet (точно так же, как на экране «Комната»).
+     */
+    fun addDevicesToRoomCustomized(
+        roomId: Long,
+        devices: List<DeviceCreateRequest>
+    ) {
+        if (_isBusy.value) return
+        _isBusy.value = true
+
+        viewModelScope.launch {
+            try {
+                val filtered = devices.filter { it.count > 0 }
+                if (filtered.isEmpty()) {
+                    emitUserMessage("Нечего добавлять: выберите устройства")
+                    _isBusy.value = false
+                    return@launch
+                }
+                val ids = addDevices(roomId, filtered)
+                _actions.emit(RoomsAction.DevicesAdded(roomId, ids))
+            } catch (t: Throwable) {
+                _actions.emit(RoomsAction.Error(t))
+            } finally {
+                _isBusy.value = false
+            }
+        }
+    }
+
     /** Undo для комнаты */
     fun undoCreateRoom(roomId: Long) {
         viewModelScope.launch {
             try {
                 deleteRoom(roomId)
-            } catch (_: Throwable) {}
+            } catch (_: Throwable) { /* ignore */ }
         }
     }
 
@@ -150,23 +220,19 @@ class RoomsViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 deleteDevices(deviceIds)
-            } catch (_: Throwable) {}
+            } catch (_: Throwable) { /* ignore */ }
         }
     }
 
     private fun emitUserMessage(msg: String) {
         viewModelScope.launch { _actions.emit(RoomsAction.UserMessage(msg)) }
     }
+
+    private fun sanitizeRoomName(name: String): String =
+        name.replace("\n", " ")
+            .replace("\r", " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .take(40)
 }
 
-/** Маппер из DefaultDevice в DeviceCreateRequest */
-private fun DefaultDevice.toCreateRequest(qty: Int): DeviceCreateRequest =
-    DeviceCreateRequest(
-        title = this.name,                  // как называется устройство в каталоге
-        type = this.deviceType,             // DeviceType
-        count = qty.coerceAtLeast(1),
-        ratedPowerW = this.power,           // Int
-        powerFactor = this.powerFactor,     // Double?
-        demandRatio = this.demandRatio,     // Double?
-        voltage = this.voltage              // Voltage
-    )

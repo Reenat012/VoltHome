@@ -28,8 +28,8 @@
 
         /* Форсированный разрыв страницы */
         .pagebreak{
-          page-break-before: always;   /* старое имя */
-          break-before: page;          /* новое имя (современные браузеры) */
+          page-break-before: always;
+          break-before: page;
           height:0; line-height:0; margin:0; padding:0; border:0;
         }
 
@@ -43,7 +43,7 @@
         .section{ page-break-inside:auto; break-inside:auto; }
         .table tr{ page-break-inside:avoid; break-inside:avoid; }
 
-        /* ВОДЯНОЙ ЗНАК */
+        /* ВОДЯНОЙ ЗНАК (подставляется/очищается билдером через {{watermark}}) */
         .watermark{
           position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
           pointer-events:none; opacity:.06;
@@ -71,11 +71,8 @@
 </head>
 <body>
 
-{{#watermark}}
-<div class="watermark">
-    <img src="img/logo.png" alt="VoltHome"/>
-</div>
-{{/watermark}}
+<!-- Вставляется билдером: либо блок, либо пусто -->
+{{watermark}}
 
 <!-- ШАПКА -->
 <div class="header">
@@ -87,30 +84,17 @@
 <div class="kpi">
     <div>Дата: <b>{{date}}</b></div>
     <div>Вводной аппарат: <b>{{incomer}}</b></div>
-    <div>Всего групп: <b>{{totalGroups}}</b></div>
-    <div>Суммарный ток: <b>{{totalCurrent}} А</b></div>
-    <div>Токи по фазам: <b>A: {{iA}} А · B: {{iB}} А · C: {{iC}} А</b></div>
+    <div>Токи по фазам: <b>A: {{iA}} · B: {{iB}} · C: {{iC}}</b></div>
 </div>
 
-{{#donut}}
-<h2>Распределение нагрузки по фазам</h2>
-<img src="{{donut}}" alt="Диаграмма фаз" style="max-width:100%;"/>
-{{/donut}}
+<!-- Донат: билдер сам подставляет SVG (3-ф распределение ИЛИ 1-ф загрузка вводного) -->
+{{donutSection}}
 
 <div class="divider"></div>
 
-<!-- Жёстко начинаем новую страницу для экспликации -->
-<div class="pagebreak"></div>
+<!-- Экспликация по фазам (таблица собирается билдером и подставляется целиком) -->
 <h2 class="h2-tight">Экспликация по фазам</h2>
-
-{{#phases}}
-<div class="section">
-    <h2>{{name}}</h2>
-    <table class="table">
-        {{rows}}
-    </table>
-</div>
-{{/phases}}
+{{phases}}
 
 <!-- ФУТЕР -->
 <div class="footer">

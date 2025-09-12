@@ -35,7 +35,7 @@ import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
 
 /**
  * Контент экрана «Нагрузки».
- * - 1 фаза: донат (индикатор вводного) + карточка «Куда уходит ток» + карточка «Что можно улучшить»
+ * - 1 фаза: донат (индикатор вводного) + карточка «Куда уходит ток» + «Что можно улучшить»
  *   + таблица только по фазе A.
  * - 3 фазы: донат A/B/C + таблица трёх фаз (как было).
  */
@@ -47,10 +47,12 @@ fun PhaseLoadContent(
     thresholds: LoadThresholds = LoadThresholds(),
     modifier: Modifier = Modifier
 ) {
+    // В 1-ф режиме показываем только фазу A; в 3-ф — все как есть
     val shown = remember(phaseLoads, mode) {
         if (mode == PhaseMode.SINGLE) phaseLoads.filter { it.phase == Phase.A } else phaseLoads
     }
 
+    // Токи по фазам для доната/индикатора
     val perPhase = remember(shown) {
         mapOf(
             Phase.A to (shown.find { it.phase == Phase.A }?.totalCurrent ?: 0.0),
@@ -59,13 +61,15 @@ fun PhaseLoadContent(
         )
     }
 
-    // локальное состояние разворота секций по фазам
-    val expandedMap = remember(mode) { mutableStateMapOf<Phase, Boolean>().apply {
-        // по умолчанию: в 1-фазе A раскрыта, в 3-фазе все свернуты
-        this[Phase.A] = (mode == PhaseMode.SINGLE)
-        this[Phase.B] = false
-        this[Phase.C] = false
-    } }
+    // Локальное состояние разворота секций по фазам
+    val expandedMap = remember(mode) {
+        mutableStateMapOf<Phase, Boolean>().apply {
+            // По умолчанию: в 1-ф A раскрыта, в 3-ф — все свернуты
+            this[Phase.A] = (mode == PhaseMode.SINGLE)
+            this[Phase.B] = false
+            this[Phase.C] = false
+        }
+    }
     fun isExpanded(phase: Phase) = expandedMap[phase] == true
     fun togglePhase(phase: Phase) { expandedMap[phase] = !(expandedMap[phase] ?: false) }
 
@@ -77,7 +81,7 @@ fun PhaseLoadContent(
     ) {
         item { Spacer(Modifier.height(8.dp)) }
 
-        // Донат / Индикатор вводного
+        // Донат / Индикатор вводного (PhaseLoadDonutChart внутри сам решает, что рисовать по mode)
         item {
             PhaseLoadDonutChart(
                 perPhase = perPhase,
@@ -168,7 +172,7 @@ fun PhaseLoadContent(
             }
         }
 
-        // Таблица фаз/групп — теперь снова со сворачиванием по клику
+        // Таблица фаз/групп — со сворачиванием по клику
         items(shown, key = { it.phase }) { item ->
             PhaseGroupTableItem(
                 item = item,
@@ -257,17 +261,9 @@ private fun AdviceCardSinglePhase(
     alertPct: Int
 ) {
     val loadPct = if (incomer > 0) (totalA / incomer) * 100.0 else 0.0
-    val topRoom = roomShares.firstOrNull()
-    val topRoomPct = if (roomShares.isNotEmpty()) {
-        val sum = roomShares.sumOf { it.second }
-        if (sum > 0) (roomShares.first().second / sum) * 100.0 else 0.0
-    } else 0.0
 
     val tips = buildList {
-        val loadPct = if (incomer > 0) (totalA / incomer) * 100.0 else 0.0
         val reserveA = (incomer - totalA).coerceAtLeast(0.0)
-
-        // ряд номиналов проекта — только для справочной подсказки
         val nominalRow = listOf(6, 10, 16, 20, 25, 32, 40, 50, 63, 80, 100, 125, 160)
         val nextUpNominal = nominalRow.firstOrNull { it > incomer }
 
@@ -277,9 +273,9 @@ private fun AdviceCardSinglePhase(
                 loadPct >= alertPct -> {
                     add("Высокая загрузка вводного (${fmt0(loadPct)}%). Запас всего ${fmt1(reserveA)} A.")
                     if (nextUpNominal != null) {
-                        add("Если высокие пики регулярны — рассмотрите вводной на ${nextUpNominal} A (убедитесь в допустимом сечении и Icu).")
+                        add("Если высокие пики регулярны — рассмотрите вводной на ${nextUpNominal} A (проверьте сечение и Icu).")
                     } else {
-                        add("Следующего номинала в ряду нет — контролируйте одновременную работу мощных приборов.")
+                        add("Следующего номинала нет — контролируйте одновременную работу мощных приборов.")
                     }
                 }
                 loadPct >= warnPct -> {
@@ -291,15 +287,15 @@ private fun AdviceCardSinglePhase(
             }
         }
 
-        // 2) Доминирующие помещения (по roomShares)
+        // 2) Доминирующие помещения
         if (roomShares.isNotEmpty()) {
             val totalRoomsA = roomShares.sumOf { it.second }.coerceAtLeast(0.0001)
             val top1 = roomShares[0]
-            val top1PctOfTotal = (top1.second / totalRoomsA) * 100.0
-            val top1PctOfIncomer = if (incomer > 0) (top1.second / incomer) * 100.0 else 0.0
+            val top1PctTotal = (top1.second / totalRoomsA) * 100.0
+            val top1PctIncomer = if (incomer > 0) (top1.second / incomer) * 100.0 else 0.0
 
-            if (top1PctOfTotal >= 35.0) {
-                add("${top1.first} даёт ${fmt0(top1PctOfTotal)}% общей нагрузки (${fmt1(top1.second)} A, ${fmt0(top1PctOfIncomer)}% вводного). Желательно разнести мощные приборы этой зоны по разным группам/времени.")
+            if (top1PctTotal >= 35.0) {
+                add("${top1.first} даёт ${fmt0(top1PctTotal)}% общей нагрузки (${fmt1(top1.second)} A, ${fmt0(top1PctIncomer)}% вводного). Разносите мощные приборы по времени/группам.")
             }
 
             val top2 = roomShares.getOrNull(1)
@@ -308,17 +304,16 @@ private fun AdviceCardSinglePhase(
                 val pairPctTotal = (pairSum / totalRoomsA) * 100.0
                 val pairPctIncomer = if (incomer > 0) (pairSum / incomer) * 100.0 else 0.0
                 if (pairPctTotal >= 60.0) {
-                    add("Две зоны лидируют: ${top1.first} + ${top2.first} = ${fmt0(pairPctTotal)}% нагрузки (${fmt0(pairPctIncomer)}% вводного). Сведите их одновременную работу к минимуму.")
+                    add("Две зоны лидируют: ${top1.first} + ${top2.first} = ${fmt0(pairPctTotal)}% нагрузки (${fmt0(pairPctIncomer)}% вводного). Сведите одновременную работу к минимуму.")
                 }
             }
         }
 
-        // 3) Критический малый запас по амперам
+        // 3) Критически малый запас
         if (reserveA in 0.0..10.0 && incomer > 0) {
-            add("Запас менее 10 A — пиковые включения (чайник+духовка/бойлер) могут давать срабатывания.")
+            add("Запас менее 10 A — пиковые включения (чайник+духовка/бойлер) могут вызывать срабатывания.")
         }
 
-        // 4) Когда всё хорошо и «узких мест» не найдено
         if (isEmpty()) {
             add("Ситуация стабильна: концентрации нагрузки по зонам нет, запас по току комфортный.")
         }
@@ -339,17 +334,14 @@ private fun AdviceCardSinglePhase(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Icon(imageVector = Icons.Outlined.TipsAndUpdates, contentDescription = null)
-                Text("Что можно улучшить", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            }
-            if (tips.isEmpty()) {
                 Text(
-                    "Существенных рисков не выявлено.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    "Что можно улучшить",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
                 )
-            } else {
-                tips.forEach {
-                    Text("• $it", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+            }
+            tips.forEach {
+                Text("• $it", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

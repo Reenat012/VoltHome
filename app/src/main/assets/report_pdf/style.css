@@ -1,0 +1,42 @@
+body {
+  font-family: system-ui, -apple-system, Roboto, Arial, sans-serif;
+  color:#1f1f1f;
+  margin:24px;
+}
+.vh-header { margin-bottom: 16px; }
+.vh-title { font-size: 20px; font-weight: 700; }
+.vh-sub { font-size: 12px; color:#666; }
+
+.vh-topline { display:flex; gap:16px; margin: 12px 0 8px; }
+.vh-metric { font-size: 12px; color:#444; }
+
+.vh-donut { display:flex; justify-content:center; align-items:center; margin: 16px 0 12px; }
+.donut-svg { width:180px; height:180px; }
+.donut-ring { fill:transparent; stroke:#eee; stroke-width:3; }
+.donut-segment { fill:transparent; stroke-width:3; }
+.donut-segment.used { stroke:#7f4b57; }
+.donut-segment.a { stroke:#7f4b57; }
+.donut-segment.b { stroke:#9b6e52; }
+.donut-segment.c { stroke:#b08b60; }
+
+.donut-incomer { position: relative; width: 220px; height: 220px; }
+.donut-incomer-ring { position:absolute; inset:0; display:flex; justify-content:center; align-items:center; }
+.donut-incomer-center {
+  position:absolute; inset:0;
+  display:flex; flex-direction:column;
+  justify-content:center; align-items:center;
+  gap:4px; text-align:center;
+}
+.donut-value { font-size:14px; font-weight:700; }
+.donut-sub { font-size:12px; color:#666; }
+
+.vh-phases { margin-top: 8px; }
+.vh-phase { margin: 12px 0; }
+.vh-phase-title { font-weight:700; margin-bottom:6px; }
+.vh-table { width:100%; border-collapse: collapse; }
+.vh-table th, .vh-table td {
+  font-size:12px;
+  border-bottom:1px solid #eee;
+  padding:6px 4px;
+  text-align:left;
+}

@@ -20,6 +20,7 @@ import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.mapper.mapToDomainDevices
 import ru.mugalimov.volthome.domain.mapper.toDomainDevice
+import ru.mugalimov.volthome.domain.mapper.toEntityDevice
 import ru.mugalimov.volthome.domain.model.DefaultDevice
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.ui.components.JsonParser
@@ -139,5 +140,10 @@ class DeviceRepositoryImpl @Inject constructor(
             } catch (e: Exception) {
                 throw DeviceNotFoundException()
             }
+        }
+
+    override suspend fun updateDevice(device: Device) =
+        withContext(dispatchers) {
+            deviceDao.update(device.toEntityDevice())
         }
 }
