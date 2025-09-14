@@ -4,4 +4,9 @@ import android.app.Application
 import dagger.hilt.android.HiltAndroidApp
 
 @HiltAndroidApp
-class VoltHomeApplication : Application()
+class VoltHomeApp : Application() {
+    override fun onCreate() {
+        super.onCreate()
+//        VKID.init(this) // Инициализация SDK один раз на процесс
+    }
+}

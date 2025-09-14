@@ -4,74 +4,56 @@ import AboutScreen
 import MainApp
 import SettingsScreen
 import WelcomeScreen
-import android.content.SharedPreferences
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Modifier
-import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import ru.mugalimov.volthome.ui.screens.onboarding.OnboardingScreen
+import com.yandex.authsdk.YandexAuthSdk
+import androidx.hilt.navigation.compose.hiltViewModel
+import ru.mugalimov.volthome.ui.screens.auth.AuthScreen
+import ru.mugalimov.volthome.ui.viewmodel.AuthViewModel
 
-
-// RootNavGraph.kt
 @Composable
 fun RootNavGraph(
     startDestination: String,
+    sdk: YandexAuthSdk,
     onFirstLaunchCompleted: () -> Unit
 ) {
     val rootNavController = rememberNavController()
 
-    NavHost(
-        navController = rootNavController,
-        startDestination = startDestination
-    ) {
-        composable(Screens.WelcomeScreen.route) {
-            WelcomeScreen(
-                onContinue = {
-                    onFirstLaunchCompleted()
-//                    rootNavController.navigate(Screens.OnBoardingScreen.route) {
-//                        popUpTo(0)
-//                    }
-                }
-            )
+    // Авторизационный гейт
+    val authVm: AuthViewModel = hiltViewModel()
+    val authState by authVm.state.collectAsState()
+
+    if (authState is AuthViewModel.State.Success) {
+        // Авторизован — строим основной граф
+        NavHost(
+            navController = rootNavController,
+            startDestination = startDestination
+        ) {
+            composable(Screens.WelcomeScreen.route) {
+                WelcomeScreen(
+                    onContinue = {
+                        onFirstLaunchCompleted()
+                    }
+                )
+            }
+
+            composable(Screens.MainApp.route) {
+                MainApp(rootNavController = rootNavController)
+            }
+
+            composable(Screens.AboutScreen.route) {
+                AboutScreen(onBack = { rootNavController.popBackStack() })
+            }
         }
-
-        // Запуск анимации
-//        composable(Screens.OnBoardingScreen.route) {
-//            OnboardingScreen(
-//                onComplete = {
-//                    // Всегда переходим на главный экран
-//                    rootNavController.navigate(Screens.MainApp.route) {
-//                        popUpTo(0)
-//                    }
-//
-//                    // Вызываем завершение ТОЛЬКО при первом запуске
-//                    if (rootNavController.previousBackStackEntry?.destination?.route != Screens.MainApp.route) {
-//                        onOnboardingCompleted()
-//                    }
-//                },
-//                animationResources = listOf(
-//                    "lottie/1.json",
-//                    "lottie/2.json",
-//                    "lottie/3.json",
-//                    "lottie/4.json",
-//                    "lottie/5.json"
-//                )
-//            )
-//        }
-
-        composable(Screens.MainApp.route) {
-            MainApp(rootNavController = rootNavController)
-        }
-
-        composable(Screens.AboutScreen.route) {
-            AboutScreen(onBack = { rootNavController.popBackStack() })
+    } else {
+        // Не авторизован (Idle/Loading/Error) — держим AuthScreen смонтированным,
+        // чтобы не потерять колбэк ActivityResult из sdk.contract
+        AuthScreen(sdk = sdk) {
+            authVm.bootstrap()
         }
     }
 }
-
