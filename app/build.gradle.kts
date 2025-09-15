@@ -179,6 +179,12 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     debugImplementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
 
+    // DataStore (Proto/Custom Serializer)
+    implementation("androidx.datastore:datastore-core:1.1.1")
+
+// Шифрование (Tink + Android Keystore)
+    implementation("com.google.crypto.tink:tink-android:1.12.0")
+
     // Если снова не найдёт капчу — ВРЕМЕННО добавь явные зависимости:
 //     implementation("com.vk.id.captcha:okhttp-interceptors:0.0.4")
 //     implementation("com.vk.id.captcha:vkid-captcha:0.0.4")
