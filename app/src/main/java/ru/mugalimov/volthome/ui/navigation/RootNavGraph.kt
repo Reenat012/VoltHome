@@ -2,7 +2,6 @@ package ru.mugalimov.volthome.ui.navigation
 
 import AboutScreen
 import MainApp
-import SettingsScreen
 import WelcomeScreen
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState

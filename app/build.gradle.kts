@@ -176,6 +176,9 @@ dependencies {
 //    }
     implementation("com.yandex.android:authsdk:3.1.3")
 
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    debugImplementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+
     // Если снова не найдёт капчу — ВРЕМЕННО добавь явные зависимости:
 //     implementation("com.vk.id.captcha:okhttp-interceptors:0.0.4")
 //     implementation("com.vk.id.captcha:vkid-captcha:0.0.4")
@@ -183,4 +186,11 @@ dependencies {
 
 configurations.all {
     resolutionStrategy.force("androidx.browser:browser:1.8.0")
+}
+
+configurations.all {
+    resolutionStrategy {
+        force("com.squareup.okhttp3:okhttp:4.12.0")
+        force("com.squareup.okhttp3:logging-interceptor:4.12.0")
+    }
 }

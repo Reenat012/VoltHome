@@ -1,6 +1,7 @@
 package ru.mugalimov.volthome.ui.navigation
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
@@ -56,6 +57,12 @@ fun MainTopAppBar(
             titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
         ),
         actions = {
+            IconButton(onClick = {
+                // Экран профиля (минимальный)
+                mainNavController.navigate(Screens.ProfileScreen.route)
+            }) {
+                Icon(Icons.Filled.AccountCircle, contentDescription = "Аккаунт")
+            }
             IconButton(onClick = {
                 // Используем mainNavController для внутренних экранов
                 mainNavController.navigate(Screens.SettingsScreen.route)

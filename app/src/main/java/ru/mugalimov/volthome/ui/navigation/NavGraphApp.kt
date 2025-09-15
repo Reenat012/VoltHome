@@ -16,6 +16,7 @@ import ru.mugalimov.volthome.ui.screens.loads.PhaseLoadScreen
 import ru.mugalimov.volthome.ui.screens.room.RoomDetailScreen
 import ru.mugalimov.volthome.ui.screens.rooms.RoomsScreen
 import ru.mugalimov.volthome.ui.screens.algoritm_about.AlgorithmExplanationScreen
+import ru.mugalimov.volthome.ui.screens.auth.profile.ProfileScreen
 import ru.mugalimov.volthome.ui.viewmodel.RoomDetailViewModel
 
 /**
@@ -128,6 +129,12 @@ fun NavGraphApp(
 
         composable(Screens.PhaseLoadScreen.route) {
             PhaseLoadScreen(
+            )
+        }
+
+        composable(Screens.ProfileScreen.route) {
+            ProfileScreen(
+                onBack = { navController.popBackStack() }
             )
         }
 
