@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Разрешаем cleartext только для вашего IP (dev). На проде используйте https и удалите это. -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain>147.45.185.209</domain>
+    </domain-config>
+</network-security-config>
