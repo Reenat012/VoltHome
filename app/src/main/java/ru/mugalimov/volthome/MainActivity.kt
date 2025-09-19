@@ -87,12 +87,12 @@ fun VoltHomeApp(
 
     AppTheme {
         RootNavGraph(
-            startDestination = startDestination,
+//            startDestination = startDestination,
             sdk = sdk,
-            onFirstLaunchCompleted = {
-                prefs.edit().putBoolean("first_launch", false).apply()
-                isFirstLaunch.value = false
-            }
+//            onFirstLaunchCompleted = {
+//                prefs.edit().putBoolean("first_launch", false).apply()
+//                isFirstLaunch.value = false
+//            }
         )
     }
 }

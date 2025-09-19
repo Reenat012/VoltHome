@@ -11,43 +11,36 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import ru.mugalimov.volthome.ui.screens.algoritm_about.AlgorithmExplanationScreen
+import ru.mugalimov.volthome.ui.screens.auth.profile.ProfileScreen
 import ru.mugalimov.volthome.ui.screens.explication.ExplicationScreen
 import ru.mugalimov.volthome.ui.screens.loads.PhaseLoadScreen
 import ru.mugalimov.volthome.ui.screens.room.RoomDetailScreen
 import ru.mugalimov.volthome.ui.screens.rooms.RoomsScreen
-import ru.mugalimov.volthome.ui.screens.algoritm_about.AlgorithmExplanationScreen
-import ru.mugalimov.volthome.ui.screens.auth.profile.ProfileScreen
+import ru.mugalimov.volthome.ui.viewmodel.AuthViewModel
 import ru.mugalimov.volthome.ui.viewmodel.RoomDetailViewModel
 
 /**
- * Контентная область приложения с навигационным графом.
- * @param navController Контроллер навигации
- * @param selectedItem Выбранный пункт нижнего меню
- * @param padding Отступы от панелей Scaffold
+ * Внутренний (main) граф. Навигацию на экран авторизации выполняет RootNavGraph,
+ * он слушает состояние authVm. Поэтому здесь просто пробрасываем authVm вниз.
  */
-
-// карта всех "этажей"
 @Composable
 fun NavGraphApp(
     navController: NavHostController,
     modifier: Modifier,
     padding: PaddingValues,
-    showOnboarding: () -> Unit
+    showOnboarding: () -> Unit,
+    authVm: AuthViewModel
 ) {
-    // Навигационный граф приложения
-    // контейнер, где отображаются экраны
     NavHost(
         navController = navController,
-        startDestination = BottomNavItem.Rooms.route, //домашний экран
+        startDestination = BottomNavItem.Rooms.route,
         modifier = Modifier.padding(padding)
     ) {
-
-        /** Основные экраны */
-
-        // Маршруты для раздела "Комнаты"
+        // Комнаты
         composable(route = Screens.RoomsList.route) {
             RoomsScreen(
-                onAddRoom = { /* no-op: AddRoomSheet теперь внутри RoomsScreen */ },
+                onAddRoom = { /* handled inside RoomsScreen */ },
                 onClickRoom = { roomId ->
                     navController.navigate(Screens.RoomDetailScreen.createRoute(roomId)) {
                         launchSingleTop = true
@@ -56,64 +49,22 @@ fun NavGraphApp(
             )
         }
 
-//        composable(
-//            route =  Screens.LoadsScreen.route
-//        ) { backStackEntry ->
-//            val roomId = backStackEntry.arguments?.getLong("roomId") ?: 0L
-//            LoadsScreen(roomId = roomId)
-//        }
+        // Нагрузки
+        composable(route = Screens.LoadsScreen.route) { PhaseLoadScreen() }
 
-        composable(route = Screens.LoadsScreen.route) {
-            PhaseLoadScreen(
+        // Экспликация
+        composable(route = BottomNavItem.Exploitation.route) { ExplicationScreen() }
 
-            )
-        }
-
+        // Детали комнаты
         composable(
-            route = BottomNavItem.Exploitation.route,
-
-            ) {
-            ExplicationScreen()
-        }
-
-
-        /** Вложенные экраны */
-
-//        composable(Screens.AddRoom.route) {
-//            AddRoomScreen(onBack = { navController.popBackStack() })
-//        }
-
-        composable(
-            route = Screens.RoomDetailScreen.route, // "room_detail/{roomId}"
-            arguments = listOf(
-                navArgument("roomId") { type = NavType.LongType }
-            )
+            route = Screens.RoomDetailScreen.route,
+            arguments = listOf(navArgument("roomId") { type = NavType.LongType })
         ) { backStackEntry ->
-            // Важно: VM берём с backStackEntry, чтобы SavedStateHandle получил roomId
             val vm: RoomDetailViewModel = hiltViewModel(backStackEntry)
-            RoomDetailScreen(
-                vm = vm,
-                onBack = { navController.popBackStack() }
-            )
+            RoomDetailScreen(vm = vm, onBack = { navController.popBackStack() })
         }
 
-//        composable(
-//            route = Screens.AddDeviceScreen.route,
-//            arguments = listOf(
-//                navArgument("roomId") {
-//                    type = NavType.LongType
-//                    defaultValue = 0L
-//                }
-//            )
-//        ) { backStackEntry ->
-//            // Извлекаем roomId из аргументов навигации
-//            val roomId = backStackEntry.arguments?.getLong("roomId") ?: 0L
-//            AddDeviceScreen(
-//                roomId = roomId,
-//                onBack = { navController.popBackStack() }
-//            )
-//        }
-
+        // Настройки
         composable(Screens.SettingsScreen.route) {
             SettingsScreen(
                 onBack = { navController.popBackStack() },
@@ -121,23 +72,20 @@ fun NavGraphApp(
             )
         }
 
+        // Объяснение алгоритма
         composable(Screens.AlgorithmExplanationScreen.route) {
-            AlgorithmExplanationScreen(
-                navController
-            )
+            AlgorithmExplanationScreen(navController)
         }
 
-        composable(Screens.PhaseLoadScreen.route) {
-            PhaseLoadScreen(
-            )
-        }
+        // Фазная нагрузка
+        composable(Screens.PhaseLoadScreen.route) { PhaseLoadScreen() }
 
+        // Профиль — сюда передаём общий authVm
         composable(Screens.ProfileScreen.route) {
             ProfileScreen(
+                authVm = authVm,
                 onBack = { navController.popBackStack() }
             )
         }
-
-
     }
 }

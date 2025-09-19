@@ -1,13 +1,7 @@
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.navigation.NavController
-import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
@@ -16,18 +10,17 @@ import ru.mugalimov.volthome.ui.navigation.MainBottomNavBar
 import ru.mugalimov.volthome.ui.navigation.MainTopAppBar
 import ru.mugalimov.volthome.ui.navigation.NavGraphApp
 import ru.mugalimov.volthome.ui.navigation.Screens
-
+import ru.mugalimov.volthome.ui.viewmodel.AuthViewModel
 
 /**
- * Основной экран приложения, содержащий:
- * - Верхнюю панель (AppBar)
- * - Нижнюю навигационную панель
- * - Контентную область с навигацией
+ * Основной контейнер приложения (top bar + bottom bar + контент-граф).
+ * Сюда пробрасываем общий AuthViewModel из RootNavGraph.
  */
-// Новый композейбл для основного приложения
-// MainApp.kt
 @Composable
-fun MainApp(rootNavController: NavHostController) {
+fun MainApp(
+    rootNavController: NavHostController,
+    authVm: AuthViewModel
+) {
     val mainNavController = rememberNavController()
 
     Scaffold(
@@ -38,21 +31,18 @@ fun MainApp(rootNavController: NavHostController) {
             )
         },
         bottomBar = {
-            // Определяем, нужно ли показывать нижнюю панель
-            val navBackStackEntry by mainNavController.currentBackStackEntryAsState()
+            val navBackStackEntry = mainNavController.currentBackStackEntryAsState().value
             val currentRoute = navBackStackEntry?.destination?.route
             val bottomNavItems = listOf(
                 BottomNavItem.Rooms.route,
                 BottomNavItem.Loads.route,
                 BottomNavItem.Exploitation.route
             )
-
             if (bottomNavItems.any { it == currentRoute }) {
                 MainBottomNavBar(navController = mainNavController)
             }
         }
     ) { innerPadding ->
-        // Убираем MainScreen и переносим его функционал сюда
         NavGraphApp(
             navController = mainNavController,
             modifier = Modifier.padding(innerPadding),
@@ -61,8 +51,8 @@ fun MainApp(rootNavController: NavHostController) {
                 rootNavController.navigate(Screens.OnBoardingScreen.route) {
                     popUpTo(Screens.MainApp.route) { inclusive = true }
                 }
-            }
+            },
+            authVm = authVm // пробрасываем дальше
         )
     }
 }
-
