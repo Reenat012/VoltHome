@@ -7,7 +7,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.remote.api.ProfileMeDto
-import ru.mugalimov.volthome.data.remote.yandex.YandexUserInfo
 import ru.mugalimov.volthome.data.repository.UserRepository
 import javax.inject.Inject
 
