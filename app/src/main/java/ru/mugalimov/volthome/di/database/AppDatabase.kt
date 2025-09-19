@@ -6,41 +6,41 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.sqlite.db.SupportSQLiteDatabase
-import ru.mugalimov.volthome.data.local.dao.DeviceDao
-import ru.mugalimov.volthome.data.local.dao.GroupDao
-import ru.mugalimov.volthome.data.local.dao.GroupDeviceJoinDao
-import ru.mugalimov.volthome.data.local.dao.LoadDao
-import ru.mugalimov.volthome.data.local.dao.RoomDao
-import ru.mugalimov.volthome.data.local.dao.RoomsTxDao
-import ru.mugalimov.volthome.data.local.entity.CircuitGroupEntity
-import ru.mugalimov.volthome.data.local.entity.DeviceEntity
-import ru.mugalimov.volthome.data.local.entity.GroupDeviceJoin
-import ru.mugalimov.volthome.data.local.entity.LoadEntity
-import ru.mugalimov.volthome.data.local.entity.RoomEntity
+import ru.mugalimov.volthome.data.local.dao.*
+import ru.mugalimov.volthome.data.local.entity.*
 import ru.netology.nework.converters.Converters
 import kotlin.synchronized
 
 @TypeConverters(Converters::class)
 @Database(
     entities = [
+        // твои существующие сущности:
         RoomEntity::class,
         DeviceEntity::class,
         LoadEntity::class,
         GroupDeviceJoin::class,
-        CircuitGroupEntity::class],
-    version = 16,
+        CircuitGroupEntity::class,
+        // новые под проекты и синк:
+        ProjectEntity::class,
+        ProjectLocalStateEntity::class,
+        SyncConflictEntity::class
+    ],
+    version = 17,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
-    abstract fun roomDao(): RoomDao //доступ к dao
+    abstract fun roomDao(): RoomDao
     abstract fun deviceDao(): DeviceDao
     abstract fun loadDao(): LoadDao
     abstract fun groupDao(): GroupDao
     abstract fun groupDeviceJoinDao(): GroupDeviceJoinDao
     abstract fun roomsTxDao(): RoomsTxDao
 
+    // новые DAO
+    abstract fun projectDao(): ProjectDao
+    abstract fun projectLocalStateDao(): ProjectLocalStateDao
+
     companion object {
-        //Singlton-паттерн для экземпляра БД, хранит единственный экземпляр БД
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -49,8 +49,10 @@ abstract class AppDatabase : RoomDatabase() {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
-                    "app_database" // Имя файла БД
+                    "app_database"
                 )
+                    .addMigrations(MIGRATION_16_17, MIGRATION_17_18)
+                    .addCallback(callback)
                     .build()
                 INSTANCE = instance
                 instance
@@ -60,7 +62,7 @@ abstract class AppDatabase : RoomDatabase() {
         private val callback = object : Callback() {
             override fun onCreate(db: SupportSQLiteDatabase) {
                 super.onCreate(db)
-                db.execSQL("PRAGMA foreign_keys = ON") // Активируем FK
+                db.execSQL("PRAGMA foreign_keys = ON")
             }
         }
     }

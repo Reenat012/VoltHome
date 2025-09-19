@@ -20,10 +20,12 @@ import ru.mugalimov.volthome.data.local.datastore.AppPreferences
 import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.data.repository.LoadsRepository
+import ru.mugalimov.volthome.data.repository.ProjectsRepository
 import ru.mugalimov.volthome.data.repository.RoomRepository
 import ru.mugalimov.volthome.data.repository.impl.DeviceRepositoryImpl
 import ru.mugalimov.volthome.data.repository.impl.ExplicationRepositoryImpl
 import ru.mugalimov.volthome.data.repository.impl.LoadsRepositoryImpl
+import ru.mugalimov.volthome.data.repository.impl.ProjectsRepositoryImpl
 import ru.mugalimov.volthome.data.repository.impl.RoomRepositoryImpl
 import ru.mugalimov.volthome.domain.model.provider.DeviceDefaultsProvider
 import ru.mugalimov.volthome.domain.model.provider.StaticDeviceDefaultsProvider
@@ -95,6 +97,12 @@ abstract class RepositoryModule {
 
     @Binds
     abstract fun bindExplicationRepository(impl: ExplicationRepositoryImpl): ExplicationRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindProjectsRepository(
+        impl: ProjectsRepositoryImpl
+    ): ProjectsRepository
 }
 
 @Module
