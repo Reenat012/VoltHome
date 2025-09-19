@@ -1,7 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Разрешаем cleartext только для вашего IP (dev). На проде используйте https и удалите это. -->
+
+    <!-- По умолчанию cleartext запрещён -->
+    <base-config cleartextTrafficPermitted="false" />
+
+    <!-- Разрешаем HTTP на локалке/эмуляторе -->
     <domain-config cleartextTrafficPermitted="true">
-        <domain>147.45.185.209</domain>
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">localhost</domain>
     </domain-config>
+
+    <!-- Разрешаем HTTP на твоём dev-сервере (IP) -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">147.45.185.209</domain>
+    </domain-config>
+
 </network-security-config>

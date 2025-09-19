@@ -1,7 +1,7 @@
 package ru.mugalimov.volthome.data.repository
 
-import ru.mugalimov.volthome.data.remote.yandex.YandexUserInfo
+import ru.mugalimov.volthome.data.remote.api.ProfileMeDto
 
 interface UserRepository {
-    suspend fun loadMe(): Result<YandexUserInfo>
+    suspend fun loadMe(): Result<ProfileMeDto>
 }

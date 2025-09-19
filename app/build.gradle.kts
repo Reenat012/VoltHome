@@ -30,6 +30,13 @@ android {
         )
         manifestPlaceholders["YANDEX_CLIENT_ID"] =
             project.findProperty("YANDEX_CLIENT_ID") as String? ?: ""
+
+        buildConfigField(
+            "String",
+            "API_BASE_URL",
+            "\"${project.findProperty("API_BASE_URL") ?: ""}\""
+        )
+
 //        addManifestPlaceholders(
 //            mapOf(
 //                "VKIDClientID" to providers.gradleProperty("VKIDClientID").get(),
@@ -184,6 +191,9 @@ dependencies {
 
 // Шифрование (Tink + Android Keystore)
     implementation("com.google.crypto.tink:tink-android:1.12.0")
+
+    implementation("com.squareup.retrofit2:retrofit:2.11.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.11.0")
 
     // Если снова не найдёт капчу — ВРЕМЕННО добавь явные зависимости:
 //     implementation("com.vk.id.captcha:okhttp-interceptors:0.0.4")

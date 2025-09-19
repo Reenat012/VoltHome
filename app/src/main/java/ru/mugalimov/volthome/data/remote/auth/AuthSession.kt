@@ -5,7 +5,8 @@ data class AuthSession(
     val expiresAtMillis: Long,
     val uid: String? = null,
     val scopes: Set<String> = emptySet(),
-    val tokenType: String = "OAuth"
+    val tokenType: String = "OAuth",
+    val refreshId: String? = null
 ) {
     val isExpired: Boolean
         get() = System.currentTimeMillis() >= expiresAtMillis

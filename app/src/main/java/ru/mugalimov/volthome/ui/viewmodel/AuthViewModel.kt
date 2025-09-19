@@ -26,24 +26,31 @@ class AuthViewModel @Inject constructor(
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state
 
+    /**
+     * Автологин на старте:
+     * читаем серверную сессию (JWT) из зашифрованного хранилища.
+     * Если она валидна — сразу Success (Root/Splash может мгновенно открыть Main).
+     */
     fun bootstrap() {
         viewModelScope.launch {
-            val logged = repo.isLoggedIn()
-            if (logged) {
-                val s = repo.currentSession()
-                if (s != null && !s.isExpired) {
-                    _state.value = State.Success(s)
-                    return@launch
-                }
+            val session = repo.currentSession()
+            _state.value = if (session != null && !session.isExpired) {
+                State.Success(session)
+            } else {
+                State.Idle
             }
-            _state.value = State.Idle
         }
     }
 
+    /** Переходим в состояние загрузки перед стартом контракта Яндекса (по кнопке «Войти»). */
     fun startLogin() {
         _state.value = State.Loading
     }
 
+    /**
+     * Результат `YandexAuthSdk`: обмениваем успешный результат на серверную сессию.
+     * На успех — State.Success с серверным JWT; на ошибку — человекочитаемое сообщение.
+     */
     fun handleResult(result: YandexAuthResult) {
         viewModelScope.launch {
             val res = repo.handleAuthResult(result)
@@ -54,6 +61,10 @@ class AuthViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Выход: инвалидируем сессию на сервере (best-effort) и чистим локальное хранилище.
+     * После — возвращаем стейт в Idle, чтобы навигация ушла на Auth.
+     */
     fun signOut() {
         viewModelScope.launch {
             repo.signOut()
@@ -66,11 +77,11 @@ class AuthViewModel @Inject constructor(
         // "cancelled", "connection", "security", "oauth_invalid", "jwt_auth", "other"
         val code = t.message?.lowercase().orEmpty()
         return when (code) {
-            "cancelled" -> "Авторизация отменена"
-            "connection" -> "Нет сети. Проверьте подключение и повторите."
-            "security" -> "Ошибка конфигурации OAuth. Проверьте Redirect URI и client_id."
-            "oauth_invalid" -> "Неверный или просроченный токен. Попробуйте войти снова."
-            "jwt_auth" -> "Ошибка авторизации (JWT). Попробуйте повторить вход."
+            "cancelled" -> "Авторизация отменена."
+            "connection" -> "Нет сети. Проверь подключение и повтори."
+            "security" -> "Ошибка конфигурации OAuth. Проверь redirect URI и client_id."
+            "oauth_invalid" -> "Неверный/просроченный токен Яндекса. Попробуй снова."
+            "jwt_auth" -> "Не удалось получить серверную сессию. Повтори вход."
             else -> "Ошибка входа. ${t.message ?: ""}".trim()
         }
     }
