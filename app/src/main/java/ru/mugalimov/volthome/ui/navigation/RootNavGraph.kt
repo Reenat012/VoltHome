@@ -1,30 +1,29 @@
 package ru.mugalimov.volthome.ui.navigation
 
 import AboutScreen
-import MainApp
-import WelcomeScreen
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.navigation.NavGraphBuilder
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.yandex.authsdk.YandexAuthSdk
-import androidx.hilt.navigation.compose.hiltViewModel
 import kotlinx.coroutines.flow.collectLatest
 import ru.mugalimov.volthome.ui.screens.auth.AuthScreen
 import ru.mugalimov.volthome.ui.viewmodel.AuthViewModel
 
 /**
- * Корневой NavHost. Слушает общий AuthViewModel и переключает граф.
+ * Корневой NavHost. Drawer здесь больше НЕ рендерится, чтобы
+ * исключить попытки навигации в app-дестинейшны на экране welcome.
  */
 @Composable
 fun RootNavGraph(
     sdk: YandexAuthSdk,
+    onLogout: () -> Unit = {},
 ) {
     val rootNavController = rememberNavController()
-    // ВАЖНО: это «общая» VM, её же передаём вниз
     val authVm: AuthViewModel = hiltViewModel()
 
     LaunchedEffect(Unit) { authVm.bootstrap() }
@@ -33,15 +32,21 @@ fun RootNavGraph(
         authVm.state.collectLatest { state ->
             when (state) {
                 is AuthViewModel.State.Success -> {
+                    // Переходим в App-граф. Чистим стек до старта root-графа корректно.
                     rootNavController.navigate(Screens.MainApp.route) {
-                        popUpTo(Screens.WelcomeScreen.route) { inclusive = true }
+                        popUpTo(rootNavController.graph.findStartDestination().id) {
+                            inclusive = true
+                        }
                         launchSingleTop = true
                     }
                 }
                 is AuthViewModel.State.Idle,
                 is AuthViewModel.State.Error -> {
+                    // Возвращаемся на welcome. Без popUpTo(0) — только через findStartDestination().
                     rootNavController.navigate(Screens.WelcomeScreen.route) {
-                        popUpTo(0) { inclusive = true }
+                        popUpTo(rootNavController.graph.findStartDestination().id) {
+                            inclusive = true
+                        }
                         launchSingleTop = true
                     }
                 }
@@ -60,23 +65,21 @@ fun RootNavGraph(
     }
 }
 
-private fun NavGraphBuilder.authGraph(
+private fun androidx.navigation.NavGraphBuilder.authGraph(
     sdk: YandexAuthSdk,
     authVm: AuthViewModel
 ) {
     composable(Screens.WelcomeScreen.route) {
-        AuthScreen(sdk = sdk) {
-            // по коллбеку можно добустить, но Root уже слушает стейт
-            authVm.bootstrap()
-        }
+        AuthScreen(sdk = sdk) { authVm.bootstrap() }
     }
 }
 
-private fun NavGraphBuilder.mainGraph(
+private fun androidx.navigation.NavGraphBuilder.mainGraph(
     rootNavController: NavHostController,
     authVm: AuthViewModel
 ) {
     composable(Screens.MainApp.route) {
+        // Внутри MainApp находится Drawer + app-NavHost (NavGraphApp)
         MainApp(
             rootNavController = rootNavController,
             authVm = authVm
@@ -84,7 +87,7 @@ private fun NavGraphBuilder.mainGraph(
     }
 }
 
-private fun NavGraphBuilder.aboutGraph(
+private fun androidx.navigation.NavGraphBuilder.aboutGraph(
     rootNavController: NavHostController
 ) {
     composable(Screens.AboutScreen.route) {

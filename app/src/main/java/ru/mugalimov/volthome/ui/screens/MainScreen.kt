@@ -1,58 +1,96 @@
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
+package ru.mugalimov.volthome.ui.navigation
+
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
-import androidx.navigation.NavHostController
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import ru.mugalimov.volthome.ui.navigation.BottomNavItem
-import ru.mugalimov.volthome.ui.navigation.MainBottomNavBar
-import ru.mugalimov.volthome.ui.navigation.MainTopAppBar
-import ru.mugalimov.volthome.ui.navigation.NavGraphApp
-import ru.mugalimov.volthome.ui.navigation.Screens
+import kotlinx.coroutines.launch
+import ru.mugalimov.volthome.ui.components.AppScaffoldWithDrawer
 import ru.mugalimov.volthome.ui.viewmodel.AuthViewModel
 
 /**
- * Основной контейнер приложения (top bar + bottom bar + контент-граф).
- * Сюда пробрасываем общий AuthViewModel из RootNavGraph.
+ * Основной контейнер приложения:
+ * Drawer + AppBar + BottomBar (там, где нужно) + app-NavHost.
  */
 @Composable
 fun MainApp(
-    rootNavController: NavHostController,
+    rootNavController: androidx.navigation.NavHostController,
     authVm: AuthViewModel
 ) {
     val mainNavController = rememberNavController()
+    val scope = rememberCoroutineScope()
 
-    Scaffold(
-        topBar = {
-            MainTopAppBar(
-                rootNavController = rootNavController,
-                mainNavController = mainNavController
-            )
+
+    // Текущий route внутри app-графа
+    val navBackStackEntry = mainNavController.currentBackStackEntryAsState().value
+    val currentRoute = navBackStackEntry?.destination?.route
+    val bottomRootRoutes = setOf(
+        BottomNavItem.Rooms.route,
+        BottomNavItem.Loads.route,
+        BottomNavItem.Exploitation.route
+    )
+
+    AppScaffoldWithDrawer(
+        title = "VoltHome",
+        onLogout = {
+            // ВАЖНО: именно выходим из аккаунта через общую VM.
+            // RootNavGraph слушает state и сам уводит на экран авторизации.
+            scope.launch {
+                authVm.signOut()
+            }
+        },
+        onSelectProject = { /* открыть проект */ },
+        onCreateProject = {
+            mainNavController.navigate(Screens.RoomsList.route) {
+                launchSingleTop = true
+                restoreState = true
+                popUpTo(mainNavController.graph.findStartDestination().id) { saveState = true }
+            }
+        },
+        onOpenSettings = {
+            mainNavController.navigate(Screens.SettingsScreen.route) {
+                launchSingleTop = true
+                restoreState = true
+                popUpTo(mainNavController.graph.findStartDestination().id) { saveState = true }
+            }
+        },
+        onOpenProfile = {
+            mainNavController.navigate(Screens.ProfileScreen.route) {
+                launchSingleTop = true
+                restoreState = true
+                popUpTo(mainNavController.graph.findStartDestination().id) { saveState = true }
+            }
+        },
+        onOpenSubscription = {
+            mainNavController.navigate(Screens.SettingsScreen.route) {
+                launchSingleTop = true
+                restoreState = true
+                popUpTo(mainNavController.graph.findStartDestination().id) { saveState = true }
+            }
+        },
+        onOpenAbout = {
+            // "О приложении" — часть root-графа
+            rootNavController.navigate(Screens.AboutScreen.route) { launchSingleTop = true }
         },
         bottomBar = {
-            val navBackStackEntry = mainNavController.currentBackStackEntryAsState().value
-            val currentRoute = navBackStackEntry?.destination?.route
-            val bottomNavItems = listOf(
-                BottomNavItem.Rooms.route,
-                BottomNavItem.Loads.route,
-                BottomNavItem.Exploitation.route
-            )
-            if (bottomNavItems.any { it == currentRoute }) {
+            if (currentRoute in bottomRootRoutes) {
                 MainBottomNavBar(navController = mainNavController)
             }
         }
-    ) { innerPadding ->
+    ) {
+        // Внутренний app-граф (Rooms/Loads/Exploitation, Settings, Profile и пр.)
         NavGraphApp(
             navController = mainNavController,
-            modifier = Modifier.padding(innerPadding),
-            padding = innerPadding,
+            modifier = Modifier,
+            padding = androidx.compose.foundation.layout.PaddingValues(),
             showOnboarding = {
                 rootNavController.navigate(Screens.OnBoardingScreen.route) {
                     popUpTo(Screens.MainApp.route) { inclusive = true }
                 }
             },
-            authVm = authVm // пробрасываем дальше
+            authVm = authVm
         )
     }
 }
