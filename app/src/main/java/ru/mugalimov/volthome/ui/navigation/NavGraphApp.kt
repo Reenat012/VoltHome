@@ -12,9 +12,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import ru.mugalimov.volthome.ui.screens.algoritm_about.AlgorithmExplanationScreen
-import ru.mugalimov.volthome.ui.screens.auth.profile.ProfileScreen
 import ru.mugalimov.volthome.ui.screens.explication.ExplicationScreen
 import ru.mugalimov.volthome.ui.screens.loads.PhaseLoadScreen
+import ru.mugalimov.volthome.ui.screens.profile.ProfileScreen
 import ru.mugalimov.volthome.ui.screens.room.RoomDetailScreen
 import ru.mugalimov.volthome.ui.screens.rooms.RoomsScreen
 import ru.mugalimov.volthome.ui.viewmodel.AuthViewModel

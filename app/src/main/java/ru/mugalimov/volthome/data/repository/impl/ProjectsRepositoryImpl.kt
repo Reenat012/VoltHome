@@ -29,9 +29,9 @@ class ProjectsRepositoryImpl @Inject constructor(
             .map { list -> list.map { it.toDomain() } }
 
     // ---------------------------
-    // CREATE (оффлайн-первый)
+    // CREATE (оффлайн-первый) — теперь возвращает id
     // ---------------------------
-    override suspend fun createProject(name: String, note: String?) {
+    override suspend fun createProject(name: String, note: String?): String {
         val id = UUID.randomUUID().toString()
         val nowIso = TimeUtils.formatIso(TimeUtils.now())
 
@@ -56,9 +56,10 @@ class ProjectsRepositoryImpl @Inject constructor(
             )
         )
 
-        // 2) Синк в фоне (Pull→Push). Если хочешь — вызывать из VM через WorkManager.
-        // Здесь можно сразу инициировать прямой синк:
-        // syncManager.syncProject(id)
+        // 2) Тут можем сразу инициировать синк (не блокируя UI)
+        // runCatching { syncManager.syncProject(id) }
+
+        return id
     }
 
     // ---------------------------
@@ -129,10 +130,8 @@ class ProjectsRepositoryImpl @Inject constructor(
     // OPEN (зафиксировать выбор + синк)
     // ---------------------------
     override suspend fun openProject(id: String) {
-        // Здесь мы не знаем, где у тебя хранится activeProjectId (DataStore/Preferences/БД).
-        // Если он ведётся в DataStore — сохраняй его там из слоя, который вызывает репозиторий.
-        // В рамках текущей зависимости (db + api + syncManager) инициируем синхронизацию проекта:
-        syncManager.syncProject(id)
+        // Инициируем синхронизацию проекта в фоне.
+        runCatching { syncManager.syncProject(id) }
     }
 
     // ---------------------------

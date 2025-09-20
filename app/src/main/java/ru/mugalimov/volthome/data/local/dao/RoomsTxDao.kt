@@ -8,14 +8,24 @@ import androidx.room.Transaction
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.data.local.entity.RoomEntity
 
+/**
+ * Транзакционные операции для комнаты и её устройств.
+ * Используется RoomRepositoryImpl.
+ */
 @Dao
 interface RoomsTxDao {
-    @Insert(onConflict = OnConflictStrategy.ABORT)
-    suspend fun insertRoom(room: RoomEntity): Long
 
+    // --- базовые вставки/удаления ---
     @Insert(onConflict = OnConflictStrategy.ABORT)
-    suspend fun insertDevices(devices: List<DeviceEntity>): List<Long>
+    suspend fun insertRoom(entity: RoomEntity): Long
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertDevicesInternal(entities: List<DeviceEntity>): List<Long>
+
+    @Query("DELETE FROM devices WHERE device_id IN (:deviceIds)")
+    suspend fun deleteDevicesByIds(deviceIds: List<Long>)
+
+    // --- транзакции высокого уровня ---
     @Transaction
     suspend fun insertRoomWithDevices(
         room: RoomEntity,
@@ -23,10 +33,12 @@ interface RoomsTxDao {
     ): Pair<Long, List<Long>> {
         val roomId = insertRoom(room)
         val withFk = devices.map { it.copy(roomId = roomId) }
-        val deviceIds = if (withFk.isNotEmpty()) insertDevices(withFk) else emptyList()
-        return roomId to deviceIds
+        val ids = insertDevicesInternal(withFk)
+        return roomId to ids
     }
 
-    @Query("DELETE FROM devices WHERE device_id IN (:ids)")
-    suspend fun deleteDevicesByIds(ids: List<Long>)
+    @Transaction
+    suspend fun insertDevices(entities: List<DeviceEntity>): List<Long> {
+        return insertDevicesInternal(entities)
+    }
 }

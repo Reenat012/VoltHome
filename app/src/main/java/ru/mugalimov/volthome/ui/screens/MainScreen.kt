@@ -1,95 +1,60 @@
 package ru.mugalimov.volthome.ui.navigation
 
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
-import androidx.navigation.NavGraph.Companion.findStartDestination
-import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.navigation.NavHostController
 import androidx.navigation.compose.rememberNavController
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import ru.mugalimov.volthome.ui.components.AppScaffoldWithDrawer
+import ru.mugalimov.volthome.ui.model.ProjectUi
+import ru.mugalimov.volthome.ui.model.UserProfileUi
 import ru.mugalimov.volthome.ui.viewmodel.AuthViewModel
+import ru.mugalimov.volthome.ui.viewmodel.ProjectsViewModel
 
-/**
- * Основной контейнер приложения:
- * Drawer + AppBar + BottomBar (там, где нужно) + app-NavHost.
- */
 @Composable
 fun MainApp(
-    rootNavController: androidx.navigation.NavHostController,
+    rootNavController: NavHostController,
     authVm: AuthViewModel
 ) {
-    val mainNavController = rememberNavController()
-    val scope = rememberCoroutineScope()
+    val appNavController = rememberNavController()
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
 
+    // Проекты
+    val projectsVm: ProjectsViewModel = hiltViewModel()
+    val projectsFlow: Flow<List<ProjectUi>> = projectsVm.projectsUi
 
-    // Текущий route внутри app-графа
-    val navBackStackEntry = mainNavController.currentBackStackEntryAsState().value
-    val currentRoute = navBackStackEntry?.destination?.route
-    val bottomRootRoutes = setOf(
-        BottomNavItem.Rooms.route,
-        BottomNavItem.Loads.route,
-        BottomNavItem.Exploitation.route
-    )
+    // Профиль — пока без привязки к внутренней модели AuthViewModel,
+    // чтобы не падать на st.user.*
+    // Когда дашь структуру State.Success/профиля — подставлю реальные поля.
+    val profileFlow: Flow<UserProfileUi?> = emptyFlow()
 
     AppScaffoldWithDrawer(
         title = "VoltHome",
-        onLogout = {
-            // ВАЖНО: именно выходим из аккаунта через общую VM.
-            // RootNavGraph слушает state и сам уводит на экран авторизации.
-            scope.launch {
-                authVm.signOut()
-            }
-        },
-        onSelectProject = { /* открыть проект */ },
-        onCreateProject = {
-            mainNavController.navigate(Screens.RoomsList.route) {
-                launchSingleTop = true
-                restoreState = true
-                popUpTo(mainNavController.graph.findStartDestination().id) { saveState = true }
-            }
-        },
-        onOpenSettings = {
-            mainNavController.navigate(Screens.SettingsScreen.route) {
-                launchSingleTop = true
-                restoreState = true
-                popUpTo(mainNavController.graph.findStartDestination().id) { saveState = true }
-            }
-        },
-        onOpenProfile = {
-            mainNavController.navigate(Screens.ProfileScreen.route) {
-                launchSingleTop = true
-                restoreState = true
-                popUpTo(mainNavController.graph.findStartDestination().id) { saveState = true }
-            }
-        },
-        onOpenSubscription = {
-            mainNavController.navigate(Screens.SettingsScreen.route) {
-                launchSingleTop = true
-                restoreState = true
-                popUpTo(mainNavController.graph.findStartDestination().id) { saveState = true }
-            }
-        },
-        onOpenAbout = {
-            // "О приложении" — часть root-графа
-            rootNavController.navigate(Screens.AboutScreen.route) { launchSingleTop = true }
-        },
+        profileFlow = profileFlow,
+        projectsFlow = projectsFlow,
+        drawerState = drawerState,
+        onLogout = { /* TODO: hook real logout from AuthViewModel */ },
+        onSelectProject = { id -> projectsVm.selectProject(id) },
+        onCreateProject = { projectsVm.createNewProject() },
+        onOpenSettings = { appNavController.navigate(Screens.SettingsScreen.route) },
+        onOpenProfile = { appNavController.navigate(Screens.ProfileScreen.route) },
+        onOpenSubscription = { /* TODO: экран подписки */ },
+        onOpenAbout = { rootNavController.navigate(Screens.AboutScreen.route) },
         bottomBar = {
-            if (currentRoute in bottomRootRoutes) {
-                MainBottomNavBar(navController = mainNavController)
-            }
+            // Если добавишь нижнюю навигацию — помести сюда.
         }
     ) {
-        // Внутренний app-граф (Rooms/Loads/Exploitation, Settings, Profile и пр.)
         NavGraphApp(
-            navController = mainNavController,
-            modifier = Modifier,
-            padding = androidx.compose.foundation.layout.PaddingValues(),
-            showOnboarding = {
-                rootNavController.navigate(Screens.OnBoardingScreen.route) {
-                    popUpTo(Screens.MainApp.route) { inclusive = true }
-                }
-            },
+            navController = appNavController,
+            modifier = Modifier.fillMaxSize(),
+            padding = PaddingValues(),
+            showOnboarding = { /* no-op пока */ },
             authVm = authVm
         )
     }

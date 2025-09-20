@@ -12,48 +12,48 @@ import ru.mugalimov.volthome.domain.model.RoomWithDevicesEntity
 
 @Dao
 interface RoomDao {
-    //получение потока данных со списком комнат и сортировкой по дате создания
-    //возвращает flow для автоматического обновления при изменениях в БД
+
     @Query("SELECT * FROM rooms ORDER BY created_at DESC")
     fun observeAllRooms(): Flow<List<RoomEntity>>
 
-    //добавление новой комнаты
-    //onConflict = OnConflictStrategy.ABORT - если запись с таким же PrimeryKey существует
-    //то запись прервывается
-    @Insert(onConflict = OnConflictStrategy.ABORT)
-    suspend fun addRoom(room: RoomEntity) : Long // Возвращаем ID новой комнаты
+    // 🔹 проектный поток
+    @Query("SELECT * FROM rooms WHERE project_id = :projectId ORDER BY created_at DESC")
+    fun observeAllRoomsByProject(projectId: String): Flow<List<RoomEntity>>
 
-    /**
-     * Обновляет существующую комнату в базе данных.
-     * @param room Обновленная версия комнаты (должна иметь существующий ID)
-     * @return Количество обновленных строк (должно быть 1 при успешном обновлении)
-     */
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun addRoom(room: RoomEntity): Long
+
     @Update(onConflict = OnConflictStrategy.ABORT)
     suspend fun updateRoom(room: RoomEntity): Int
 
-    //удаление комнаты по id
-    //возращает количество удаленных строк 0 или 1
     @Query("DELETE FROM rooms WHERE id = :roomId")
-    suspend fun deleteRoomById(roomId: Long) : Int
+    suspend fun deleteRoomById(roomId: Long): Int
 
-    //проверить существует ли комната с таким именем
     @Query("SELECT EXISTS(SELECT 1 FROM rooms WHERE name = :name LIMIT 1)")
     suspend fun existsByName(name: String): Boolean
 
-    //получить комнату по roomId
     @Query("SELECT * FROM rooms WHERE id = :roomId")
     suspend fun getRoomById(roomId: Long): RoomEntity?
 
     @Transaction
     @Query("SELECT * FROM rooms WHERE id=:roomId")
-    suspend fun getRoomWithDevicesById(roomId: Long) : RoomWithDevicesEntity?
+    suspend fun getRoomWithDevicesById(roomId: Long): RoomWithDevicesEntity?
 
     @Transaction
     @Query("SELECT * FROM rooms ORDER BY created_at DESC")
     fun observeAllRoomsWithDevices(): List<RoomWithDevicesEntity>
 
+    // 🔹 проектный вариант
+    @Transaction
+    @Query("SELECT * FROM rooms WHERE project_id = :projectId ORDER BY created_at DESC")
+    fun observeAllRoomsWithDevicesByProject(projectId: String): List<RoomWithDevicesEntity>
+
     @Query("SELECT * FROM rooms")
-    suspend fun getAllRooms() : List<RoomEntity>
+    suspend fun getAllRooms(): List<RoomEntity>
+
+    // 🔹 проектный вариант
+    @Query("SELECT * FROM rooms WHERE project_id = :projectId")
+    suspend fun getAllRoomsByProject(projectId: String): List<RoomEntity>
 
     @Query("SELECT COUNT(*) FROM rooms")
     suspend fun countAll(): Int

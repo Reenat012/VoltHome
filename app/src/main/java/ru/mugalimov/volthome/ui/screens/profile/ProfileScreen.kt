@@ -1,4 +1,4 @@
-package ru.mugalimov.volthome.ui.screens.auth.profile
+package ru.mugalimov.volthome.ui.screens.profile
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -14,38 +14,23 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.ui.viewmodel.AuthViewModel
-import ru.mugalimov.volthome.ui.viewmodel.ProfileViewModel
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
-    authVm: AuthViewModel,     // ← пробрасываем общий AuthViewModel
+    authVm: AuthViewModel,
     onBack: () -> Unit = {}
 ) {
     val authState by authVm.state.collectAsState()
-
-    val profileVm: ProfileViewModel = hiltViewModel()
-    val profileState by profileVm.state.collectAsState()
-
     val scope = rememberCoroutineScope()
-
-    // Подтянем профиль при открытии
-    LaunchedEffect(Unit) {
-        profileVm.refresh()
-    }
 
     Column(
         modifier = Modifier
@@ -66,41 +51,11 @@ fun ProfileScreen(
 
         when (val s = authState) {
             is AuthViewModel.State.Success -> {
-                // Данные с сервера (/profile/me)
-                when (val ps = profileState) {
-                    is ProfileViewModel.UiState.Loading -> {
-                        Text("Загружаем профиль…")
-                        Spacer(Modifier.height(8.dp))
-                    }
-                    is ProfileViewModel.UiState.Error -> {
-                        Text(ps.message, color = MaterialTheme.colorScheme.error)
-                        Spacer(Modifier.height(8.dp))
-                        Button(onClick = { profileVm.refresh() }) { Text("Повторить") }
-                        Spacer(Modifier.height(12.dp))
-                    }
-                    is ProfileViewModel.UiState.Data -> {
-                        val me = ps.me
-                        Text("Имя: ${me.displayName}", style = MaterialTheme.typography.titleMedium)
-                        me.email?.let { Text("Email: $it") }
-
-                        val planLine = buildString {
-                            append("Тариф: ${me.plan}")
-                            me.planUntilEpochSeconds?.let { until ->
-                                val dateStr = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
-                                    .format(Date(until * 1000))
-                                append(" (до $dateStr)")
-                            }
-                        }
-                        Spacer(Modifier.height(6.dp))
-                        Text(planLine)
-
-                        Spacer(Modifier.height(12.dp))
-                        Button(onClick = { profileVm.refresh() }) { Text("Обновить профиль") }
-                        Spacer(Modifier.height(12.dp))
-                    }
-                }
-
-                Text("Статус: вошёл через серверную сессию", style = MaterialTheme.typography.titleMedium)
+                // У нас есть только session; полей user нет — показываем общий статус.
+                Text(
+                    "Статус: авторизован (серверная сессия активна)",
+                    style = MaterialTheme.typography.titleMedium
+                )
 
                 Spacer(Modifier.height(16.dp))
                 Divider()
@@ -108,11 +63,7 @@ fun ProfileScreen(
 
                 Button(
                     onClick = {
-                        scope.launch {
-                            // ВАЖНО: вызываем signOut у общей VM,
-                            // RootNavGraph его слышит и сам переводит на экран авторизации
-                            authVm.signOut()
-                        }
+                        scope.launch { authVm.signOut() }
                     }
                 ) { Text("Выйти") }
             }

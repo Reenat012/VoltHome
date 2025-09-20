@@ -31,38 +31,26 @@ class DeviceRepositoryImpl @Inject constructor(
     private val deviceDao: DeviceDao,
     private val roomDao: RoomDao,
     private val explicationRepository: ExplicationRepository,
-    //свойство dispatchers, которое хранит диспетчер для запуска корутин
-    //в фоновых потоках, подходящих для IO-задач
     @IoDispatcher private val dispatchers: CoroutineDispatcher,
     @ApplicationContext private val context: Context
 ) : DeviceRepository {
-    // ✅ парсим каталог один раз за жизнь процесса
+
     private val defaultDevicesCache by lazy(LazyThreadSafetyMode.NONE) {
-        JsonParser.parseDevices(context)   // -> List<Device>
+        JsonParser.parseDevices(context)
     }
 
-    //получение списка комнат через DAO
-    //используется для получения изменения данных
     override suspend fun observeDevicesByIdRoom(roomId: Long): Flow<List<Device>> {
         return deviceDao.observeDevicesByIdRoom(roomId)
-            //преобразуем список DeviceEntity в список Device
             .map { entities -> entities.mapToDomainDevices() }
             .flowOn(dispatchers)
     }
 
-    override suspend fun addDevice(
-        device: Device
-    ) {
-        Log.d(TAG, "Заходим в репо")
-        //запускаем в фоновом потоке, используя корутину
+    override suspend fun addDevice(device: Device) {
         try {
             withContext(dispatchers) {
-                val isRoomExist = roomDao.getRoomById(device.roomId)
-                if (isRoomExist == null) {
-                    throw IllegalArgumentException("Комната с ID ${device.roomId} не найдена")
-                }
+                val room = roomDao.getRoomById(device.roomId)
+                    ?: throw IllegalArgumentException("Комната с ID ${device.roomId} не найдена")
 
-                Log.d(TAG, "Заходим в корутину")
                 deviceDao.addDevice(
                     DeviceEntity(
                         name = device.name,
@@ -74,53 +62,41 @@ class DeviceRepositoryImpl @Inject constructor(
                         deviceType = device.deviceType,
                         powerFactor = device.powerFactor,
                         hasMotor = device.hasMotor,
-                        requiresDedicatedCircuit = device.requiresDedicatedCircuit
+                        requiresDedicatedCircuit = device.requiresDedicatedCircuit,
+                        requiresSocketConnection = device.requiresSocketConnection,
+                        projectId = room.projectId // ← ключевое
                     )
                 )
-                Log.d(TAG, "Успех")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Ошибка при добавлении устройства: ${e.message}", e)
-            throw e // Перебрасываем исключение дальше
+            throw e
         }
     }
 
     override suspend fun deleteDevice(deviceId: Long) {
-        //запускаем в фоновом потоке, используя корутину
         withContext(dispatchers) {
-            //записываем в переменную число удаленных строк
             val rowsDeleted = deviceDao.deleteDeviceById(deviceId)
-            //проверяем удалилось что-нибудь или нет
-            if (rowsDeleted == 0) {
-                throw DeviceNotFoundException("Устройство с ID $deviceId не найдено")
-            }
-
-            // Обработка удаления связанных с устройством групп
+            if (rowsDeleted == 0) throw DeviceNotFoundException("Устройство с ID $deviceId не найдено")
             explicationRepository.handleDeviceDeletion(deviceId)
         }
     }
 
     override suspend fun getDeviceById(deviceId: Int): Device? =
         withContext(dispatchers) {
-            return@withContext try {
-                //ищем устройство в БД
+            try {
                 val entity = deviceDao.getDeviceById(deviceId)
-
-                //преобразовываем из Entity в модель удобную для чтения
                 entity?.toDomainDevice()
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 throw DeviceNotFoundException()
             }
         }
 
     override suspend fun getAllDevicesByRoomId(roomId: Long): List<Device> =
         withContext(dispatchers) {
-            return@withContext try {
-                val listDeviceEntity = deviceDao.getAllDevicesByRoomId(roomId)
-
-                listDeviceEntity.mapToDomainDevices()
-
-            } catch (e: Exception) {
+            try {
+                deviceDao.getAllDevicesByRoomId(roomId).mapToDomainDevices()
+            } catch (_: Exception) {
                 throw RoomNotFoundException()
             }
         }
@@ -128,22 +104,26 @@ class DeviceRepositoryImpl @Inject constructor(
     override fun getDefaultDevices(): Flow<List<DefaultDevice>> {
         return try {
             JsonParser.parseDevices(context)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             emptyFlow()
         }
     }
 
     override suspend fun getAllDevices(): List<Device> =
         withContext(dispatchers) {
-            return@withContext try {
+            try {
                 deviceDao.getAllDevices().mapToDomainDevices()
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 throw DeviceNotFoundException()
             }
         }
 
     override suspend fun updateDevice(device: Device) =
         withContext(dispatchers) {
-            deviceDao.update(device.toEntityDevice())
+            // сохраняем текущий projectId устройства, если есть
+            val current = deviceDao.getDeviceById(device.id.toInt())
+            deviceDao.update(
+                device.toEntityDevice().copy(projectId = current?.projectId)
+            )
         }
 }

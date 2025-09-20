@@ -20,11 +20,13 @@ import ru.mugalimov.volthome.data.local.datastore.AppPreferences
 import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.data.repository.LoadsRepository
+import ru.mugalimov.volthome.data.repository.PreferencesRepository
 import ru.mugalimov.volthome.data.repository.ProjectsRepository
 import ru.mugalimov.volthome.data.repository.RoomRepository
 import ru.mugalimov.volthome.data.repository.impl.DeviceRepositoryImpl
 import ru.mugalimov.volthome.data.repository.impl.ExplicationRepositoryImpl
 import ru.mugalimov.volthome.data.repository.impl.LoadsRepositoryImpl
+import ru.mugalimov.volthome.data.repository.impl.PreferencesRepositoryImpl
 import ru.mugalimov.volthome.data.repository.impl.ProjectsRepositoryImpl
 import ru.mugalimov.volthome.data.repository.impl.RoomRepositoryImpl
 import ru.mugalimov.volthome.domain.model.provider.DeviceDefaultsProvider
@@ -83,26 +85,21 @@ object DatabaseModule {
 abstract class RepositoryModule {
 
     @Binds
-    abstract fun bindRoomRepository(
-        impl: RoomRepositoryImpl
-    ): RoomRepository
-
-    @Binds
-    abstract fun bindDeviceRepository(
-        impl: DeviceRepositoryImpl
-    ): DeviceRepository
-
-    @Binds
-    abstract fun bindLoadRepository(impl: LoadsRepositoryImpl): LoadsRepository
-
-    @Binds
-    abstract fun bindExplicationRepository(impl: ExplicationRepositoryImpl): ExplicationRepository
+    @Singleton
+    abstract fun bindRoomRepository(impl: RoomRepositoryImpl): RoomRepository
 
     @Binds
     @Singleton
-    abstract fun bindProjectsRepository(
-        impl: ProjectsRepositoryImpl
-    ): ProjectsRepository
+    abstract fun bindDeviceRepository(impl: DeviceRepositoryImpl): DeviceRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindExplicationRepository(impl: ExplicationRepositoryImpl): ExplicationRepository
+
+    // 🔹 добавили биндинг, чтобы собрать ProjectsViewModel
+    @Binds
+    @Singleton
+    abstract fun bindProjectsRepository(impl: ProjectsRepositoryImpl): ProjectsRepository
 }
 
 @Module

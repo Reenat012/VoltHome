@@ -41,7 +41,7 @@ import ru.mugalimov.volthome.ui.model.UserProfileUi
 
 /**
  * Левый Start Drawer + AppBar.
- * Добавлен слот [bottomBar] для нижнего меню.
+ * Секция проектов: без плейсхолдера «Проектов пока нет».
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -83,32 +83,26 @@ fun StartDrawer(
 
                 // --- Мои проекты ---
                 DrawerSectionTitle("Мои проекты")
-                if (projects.isEmpty()) {
-                    ListItem(
-                        headlineContent = { Text("Проектов пока нет") },
-                        supportingContent = { Text("Нажмите «+ Новый проект»") },
-                        leadingContent = { Icon(Icons.Default.Shield, null) }
+
+                // без плейсхолдера — просто список, если пусто, ниже есть «+ Новый проект»
+                projects.forEach { p ->
+                    NavigationDrawerItem(
+                        label = {
+                            Text(
+                                text = p.name,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                fontWeight = if (p.isActive) FontWeight.SemiBold else null
+                            )
+                        },
+                        selected = p.isActive,
+                        onClick = {
+                            scope.launch { drawerState.close() }
+                            onSelectProject(p.id)
+                        },
+                        icon = { Icon(Icons.Default.Shield, contentDescription = null) },
+                        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                     )
-                } else {
-                    projects.forEach { p ->
-                        NavigationDrawerItem(
-                            label = {
-                                Text(
-                                    text = p.name,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    fontWeight = if (p.isActive) FontWeight.SemiBold else null
-                                )
-                            },
-                            selected = p.isActive,
-                            onClick = {
-                                scope.launch { drawerState.close() }
-                                onSelectProject(p.id)
-                            },
-                            icon = { Icon(Icons.Default.Shield, contentDescription = null) },
-                            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-                        )
-                    }
                 }
 
                 NavigationDrawerItem(
@@ -169,7 +163,6 @@ fun StartDrawer(
             }
         }
     ) {
-        // Весь экран — под Scaffold: AppBar + bottomBar + контент.
         Scaffold(
             topBar = {
                 TopAppBar(
@@ -184,7 +177,6 @@ fun StartDrawer(
             bottomBar = bottomBar
         ) { innerPadding ->
             Box(modifier = Modifier.padding(innerPadding)) {
-                // Передаём наружный контент и даём коллбек для открытия дровера
                 content { scope.launch { drawerState.open() } }
             }
         }

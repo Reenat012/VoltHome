@@ -5,27 +5,31 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
-
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.Voltage
 import java.util.Date
 
 @Entity(
     tableName = "devices",
-    indices = [Index(value = ["room_id", "name"])],
-    foreignKeys = [ForeignKey(
-        entity = RoomEntity::class,
-        parentColumns = ["id"],
-        childColumns = ["room_id"],
-        onDelete = ForeignKey.CASCADE //удаление устройств при удалении комнаты
-    )]
+    indices = [
+        Index(name = "idx_devices_room_id", value = ["room_id"]),
+        Index(name = "idx_devices_project_id", value = ["project_id"])
+    ],
+    foreignKeys = [
+        ForeignKey(
+            entity = RoomEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["room_id"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ]
 )
 data class DeviceEntity(
     @PrimaryKey(autoGenerate = true)
     @ColumnInfo(name = "device_id")
     val deviceId: Long = 0,
 
-    @ColumnInfo(name = "name") //явное указание имени столбца
+    @ColumnInfo(name = "name")
     val name: String,
 
     @ColumnInfo(name = "power")
@@ -34,14 +38,12 @@ data class DeviceEntity(
     @ColumnInfo(name = "voltage")
     val voltage: Voltage,
 
-    //к-т спроса
     @ColumnInfo(name = "demand_ratio")
     val demandRatio: Double,
 
     @ColumnInfo(name = "created_at")
-    val createdAt: Date, //временная метка создания
+    val createdAt: Date,
 
-    //связь с комнатой через id
     @ColumnInfo(name = "room_id")
     val roomId: Long,
 
@@ -52,11 +54,15 @@ data class DeviceEntity(
     val powerFactor: Double,
 
     @ColumnInfo(name = "has_motor")
-    val hasMotor: Boolean = false,  // Имеет ли двигатель
+    val hasMotor: Boolean = false,
 
     @ColumnInfo(name = "requires_dedicated")
-    val requiresDedicatedCircuit: Boolean = false,  // Требует выделенной линии
+    val requiresDedicatedCircuit: Boolean = false,
 
     @ColumnInfo(name = "requires_socket")
-    val requiresSocketConnection: Boolean = true
+    val requiresSocketConnection: Boolean = true,
+
+    // 🔹 Привязка к проекту
+    @ColumnInfo(name = "project_id")
+    val projectId: String? = null
 )
