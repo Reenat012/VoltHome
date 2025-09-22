@@ -1,11 +1,8 @@
 package ru.mugalimov.volthome.data.remote.dto
 
-// ---- Projects list ----
-data class ProjectsListResponse(
-    val items: List<ProjectShortDto>,
-    val next: String?
-)
-
+// ---------------------------------------------------------
+// Короткая карточка проекта (совпадает с сервером)
+// ---------------------------------------------------------
 data class ProjectShortDto(
     val id: String,
     val name: String,
@@ -15,19 +12,9 @@ data class ProjectShortDto(
     val is_deleted: Boolean
 )
 
-// ---- Create/Update ----
-data class ProjectCreateRequest(
-    val id: String? = null,
-    val name: String,
-    val note: String? = null
-)
-
-data class ProjectUpdateRequest(
-    val name: String? = null,
-    val note: String? = null
-)
-
-// ---- Project tree ----
+// ---------------------------------------------------------
+// Полное дерево проекта (GET /v1/projects/{id})
+// ---------------------------------------------------------
 data class ProjectTreeDto(
     val project: ProjectShortDto,
     val rooms: List<RoomDto>,
@@ -35,10 +22,11 @@ data class ProjectTreeDto(
     val devices: List<DeviceDto>
 )
 
+// Сущности проекта (как приходят с сервера; поля — snake_case)
 data class RoomDto(
     val id: String,
     val name: String,
-    val meta: Map<String, Any?>?,
+    val meta: Map<String, Any?>? = null,
     val updated_at: String,
     val is_deleted: Boolean
 )
@@ -46,7 +34,7 @@ data class RoomDto(
 data class GroupDto(
     val id: String,
     val name: String,
-    val meta: Map<String, Any?>?,
+    val meta: Map<String, Any?>? = null,
     val updated_at: String,
     val is_deleted: Boolean
 )
@@ -54,26 +42,33 @@ data class GroupDto(
 data class DeviceDto(
     val id: String,
     val name: String,
-    val meta: Map<String, Any?>?,
+    val meta: Map<String, Any?>? = null,
     val updated_at: String,
     val is_deleted: Boolean
 )
 
-// ---- Delta/Batch ----
-data class DeltaResponse(
+// ---------------------------------------------------------
+// Delta (GET /v1/projects/{id}/delta?since=ISO)
+// ---------------------------------------------------------
+data class ProjectDeltaResponse(
     val rooms: DeltaBucket<RoomDto>,
     val groups: DeltaBucket<GroupDto>,
     val devices: DeltaBucket<DeviceDto>
 )
 
 data class DeltaBucket<T>(
-    val upsert: List<T>,
-    val delete: List<String>
+    val upsert: List<T> = emptyList(),
+    val delete: List<String> = emptyList() // UUID удалённых сущностей (tombstones)
 )
 
-data class BatchRequest(
+// ---------------------------------------------------------
+// Batch (POST /v1/projects/{id}/batch)
+// Совместимо с твоими мапперами: id — nullable,
+// room_id/group_id — nullable и опциональны
+// ---------------------------------------------------------
+data class ProjectBatchRequest(
     val baseVersion: Int? = null,
-    val ops: Ops
+    val ops: Ops? = null
 )
 
 data class Ops(
@@ -83,35 +78,39 @@ data class Ops(
 )
 
 data class OpBucket<T>(
-    val upsert: List<T>? = null,
-    val delete: List<String>? = null
+    val upsert: List<T> = emptyList(),
+    val delete: List<String> = emptyList()
 )
 
+// Upsert-пэйлоады
 data class RoomUpsert(
-    val id: String? = null,
+    val id: String? = null,                 // твои мапперы передают null → сервер сгенерит UUID
     val name: String,
     val meta: Map<String, Any?>? = null
 )
 
 data class GroupUpsert(
     val id: String? = null,
+    val room_id: String? = null,
     val name: String,
     val meta: Map<String, Any?>? = null
 )
 
 data class DeviceUpsert(
     val id: String? = null,
+    val group_id: String? = null,
     val name: String,
     val meta: Map<String, Any?>? = null
 )
 
-data class BatchResponse(
+// Ответ batch
+data class ProjectBatchResponse(
     val newVersion: Int,
-    val conflicts: List<Conflict>
+    val conflicts: List<Conflict> = emptyList()
 )
 
 data class Conflict(
-    val entity: String,
-    val id: String,
+    val entity: String,                     // "rooms" | "groups" | "devices"
+    val id: String,                         // UUID сущности
     val reason: String
 )

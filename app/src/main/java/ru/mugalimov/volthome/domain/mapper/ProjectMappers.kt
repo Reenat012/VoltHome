@@ -3,6 +3,7 @@ package ru.mugalimov.volthome.domain.mapper
 import ru.mugalimov.volthome.data.local.entity.ProjectEntity
 import ru.mugalimov.volthome.data.remote.dto.ProjectShortDto
 
+
 fun ProjectShortDto.toEntity(): ProjectEntity = ProjectEntity(
     id = id,
     name = name,

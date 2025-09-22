@@ -16,13 +16,14 @@ data class SessionResponse(
 )
 
 interface AuthApi {
-    @POST("auth/yandex/exchange")
+
+    // Сервер: app.use("/v1/auth", authRouter)
+    @POST("v1/auth/yandex/exchange")
     suspend fun exchange(@Body body: ExchangeRequest): SessionResponse
 
-    @POST("auth/session/refresh")
+    @POST("v1/auth/session/refresh")
     suspend fun refresh(@Body body: RefreshRequest? = null): SessionResponse
 
-    @POST("auth/session/logout")
+    @POST("v1/auth/session/logout")
     suspend fun logout(@Body body: LogoutRequest? = null): Response<Unit>
-
 }
