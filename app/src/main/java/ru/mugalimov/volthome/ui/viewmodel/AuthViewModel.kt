@@ -4,16 +4,18 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.yandex.authsdk.YandexAuthResult
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.remote.auth.AuthSession
 import ru.mugalimov.volthome.data.repository.AuthRepository
+import ru.mugalimov.volthome.data.repository.ProjectsRepository
 import javax.inject.Inject
 
 @HiltViewModel
 class AuthViewModel @Inject constructor(
-    private val repo: AuthRepository
+    private val authRepo: AuthRepository,
+    private val projectsRepo: ProjectsRepository
 ) : ViewModel() {
 
     sealed interface State {
@@ -28,16 +30,20 @@ class AuthViewModel @Inject constructor(
 
     /**
      * Автологин на старте:
-     * читаем серверную сессию (JWT) из зашифрованного хранилища.
-     * Если она валидна — сразу Success (Root/Splash может мгновенно открыть Main).
+     * - читаем серверную сессию (JWT) из зашифрованного хранилища
+     * - если валидна — сразу Success (Root/Splash может открыть Main)
+     * - ПАРАЛЛЕЛЬНО запускаем "холодный" бутстрап проектов из сервера в Room
      */
     fun bootstrap() {
         viewModelScope.launch {
-            val session = repo.currentSession()
-            _state.value = if (session != null && !session.isExpired) {
-                State.Success(session)
+            val session = authRepo.currentSession()
+            if (session != null && !session.isExpired) {
+                // 1) сразу даём UI зелёный свет
+                _state.value = State.Success(session)
+                // 2) фоном подтягиваем проекты в Room
+                launch { runCatching { projectsRepo.bootstrapFromRemote() } }
             } else {
-                State.Idle
+                _state.value = State.Idle
             }
         }
     }
@@ -50,12 +56,19 @@ class AuthViewModel @Inject constructor(
     /**
      * Результат `YandexAuthSdk`: обмениваем успешный результат на серверную сессию.
      * На успех — State.Success с серверным JWT; на ошибку — человекочитаемое сообщение.
+     * После успеха фоном запускаем бутстрап проектов.
      */
     fun handleResult(result: YandexAuthResult) {
         viewModelScope.launch {
-            val res = repo.handleAuthResult(result)
+            val res = authRepo.handleAuthResult(result)
             _state.value = res.fold(
-                onSuccess = { State.Success(it) },
+                onSuccess = { session ->
+                    // отдадим UI Success
+                    State.Success(session).also {
+                        // и фоном подтянем проекты → Room (после чистой установки)
+                        launch { runCatching { projectsRepo.bootstrapFromRemote() } }
+                    }
+                },
                 onFailure = { State.Error(mapThrowableToUi(it)) }
             )
         }
@@ -67,13 +80,13 @@ class AuthViewModel @Inject constructor(
      */
     fun signOut() {
         viewModelScope.launch {
-            repo.signOut()
+            authRepo.signOut()
             _state.value = State.Idle
         }
     }
 
     private fun mapThrowableToUi(t: Throwable): String {
-        // repo в failure возвращает RuntimeException с коротким кодом:
+        // authRepo в failure возвращает RuntimeException с коротким кодом:
         // "cancelled", "connection", "security", "oauth_invalid", "jwt_auth", "other"
         val code = t.message?.lowercase().orEmpty()
         return when (code) {

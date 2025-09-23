@@ -6,6 +6,8 @@ import ru.mugalimov.volthome.domain.model.Project
 interface ProjectsRepository {
     fun listProjects(): Flow<List<Project>>
 
+    suspend fun bootstrapFromRemote(): Int
+
     /**
      * Создаёт локальный проект (оффлайн-первый), ставит флаг локальных изменений
      * и возвращает его id (UUID string), чтобы UI мог сразу выбрать его активным.

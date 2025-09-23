@@ -14,6 +14,7 @@ import ru.mugalimov.volthome.data.local.dao.DeviceDao
 import ru.mugalimov.volthome.data.local.dao.GroupDao
 import ru.mugalimov.volthome.data.local.dao.GroupDeviceJoinDao
 import ru.mugalimov.volthome.data.local.dao.LoadDao
+import ru.mugalimov.volthome.data.local.dao.ProjectDao
 import ru.mugalimov.volthome.data.local.dao.RoomDao
 import ru.mugalimov.volthome.data.local.dao.RoomsTxDao
 import ru.mugalimov.volthome.data.local.datastore.AppPreferences
@@ -76,6 +77,10 @@ object DatabaseModule {
     @Provides
     fun provideRoomsTxDao(database: AppDatabase): RoomsTxDao =
         database.roomsTxDao()
+
+    @Provides
+    @Singleton
+    fun provideProjectDao(db: AppDatabase): ProjectDao = db.projectDao()
 }
 
 // di/RepositoryModule.kt

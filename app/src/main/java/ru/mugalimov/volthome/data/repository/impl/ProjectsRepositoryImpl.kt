@@ -2,11 +2,13 @@ package ru.mugalimov.volthome.data.repository.impl
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
 import ru.mugalimov.volthome.data.local.entity.ProjectEntity
-import ru.mugalimov.volthome.data.remote.api.ProjectsApi
 import ru.mugalimov.volthome.data.remote.api.CreateProjectRequest
+import ru.mugalimov.volthome.data.remote.api.ProjectsApi
 import ru.mugalimov.volthome.data.remote.api.ProjectsApi.UpdateProjectRequest
 import ru.mugalimov.volthome.data.repository.ProjectsRepository
 import ru.mugalimov.volthome.data.sync.SyncManager
@@ -21,7 +23,8 @@ import javax.inject.Singleton
 class ProjectsRepositoryImpl @Inject constructor(
     private val api: ProjectsApi,
     private val db: AppDatabase,
-    private val syncManager: SyncManager
+    private val syncManager: SyncManager,
+    private val activeProjectDataStore: ActiveProjectDataStore
 ) : ProjectsRepository {
 
     // ---------------------------
@@ -33,8 +36,58 @@ class ProjectsRepositoryImpl @Inject constructor(
             .map { list -> list.map { it.toDomain() } }
 
     // ---------------------------
-    // CREATE (оффлайн-первый + best-effort онлайн)
-    // возвращает локальный/итоговый id
+    // BOOTSTRAP (после чистой установки / первого логина)
+    // Тянем все проекты пользователя и кладём в Room.
+    // Возвращаем количество импортированных записей.
+    // ---------------------------
+    override suspend fun bootstrapFromRemote(): Int = withContext(Dispatchers.IO) {
+        var imported = 0
+        var cursor: String? = null
+        val stateDao = db.projectLocalStateDao()
+
+        do {
+            val page = api.listProjects(since = null, limit = 100) // сервер сам вернёт next при необходимости
+            for (p in page.items) {
+                db.projectDao().upsert(
+                    ProjectEntity(
+                        id = p.id,
+                        name = p.name,
+                        note = p.note,
+                        version = p.version,
+                        updated_at = p.updated_at,
+                        is_deleted = p.is_deleted
+                    )
+                )
+                stateDao.upsert(
+                    ru.mugalimov.volthome.data.local.entity.ProjectLocalStateEntity(
+                        project_id = p.id,
+                        remote_version = p.version,
+                        last_sync_at = null,
+                        has_local_changes = false
+                    )
+                )
+                imported++
+            }
+            cursor = page.next
+        } while (!cursor.isNullOrBlank()) // если у тебя реальный cursor-параметр — подставь его в listProjects
+
+        // Если активный проект ещё не выбран — выберем самый свежий по updated_at
+        val activeId = activeProjectDataStore.activeProjectId.firstOrNull()
+        if (activeId.isNullOrBlank()) {
+            val latest = db.projectDao().observeAll().firstOrNull()?.maxByOrNull { it.updated_at }
+            latest?.let { activeProjectDataStore.setActiveProjectId(it.id) }
+        }
+
+        // Опционально: синканём активный, чтобы догрузить дерево
+        activeProjectDataStore.activeProjectId.firstOrNull()?.let { id ->
+            runCatching { syncManager.syncProject(id) }
+        }
+
+        imported
+    }
+
+    // ---------------------------
+    // CREATE (оффлайн-первичный + best-effort онлайн)
     // ---------------------------
     override suspend fun createProject(name: String, note: String?): String = withContext(Dispatchers.IO) {
         val id = UUID.randomUUID().toString()
@@ -61,10 +114,9 @@ class ProjectsRepositoryImpl @Inject constructor(
             )
         )
 
-        // 2) Сразу пробуем POST /v1/projects с передачей нашего id
+        // 2) Пробуем POST /v1/projects с нашим id
         try {
             val created = api.createProject(CreateProjectRequest(id = id, name = name, note = note))
-            // сервер вернул те же id/актуальные поля — приводим запись
             db.projectDao().upsert(
                 ProjectEntity(
                     id = created.id,
@@ -84,7 +136,7 @@ class ProjectsRepositoryImpl @Inject constructor(
                 )
             )
         } catch (_: Exception) {
-            // оффлайн: остаёмся с черновиком, sync подтолкнёт позже
+            // оффлайн/ошибка — подтолкнёт воркер синка
         }
 
         id
@@ -99,7 +151,6 @@ class ProjectsRepositoryImpl @Inject constructor(
             val dao = db.projectDao()
             val current = dao.getById(id)
 
-            // локально
             dao.upsert(
                 (current ?: ProjectEntity(
                     id = id,
@@ -125,7 +176,6 @@ class ProjectsRepositoryImpl @Inject constructor(
                 )).copy(has_local_changes = true)
             )
 
-            // онлайн-обновление, если доступно
             try {
                 val updated = api.updateProjectMeta(id, UpdateProjectRequest(name = name, note = current?.note))
                 db.projectDao().upsert(
@@ -179,7 +229,6 @@ class ProjectsRepositoryImpl @Inject constructor(
                 )).copy(has_local_changes = true)
             )
 
-            // онлайн-удаление, если доступно
             try {
                 val deleted = api.deleteProject(id)
                 db.projectDao().upsert(
@@ -207,10 +256,14 @@ class ProjectsRepositoryImpl @Inject constructor(
     }
 
     // ---------------------------
-    // OPEN (зафиксировать выбор + синк)
+    // OPEN (зафиксировать выбор + синк конкретного проекта)
     // ---------------------------
     override suspend fun openProject(id: String) {
-        runCatching { syncManager.syncProject(id) }
+        try {
+            syncManager.syncProject(id)
+        } catch (_: Exception) {
+            // не падаем на UI; синк повторит воркер
+        }
     }
 
     // ---------------------------
