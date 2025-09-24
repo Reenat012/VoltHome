@@ -16,7 +16,6 @@ interface RoomDao {
     @Query("SELECT * FROM rooms ORDER BY created_at DESC")
     fun observeAllRooms(): Flow<List<RoomEntity>>
 
-    // 🔹 проектный поток
     @Query("SELECT * FROM rooms WHERE project_id = :projectId ORDER BY created_at DESC")
     fun observeAllRoomsByProject(projectId: String): Flow<List<RoomEntity>>
 
@@ -29,8 +28,18 @@ interface RoomDao {
     @Query("DELETE FROM rooms WHERE id = :roomId")
     suspend fun deleteRoomById(roomId: Long): Int
 
+    @Deprecated("Используй existsByNameInProject")
     @Query("SELECT EXISTS(SELECT 1 FROM rooms WHERE name = :name LIMIT 1)")
     suspend fun existsByName(name: String): Boolean
+
+    @Query("""
+        SELECT EXISTS(
+            SELECT 1 FROM rooms 
+            WHERE name = :name AND project_id = :projectId 
+            LIMIT 1
+        )
+    """)
+    suspend fun existsByNameInProject(name: String, projectId: String): Boolean
 
     @Query("SELECT * FROM rooms WHERE id = :roomId")
     suspend fun getRoomById(roomId: Long): RoomEntity?
@@ -43,7 +52,6 @@ interface RoomDao {
     @Query("SELECT * FROM rooms ORDER BY created_at DESC")
     fun observeAllRoomsWithDevices(): List<RoomWithDevicesEntity>
 
-    // 🔹 проектный вариант
     @Transaction
     @Query("SELECT * FROM rooms WHERE project_id = :projectId ORDER BY created_at DESC")
     fun observeAllRoomsWithDevicesByProject(projectId: String): List<RoomWithDevicesEntity>
@@ -51,7 +59,6 @@ interface RoomDao {
     @Query("SELECT * FROM rooms")
     suspend fun getAllRooms(): List<RoomEntity>
 
-    // 🔹 проектный вариант
     @Query("SELECT * FROM rooms WHERE project_id = :projectId")
     suspend fun getAllRoomsByProject(projectId: String): List<RoomEntity>
 
@@ -60,4 +67,11 @@ interface RoomDao {
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(entities: List<RoomEntity>): List<Long>
+
+    // ------- ДОБАВЛЕНО: нужно для SyncManager -------
+    @Query("SELECT COUNT(*) FROM rooms WHERE project_id = :projectId")
+    suspend fun countByProjectId(projectId: String): Int
+
+    @Query("SELECT id FROM rooms WHERE project_id = :projectId AND name = :name LIMIT 1")
+    suspend fun findIdByProjectAndName(projectId: String, name: String): Long?
 }

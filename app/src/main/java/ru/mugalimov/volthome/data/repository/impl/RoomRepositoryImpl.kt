@@ -63,10 +63,13 @@ class RoomRepositoryImpl @Inject constructor(
 
     override suspend fun addRoom(room: Room) {
         withContext(dispatchers) {
-            if (roomDao.existsByName(room.name)) {
-                throw RoomAlreadyExistsException("Комната с именем '${room.name}' уже существует")
-            }
             val projectId = activeProjectDs.activeProjectId.first()
+            require(!projectId.isNullOrBlank()) { "Активный проект не выбран" }
+
+            if (roomDao.existsByNameInProject(room.name, projectId)) {
+                throw RoomAlreadyExistsException("Комната с именем '${room.name}' уже существует в этом проекте")
+            }
+
 
             val newRoomId = roomDao.addRoom(
                 RoomEntity(
@@ -147,10 +150,12 @@ class RoomRepositoryImpl @Inject constructor(
 
     override suspend fun addRoomWithDevices(req: RoomCreateRequest): CreatedRoomResult =
         withContext(dispatchers) {
-            if (roomDao.existsByName(req.name)) {
-                throw IllegalArgumentException("Комната '${req.name}' уже существует")
-            }
             val projectId = activeProjectDs.activeProjectId.first()
+            require(!projectId.isNullOrBlank()) { "Активный проект не выбран" }
+
+            if (roomDao.existsByNameInProject(req.name, projectId)) {
+                throw IllegalArgumentException("Комната '${req.name}' уже существует в этом проекте")
+            }
 
             val room = RoomEntity(
                 id = 0L,

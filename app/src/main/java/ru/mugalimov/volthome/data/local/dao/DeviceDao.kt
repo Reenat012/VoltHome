@@ -11,14 +11,12 @@ import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 @Dao
 interface DeviceDao {
 
-    // --- НОВОЕ: проектный скоуп ---
     @Query("SELECT * FROM devices WHERE project_id = :projectId")
     fun observeDevicesByProject(projectId: String): Flow<List<DeviceEntity>>
 
     @Query("SELECT * FROM devices WHERE project_id = :projectId")
     suspend fun getAllDevicesByProject(projectId: String): List<DeviceEntity>
 
-    // --- СТАРОЕ (на переходный период) ---
     @Query("SELECT * FROM devices WHERE room_id = :roomId")
     fun observeDevicesByIdRoom(roomId: Long): Flow<List<DeviceEntity>>
 
@@ -60,4 +58,8 @@ interface DeviceDao {
 
     @Query("SELECT * FROM devices WHERE room_id = :roomId AND name = :name LIMIT 1")
     suspend fun findByRoomAndName(roomId: Long, name: String): DeviceEntity?
+
+    // ------- ДОБАВЛЕНО: нужно для SyncManager -------
+    @Query("SELECT COUNT(*) FROM devices WHERE project_id = :projectId")
+    suspend fun countByProjectId(projectId: String): Int
 }

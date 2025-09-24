@@ -2,6 +2,7 @@ package ru.mugalimov.volthome.di.database
 
 import android.content.Context
 import androidx.room.Room
+import androidx.room.RoomDatabase
 import androidx.room.RoomDatabase.Callback
 import androidx.sqlite.db.SupportSQLiteDatabase
 import dagger.Binds
@@ -46,6 +47,7 @@ object DatabaseModule {
             AppDatabase::class.java,
             "volthome.db"
         )
+            .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
             .addCallback(object : Callback() {
                 override fun onCreate(db: SupportSQLiteDatabase) {
                     super.onCreate(db)
@@ -54,7 +56,7 @@ object DatabaseModule {
             })
             // Использовать для пересоздания БД при ошибке миграции
             // TODO после использования закомментировать иначе БД будет постоянно пересоздаваться
-            .fallbackToDestructiveMigration()
+//            .fallbackToDestructiveMigration()
             .build()
     }
 

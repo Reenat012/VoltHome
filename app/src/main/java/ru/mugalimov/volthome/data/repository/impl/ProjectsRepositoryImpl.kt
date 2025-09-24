@@ -78,10 +78,14 @@ class ProjectsRepositoryImpl @Inject constructor(
             latest?.let { activeProjectDataStore.setActiveProjectId(it.id) }
         }
 
-        // Опционально: синканём активный, чтобы догрузить дерево
-        activeProjectDataStore.activeProjectId.firstOrNull()?.let { id ->
-            runCatching { syncManager.syncProject(id) }
-        }
+
+        //Убираю этот автозапуск, потому что сразу после логина
+        // уже едет SyncProjectsWorker.enqueue(context) (сетевая нагрузка + транзакции). Дублирование триггеров приводит к «хвосту»
+        // долгих транзакций.
+//        // Опционально: синканём активный, чтобы догрузить дерево
+//        activeProjectDataStore.activeProjectId.firstOrNull()?.let { id ->
+//            runCatching { syncManager.syncProject(id) }
+//        }
 
         imported
     }

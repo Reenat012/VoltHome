@@ -15,7 +15,6 @@ import ru.mugalimov.volthome.domain.model.DeviceType
 @Dao
 interface GroupDao {
 
-    // --- НОВОЕ: проектные выборки
     @Transaction
     @Query("SELECT * FROM `groups` WHERE project_id = :projectId")
     fun observeGroupsWithDevicesByProject(projectId: String): Flow<List<CircuitGroupWithDevices>>
@@ -26,7 +25,6 @@ interface GroupDao {
     @Query("SELECT * FROM `groups` WHERE project_id = :projectId")
     suspend fun getAllGroupsByProject(projectId: String): List<CircuitGroupEntity>
 
-    // --- СТАРОЕ (до полной интеграции):
     @Transaction
     @Query("SELECT * FROM `groups`")
     fun observeGroupsWithDevices(): Flow<List<CircuitGroupWithDevices>>
@@ -71,4 +69,8 @@ interface GroupDao {
     @Transaction
     @Query("SELECT * FROM `groups` WHERE group_id = :groupId")
     suspend fun getGroupWithDevicesById(groupId: Long): CircuitGroupWithDevices?
+
+    // ------- ДОБАВЛЕНО: нужно для SyncManager -------
+    @Query("SELECT COUNT(*) FROM `groups` WHERE project_id = :projectId")
+    suspend fun countByProjectId(projectId: String): Int
 }

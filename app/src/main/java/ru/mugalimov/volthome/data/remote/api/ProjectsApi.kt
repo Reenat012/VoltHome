@@ -11,18 +11,7 @@ import ru.mugalimov.volthome.data.remote.dto.ProjectBatchRequest
 import ru.mugalimov.volthome.data.remote.dto.ProjectBatchResponse
 import ru.mugalimov.volthome.data.remote.dto.ProjectDeltaResponse
 import ru.mugalimov.volthome.data.remote.dto.ProjectShortDto
-
-/**
- * Контракты соответствуют серверу (routes/projects.js):
- *
- *  GET    /v1/projects?since=&limit=
- *  POST   /v1/projects                  { id?, name, note? }
- *  GET    /v1/projects/{id}
- *  PUT    /v1/projects/{id}             { name?, note? }
- *  DELETE /v1/projects/{id}
- *  GET    /v1/projects/{id}/delta?since=
- *  POST   /v1/projects/{id}/batch       { baseVersion?, ops{...} }
- */
+import ru.mugalimov.volthome.data.remote.dto.ProjectTreeDto
 
 data class ProjectsListResponse(
     val items: List<ProjectShortDto>,
@@ -64,19 +53,18 @@ interface ProjectsApi {
         @Path("id") id: String
     ): ProjectShortDto
 
-    // Название метода — "delta", как в твоём SyncManager
-    @GET("/v1/projects/{id}/delta")
-    suspend fun delta(
-        @Path("id") id: String,
-        @Query("since") since: String
-    ): ProjectDeltaResponse
-
-    // Оставляю и альтернативное имя (на будущее), один и тот же эндпоинт
+    // delta
     @GET("/v1/projects/{id}/delta")
     suspend fun getDelta(
         @Path("id") id: String,
         @Query("since") since: String
     ): ProjectDeltaResponse
+
+    // ------- ДОБАВЛЕНО: snapshot дерева проекта -------
+    @GET("/v1/projects/{id}")
+    suspend fun getProjectTree(
+        @Path("id") id: String
+    ): ProjectTreeDto
 
     @POST("/v1/projects/{id}/batch")
     suspend fun applyBatch(

@@ -16,7 +16,8 @@ import ru.mugalimov.volthome.data.local.entity.RoomEntity
 interface RoomsTxDao {
 
     // --- базовые вставки/удаления ---
-    @Insert(onConflict = OnConflictStrategy.ABORT)
+    // Ключевое изменение: IGNORE вместо ABORT, чтобы транзакция не «ломалась» на уникальном индексе.
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertRoom(entity: RoomEntity): Long
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
@@ -32,6 +33,10 @@ interface RoomsTxDao {
         devices: List<DeviceEntity>
     ): Pair<Long, List<Long>> {
         val roomId = insertRoom(room)
+        // Если из-за уникального индекса (name, project_id) произошёл конфликт и вернулся -1,
+        // вызывающий код должен обработать «комната уже существует».
+        if (roomId <= 0L) return -1L to emptyList()
+
         val withFk = devices.map { it.copy(roomId = roomId) }
         val ids = insertDevicesInternal(withFk)
         return roomId to ids
