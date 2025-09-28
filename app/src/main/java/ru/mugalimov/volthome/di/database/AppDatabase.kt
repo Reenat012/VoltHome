@@ -230,59 +230,62 @@ abstract class AppDatabase : RoomDatabase() {
 
         val MIGRATION_19_20 = object : Migration(19, 20) {
             override fun migrate(db: SupportSQLiteDatabase) {
+                // На время миграции отключаем FK, чтобы спокойно перенести данные
                 db.execSQL("PRAGMA foreign_keys=OFF")
 
-                // Создаём новую таблицу devices_tmp с room_id NULL и FK SET NULL
+                // 1) Создаём новую таблицу devices_tmp с нужной схемой:
+                //    - room_id NULL
+                //    - FK(room_id) → rooms(id) ON DELETE SET NULL
                 db.execSQL(
                     """
-                    CREATE TABLE IF NOT EXISTS devices_tmp (
-                        device_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                        name TEXT NOT NULL,
-                        power INTEGER NOT NULL,
-                        voltage TEXT NOT NULL,
-                        demand_ratio REAL NOT NULL,
-                        created_at INTEGER NOT NULL,
-                        room_id INTEGER NULL,
-                        device_type TEXT NOT NULL,
-                        power_factor REAL NOT NULL,
-                        has_motor INTEGER NOT NULL DEFAULT 0,
-                        requires_dedicated INTEGER NOT NULL DEFAULT 0,
-                        requires_socket INTEGER NOT NULL DEFAULT 1,
-                        project_id TEXT NULL,
-                        FOREIGN KEY(room_id) REFERENCES rooms(id) ON UPDATE NO ACTION ON DELETE SET NULL
-                    )
-                    """.trimIndent()
+            CREATE TABLE IF NOT EXISTS devices_tmp (
+                device_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                name TEXT NOT NULL,
+                power INTEGER NOT NULL,
+                voltage TEXT NOT NULL,
+                demand_ratio REAL NOT NULL,
+                created_at INTEGER NOT NULL,
+                room_id INTEGER NULL,
+                device_type TEXT NOT NULL,
+                power_factor REAL NOT NULL,
+                has_motor INTEGER NOT NULL DEFAULT 0,
+                requires_dedicated INTEGER NOT NULL DEFAULT 0,
+                requires_socket INTEGER NOT NULL DEFAULT 1,
+                project_id TEXT NULL,
+                FOREIGN KEY(room_id) REFERENCES rooms(id) ON UPDATE NO ACTION ON DELETE SET NULL
+            )
+            """.trimIndent()
                 )
 
-                // Переносим данные; если в старых данных есть room_id без соответствующей комнаты,
-                // перенос всё равно пройдёт (FK выключены), а при включении FK такие строки останутся с room_id как есть.
+                // 2) Переносим данные из старой devices в devices_tmp 1:1
                 db.execSQL(
                     """
-                    INSERT INTO devices_tmp (
-                        device_id, name, power, voltage, demand_ratio, created_at,
-                        room_id, device_type, power_factor, has_motor,
-                        requires_dedicated, requires_socket, project_id
-                    )
-                    SELECT
-                        device_id, name, power, voltage, demand_ratio, created_at,
-                        room_id, device_type, power_factor, has_motor,
-                        requires_dedicated, requires_socket, project_id
-                    FROM devices
-                    """.trimIndent()
+            INSERT INTO devices_tmp (
+                device_id, name, power, voltage, demand_ratio, created_at,
+                room_id, device_type, power_factor, has_motor,
+                requires_dedicated, requires_socket, project_id
+            )
+            SELECT
+                device_id, name, power, voltage, demand_ratio, created_at,
+                room_id, device_type, power_factor, has_motor,
+                requires_dedicated, requires_socket, project_id
+            FROM devices
+            """.trimIndent()
                 )
 
-                // Индексы
+                // 3) Сносим старые индексы (если были)
                 try { db.execSQL("DROP INDEX IF EXISTS idx_devices_room_id") } catch (_: Throwable) {}
                 try { db.execSQL("DROP INDEX IF EXISTS idx_devices_project_id") } catch (_: Throwable) {}
 
-                // Заменяем таблицу
+                // 4) Заменяем таблицу
                 db.execSQL("DROP TABLE devices")
                 db.execSQL("ALTER TABLE devices_tmp RENAME TO devices")
 
-                // Восстанавливаем индексы
+                // 5) Восстанавливаем индексы в соответствии со схемой Entity
                 db.execSQL("CREATE INDEX IF NOT EXISTS idx_devices_room_id ON devices(room_id)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS idx_devices_project_id ON devices(project_id)")
 
+                // Возвращаем контроль ссылочной целостности
                 db.execSQL("PRAGMA foreign_keys=ON")
             }
         }

@@ -9,6 +9,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import retrofit2.HttpException
 import ru.mugalimov.volthome.data.local.dao.DeviceDao
 import ru.mugalimov.volthome.data.local.dao.GroupDao
 import ru.mugalimov.volthome.data.local.dao.ProjectDao
@@ -17,6 +18,9 @@ import ru.mugalimov.volthome.data.local.entity.CircuitGroupEntity
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.data.local.entity.ProjectEntity
 import ru.mugalimov.volthome.data.local.entity.RoomEntity
+import ru.mugalimov.volthome.data.local.entity.UuidMapDevice
+import ru.mugalimov.volthome.data.local.entity.UuidMapGroup
+import ru.mugalimov.volthome.data.local.entity.UuidMapRoom
 import ru.mugalimov.volthome.data.remote.api.ProjectsApi
 import ru.mugalimov.volthome.data.remote.dto.DeviceUpsert
 import ru.mugalimov.volthome.data.remote.dto.OpBucket
@@ -24,6 +28,7 @@ import ru.mugalimov.volthome.data.remote.dto.Ops
 import ru.mugalimov.volthome.data.remote.dto.ProjectBatchRequest
 import ru.mugalimov.volthome.data.remote.dto.ProjectDeltaResponse
 import ru.mugalimov.volthome.data.remote.dto.ProjectTreeDto
+import ru.mugalimov.volthome.data.remote.dto.RoomUpsert
 import ru.mugalimov.volthome.di.database.AppDatabase
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.RoomType
@@ -35,11 +40,6 @@ import java.util.Date
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
-import retrofit2.HttpException
-import ru.mugalimov.volthome.data.local.entity.UuidMapDevice
-import ru.mugalimov.volthome.data.local.entity.UuidMapGroup
-import ru.mugalimov.volthome.data.local.entity.UuidMapRoom
-import ru.mugalimov.volthome.data.remote.dto.RoomUpsert
 
 @Singleton
 class SyncManager @Inject constructor(
@@ -71,10 +71,7 @@ class SyncManager @Inject constructor(
         // Сериализация синков по семафору + лок по проекту
         syncSemaphore.withPermit {
             lockFor(projectId).withLock {
-                Log.i(
-                    "Sync",
-                    "syncProject START project=$projectId thread=${Thread.currentThread().name}"
-                )
+                Log.i("Sync", "syncProject START project=$projectId thread=${Thread.currentThread().name}")
 
                 val tStart = System.currentTimeMillis()
                 try {
@@ -84,7 +81,7 @@ class SyncManager @Inject constructor(
                         return@withLock
                     }
 
-                    // Черновик: не ходим на сервер (безопасный fix, чтобы убрать 400 invalid_id)
+                    // Черновик: не ходим на сервер
                     if (isDraftId(projectId)) {
                         Log.i("Sync", "Project $projectId is DRAFT — skip network sync for now")
                         return@withLock
@@ -108,27 +105,17 @@ class SyncManager @Inject constructor(
                         // SNAPSHOT
                         val tree: ProjectTreeDto = try {
                             projectsApi.getProjectTree(projectId)
-                        } catch (e: HttpException) {
+                        } catch (e: retrofit2.HttpException) {
                             if (e.code() == 400) {
-                                Log.w(
-                                    "Sync",
-                                    "GET /projects/$projectId snapshot -> 400 invalid_id; skip pull"
-                                )
+                                Log.w("Sync", "GET /projects/$projectId snapshot -> 400 invalid_id; skip pull")
                                 return@withLock
                             } else {
-                                Log.e(
-                                    "Sync",
-                                    "GET /projects/$projectId snapshot failed: ${e.code()}",
-                                    e
-                                )
+                                Log.e("Sync", "GET /projects/$projectId snapshot failed: ${e.code()}", e)
                                 throw e
                             }
                         }
 
-                        Log.i(
-                            "Sync",
-                            "snapshot pull: rooms=${tree.rooms.size}, groups=${tree.groups.size}, devices=${tree.devices.size}"
-                        )
+                        Log.i("Sync", "snapshot pull: rooms=${tree.rooms.size}, groups=${tree.groups.size}, devices=${tree.devices.size}")
 
                         val toMapRooms = mutableListOf<Pair<String, Long>>()
                         val toMapGroups = mutableListOf<Pair<String, Long>>()
@@ -138,11 +125,11 @@ class SyncManager @Inject constructor(
                         withContext(Dispatchers.IO) {
                             appDb.withTransaction {
                                 applySnapshotTx(
-                                    projectId,
-                                    tree,
-                                    toMapRooms,
-                                    toMapGroups,
-                                    toMapDevices
+                                    projectId = projectId,
+                                    tree = tree,
+                                    toMapRooms = toMapRooms,
+                                    toMapGroups = toMapGroups,
+                                    toMapDevices = toMapDevices
                                 )
 
                                 projectDao.upsert(
@@ -165,12 +152,9 @@ class SyncManager @Inject constructor(
                         val since = project.updated_at.ifBlank { "1970-01-01T00:00:00Z" }
                         val delta: ProjectDeltaResponse = try {
                             projectsApi.getDelta(projectId, since)
-                        } catch (e: HttpException) {
+                        } catch (e: retrofit2.HttpException) {
                             if (e.code() == 400) {
-                                Log.w(
-                                    "Sync",
-                                    "GET /projects/$projectId/delta?since=$since -> 400 invalid_id; skip pull"
-                                )
+                                Log.w("Sync", "GET /projects/$projectId/delta?since=$since -> 400 invalid_id; skip pull")
                                 return@withLock
                             } else {
                                 Log.e("Sync", "GET delta failed: ${e.code()}", e)
@@ -200,7 +184,7 @@ class SyncManager @Inject constructor(
                                         id = project.id,
                                         name = project.name,
                                         note = project.note,
-                                        version = project.version, // baseVersion в delta нет — оставляем
+                                        version = project.version,
                                         updated_at = isoNow(),
                                         is_deleted = project.is_deleted
                                     )
@@ -219,61 +203,42 @@ class SyncManager @Inject constructor(
                     }
 
                     // ---------------- PUSH ----------------
-                    // Пропускаем push для draft (уже отфильтровали выше, но оставим явную проверку)
                     if (isDraftId(projectId)) {
                         Log.i("Sync", "Project $projectId is DRAFT — skip push")
                         return@withLock
                     }
 
-                    // 1) Пушим только «новые» комнаты (по нашей политике uuid-маппинга)
+                    // 1) Rooms
                     val roomsBatch = buildBatchNewRooms(projectId)
                     if (hasOps(roomsBatch)) {
                         Log.i("Sync", "push rooms: ${roomsBatch.ops?.rooms?.upsert?.size ?: 0}")
                         withContext(Dispatchers.IO) {
                             try {
                                 projectsApi.applyBatch(projectId, roomsBatch)
-                            } catch (e: HttpException) {
-                                Log.e(
-                                    "Sync",
-                                    "POST /projects/$projectId/batch (rooms) failed: ${e.code()}",
-                                    e
-                                )
+                            } catch (e: retrofit2.HttpException) {
+                                Log.e("Sync", "POST /projects/$projectId/batch (rooms) failed: ${e.code()}", e)
                                 throw e
                             }
                         }
-                        Log.i(
-                            "Sync",
-                            "push rooms done: ${roomsBatch.ops?.rooms?.upsert?.size ?: 0}"
-                        )
-                        // После пуша комнат — обновляем маппинги UUID комнат с сервера
+                        Log.i("Sync", "push rooms done: ${roomsBatch.ops?.rooms?.upsert?.size ?: 0}")
                         refreshRoomUuidMappingsFromServer(projectId)
                     } else {
                         Log.i("Sync", "push rooms: nothing to do")
                     }
 
-                    // 2) Пушим новые устройства (комната уже должна иметь server UUID)
+                    // 2) Devices
                     val devicesBatch = buildBatchNewDevices(projectId)
                     if (hasOps(devicesBatch)) {
-                        Log.i(
-                            "Sync",
-                            "push devices: ${devicesBatch.ops?.devices?.upsert?.size ?: 0}"
-                        )
+                        Log.i("Sync", "push devices: ${devicesBatch.ops?.devices?.upsert?.size ?: 0}")
                         withContext(Dispatchers.IO) {
                             try {
                                 projectsApi.applyBatch(projectId, devicesBatch)
-                            } catch (e: HttpException) {
-                                Log.e(
-                                    "Sync",
-                                    "POST /projects/$projectId/batch (devices) failed: ${e.code()}",
-                                    e
-                                )
+                            } catch (e: retrofit2.HttpException) {
+                                Log.e("Sync", "POST /projects/$projectId/batch (devices) failed: ${e.code()}", e)
                                 throw e
                             }
                         }
-                        Log.i(
-                            "Sync",
-                            "push devices done: ${devicesBatch.ops?.devices?.upsert?.size ?: 0}"
-                        )
+                        Log.i("Sync", "push devices done: ${devicesBatch.ops?.devices?.upsert?.size ?: 0}")
                         refreshDeviceUuidMappingsFromServer(projectId)
                     } else {
                         Log.i("Sync", "push devices: nothing to do")
@@ -294,11 +259,13 @@ class SyncManager @Inject constructor(
         toMapGroups: MutableList<Pair<String, Long>>,
         toMapDevices: MutableList<Pair<String, Long>>
     ) {
+        // ЛОКАЛЬНАЯ карта UUID комнаты → localId на время этой транзакции
+        val roomUuidToLocal = mutableMapOf<String, Long>()
+
         // ROOMS
         for (r in tree.rooms) {
             val createdAt = parseDate(r.meta?.get("created_at_iso") as? String)
-            val roomType =
-                (r.meta?.get("room_type") as? String)?.let { safeRoomType(it) } ?: RoomType.STANDARD
+            val roomType = (r.meta?.get("room_type") as? String)?.let { safeRoomType(it) } ?: RoomType.STANDARD
 
             val existingId = roomDao.findIdByProjectAndName(projectId, r.name)
             val localId: Long = if (existingId != null) {
@@ -317,20 +284,21 @@ class SyncManager @Inject constructor(
                     ?: continue
             }
             toMapRooms += r.id to localId
+            // сразу в оперативную карту — чтобы ниже не обращаться к uuidDao
+            roomUuidToLocal[r.id] = localId
         }
 
-        // Быстрое имя→localId для привязки устройств по room_name, если room_id отсутствует
-        val roomNameToLocalId: Map<String, Long> = tree.rooms
-            .associateNotNull { rd ->
-                val local = roomDao.findIdByProjectAndName(projectId, rd.name)
-                if (local != null) rd.name to local else null
-            }
+        // Имя → localId (если где-то придёт только room_name)
+        val roomNameToLocalId: Map<String, Long> = tree.rooms.associateNotNull { rd ->
+            val local = roomDao.findIdByProjectAndName(projectId, rd.name)
+            if (local != null) rd.name to local else null
+        }
 
         // GROUPS
         for (g in tree.groups) {
             val meta = g.meta.orEmpty()
             val roomUuid = meta["room_id"] as? String
-            val roomLocal = roomUuid?.let { uuidDao.getRoomLocal(it) }
+            val roomLocal = roomUuid?.let { roomUuidToLocal[it] } // <— ключевая замена
             val roomName = (meta["room_name"] as? String)?.trim().orEmpty()
 
             val ensuredRoomId = when {
@@ -365,9 +333,8 @@ class SyncManager @Inject constructor(
             val roomUuid = meta["room_id"] as? String
             val roomName = (meta["room_name"] as? String)?.trim().orEmpty()
 
-            val roomLocalFromUuid = roomUuid?.let { uuidDao.getRoomLocal(it) }
+            val roomLocalFromUuid = roomUuid?.let { roomUuidToLocal[it] } // <— ключевая замена
             val roomLocalFromName = if (roomLocalFromUuid == null && roomName.isNotEmpty()) {
-                // сперва попытка по уже имеющейся карте имён
                 roomNameToLocalId[roomName] ?: roomDao.findIdByProjectAndName(projectId, roomName)
             } else null
 
@@ -386,8 +353,7 @@ class SyncManager @Inject constructor(
                 demandRatio = (meta["demand_ratio"] as? Number)?.toDouble() ?: 1.0,
                 createdAt = parseDate(meta["created_at_iso"] as? String),
                 roomId = ensuredRoomId,
-                deviceType = (meta["device_type"] as? String)?.let { safeDeviceType(it) }
-                    ?: DeviceType.OTHER,
+                deviceType = (meta["device_type"] as? String)?.let { safeDeviceType(it) } ?: DeviceType.OTHER,
                 powerFactor = (meta["power_factor"] as? Number)?.toDouble() ?: 1.0,
                 hasMotor = (meta["has_motor"] as? Boolean) ?: false,
                 requiresDedicatedCircuit = (meta["requires_dedicated"] as? Boolean) ?: false,
@@ -395,14 +361,14 @@ class SyncManager @Inject constructor(
                 projectId = projectId
             )
             val newLocal = deviceDao.insert(entity)
-            val resolvedId = if (newLocal > 0) newLocal else {
-                deviceDao.findByRoomAndName(ensuredRoomId, d.name)?.deviceId ?: continue
-            }
+            val resolvedId = if (newLocal > 0) newLocal
+            else deviceDao.findByRoomAndName(ensuredRoomId, d.name)?.deviceId ?: continue
+
             toMapDevices += d.id to resolvedId
         }
     }
 
-    // ------------------------ DELTA ------------------------
+    // ------------------------ DELТА ------------------------
     private suspend fun applyRoomsDeltaTx(
         projectId: String,
         delta: ProjectDeltaResponse,
@@ -411,8 +377,7 @@ class SyncManager @Inject constructor(
         for (r in delta.rooms.upsert) {
             val localId = uuidDao.getRoomLocal(r.id)
             val createdAt = parseDate(r.meta?.get("created_at_iso") as? String)
-            val roomType =
-                (r.meta?.get("room_type") as? String)?.let { safeRoomType(it) } ?: RoomType.STANDARD
+            val roomType = (r.meta?.get("room_type") as? String)?.let { safeRoomType(it) } ?: RoomType.STANDARD
 
             if (localId == null) {
                 val existingId = roomDao.findIdByProjectAndName(projectId, r.name)
@@ -550,18 +515,15 @@ class SyncManager @Inject constructor(
             val voltage = parseVoltageFromMeta(meta)
             val demandRatio = (meta["demand_ratio"] as? Number)?.toDouble() ?: 1.0
             val createdAt = parseDate(meta["created_at_iso"] as? String)
-            val deviceType =
-                (meta["device_type"] as? String)?.let { safeDeviceType(it) } ?: DeviceType.OTHER
+            val deviceType = (meta["device_type"] as? String)?.let { safeDeviceType(it) } ?: DeviceType.OTHER
             val powerFactor = (meta["power_factor"] as? Number)?.toDouble() ?: 1.0
             val hasMotor = (meta["has_motor"] as? Boolean) ?: false
             val requiresDedicated = (meta["requires_dedicated"] as? Boolean) ?: false
             val requiresSocket = (meta["requires_socket"] as? Boolean) ?: true
 
             if (localId == null) {
-                // ❶ СНАЧАЛА пытаемся сопоставить по room+name
                 val existingByName = deviceDao.findByRoomAndName(ensuredRoomId, name)
                 if (existingByName != null) {
-                    // обновим поля и положим маппинг
                     deviceDao.update(
                         existingByName.copy(
                             name = name,
@@ -580,7 +542,6 @@ class SyncManager @Inject constructor(
                     )
                     toMapDevices += d.id to existingByName.deviceId
                 } else {
-                    // ❷ И только если ничего не нашли — вставляем новую локальную запись
                     val entity = DeviceEntity(
                         deviceId = 0,
                         name = name,
@@ -603,7 +564,6 @@ class SyncManager @Inject constructor(
                     toMapDevices += d.id to resolvedId
                 }
             } else {
-                // как было — апдейт существующей локальной
                 val existing = deviceDao.getDeviceById(localId.toInt()) ?: continue
                 deviceDao.update(
                     existing.copy(
@@ -647,25 +607,13 @@ class SyncManager @Inject constructor(
     private fun isoNow(): String = DateTimeFormatter.ISO_INSTANT.format(Instant.now())
 
     private fun parseDate(iso: String?): Date =
-        try {
-            Date.from(Instant.parse(iso))
-        } catch (_: Throwable) {
-            Date()
-        }
+        try { Date.from(Instant.parse(iso)) } catch (_: Throwable) { Date() }
 
     private fun safeRoomType(v: String): RoomType =
-        try {
-            RoomType.valueOf(v)
-        } catch (_: Throwable) {
-            RoomType.STANDARD
-        }
+        try { RoomType.valueOf(v) } catch (_: Throwable) { RoomType.STANDARD }
 
     private fun safeDeviceType(v: String): DeviceType =
-        try {
-            DeviceType.valueOf(v)
-        } catch (_: Throwable) {
-            DeviceType.OTHER
-        }
+        try { DeviceType.valueOf(v) } catch (_: Throwable) { DeviceType.OTHER }
 
     private fun parseVoltageFromMeta(meta: Map<String, Any?>): Voltage {
         val vFromValue = when (val vv = meta["voltage_value"]) {
@@ -728,14 +676,10 @@ class SyncManager @Inject constructor(
     }
 
     // -------------------------- PUSH --------------------------
-    /** Фаза 1: собрать новые комнаты. Мы САМИ генерируем UUID и шлём его в upsert (сервер принимает id). */
-    // file: volthome/data/sync/SyncManager.kt
 
     suspend fun buildBatchNewRooms(projectId: String): ProjectBatchRequest {
         val newRooms = mutableListOf<RoomUpsert>()
 
-        // Берём локальные комнаты проекта, но в батч кладём ТОЛЬКО те,
-        // у которых нет uuid-маппинга (реально новые для сервера).
         for (r in roomDao.getAllRoomsByProject(projectId)) {
             val roomUuid = uuidDao.getRoomUuidByLocal(r.id)
             if (roomUuid == null) {
@@ -749,41 +693,29 @@ class SyncManager @Inject constructor(
                     meta = metaRoom(r)
                 )
             } else {
-                // уже смаплено — в upsert не отправляем
-                Log.i(
-                    "Sync",
-                    "room map EXIST uuid=$roomUuid <- localId=${r.id} name='${r.name}' (skip upsert)"
-                )
+                Log.i("Sync", "room map EXIST uuid=$roomUuid <- localId=${r.id} name='${r.name}' (skip upsert)")
             }
         }
         Log.i("Sync", "buildBatchNewRooms: prepared=${newRooms.size}")
 
         val ops = if (newRooms.isEmpty()) null
-        else Ops(
-            rooms = OpBucket(upsert = newRooms, delete = emptyList()),
-            groups = null,
-            devices = null
-        )
+        else Ops(rooms = OpBucket(upsert = newRooms, delete = emptyList()))
         return ProjectBatchRequest(baseVersion = null, ops = ops)
     }
 
-    /** После отправки комнат — подтянуть snapshot и проставить roomUuid ↔ localId */
     private suspend fun refreshRoomUuidMappingsFromServer(projectId: String) {
         val tree = projectsApi.getProjectTree(projectId)
         val toPut = mutableListOf<UuidMapRoom>()
         for (r in tree.rooms) {
             val localId = roomDao.findIdByProjectAndName(projectId, r.name) ?: continue
-            // НОВОЕ: если уже есть маппинг — не трогаем
             val existing = uuidDao.getRoomUuidByLocal(localId)
             if (existing != null) continue
-
             toPut += UuidMapRoom(roomUuid = r.id, localId = localId)
         }
         if (toPut.isNotEmpty()) uuidDao.putRooms(toPut)
         Log.i("Sync", "refresh rooms uuid-map: mapped=${toPut.size}/${tree.rooms.size}")
     }
 
-    /** Фаза 2: собрать только новые устройства (комната уже должна иметь server UUID) */
     private suspend fun buildBatchNewDevices(projectId: String): ProjectBatchRequest {
         val newDevices = mutableListOf<DeviceUpsert>()
 
@@ -791,12 +723,8 @@ class SyncManager @Inject constructor(
             val hasUuid = uuidDao.getDeviceUuidByLocal(d.deviceId) != null
             if (!hasUuid) {
                 val roomUuid: String? = d.roomId?.let { uuidDao.getRoomUuidByLocal(it) }
-
                 if (roomUuid == null) {
-                    Log.i(
-                        "Sync",
-                        "skip device id=${d.deviceId} name='${d.name}': room(${d.roomId}) has no server UUID yet"
-                    )
+                    Log.i("Sync", "skip device id=${d.deviceId} name='${d.name}': room(${d.roomId}) has no server UUID yet")
                     continue
                 }
 
@@ -810,11 +738,7 @@ class SyncManager @Inject constructor(
         }
 
         val ops = if (newDevices.isEmpty()) null
-        else Ops(
-            rooms = null,
-            groups = null,
-            devices = OpBucket(upsert = newDevices, delete = emptyList())
-        )
+        else Ops(devices = OpBucket(upsert = newDevices, delete = emptyList()))
 
         return ProjectBatchRequest(baseVersion = null, ops = ops)
     }
@@ -862,7 +786,7 @@ class SyncManager @Inject constructor(
         "requires_socket" to d.requiresSocketConnection
     )
 
-    // утилита: как associateNotNull
+    // как associateNotNull
     private inline fun <T, K, V> Iterable<T>.associateNotNull(transform: (T) -> Pair<K, V>?): Map<K, V> {
         val map = LinkedHashMap<K, V>()
         for (e in this) {
@@ -876,15 +800,11 @@ class SyncManager @Inject constructor(
         val tree = projectsApi.getProjectTree(projectId)
         val toPut = mutableListOf<UuidMapDevice>()
         for (d in tree.devices) {
-            // Пытаемся найти локальную запись по room+name
             val roomUuid = (d.meta?.get("room_id") as? String)
             val roomLocal = roomUuid?.let { uuidDao.getRoomLocal(it) } ?: continue
             val local = deviceDao.findByRoomAndName(roomLocal, d.name) ?: continue
-
-            // Если у этого local уже есть uuid — не перетираем
             val existing = uuidDao.getDeviceUuidByLocal(local.deviceId)
             if (existing != null) continue
-
             toPut += UuidMapDevice(deviceUuid = d.id, localId = local.deviceId)
         }
         if (toPut.isNotEmpty()) uuidDao.putDevices(toPut)
