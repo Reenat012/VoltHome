@@ -62,4 +62,7 @@ interface DeviceDao {
     // ------- ДОБАВЛЕНО: нужно для SyncManager -------
     @Query("SELECT COUNT(*) FROM devices WHERE project_id = :projectId")
     suspend fun countByProjectId(projectId: String): Int
+
+    @Query("UPDATE devices SET project_id = :newId WHERE project_id = :oldId")
+    suspend fun rebindProjectDevices(oldId: String, newId: String): Int
 }

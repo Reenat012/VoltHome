@@ -73,4 +73,7 @@ interface GroupDao {
     // ------- ДОБАВЛЕНО: нужно для SyncManager -------
     @Query("SELECT COUNT(*) FROM `groups` WHERE project_id = :projectId")
     suspend fun countByProjectId(projectId: String): Int
+
+    @Query("UPDATE `groups` SET project_id = :newId WHERE project_id = :oldId")
+    suspend fun rebindProjectGroups(oldId: String, newId: String): Int
 }

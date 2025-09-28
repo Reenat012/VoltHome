@@ -3,6 +3,7 @@ package ru.mugalimov.volthome.data.sync.work
 import android.content.Context
 import android.util.Log
 import androidx.hilt.work.HiltWorker
+import androidx.room.withTransaction
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
@@ -13,6 +14,8 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import retrofit2.HttpException
+import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
 import ru.mugalimov.volthome.data.remote.api.CreateProjectRequest
 import ru.mugalimov.volthome.data.remote.api.ProjectsApi
 import ru.mugalimov.volthome.data.sync.SyncManager
@@ -25,7 +28,8 @@ class SyncProjectsWorker @AssistedInject constructor(
     @Assisted params: WorkerParameters,
     private val db: AppDatabase,
     private val api: ProjectsApi,
-    private val syncManager: SyncManager
+    private val syncManager: SyncManager,
+    private val activeProjectDataStore: ActiveProjectDataStore, // ← добавили
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
@@ -37,72 +41,121 @@ class SyncProjectsWorker @AssistedInject constructor(
                 return@withContext Result.success()
             } else {
                 // Перед синком — опубликуем локальный черновик при необходимости
-                publishDraftIfNeeded(projectId)
-                syncManager.syncProject(projectId)
+                val maybeRemote = publishDraftIfNeeded(projectId)
+                val idForSync = maybeRemote ?: projectId
+                syncManager.syncProject(idForSync)
                 return@withContext Result.success()
             }
         } catch (t: Throwable) {
             Log.e(TAG, "sync failed: ${t.message}", t)
+            // Любая ошибка синка — попробуем позже (с бэкоффом WorkManager)
             Result.retry()
         }
     }
 
     /**
-     * Если проект локальный черновик (remote_version == 0) — пробуем создать его на сервере.
-     * Если уже существует — ок; если сети нет — синк отложится.
+     * Если проект — локальный драфт (remote_version == 0), создаём его на сервере
+     * БЕЗ передачи client-side id, получаем server id и ПЕРЕПРИВЯЗЫВАЕМ все FK.
+     * Возвращаем remoteId, если публикация состоялась; иначе null.
      */
-    private suspend fun publishDraftIfNeeded(projectId: String) {
+    private suspend fun publishDraftIfNeeded(localProjectId: String): String? {
         val stateDao = db.projectLocalStateDao()
-        val st = stateDao.get(projectId) ?: return
-        if (st.remote_version != 0) return // уже опубликован
+        val projectDao = db.projectDao()
 
-        val p = db.projectDao().getById(projectId) ?: return
-        Log.i(TAG, "publish draft: id=$projectId, name='${p.name}'")
+        // Подстраховка: если id не draft-* и/или remote_version != 0 — выходим
+        val isDraftId = localProjectId.startsWith("draft-")
+        val st = stateDao.get(localProjectId)
+        if (!isDraftId || st == null || st.remote_version != 0) return null
 
-        runCatching {
-            val created = api.createProject(CreateProjectRequest(id = p.id, name = p.name, note = p.note))
-            // Обновляем локальную запись версиями сервера
-            db.projectDao().upsert(
-                ru.mugalimov.volthome.data.local.entity.ProjectEntity(
-                    id = created.id,
-                    name = created.name,
-                    note = created.note,
-                    version = created.version,
-                    updated_at = created.updated_at,
-                    is_deleted = created.is_deleted
+        val p = projectDao.getById(localProjectId) ?: return null
+        Log.i(TAG, "publish draft: localId=$localProjectId, name='${p.name}'")
+
+        try {
+            // НЕ передаём id — сервер сам сгенерирует UUID
+            val created = api.createProject(CreateProjectRequest(name = p.name, note = p.note))
+            val remoteId = created.id
+            Log.i(TAG, "draft published ok: remoteId=$remoteId (v${created.version})")
+
+            val roomDao = db.roomDao()
+            val deviceDao = db.deviceDao()
+            val groupDaoOrNull = runCatching { db.groupDao() }.getOrNull()
+
+            db.withTransaction {
+                // 1) Вставляем запись с remoteId
+                projectDao.upsert(
+                    ru.mugalimov.volthome.data.local.entity.ProjectEntity(
+                        id = created.id,
+                        name = created.name,
+                        note = created.note,
+                        version = created.version,
+                        updated_at = created.updated_at,
+                        is_deleted = created.is_deleted
+                    )
                 )
-            )
-            stateDao.upsert(
-                ru.mugalimov.volthome.data.local.entity.ProjectLocalStateEntity(
-                    project_id = created.id,
-                    remote_version = created.version,
-                    last_sync_at = TimeUtils.formatIso(TimeUtils.now()),
-                    has_local_changes = true // после публикации есть что синкать (комнаты/девайсы)
+
+                // 2) Перепривязываем зависимые строки на remoteId
+                val roomsRebound = roomDao.rebindProjectRooms(localProjectId, remoteId)
+                val devicesRebound = deviceDao.rebindProjectDevices(localProjectId, remoteId)
+                val groupsRebound = if (groupDaoOrNull != null) {
+                    runCatching { groupDaoOrNull.rebindProjectGroups(localProjectId, remoteId) }.getOrElse { 0 }
+                } else 0
+                Log.i(TAG, "rebind done: rooms=$roomsRebound, devices=$devicesRebound, groups=$groupsRebound")
+
+                // 3) Перенос local state
+                stateDao.delete(localProjectId)
+                stateDao.upsert(
+                    ru.mugalimov.volthome.data.local.entity.ProjectLocalStateEntity(
+                        project_id = created.id,
+                        remote_version = created.version,
+                        last_sync_at = TimeUtils.formatIso(TimeUtils.now()),
+                        has_local_changes = true
+                    )
                 )
-            )
-            Log.i(TAG, "draft published ok: id=$projectId (v${created.version})")
-        }.onFailure {
-            // Если 409/конфликт — считаем, что проект уже существует, пытаться ещё раз не мешает при следующем синке
-            Log.w(TAG, "draft publish failed: ${it.message}")
+
+                // 4) Удаляем строку драфта
+                projectDao.deleteById(localProjectId)
+            }
+
+            // 5) Переключаем активный проект на remoteId (безопасно) + лог
+            runCatching {
+                Log.i(TAG, "active project switched to remoteId=$remoteId from localId=$localProjectId")
+                activeProjectDataStore.setActiveProjectId(remoteId)
+            }.onFailure {
+                Log.w(TAG, "failed to setActiveProjectId($remoteId): ${it.message}", it)
+            }
+
+            // 6) На всякий случай поставим новый sync сразу на remoteId (чтобы не ждать внешних триггеров)
+            enqueue(applicationContext, remoteId)
+
+            return remoteId
+        } catch (e: HttpException) {
+            if (e.code() == 409) {
+                Log.w(TAG, "draft publish: 409 already exists; will resync later")
+                return null
+            }
+            Log.w(TAG, "draft publish failed with HTTP ${e.code()}: ${e.message()}")
+            throw e
+        } catch (t: Throwable) {
+            Log.w(TAG, "draft publish failed: ${t.message}", t)
+            throw t
         }
     }
 
     companion object {
         private const val TAG = "SyncWorker"
         private const val KEY_PROJECT_ID = "project_id"
-        private const val UNIQUE_PREFIX = "sync_project_"
         private const val UNIQUE_NAME_PREFIX = "sync-project-"
 
         fun enqueue(context: Context, projectId: String) {
             val req = OneTimeWorkRequestBuilder<SyncProjectsWorker>()
-                .setInputData(workDataOf("project_id" to projectId))
+                .setInputData(workDataOf(KEY_PROJECT_ID to projectId))
                 .setInitialDelay(300, java.util.concurrent.TimeUnit.MILLISECONDS)
                 .addTag("$UNIQUE_NAME_PREFIX$projectId")
                 .build()
 
             WorkManager.getInstance(context).enqueueUniqueWork(
                 "$UNIQUE_NAME_PREFIX$projectId",
-                ExistingWorkPolicy.KEEP,  // <— если уже в очереди, второй не ставим
+                ExistingWorkPolicy.KEEP,  // уже есть — второй не ставим
                 req
             )
         }

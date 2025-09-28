@@ -20,4 +20,7 @@ interface ProjectDao {
 
     @Query("UPDATE projects SET is_deleted=1, updated_at=:updatedAt, version=:version WHERE id=:id")
     suspend fun softDelete(id: String, updatedAt: String, version: Int)
+
+    @Query("DELETE FROM projects WHERE id = :id")
+    suspend fun deleteById(id: String)
 }

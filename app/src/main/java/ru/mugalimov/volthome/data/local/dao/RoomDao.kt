@@ -70,4 +70,10 @@ interface RoomDao {
 
     @Query("SELECT id FROM rooms WHERE project_id = :projectId AND name = :name LIMIT 1")
     suspend fun findIdByProjectAndName(projectId: String, name: String): Long?
+
+    // file: volthome/data/local/dao/RoomDao.kt
+    @Query("UPDATE rooms SET project_id = :newId WHERE project_id = :oldId")
+    suspend fun rebindProjectRooms(oldId: String, newId: String): Int
+
+
 }

@@ -9,7 +9,7 @@ data class Device(
     val power: Int, //мощность
     val voltage: Voltage,
     val demandRatio: Double, //к-т спроса
-    val roomId: Long,
+    val roomId: Long?,
     val createdAt: Date = Date(),
     val deviceType: DeviceType,
     val powerFactor: Double,

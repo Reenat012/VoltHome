@@ -48,8 +48,8 @@ class DeviceRepositoryImpl @Inject constructor(
     override suspend fun addDevice(device: Device) {
         try {
             withContext(dispatchers) {
-                val room = roomDao.getRoomById(device.roomId)
-                    ?: throw IllegalArgumentException("Комната с ID ${device.roomId} не найдена")
+                val room = device.roomId?.let { roomDao.getRoomById(it) }
+                    ?: throw IllegalArgumentException("У устройства нет привязки к комнате (roomId=null) или комната не найдена")
 
                 deviceDao.addDevice(
                     DeviceEntity(

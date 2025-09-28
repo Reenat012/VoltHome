@@ -20,7 +20,7 @@ import java.util.Date
             entity = RoomEntity::class,
             parentColumns = ["id"],
             childColumns = ["room_id"],
-            onDelete = ForeignKey.CASCADE
+            onDelete = ForeignKey.SET_NULL   // <= база уже так, приводим Entity к ней
         )
     ]
 )
@@ -44,8 +44,9 @@ data class DeviceEntity(
     @ColumnInfo(name = "created_at")
     val createdAt: Date,
 
+    // 🔹 теперь nullable, чтобы совпасть с БД (Found: notNull=false)
     @ColumnInfo(name = "room_id")
-    val roomId: Long,
+    val roomId: Long?,
 
     @ColumnInfo(name = "device_type")
     val deviceType: DeviceType,
@@ -53,16 +54,17 @@ data class DeviceEntity(
     @ColumnInfo(name = "power_factor")
     val powerFactor: Double,
 
-    @ColumnInfo(name = "has_motor")
+    // 🔹 проставляем defaultValue, чтобы совпасть с БД (Found: 0/1)
+    @ColumnInfo(name = "has_motor", defaultValue = "0")
     val hasMotor: Boolean = false,
 
-    @ColumnInfo(name = "requires_dedicated")
+    @ColumnInfo(name = "requires_dedicated", defaultValue = "0")
     val requiresDedicatedCircuit: Boolean = false,
 
-    @ColumnInfo(name = "requires_socket")
+    @ColumnInfo(name = "requires_socket", defaultValue = "1")
     val requiresSocketConnection: Boolean = true,
 
-    // 🔹 Привязка к проекту
+    // 🔹 привязка к проекту (nullable)
     @ColumnInfo(name = "project_id")
     val projectId: String? = null
 )

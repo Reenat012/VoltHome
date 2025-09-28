@@ -23,4 +23,7 @@ interface ProjectLocalStateDao {
 
     @Query("SELECT * FROM project_local_state")
     fun observeAll(): Flow<List<ProjectLocalStateEntity>>
+
+    @Query("DELETE FROM project_local_state WHERE project_id = :projectId")
+    suspend fun delete(projectId: String)
 }
