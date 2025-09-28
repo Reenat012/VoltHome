@@ -39,9 +39,11 @@ object NetworkModule {
     @Singleton
     @Named("logging")
     fun provideLoggingInterceptor(): HttpLoggingInterceptor =
-        HttpLoggingInterceptor().apply {
-            // BASIC достаточно; токены не логируем
-            level = HttpLoggingInterceptor.Level.BASIC
+        HttpLoggingInterceptor { msg ->
+            // можно фильтровать, чтобы не светить токены
+            android.util.Log.d("HTTP", msg)
+        }.apply {
+            level = HttpLoggingInterceptor.Level.BODY
         }
 
     // Клиент без авторизации — для обмена/refresh в аутентификаторе

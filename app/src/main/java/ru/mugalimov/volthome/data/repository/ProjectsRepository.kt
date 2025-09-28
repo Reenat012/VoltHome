@@ -6,6 +6,9 @@ import ru.mugalimov.volthome.domain.model.Project
 interface ProjectsRepository {
     fun listProjects(): Flow<List<Project>>
 
+    /** Гарантирует, что активный проект выбран; если нет — создаёт локальный “черновик”. Возвращает id активного. */
+    suspend fun ensureActiveDraft(): String
+
     suspend fun bootstrapFromRemote(): Int
 
     /**

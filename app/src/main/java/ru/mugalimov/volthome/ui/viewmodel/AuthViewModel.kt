@@ -10,12 +10,15 @@ import kotlinx.coroutines.flow.StateFlow
 import ru.mugalimov.volthome.data.remote.auth.AuthSession
 import ru.mugalimov.volthome.data.repository.AuthRepository
 import ru.mugalimov.volthome.data.repository.ProjectsRepository
+import ru.mugalimov.volthome.data.repository.impl.ProjectsRepositoryImpl
 import javax.inject.Inject
 
 @HiltViewModel
 class AuthViewModel @Inject constructor(
     private val authRepo: AuthRepository,
-    private val projectsRepo: ProjectsRepository
+    private val projectsRepo: ProjectsRepository,
+    // нам нужен ensureActiveOrCreateLocalDraft(); он в impl — инжектим через интерфейс сверху,
+    // а вызвать будем через safe cast, если реализация наша.
 ) : ViewModel() {
 
     sealed interface State {
@@ -28,19 +31,17 @@ class AuthViewModel @Inject constructor(
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state
 
-    /**
-     * Автологин на старте:
-     * - читаем серверную сессию (JWT) из зашифрованного хранилища
-     * - если валидна — сразу Success (Root/Splash может открыть Main)
-     * - ПАРАЛЛЕЛЬНО запускаем "холодный" бутстрап проектов из сервера в Room
-     */
     fun bootstrap() {
         viewModelScope.launch {
             val session = authRepo.currentSession()
             if (session != null && !session.isExpired) {
                 // 1) сразу даём UI зелёный свет
                 _state.value = State.Success(session)
-                // 2) фоном подтягиваем проекты в Room
+
+                // 2) гарантируем активный проект (черновик при необходимости)
+                launch { runCatching { projectsRepo.ensureActiveDraft() } }
+
+                // 3) фоном подтягиваем проекты в Room (будет 1 раз благодаря защите в репозитории)
                 launch { runCatching { projectsRepo.bootstrapFromRemote() } }
             } else {
                 _state.value = State.Idle
@@ -48,36 +49,26 @@ class AuthViewModel @Inject constructor(
         }
     }
 
-    /** Переходим в состояние загрузки перед стартом контракта Яндекса (по кнопке «Войти»). */
-    fun startLogin() {
-        _state.value = State.Loading
-    }
+    fun startLogin() { _state.value = State.Loading }
 
-    /**
-     * Результат `YandexAuthSdk`: обмениваем успешный результат на серверную сессию.
-     * На успех — State.Success с серверным JWT; на ошибку — человекочитаемое сообщение.
-     * После успеха фоном запускаем бутстрап проектов.
-     */
     fun handleResult(result: YandexAuthResult) {
         viewModelScope.launch {
             val res = authRepo.handleAuthResult(result)
             _state.value = res.fold(
                 onSuccess = { session ->
-                    // отдадим UI Success
-                    State.Success(session).also {
-                        // и фоном подтянем проекты → Room (после чистой установки)
-                        launch { runCatching { projectsRepo.bootstrapFromRemote() } }
-                    }
+                    // Успех авторизации
+                    projectsRepo.ensureActiveDraft()
+
+                    // чФоновый бутстрап (идемпотентно)
+                    launch { runCatching { projectsRepo.bootstrapFromRemote() } }
+
+                    State.Success(session)
                 },
                 onFailure = { State.Error(mapThrowableToUi(it)) }
             )
         }
     }
 
-    /**
-     * Выход: инвалидируем сессию на сервере (best-effort) и чистим локальное хранилище.
-     * После — возвращаем стейт в Idle, чтобы навигация ушла на Auth.
-     */
     fun signOut() {
         viewModelScope.launch {
             authRepo.signOut()
@@ -86,8 +77,6 @@ class AuthViewModel @Inject constructor(
     }
 
     private fun mapThrowableToUi(t: Throwable): String {
-        // authRepo в failure возвращает RuntimeException с коротким кодом:
-        // "cancelled", "connection", "security", "oauth_invalid", "jwt_auth", "other"
         val code = t.message?.lowercase().orEmpty()
         return when (code) {
             "cancelled" -> "Авторизация отменена."

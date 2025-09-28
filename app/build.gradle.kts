@@ -197,6 +197,9 @@ dependencies {
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
     implementation("com.squareup.retrofit2:converter-gson:2.11.0")
 
+    implementation("androidx.hilt:hilt-work:1.2.0")
+    kapt ("androidx.hilt:hilt-compiler:1.2.0")
+
     // Если снова не найдёт капчу — ВРЕМЕННО добавь явные зависимости:
 //     implementation("com.vk.id.captcha:okhttp-interceptors:0.0.4")
 //     implementation("com.vk.id.captcha:vkid-captcha:0.0.4")

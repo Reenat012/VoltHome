@@ -28,10 +28,6 @@ interface RoomDao {
     @Query("DELETE FROM rooms WHERE id = :roomId")
     suspend fun deleteRoomById(roomId: Long): Int
 
-    @Deprecated("Используй existsByNameInProject")
-    @Query("SELECT EXISTS(SELECT 1 FROM rooms WHERE name = :name LIMIT 1)")
-    suspend fun existsByName(name: String): Boolean
-
     @Query("""
         SELECT EXISTS(
             SELECT 1 FROM rooms 

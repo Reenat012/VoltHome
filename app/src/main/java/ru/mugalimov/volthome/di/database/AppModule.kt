@@ -48,15 +48,20 @@ object DatabaseModule {
             "volthome.db"
         )
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
-            .addCallback(object : Callback() {
+            .setQueryExecutor(java.util.concurrent.Executors.newFixedThreadPool(4))
+            .setTransactionExecutor(java.util.concurrent.Executors.newSingleThreadExecutor())
+            .addMigrations(
+                AppDatabase.MIGRATION_16_17,
+                AppDatabase.MIGRATION_17_18,
+                AppDatabase.MIGRATION_18_19
+            )
+            .addCallback(object : RoomDatabase.Callback() {
                 override fun onCreate(db: SupportSQLiteDatabase) {
                     super.onCreate(db)
-                    // Инициализация БД при первом создании
+                    // init if needed
                 }
             })
-            // Использовать для пересоздания БД при ошибке миграции
-            // TODO после использования закомментировать иначе БД будет постоянно пересоздаваться
-//            .fallbackToDestructiveMigration()
+            // .fallbackToDestructiveMigration()
             .build()
     }
 

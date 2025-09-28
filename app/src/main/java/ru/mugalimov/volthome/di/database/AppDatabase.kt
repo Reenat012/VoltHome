@@ -29,9 +29,13 @@ import kotlin.synchronized
         // под проекты и синк:
         ProjectEntity::class,
         ProjectLocalStateEntity::class,
-        SyncConflictEntity::class
+        SyncConflictEntity::class,
+
+        UuidMapRoom::class,
+        UuidMapGroup::class,
+        UuidMapDevice::class
     ],
-    version = 18,
+    version = 19,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -46,25 +50,9 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun projectDao(): ProjectDao
     abstract fun projectLocalStateDao(): ProjectLocalStateDao
 
+    abstract fun uuidMapDao(): UuidMapDao
+
     companion object {
-        @Volatile
-        private var INSTANCE: AppDatabase? = null
-
-        fun getInstance(context: Context): AppDatabase {
-            return INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
-                    context.applicationContext,
-                    AppDatabase::class.java,
-                    "app_database"
-                )
-                    .addMigrations(MIGRATION_16_17, MIGRATION_17_18)
-                    .addCallback(callback)
-                    .build()
-                INSTANCE = instance
-                instance
-            }
-        }
-
         private val callback = object : Callback() {
             override fun onCreate(db: SupportSQLiteDatabase) {
                 super.onCreate(db)
@@ -103,7 +91,8 @@ abstract class AppDatabase : RoomDatabase() {
 
                 // 3) Создаём Default Project (если таблица projects есть и записи с таким id нет)
                 val defaultProjectId = UUID.randomUUID().toString()
-                val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).format(Date())
+                val nowIso =
+                    SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).format(Date())
 
                 db.execSQL(
                     """
@@ -115,22 +104,41 @@ abstract class AppDatabase : RoomDatabase() {
                 )
 
                 // 4) Проставляем во все строки, где project_id IS NULL
-                db.execSQL("UPDATE rooms  SET project_id = COALESCE(project_id, ?) WHERE project_id IS NULL", arrayOf(defaultProjectId))
-                db.execSQL("UPDATE devices SET project_id = COALESCE(project_id, ?) WHERE project_id IS NULL", arrayOf(defaultProjectId))
-                db.execSQL("UPDATE groups  SET project_id = COALESCE(project_id, ?) WHERE project_id IS NULL", arrayOf(defaultProjectId))
-                db.execSQL("UPDATE loads   SET project_id = COALESCE(project_id, ?) WHERE project_id IS NULL", arrayOf(defaultProjectId))
+                db.execSQL(
+                    "UPDATE rooms  SET project_id = COALESCE(project_id, ?) WHERE project_id IS NULL",
+                    arrayOf(defaultProjectId)
+                )
+                db.execSQL(
+                    "UPDATE devices SET project_id = COALESCE(project_id, ?) WHERE project_id IS NULL",
+                    arrayOf(defaultProjectId)
+                )
+                db.execSQL(
+                    "UPDATE groups  SET project_id = COALESCE(project_id, ?) WHERE project_id IS NULL",
+                    arrayOf(defaultProjectId)
+                )
+                db.execSQL(
+                    "UPDATE loads   SET project_id = COALESCE(project_id, ?) WHERE project_id IS NULL",
+                    arrayOf(defaultProjectId)
+                )
 
                 db.execSQL("PRAGMA foreign_keys=ON")
             }
 
-            private fun safeAddColumn(db: SupportSQLiteDatabase, table: String, col: String, type: String) {
+            private fun safeAddColumn(
+                db: SupportSQLiteDatabase,
+                table: String,
+                col: String,
+                type: String
+            ) {
                 // Проверяем, есть ли колонка
                 val cursor = db.query("PRAGMA table_info($table)")
                 var exists = false
                 cursor.use {
                     val nameIdx = it.getColumnIndex("name")
                     while (it.moveToNext()) {
-                        if (it.getString(nameIdx) == col) { exists = true; break }
+                        if (it.getString(nameIdx) == col) {
+                            exists = true; break
+                        }
                     }
                 }
                 if (!exists) {
@@ -138,12 +146,85 @@ abstract class AppDatabase : RoomDatabase() {
                 }
             }
 
-            private fun safeCreateIndex(db: SupportSQLiteDatabase, indexName: String, table: String, col: String) {
+            private fun safeCreateIndex(
+                db: SupportSQLiteDatabase,
+                indexName: String,
+                table: String,
+                col: String
+            ) {
                 // SQLite не имеет IF NOT EXISTS для CREATE INDEX до некоторых версий,
                 // поэтому просто пробуем создать и ловим ошибку — Room её проглотит.
                 try {
                     db.execSQL("CREATE INDEX IF NOT EXISTS $indexName ON $table($col)")
-                } catch (_: Throwable) { /* ignore */ }
+                } catch (_: Throwable) { /* ignore */
+                }
+            }
+        }
+
+        val MIGRATION_18_19 = object : Migration(18, 19) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                fun hasTable(name: String): Boolean {
+                    val c = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name=?", arrayOf(name))
+                    c.use { return it.moveToFirst() }
+                }
+
+                // ---- rooms ----
+                db.execSQL("""
+            CREATE TABLE IF NOT EXISTS uuid_map_rooms_tmp (
+                room_uuid TEXT NOT NULL PRIMARY KEY,
+                local_id  INTEGER NOT NULL
+            )
+        """.trimIndent())
+                if (hasTable("uuid_map_rooms")) {
+                    db.execSQL("""
+                INSERT OR IGNORE INTO uuid_map_rooms_tmp(room_uuid, local_id)
+                SELECT room_uuid, local_id FROM uuid_map_rooms
+                WHERE room_uuid IS NOT NULL
+            """.trimIndent())
+                    // сносим старый индекс/таблицу, если были
+                    try { db.execSQL("DROP INDEX IF EXISTS idx_uuid_map_rooms_local") } catch (_: Throwable) {}
+                    try { db.execSQL("DROP TABLE IF EXISTS uuid_map_rooms") } catch (_: Throwable) {}
+                }
+                db.execSQL("ALTER TABLE uuid_map_rooms_tmp RENAME TO uuid_map_rooms")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_uuid_map_rooms_local_id ON uuid_map_rooms(local_id)")
+
+                // ---- groups ----
+                db.execSQL("""
+            CREATE TABLE IF NOT EXISTS uuid_map_groups_tmp (
+                group_uuid TEXT NOT NULL PRIMARY KEY,
+                local_id   INTEGER NOT NULL
+            )
+        """.trimIndent())
+                if (hasTable("uuid_map_groups")) {
+                    db.execSQL("""
+                INSERT OR IGNORE INTO uuid_map_groups_tmp(group_uuid, local_id)
+                SELECT group_uuid, local_id FROM uuid_map_groups
+                WHERE group_uuid IS NOT NULL
+            """.trimIndent())
+                    try { db.execSQL("DROP INDEX IF EXISTS idx_uuid_map_groups_local") } catch (_: Throwable) {}
+                    try { db.execSQL("DROP TABLE IF EXISTS uuid_map_groups") } catch (_: Throwable) {}
+                }
+                db.execSQL("ALTER TABLE uuid_map_groups_tmp RENAME TO uuid_map_groups")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_uuid_map_groups_local_id ON uuid_map_groups(local_id)")
+
+                // ---- devices ----
+                db.execSQL("""
+            CREATE TABLE IF NOT EXISTS uuid_map_devices_tmp (
+                device_uuid TEXT NOT NULL PRIMARY KEY,
+                local_id    INTEGER NOT NULL
+            )
+        """.trimIndent())
+                if (hasTable("uuid_map_devices")) {
+                    db.execSQL("""
+                INSERT OR IGNORE INTO uuid_map_devices_tmp(device_uuid, local_id)
+                SELECT device_uuid, local_id FROM uuid_map_devices
+                WHERE device_uuid IS NOT NULL
+            """.trimIndent())
+                    try { db.execSQL("DROP INDEX IF EXISTS idx_uuid_map_devices_local") } catch (_: Throwable) {}
+                    try { db.execSQL("DROP TABLE IF EXISTS uuid_map_devices") } catch (_: Throwable) {}
+                }
+                db.execSQL("ALTER TABLE uuid_map_devices_tmp RENAME TO uuid_map_devices")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_uuid_map_devices_local_id ON uuid_map_devices(local_id)")
             }
         }
     }

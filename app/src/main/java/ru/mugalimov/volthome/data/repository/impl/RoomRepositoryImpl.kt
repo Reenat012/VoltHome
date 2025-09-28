@@ -1,6 +1,7 @@
 package ru.mugalimov.volthome.data.repository.impl
 
 import android.content.Context
+import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
@@ -8,6 +9,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.first
 import ru.mugalimov.volthome.core.error.RoomAlreadyExistsException
 import ru.mugalimov.volthome.core.error.RoomNotFoundException
 import ru.mugalimov.volthome.data.local.dao.DeviceDao
@@ -20,6 +22,7 @@ import ru.mugalimov.volthome.data.local.dao.RoomsTxDao
 import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.data.repository.RoomRepository
+import ru.mugalimov.volthome.data.repository.ProjectsRepository
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.mapper.mapToDomainRooms
 import ru.mugalimov.volthome.domain.mapper.toDomainModelGroup
@@ -36,7 +39,7 @@ import ru.mugalimov.volthome.domain.model.provider.DeviceDefaultsProvider
 import ru.mugalimov.volthome.ui.components.JsonParser
 import java.util.Date
 import javax.inject.Inject
-import kotlinx.coroutines.flow.first
+import ru.mugalimov.volthome.data.sync.work.SyncProjectsWorker
 
 class RoomRepositoryImpl @Inject constructor(
     private val roomDao: RoomDao,
@@ -46,16 +49,16 @@ class RoomRepositoryImpl @Inject constructor(
     private val roomsTxDao: RoomsTxDao,
     private val deviceDefaults: DeviceDefaultsProvider,
     private val activeProjectDs: ActiveProjectDataStore,
+    private val projectsRepo: ProjectsRepository,          // <— ДОБАВЛЕНО (для ensureActiveDraft)
     @IoDispatcher private val dispatchers: CoroutineDispatcher,
     @ApplicationContext private val context: Context
 ) : RoomRepository {
 
-    /** Проектно-осознанное наблюдение: если активный проект выбран — фильтруем по нему. */
     override fun observeRooms(): Flow<List<Room>> {
         return activeProjectDs.activeProjectId
             .flatMapLatest { projectId ->
                 if (projectId != null) roomDao.observeAllRoomsByProject(projectId)
-                else roomDao.observeAllRooms() // безопасный фоллбэк до первичного выбора
+                else roomDao.observeAllRooms()
             }
             .map { entities -> entities.mapToDomainRooms() }
             .flowOn(dispatchers)
@@ -63,13 +66,12 @@ class RoomRepositoryImpl @Inject constructor(
 
     override suspend fun addRoom(room: Room) {
         withContext(dispatchers) {
-            val projectId = activeProjectDs.activeProjectId.first()
-            require(!projectId.isNullOrBlank()) { "Активный проект не выбран" }
+            // гарантируем активный проект (если ещё не выбран) — создаст черновик
+            val projectId = projectsRepo.ensureActiveDraft()
+            Log.i("AddRoom", "CLICK name='${room.name}' projectId=$projectId")
 
-            if (roomDao.existsByNameInProject(room.name, projectId)) {
-                throw RoomAlreadyExistsException("Комната с именем '${room.name}' уже существует в этом проекте")
-            }
-
+            val exists = roomDao.existsByNameInProject(room.name, projectId)
+            if (exists) throw RoomAlreadyExistsException("Комната '${room.name}' уже существует")
 
             val newRoomId = roomDao.addRoom(
                 RoomEntity(
@@ -79,7 +81,7 @@ class RoomRepositoryImpl @Inject constructor(
                     projectId = projectId
                 )
             )
-            // Создаём запись нагрузки комнаты в рамках того же проекта
+
             loadDao.addLoad(
                 LoadEntity(
                     name = room.name,
@@ -91,40 +93,38 @@ class RoomRepositoryImpl @Inject constructor(
                     projectId = projectId
                 )
             )
+
+            // Уникальный синк per-project
+            SyncProjectsWorker.enqueue(context, projectId)
         }
     }
 
     override suspend fun updateRoom(room: Room) {
         withContext(dispatchers) {
-            try {
-                val roomEntity = room.toEntityRoom()
-                // сохраняем projectId, если он был в БД (toEntityRoom мог не содержать)
-                val current = roomDao.getRoomById(room.id)
-                roomDao.updateRoom(roomEntity.copy(projectId = current?.projectId))
-            } catch (_: Exception) {
-                throw RoomNotFoundException()
-            }
+            val current = roomDao.getRoomById(room.id) ?: throw RoomNotFoundException()
+            val roomEntity = room.toEntityRoom().copy(projectId = current.projectId)
+            roomDao.updateRoom(roomEntity)
+            // синк не обязателен на rename, но можно:
+            current.projectId?.let { SyncProjectsWorker.enqueue(context, it) }
         }
     }
 
     override suspend fun deleteRoom(roomId: Long) {
         withContext(dispatchers) {
+            val current = roomDao.getRoomById(roomId) ?: throw RoomNotFoundException("Комната $roomId не найдена")
+            val projectId = current.projectId
             val rowsDeleted = roomDao.deleteRoomById(roomId)
-            if (rowsDeleted == 0) throw RoomNotFoundException("Комната с ID $roomId не найдена")
+            if (rowsDeleted == 0) throw RoomNotFoundException("Комната $roomId не найдена")
             explicationRepository.handleRoomDeletion(roomId)
+            projectId?.let { SyncProjectsWorker.enqueue(context, it) }
         }
     }
 
     override suspend fun getRoomById(roomId: Long): Room? = withContext(dispatchers) {
-        try {
-            val entity = roomDao.getRoomWithDevicesById(roomId)
-            entity?.toDomainModelGroup()
-        } catch (_: Exception) {
-            throw RoomNotFoundException()
-        }
+        val entity = roomDao.getRoomWithDevicesById(roomId) ?: return@withContext null
+        entity.toDomainModelGroup()
     }
 
-    /** Для виджета “Нагрузки” оставляем текущую реализацию; фильтрацию по проекту добавим позже при необходимости. */
     override suspend fun getRoomsWithLoads(): Flow<List<RoomWithLoad>> {
         return loadDao.getRoomsWithLoads()
             .map { list -> list.map { RoomWithLoad(room = it.room, load = it.load) } }
@@ -150,39 +150,24 @@ class RoomRepositoryImpl @Inject constructor(
 
     override suspend fun addRoomWithDevices(req: RoomCreateRequest): CreatedRoomResult =
         withContext(dispatchers) {
-            val projectId = activeProjectDs.activeProjectId.first()
-            require(!projectId.isNullOrBlank()) { "Активный проект не выбран" }
+            val projectId = projectsRepo.ensureActiveDraft()
+            Log.i("AddRoomWD", "CLICK name='${req.name}' projectId=$projectId")
 
-            if (roomDao.existsByNameInProject(req.name, projectId)) {
-                throw IllegalArgumentException("Комната '${req.name}' уже существует в этом проекте")
-            }
+            val exists = roomDao.existsByNameInProject(req.name, projectId)
+            if (exists) throw IllegalArgumentException("Комната '${req.name}' уже существует")
 
             val room = RoomEntity(
-                id = 0L,
-                name = req.name,
-                roomType = req.roomType,
-                createdAt = Date(),
-                projectId = projectId
+                id = 0L, name = req.name, roomType = req.roomType, createdAt = Date(), projectId = projectId
             )
 
-            // Заготовим устройства (roomId появится в транзакции), но уже с projectId
             val devices = expand(req.devices, roomId = null, projectId = projectId)
-
             val (roomId, deviceIds) = roomsTxDao.insertRoomWithDevices(room, devices)
 
-            // создаём запись нагрузки под проект
             loadDao.addLoad(
-                LoadEntity(
-                    name = req.name,
-                    currentRoom = 0.0,
-                    powerRoom = 0,
-                    countDevices = 0,
-                    createdAt = Date(),
-                    roomId = roomId,
-                    projectId = projectId
-                )
+                LoadEntity(name = req.name, currentRoom = 0.0, powerRoom = 0, countDevices = 0, createdAt = Date(), roomId = roomId, projectId = projectId)
             )
 
+            SyncProjectsWorker.enqueue(context, projectId)
             CreatedRoomResult(roomId = roomId, deviceIds = deviceIds)
         }
 
@@ -190,14 +175,22 @@ class RoomRepositoryImpl @Inject constructor(
         roomId: Long,
         devices: List<DeviceCreateRequest>
     ): List<Long> = withContext(dispatchers) {
-        val room = roomDao.getRoomById(roomId)
-            ?: throw RoomNotFoundException("Комната $roomId не найдена")
-        val entities = expand(devices, roomId = roomId, projectId = room.projectId)
-        roomsTxDao.insertDevices(entities)
+        val room = roomDao.getRoomById(roomId) ?: throw RoomNotFoundException("Комната $roomId не найдена")
+        val projectId = room.projectId
+        val entities = expand(devices, roomId = roomId, projectId = projectId)
+        val ids = roomsTxDao.insertDevices(entities)
+        projectId?.let { SyncProjectsWorker.enqueue(context, it) }
+        ids
     }
 
     override suspend fun deleteDevices(deviceIds: List<Long>) = withContext(dispatchers) {
-        if (deviceIds.isNotEmpty()) roomsTxDao.deleteDevicesByIds(deviceIds)
+        if (deviceIds.isNotEmpty()) {
+            // найдём проект по любому из устройств (чтобы правильно дернуть enqueue)
+            val anyDevice = deviceDao.getDeviceById(deviceIds.firstOrNull()?.toInt() ?: return@withContext) ?: return@withContext
+            val projectId = anyDevice.projectId
+            roomsTxDao.deleteDevicesByIds(deviceIds)
+            projectId?.let { SyncProjectsWorker.enqueue(context, it) }
+        }
     }
 
     private fun expand(
