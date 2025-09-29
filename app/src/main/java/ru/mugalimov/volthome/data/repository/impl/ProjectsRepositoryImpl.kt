@@ -9,6 +9,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
 import ru.mugalimov.volthome.data.local.entity.ProjectEntity
+import ru.mugalimov.volthome.data.mapper.toDomainProject
 import ru.mugalimov.volthome.data.remote.api.CreateProjectRequest
 import ru.mugalimov.volthome.data.remote.api.ProjectsApi
 import ru.mugalimov.volthome.data.remote.api.ProjectsApi.UpdateProjectRequest
@@ -30,25 +31,20 @@ class ProjectsRepositoryImpl @Inject constructor(
     private val activeProjectDataStore: ActiveProjectDataStore
 ) : ProjectsRepository {
 
-    // ----------- защита от параллельных/повторных запусков -----------
     private val bootstrapMutex = Mutex()
     private val isBootstrapping = AtomicBoolean(false)
 
-    // --------------------------- LIST ---------------------------
     override fun listProjects(): Flow<List<Project>> =
         db.projectDao()
             .observeAll()
-            .map { list -> list.map { it.toDomain() } }
+            .map { list -> list.map { it.toDomainProject() } }
 
-    // --------------------------- ensureActiveDraft ---------------------------
     override suspend fun ensureActiveDraft(): String = withContext(Dispatchers.IO) {
-        // 1) Если активный уже выбран и есть в БД — возвращаем его.
         val current = activeProjectDataStore.activeProjectId.firstOrNull()
         if (!current.isNullOrBlank()) {
             if (db.projectDao().getById(current) != null) return@withContext current
         }
 
-        // 2) Пробуем выбрать самый свежий удалённый/локальный проект, если он есть
         val all = db.projectDao().observeAll().firstOrNull().orEmpty()
         val latest = all.maxByOrNull { it.updated_at }
         if (latest != null) {
@@ -56,7 +52,6 @@ class ProjectsRepositoryImpl @Inject constructor(
             return@withContext latest.id
         }
 
-        // 3) Иначе создаём ЛОКАЛЬНЫЙ ЧЕРНОВИК (без POST!)
         val id = "draft-" + UUID.randomUUID().toString()
         val nowIso = TimeUtils.formatIso(TimeUtils.now())
         db.projectDao().upsert(
@@ -64,12 +59,11 @@ class ProjectsRepositoryImpl @Inject constructor(
                 id = id,
                 name = "Новый проект",
                 note = null,
-                version = 0,                 // <— ключ: 0 = «черновик/не опубликован»
+                version = 0,
                 updated_at = nowIso,
                 is_deleted = false
             )
         )
-        // локальное состояние
         val stateDao = db.projectLocalStateDao()
         stateDao.upsert(
             ru.mugalimov.volthome.data.local.entity.ProjectLocalStateEntity(
@@ -83,9 +77,7 @@ class ProjectsRepositoryImpl @Inject constructor(
         id
     }
 
-    // --------------------------- BOOTSTRAP ---------------------------
     override suspend fun bootstrapFromRemote(): Int = withContext(Dispatchers.IO) {
-        // защита от двоекратного запуска (из разных вьюмоделей при старте)
         if (!isBootstrapping.compareAndSet(false, true)) return@withContext 0
         try {
             bootstrapMutex.withLock {
@@ -93,7 +85,6 @@ class ProjectsRepositoryImpl @Inject constructor(
                 var cursor: String? = null
                 val stateDao = db.projectLocalStateDao()
 
-                // простой вариант — сервер сам отдаёт всю страницу, next всегда null
                 do {
                     val page = api.listProjects(since = null, limit = 100)
                     for (p in page.items) {
@@ -120,7 +111,6 @@ class ProjectsRepositoryImpl @Inject constructor(
                     cursor = page.next
                 } while (!cursor.isNullOrBlank())
 
-                // Если активный не выбран — пусть будет самый свежий (но НЕ создаём новый проект здесь!)
                 val activeId = activeProjectDataStore.activeProjectId.firstOrNull()
                 if (activeId.isNullOrBlank()) {
                     val latest = db.projectDao().observeAll().firstOrNull()?.maxByOrNull { it.updated_at }
@@ -133,7 +123,6 @@ class ProjectsRepositoryImpl @Inject constructor(
         }
     }
 
-    // --------------------------- CREATE ---------------------------
     override suspend fun createProject(name: String, note: String?): String = withContext(Dispatchers.IO) {
         val id = UUID.randomUUID().toString()
         val nowIso = TimeUtils.formatIso(TimeUtils.now())
@@ -143,7 +132,7 @@ class ProjectsRepositoryImpl @Inject constructor(
                 id = id,
                 name = name,
                 note = note,
-                version = 0, // сервер потом вернёт >=1
+                version = 0,
                 updated_at = nowIso,
                 is_deleted = false
             )
@@ -158,7 +147,6 @@ class ProjectsRepositoryImpl @Inject constructor(
             )
         )
 
-        // Best-effort POST
         runCatching {
             val created = api.createProject(CreateProjectRequest(id = id, name = name, note = note))
             db.projectDao().upsert(
@@ -183,7 +171,6 @@ class ProjectsRepositoryImpl @Inject constructor(
         id
     }
 
-    // --------------------------- RENAME ---------------------------
     override suspend fun renameProject(id: String, name: String) {
         withContext(Dispatchers.IO) {
             val nowIso = TimeUtils.formatIso(TimeUtils.now())
@@ -215,7 +202,6 @@ class ProjectsRepositoryImpl @Inject constructor(
                 )).copy(has_local_changes = true)
             )
 
-            // Best-effort PUT
             runCatching {
                 val updated = api.updateProjectMeta(id, UpdateProjectRequest(name = name, note = current?.note))
                 db.projectDao().upsert(
@@ -240,13 +226,13 @@ class ProjectsRepositoryImpl @Inject constructor(
         }
     }
 
-    // --------------------------- DELETE ---------------------------
     override suspend fun deleteProject(id: String) {
         withContext(Dispatchers.IO) {
             val nowIso = TimeUtils.formatIso(TimeUtils.now())
             val dao = db.projectDao()
             val current = dao.getById(id) ?: return@withContext
 
+            // Локальное мягкое удаление
             dao.softDelete(id = id, updatedAt = nowIso, version = current.version)
 
             val stateDao = db.projectLocalStateDao()
@@ -260,7 +246,7 @@ class ProjectsRepositoryImpl @Inject constructor(
                 )).copy(has_local_changes = true)
             )
 
-            // Best-effort DELETE
+            // Серверное удаление
             runCatching {
                 val deleted = api.deleteProject(id)
                 db.projectDao().upsert(
@@ -282,24 +268,19 @@ class ProjectsRepositoryImpl @Inject constructor(
                     )
                 )
             }
+
+            // Если удаляем активный — снимаем выбор
+            val active = activeProjectDataStore.activeProjectId.firstOrNull()
+            if (active == id) {
+                activeProjectDataStore.setActiveProjectId(null)
+            }
         }
     }
 
-    // --------------------------- OPEN ---------------------------
     override suspend fun openProject(id: String) {
-        // ВАЖНО: сначала зафиксировать выбор, потом синк (чтобы UI уже знал projectId)
         activeProjectDataStore.setActiveProjectId(id)
         runCatching { syncManager.syncProject(id) }
     }
 
-    // --------------------------- MAPPERS ---------------------------
-    private fun ProjectEntity.toDomain(): Project =
-        Project(
-            id = id,
-            name = name,
-            note = note,
-            version = version,
-            updatedAt = updated_at,
-            isDeleted = is_deleted
-        )
+
 }

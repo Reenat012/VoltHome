@@ -11,7 +11,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
-import ru.mugalimov.volthome.ui.components.AppScaffoldWithDrawer
+import ru.mugalimov.volthome.ui.screens.start_drawer.AppScaffoldWithDrawer
 import ru.mugalimov.volthome.ui.model.ProjectUi
 import ru.mugalimov.volthome.ui.model.UserProfileUi
 import ru.mugalimov.volthome.ui.viewmodel.AuthViewModel

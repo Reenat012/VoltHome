@@ -5,18 +5,23 @@ import android.content.Context
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.withContext
 import ru.mugalimov.volthome.core.error.DeviceNotFoundException
 import ru.mugalimov.volthome.core.error.RoomNotFoundException
 import ru.mugalimov.volthome.data.local.dao.DeviceDao
 import ru.mugalimov.volthome.data.local.dao.RoomDao
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
+import ru.mugalimov.volthome.data.remote.api.ProjectsApi
+import ru.mugalimov.volthome.data.remote.dto.OpBucket
+import ru.mugalimov.volthome.data.remote.dto.Ops
+import ru.mugalimov.volthome.data.remote.dto.ProjectBatchRequest
 import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
+import ru.mugalimov.volthome.di.database.AppDatabase
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.mapper.mapToDomainDevices
 import ru.mugalimov.volthome.domain.mapper.toDomainDevice
@@ -32,8 +37,13 @@ class DeviceRepositoryImpl @Inject constructor(
     private val roomDao: RoomDao,
     private val explicationRepository: ExplicationRepository,
     @IoDispatcher private val dispatchers: CoroutineDispatcher,
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    // ↓↓↓ добавлено
+    private val projectsApi: ProjectsApi,
+    private val appDb: AppDatabase
 ) : DeviceRepository {
+
+    private val uuidDao get() = appDb.uuidMapDao()
 
     private val defaultDevicesCache by lazy(LazyThreadSafetyMode.NONE) {
         JsonParser.parseDevices(context)
@@ -64,7 +74,7 @@ class DeviceRepositoryImpl @Inject constructor(
                         hasMotor = device.hasMotor,
                         requiresDedicatedCircuit = device.requiresDedicatedCircuit,
                         requiresSocketConnection = device.requiresSocketConnection,
-                        projectId = room.projectId // ← ключевое
+                        projectId = room.projectId
                     )
                 )
             }
@@ -76,6 +86,28 @@ class DeviceRepositoryImpl @Inject constructor(
 
     override suspend fun deleteDevice(deviceId: Long) {
         withContext(dispatchers) {
+            val existing = deviceDao.getDeviceById(deviceId.toInt()) ?: throw DeviceNotFoundException("Устройство с ID $deviceId не найдено")
+
+            // 1) Пытаемся удалить на сервере
+            val projectId = existing.projectId
+            if (!projectId.isNullOrBlank() && !projectId.startsWith("draft-")) {
+                val deviceUuid = uuidDao.getDeviceUuidByLocal(deviceId)
+                if (deviceUuid != null) {
+                    runCatching {
+                        val ops = Ops(
+                            rooms = null,
+                            groups = null,
+                            devices = OpBucket(upsert = emptyList(), delete = listOf(deviceUuid))
+                        )
+                        projectsApi.applyBatch(projectId, ProjectBatchRequest(baseVersion = null, ops = ops))
+                        Log.i("DeviceDelete", "Server delete ok: deviceUuid=$deviceUuid project=$projectId")
+                    }.onFailure { t ->
+                        Log.w("DeviceDelete", "Server delete failed: ${t.message}", t)
+                    }
+                }
+            }
+
+            // 2) Локально удаляем
             val rowsDeleted = deviceDao.deleteDeviceById(deviceId)
             if (rowsDeleted == 0) throw DeviceNotFoundException("Устройство с ID $deviceId не найдено")
             explicationRepository.handleDeviceDeletion(deviceId)
@@ -120,7 +152,6 @@ class DeviceRepositoryImpl @Inject constructor(
 
     override suspend fun updateDevice(device: Device) =
         withContext(dispatchers) {
-            // сохраняем текущий projectId устройства, если есть
             val current = deviceDao.getDeviceById(device.id.toInt())
             deviceDao.update(
                 device.toEntityDevice().copy(projectId = current?.projectId)

@@ -96,3 +96,13 @@ fun DeviceEntity.toUpsert(): DeviceUpsert = DeviceUpsert(
 // -------- утилиты --------
 
 fun nowIso(): String = TimeUtils.formatIso(TimeUtils.now())
+
+fun ProjectEntity.toDomainProject(): Project =
+    Project(
+        id = id,
+        name = name,
+        note = note,
+        version = version,
+        updatedAt = updated_at,
+        isDeleted = is_deleted
+    )

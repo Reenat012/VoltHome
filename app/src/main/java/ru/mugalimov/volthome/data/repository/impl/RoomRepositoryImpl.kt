@@ -8,21 +8,27 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import ru.mugalimov.volthome.core.error.RoomAlreadyExistsException
 import ru.mugalimov.volthome.core.error.RoomNotFoundException
 import ru.mugalimov.volthome.data.local.dao.DeviceDao
 import ru.mugalimov.volthome.data.local.dao.LoadDao
 import ru.mugalimov.volthome.data.local.dao.RoomDao
+import ru.mugalimov.volthome.data.local.dao.RoomsTxDao
+import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.data.local.entity.LoadEntity
 import ru.mugalimov.volthome.data.local.entity.RoomEntity
-import ru.mugalimov.volthome.data.local.dao.RoomsTxDao
-import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
+import ru.mugalimov.volthome.data.remote.api.ProjectsApi
+import ru.mugalimov.volthome.data.remote.dto.OpBucket
+import ru.mugalimov.volthome.data.remote.dto.Ops
+import ru.mugalimov.volthome.data.remote.dto.ProjectBatchRequest
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
-import ru.mugalimov.volthome.data.repository.RoomRepository
 import ru.mugalimov.volthome.data.repository.ProjectsRepository
+import ru.mugalimov.volthome.data.repository.RoomRepository
+import ru.mugalimov.volthome.data.sync.work.SyncProjectsWorker
+import ru.mugalimov.volthome.di.database.AppDatabase
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.mapper.mapToDomainRooms
 import ru.mugalimov.volthome.domain.mapper.toDomainModelGroup
@@ -39,7 +45,6 @@ import ru.mugalimov.volthome.domain.model.provider.DeviceDefaultsProvider
 import ru.mugalimov.volthome.ui.components.JsonParser
 import java.util.Date
 import javax.inject.Inject
-import ru.mugalimov.volthome.data.sync.work.SyncProjectsWorker
 
 class RoomRepositoryImpl @Inject constructor(
     private val roomDao: RoomDao,
@@ -49,10 +54,15 @@ class RoomRepositoryImpl @Inject constructor(
     private val roomsTxDao: RoomsTxDao,
     private val deviceDefaults: DeviceDefaultsProvider,
     private val activeProjectDs: ActiveProjectDataStore,
-    private val projectsRepo: ProjectsRepository,          // <— ДОБАВЛЕНО (для ensureActiveDraft)
+    private val projectsRepo: ProjectsRepository,
     @IoDispatcher private val dispatchers: CoroutineDispatcher,
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    // ↓↓↓ добавлено
+    private val projectsApi: ProjectsApi,
+    private val appDb: AppDatabase
 ) : RoomRepository {
+
+    private val uuidDao get() = appDb.uuidMapDao()
 
     override fun observeRooms(): Flow<List<Room>> {
         return activeProjectDs.activeProjectId
@@ -66,9 +76,8 @@ class RoomRepositoryImpl @Inject constructor(
 
     override suspend fun addRoom(room: Room) {
         withContext(dispatchers) {
-            // гарантируем активный проект (если ещё не выбран) — создаст черновик
             val projectId = projectsRepo.ensureActiveDraft()
-            Log.i("AddRoom", "CLICK name='${room.name}' projectId=$projectId")
+            android.util.Log.i("AddRoom", "CLICK name='${room.name}' projectId=$projectId")
 
             val exists = roomDao.existsByNameInProject(room.name, projectId)
             if (exists) throw RoomAlreadyExistsException("Комната '${room.name}' уже существует")
@@ -94,7 +103,6 @@ class RoomRepositoryImpl @Inject constructor(
                 )
             )
 
-            // Уникальный синк per-project
             SyncProjectsWorker.enqueue(context, projectId)
         }
     }
@@ -104,7 +112,6 @@ class RoomRepositoryImpl @Inject constructor(
             val current = roomDao.getRoomById(room.id) ?: throw RoomNotFoundException()
             val roomEntity = room.toEntityRoom().copy(projectId = current.projectId)
             roomDao.updateRoom(roomEntity)
-            // синк не обязателен на rename, но можно:
             current.projectId?.let { SyncProjectsWorker.enqueue(context, it) }
         }
     }
@@ -113,9 +120,38 @@ class RoomRepositoryImpl @Inject constructor(
         withContext(dispatchers) {
             val current = roomDao.getRoomById(roomId) ?: throw RoomNotFoundException("Комната $roomId не найдена")
             val projectId = current.projectId
+
+            // 1) Пытаемся удалить на сервере (если не draft и есть UUID)
+            if (!projectId.isNullOrBlank() && !projectId.startsWith("draft-")) {
+                val roomUuid = uuidDao.getRoomUuidByLocal(roomId)
+                // КАСКАДНО: соберём device UUID этой комнаты
+                val devicesInRoom: List<DeviceEntity> = deviceDao.getAllDevicesByRoomId(roomId)
+                val deviceUuids = devicesInRoom.mapNotNull { uuidDao.getDeviceUuidByLocal(it.deviceId) }
+
+                if (roomUuid != null || deviceUuids.isNotEmpty()) {
+                    runCatching {
+                        val ops = Ops(
+                            rooms = if (roomUuid != null)
+                                OpBucket(upsert = emptyList(), delete = listOf(roomUuid))
+                            else null,
+                            groups = null,
+                            devices = if (deviceUuids.isNotEmpty())
+                                OpBucket(upsert = emptyList(), delete = deviceUuids)
+                            else null
+                        )
+                        projectsApi.applyBatch(projectId, ProjectBatchRequest(baseVersion = null, ops = ops))
+                        Log.i("RoomDelete", "Server delete ok: roomUuid=$roomUuid, devices=${deviceUuids.size}, project=$projectId")
+                    }.onFailure { t ->
+                        Log.w("RoomDelete", "Server delete failed: ${t.message}", t)
+                    }
+                }
+            }
+
+            // 2) Локально удаляем комнату и побочные сущности
             val rowsDeleted = roomDao.deleteRoomById(roomId)
             if (rowsDeleted == 0) throw RoomNotFoundException("Комната $roomId не найдена")
             explicationRepository.handleRoomDeletion(roomId)
+
             projectId?.let { SyncProjectsWorker.enqueue(context, it) }
         }
     }
@@ -151,7 +187,7 @@ class RoomRepositoryImpl @Inject constructor(
     override suspend fun addRoomWithDevices(req: RoomCreateRequest): CreatedRoomResult =
         withContext(dispatchers) {
             val projectId = projectsRepo.ensureActiveDraft()
-            Log.i("AddRoomWD", "CLICK name='${req.name}' projectId=$projectId")
+            android.util.Log.i("AddRoomWD", "CLICK name='${req.name}' projectId=$projectId")
 
             val exists = roomDao.existsByNameInProject(req.name, projectId)
             if (exists) throw IllegalArgumentException("Комната '${req.name}' уже существует")
@@ -185,9 +221,28 @@ class RoomRepositoryImpl @Inject constructor(
 
     override suspend fun deleteDevices(deviceIds: List<Long>) = withContext(dispatchers) {
         if (deviceIds.isNotEmpty()) {
-            // найдём проект по любому из устройств (чтобы правильно дернуть enqueue)
             val anyDevice = deviceDao.getDeviceById(deviceIds.firstOrNull()?.toInt() ?: return@withContext) ?: return@withContext
             val projectId = anyDevice.projectId
+
+            // 1) Пытаемся удалить на сервере (если не draft и знаем UUID’ы)
+            if (!projectId.isNullOrBlank() && !projectId.startsWith("draft-")) {
+                val uuidsToDelete = deviceIds.mapNotNull { id -> uuidDao.getDeviceUuidByLocal(id) }
+                if (uuidsToDelete.isNotEmpty()) {
+                    runCatching {
+                        val ops = Ops(
+                            rooms = null,
+                            groups = null,
+                            devices = OpBucket(upsert = emptyList(), delete = uuidsToDelete)
+                        )
+                        projectsApi.applyBatch(projectId, ProjectBatchRequest(baseVersion = null, ops = ops))
+                        Log.i("DeviceDelete", "Server delete ok: count=${uuidsToDelete.size} project=$projectId")
+                    }.onFailure { t ->
+                        Log.w("DeviceDelete", "Server delete failed: ${t.message}", t)
+                    }
+                }
+            }
+
+            // 2) Локальное удаление
             roomsTxDao.deleteDevicesByIds(deviceIds)
             projectId?.let { SyncProjectsWorker.enqueue(context, it) }
         }
