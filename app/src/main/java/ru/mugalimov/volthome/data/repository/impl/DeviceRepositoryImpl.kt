@@ -21,6 +21,7 @@ import ru.mugalimov.volthome.data.remote.dto.Ops
 import ru.mugalimov.volthome.data.remote.dto.ProjectBatchRequest
 import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
+import ru.mugalimov.volthome.data.sync.work.SyncProjectsWorker
 import ru.mugalimov.volthome.di.database.AppDatabase
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.mapper.mapToDomainDevices
@@ -38,7 +39,6 @@ class DeviceRepositoryImpl @Inject constructor(
     private val explicationRepository: ExplicationRepository,
     @IoDispatcher private val dispatchers: CoroutineDispatcher,
     @ApplicationContext private val context: Context,
-    // ↓↓↓ добавлено
     private val projectsApi: ProjectsApi,
     private val appDb: AppDatabase
 ) : DeviceRepository {
@@ -86,31 +86,36 @@ class DeviceRepositoryImpl @Inject constructor(
 
     override suspend fun deleteDevice(deviceId: Long) {
         withContext(dispatchers) {
-            val existing = deviceDao.getDeviceById(deviceId.toInt()) ?: throw DeviceNotFoundException("Устройство с ID $deviceId не найдено")
+            val existing = deviceDao.getDeviceById(deviceId.toInt())
+                ?: throw DeviceNotFoundException("Устройство с ID $deviceId не найдено")
 
-            // 1) Пытаемся удалить на сервере
             val projectId = existing.projectId
-            if (!projectId.isNullOrBlank() && !projectId.startsWith("draft-")) {
+            val isDraft = projectId.isNullOrBlank() || projectId.startsWith("draft-")
+
+            if (!isDraft) {
                 val deviceUuid = uuidDao.getDeviceUuidByLocal(deviceId)
                 if (deviceUuid != null) {
-                    runCatching {
+                    try {
                         val ops = Ops(
                             rooms = null,
                             groups = null,
                             devices = OpBucket(upsert = emptyList(), delete = listOf(deviceUuid))
                         )
-                        projectsApi.applyBatch(projectId, ProjectBatchRequest(baseVersion = null, ops = ops))
+                        projectsApi.applyBatch(projectId!!, ProjectBatchRequest(baseVersion = null, ops = ops))
                         Log.i("DeviceDelete", "Server delete ok: deviceUuid=$deviceUuid project=$projectId")
-                    }.onFailure { t ->
-                        Log.w("DeviceDelete", "Server delete failed: ${t.message}", t)
+                    } catch (t: Throwable) {
+                        Log.w("DeviceDelete", "Server delete failed, keep local. reason=${t.message}", t)
+                        // не удаляем локально — иначе появится снова при снапшоте
+                        throw t
                     }
                 }
             }
 
-            // 2) Локально удаляем
             val rowsDeleted = deviceDao.deleteDeviceById(deviceId)
             if (rowsDeleted == 0) throw DeviceNotFoundException("Устройство с ID $deviceId не найдено")
             explicationRepository.handleDeviceDeletion(deviceId)
+
+            projectId?.let { SyncProjectsWorker.enqueue(context, it) }
         }
     }
 

@@ -259,11 +259,16 @@ class SyncManager @Inject constructor(
         toMapGroups: MutableList<Pair<String, Long>>,
         toMapDevices: MutableList<Pair<String, Long>>
     ) {
-        // ЛОКАЛЬНАЯ карта UUID комнаты → localId на время этой транзакции
         val roomUuidToLocal = mutableMapOf<String, Long>()
 
         // ROOMS
         for (r in tree.rooms) {
+            if (r.is_deleted == true) {
+                // подчистим локальные остатки, если были
+                uuidDao.getRoomLocal(r.id)?.let { roomDao.deleteRoomById(it) }
+                continue
+            }
+
             val createdAt = parseDate(r.meta?.get("created_at_iso") as? String)
             val roomType = (r.meta?.get("room_type") as? String)?.let { safeRoomType(it) } ?: RoomType.STANDARD
 
@@ -284,21 +289,24 @@ class SyncManager @Inject constructor(
                     ?: continue
             }
             toMapRooms += r.id to localId
-            // сразу в оперативную карту — чтобы ниже не обращаться к uuidDao
             roomUuidToLocal[r.id] = localId
         }
 
-        // Имя → localId (если где-то придёт только room_name)
         val roomNameToLocalId: Map<String, Long> = tree.rooms.associateNotNull { rd ->
             val local = roomDao.findIdByProjectAndName(projectId, rd.name)
-            if (local != null) rd.name to local else null
+            if (local != null && rd.is_deleted != true) rd.name to local else null
         }
 
         // GROUPS
         for (g in tree.groups) {
+            if (g.is_deleted == true) {
+                uuidDao.getGroupLocal(g.id)?.let { groupDao.deleteGroupByGroupId(it) }
+                continue
+            }
+
             val meta = g.meta.orEmpty()
             val roomUuid = meta["room_id"] as? String
-            val roomLocal = roomUuid?.let { roomUuidToLocal[it] } // <— ключевая замена
+            val roomLocal = roomUuid?.let { roomUuidToLocal[it] }
             val roomName = (meta["room_name"] as? String)?.trim().orEmpty()
 
             val ensuredRoomId = when {
@@ -329,11 +337,16 @@ class SyncManager @Inject constructor(
 
         // DEVICES
         for (d in tree.devices) {
+            if (d.is_deleted == true) {
+                uuidDao.getDeviceLocal(d.id)?.let { deviceDao.deleteDeviceById(it) }
+                continue
+            }
+
             val meta = d.meta.orEmpty()
             val roomUuid = meta["room_id"] as? String
             val roomName = (meta["room_name"] as? String)?.trim().orEmpty()
 
-            val roomLocalFromUuid = roomUuid?.let { roomUuidToLocal[it] } // <— ключевая замена
+            val roomLocalFromUuid = roomUuid?.let { roomUuidToLocal[it] }
             val roomLocalFromName = if (roomLocalFromUuid == null && roomName.isNotEmpty()) {
                 roomNameToLocalId[roomName] ?: roomDao.findIdByProjectAndName(projectId, roomName)
             } else null
@@ -368,13 +381,18 @@ class SyncManager @Inject constructor(
         }
     }
 
-    // ------------------------ DELТА ------------------------
+    // ------------------------ ДЕЛЬТА ------------------------
     private suspend fun applyRoomsDeltaTx(
         projectId: String,
         delta: ProjectDeltaResponse,
         toMapRooms: MutableList<Pair<String, Long>>
     ) {
         for (r in delta.rooms.upsert) {
+            if (r.is_deleted == true) {
+                uuidDao.getRoomLocal(r.id)?.let { roomDao.deleteRoomById(it) }
+                continue
+            }
+
             val localId = uuidDao.getRoomLocal(r.id)
             val createdAt = parseDate(r.meta?.get("created_at_iso") as? String)
             val roomType = (r.meta?.get("room_type") as? String)?.let { safeRoomType(it) } ?: RoomType.STANDARD
@@ -420,6 +438,11 @@ class SyncManager @Inject constructor(
         toMapGroups: MutableList<Pair<String, Long>>
     ) {
         for (g in delta.groups.upsert) {
+            if (g.is_deleted == true) {
+                uuidDao.getGroupLocal(g.id)?.let { groupDao.deleteGroupByGroupId(it) }
+                continue
+            }
+
             val localId = uuidDao.getGroupLocal(g.id)
             val meta = g.meta.orEmpty()
 
@@ -438,10 +461,21 @@ class SyncManager @Inject constructor(
             val createdAt = parseDate(meta["created_at_iso"] as? String)
             val phase = (meta["phase"] as? String) ?: "A"
 
-            val ensuredRoomId = when {
+            // ⚠️ Δ: не создаём комнату. Используем только room_id → local или существующее имя.
+            val ensuredRoomId: Long = when {
                 roomLocal != null -> roomLocal
-                roomName.isNotEmpty() -> ensureRoomByNameTx(projectId, roomName)
-                else -> ensurePlaceholderRoomTx(projectId, "Room")
+                roomName.isNotEmpty() -> {
+                    val byName = roomDao.findIdByProjectAndName(projectId, roomName)
+                    if (byName == null) {
+                        Log.w("Sync", "groups.upsert skip: room not found for name='$roomName', project=$projectId")
+                        continue
+                    }
+                    byName
+                }
+                else -> {
+                    Log.w("Sync", "groups.upsert skip: no room_id and no room_name for group_number=$groupNumber")
+                    continue
+                }
             }
 
             if (localId == null) {
@@ -497,19 +531,33 @@ class SyncManager @Inject constructor(
         toMapDevices: MutableList<Pair<String, Long>>
     ) {
         for (d in delta.devices.upsert) {
+            // на всякий случай — если сервер прислал is_deleted в upsert
+            if (d.is_deleted == true) {
+                uuidDao.getDeviceLocal(d.id)?.let { deviceDao.deleteDeviceById(it) }
+                continue
+            }
+
             val localId = uuidDao.getDeviceLocal(d.id)
             val meta = d.meta.orEmpty()
 
-            val roomUuid = meta["room_id"] as? String
-            val roomName = (meta["room_name"] as? String)?.trim().orEmpty()
+            // 1) Комнату определяем ТОЛЬКО по room_id (uuid) или по существующему имени
+            val roomUuid: String? = meta["room_id"] as? String
+            val roomName: String = (meta["room_name"] as? String)?.trim().orEmpty()
 
-            val roomLocalFromUuid = roomUuid?.let { uuidDao.getRoomLocal(it) }
-            val ensuredRoomId = when {
-                roomLocalFromUuid != null -> roomLocalFromUuid
-                roomName.isNotEmpty() -> ensureRoomByNameTx(projectId, roomName)
-                else -> ensurePlaceholderRoomTx(projectId, "Room")
+            var ensuredRoomId: Long? = roomUuid?.let { uuidDao.getRoomLocal(it) }
+            if (ensuredRoomId == null && roomName.isNotEmpty()) {
+                ensuredRoomId = roomDao.findIdByProjectAndName(projectId, roomName)
+            }
+            if (ensuredRoomId == null) {
+                Log.w(
+                    "Sync",
+                    "devices.upsert skip: cannot resolve room for device='${d.name}' " +
+                            "roomUuid=$roomUuid roomName='$roomName' project=$projectId"
+                )
+                continue
             }
 
+            // 2) Поля девайса
             val name = d.name
             val power = (meta["power"] as? Number)?.toInt() ?: 0
             val voltage = parseVoltageFromMeta(meta)
@@ -522,7 +570,7 @@ class SyncManager @Inject constructor(
             val requiresSocket = (meta["requires_socket"] as? Boolean) ?: true
 
             if (localId == null) {
-                val existingByName = deviceDao.findByRoomAndName(ensuredRoomId, name)
+                val existingByName = deviceDao.findByRoomAndName(ensuredRoomId!!, name)
                 if (existingByName != null) {
                     deviceDao.update(
                         existingByName.copy(
@@ -549,7 +597,7 @@ class SyncManager @Inject constructor(
                         voltage = voltage,
                         demandRatio = demandRatio,
                         createdAt = createdAt,
-                        roomId = ensuredRoomId,
+                        roomId = ensuredRoomId!!,
                         deviceType = deviceType,
                         powerFactor = powerFactor,
                         hasMotor = hasMotor,
@@ -559,7 +607,7 @@ class SyncManager @Inject constructor(
                     )
                     val newLocal = deviceDao.insert(entity)
                     val resolvedId = if (newLocal > 0) newLocal
-                    else deviceDao.findByRoomAndName(ensuredRoomId, name)?.deviceId ?: continue
+                    else deviceDao.findByRoomAndName(ensuredRoomId!!, name)?.deviceId ?: continue
 
                     toMapDevices += d.id to resolvedId
                 }
@@ -572,7 +620,7 @@ class SyncManager @Inject constructor(
                         voltage = voltage,
                         demandRatio = demandRatio,
                         createdAt = createdAt,
-                        roomId = ensuredRoomId,
+                        roomId = ensuredRoomId!!,
                         deviceType = deviceType,
                         powerFactor = powerFactor,
                         hasMotor = hasMotor,
@@ -583,6 +631,7 @@ class SyncManager @Inject constructor(
                 )
             }
         }
+
         for (id in delta.devices.delete) {
             uuidDao.getDeviceLocal(id)?.let { deviceDao.deleteDeviceById(it) }
         }
@@ -707,6 +756,7 @@ class SyncManager @Inject constructor(
         val tree = projectsApi.getProjectTree(projectId)
         val toPut = mutableListOf<UuidMapRoom>()
         for (r in tree.rooms) {
+            if (r.is_deleted == true) continue // ⬅️ не мапим удалённые
             val localId = roomDao.findIdByProjectAndName(projectId, r.name) ?: continue
             val existing = uuidDao.getRoomUuidByLocal(localId)
             if (existing != null) continue
@@ -800,6 +850,7 @@ class SyncManager @Inject constructor(
         val tree = projectsApi.getProjectTree(projectId)
         val toPut = mutableListOf<UuidMapDevice>()
         for (d in tree.devices) {
+            if (d.is_deleted == true) continue // ⬅️ безопасно пропускаем удалённые
             val roomUuid = (d.meta?.get("room_id") as? String)
             val roomLocal = roomUuid?.let { uuidDao.getRoomLocal(it) } ?: continue
             val local = deviceDao.findByRoomAndName(roomLocal, d.name) ?: continue

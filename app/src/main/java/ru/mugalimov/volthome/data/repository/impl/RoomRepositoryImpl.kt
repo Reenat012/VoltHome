@@ -57,7 +57,6 @@ class RoomRepositoryImpl @Inject constructor(
     private val projectsRepo: ProjectsRepository,
     @IoDispatcher private val dispatchers: CoroutineDispatcher,
     @ApplicationContext private val context: Context,
-    // ↓↓↓ добавлено
     private val projectsApi: ProjectsApi,
     private val appDb: AppDatabase
 ) : RoomRepository {
@@ -77,7 +76,7 @@ class RoomRepositoryImpl @Inject constructor(
     override suspend fun addRoom(room: Room) {
         withContext(dispatchers) {
             val projectId = projectsRepo.ensureActiveDraft()
-            android.util.Log.i("AddRoom", "CLICK name='${room.name}' projectId=$projectId")
+            Log.i("AddRoom", "CLICK name='${room.name}' projectId=$projectId")
 
             val exists = roomDao.existsByNameInProject(room.name, projectId)
             if (exists) throw RoomAlreadyExistsException("Комната '${room.name}' уже существует")
@@ -118,36 +117,36 @@ class RoomRepositoryImpl @Inject constructor(
 
     override suspend fun deleteRoom(roomId: Long) {
         withContext(dispatchers) {
-            val current = roomDao.getRoomById(roomId) ?: throw RoomNotFoundException("Комната $roomId не найдена")
+            val current = roomDao.getRoomById(roomId)
+                ?: throw RoomNotFoundException("Комната $roomId не найдена")
             val projectId = current.projectId
+            val isDraft = projectId.isNullOrBlank() || projectId.startsWith("draft-")
 
-            // 1) Пытаемся удалить на сервере (если не draft и есть UUID)
-            if (!projectId.isNullOrBlank() && !projectId.startsWith("draft-")) {
-                val roomUuid = uuidDao.getRoomUuidByLocal(roomId)
-                // КАСКАДНО: соберём device UUID этой комнаты
-                val devicesInRoom: List<DeviceEntity> = deviceDao.getAllDevicesByRoomId(roomId)
-                val deviceUuids = devicesInRoom.mapNotNull { uuidDao.getDeviceUuidByLocal(it.deviceId) }
+            // список device UUID для каскада на сервере
+            val devicesInRoom: List<DeviceEntity> = deviceDao.getAllDevicesByRoomId(roomId)
+            val deviceUuids = devicesInRoom.mapNotNull { uuidDao.getDeviceUuidByLocal(it.deviceId) }
+            val roomUuid = uuidDao.getRoomUuidByLocal(roomId)
 
-                if (roomUuid != null || deviceUuids.isNotEmpty()) {
-                    runCatching {
-                        val ops = Ops(
-                            rooms = if (roomUuid != null)
-                                OpBucket(upsert = emptyList(), delete = listOf(roomUuid))
-                            else null,
-                            groups = null,
-                            devices = if (deviceUuids.isNotEmpty())
-                                OpBucket(upsert = emptyList(), delete = deviceUuids)
-                            else null
-                        )
-                        projectsApi.applyBatch(projectId, ProjectBatchRequest(baseVersion = null, ops = ops))
-                        Log.i("RoomDelete", "Server delete ok: roomUuid=$roomUuid, devices=${deviceUuids.size}, project=$projectId")
-                    }.onFailure { t ->
-                        Log.w("RoomDelete", "Server delete failed: ${t.message}", t)
-                    }
+            if (!isDraft && (roomUuid != null || deviceUuids.isNotEmpty())) {
+                // 1) Удаляем НА СЕРВЕРЕ (атомарно через batch). Если не получилось — не трогаем локально.
+                val ops = Ops(
+                    rooms   = roomUuid?.let { OpBucket(upsert = emptyList(), delete = listOf(it)) },
+                    groups  = null,
+                    devices = if (deviceUuids.isNotEmpty())
+                        OpBucket(upsert = emptyList(), delete = deviceUuids)
+                    else null
+                )
+                try {
+                    projectsApi.applyBatch(projectId!!, ProjectBatchRequest(baseVersion = null, ops = ops))
+                    Log.i("RoomDelete", "Server delete ok: room=$roomUuid dev=${deviceUuids.size} project=$projectId")
+                } catch (t: Throwable) {
+                    Log.w("RoomDelete", "Server delete failed, keep local. reason=${t.message}", t)
+                    // важный момент: НЕ удаляем локально, иначе они вернутся со снапшотом
+                    throw t
                 }
             }
 
-            // 2) Локально удаляем комнату и побочные сущности
+            // 2) Локально удаляем комнату и производные
             val rowsDeleted = roomDao.deleteRoomById(roomId)
             if (rowsDeleted == 0) throw RoomNotFoundException("Комната $roomId не найдена")
             explicationRepository.handleRoomDeletion(roomId)
@@ -187,7 +186,7 @@ class RoomRepositoryImpl @Inject constructor(
     override suspend fun addRoomWithDevices(req: RoomCreateRequest): CreatedRoomResult =
         withContext(dispatchers) {
             val projectId = projectsRepo.ensureActiveDraft()
-            android.util.Log.i("AddRoomWD", "CLICK name='${req.name}' projectId=$projectId")
+            Log.i("AddRoomWD", "CLICK name='${req.name}' projectId=$projectId")
 
             val exists = roomDao.existsByNameInProject(req.name, projectId)
             if (exists) throw IllegalArgumentException("Комната '${req.name}' уже существует")
@@ -200,7 +199,10 @@ class RoomRepositoryImpl @Inject constructor(
             val (roomId, deviceIds) = roomsTxDao.insertRoomWithDevices(room, devices)
 
             loadDao.addLoad(
-                LoadEntity(name = req.name, currentRoom = 0.0, powerRoom = 0, countDevices = 0, createdAt = Date(), roomId = roomId, projectId = projectId)
+                LoadEntity(
+                    name = req.name, currentRoom = 0.0, powerRoom = 0,
+                    countDevices = 0, createdAt = Date(), roomId = roomId, projectId = projectId
+                )
             )
 
             SyncProjectsWorker.enqueue(context, projectId)
@@ -211,7 +213,8 @@ class RoomRepositoryImpl @Inject constructor(
         roomId: Long,
         devices: List<DeviceCreateRequest>
     ): List<Long> = withContext(dispatchers) {
-        val room = roomDao.getRoomById(roomId) ?: throw RoomNotFoundException("Комната $roomId не найдена")
+        val room = roomDao.getRoomById(roomId)
+            ?: throw RoomNotFoundException("Комната $roomId не найдена")
         val projectId = room.projectId
         val entities = expand(devices, roomId = roomId, projectId = projectId)
         val ids = roomsTxDao.insertDevices(entities)
@@ -220,32 +223,31 @@ class RoomRepositoryImpl @Inject constructor(
     }
 
     override suspend fun deleteDevices(deviceIds: List<Long>) = withContext(dispatchers) {
-        if (deviceIds.isNotEmpty()) {
-            val anyDevice = deviceDao.getDeviceById(deviceIds.firstOrNull()?.toInt() ?: return@withContext) ?: return@withContext
-            val projectId = anyDevice.projectId
+        if (deviceIds.isEmpty()) return@withContext
 
-            // 1) Пытаемся удалить на сервере (если не draft и знаем UUID’ы)
-            if (!projectId.isNullOrBlank() && !projectId.startsWith("draft-")) {
-                val uuidsToDelete = deviceIds.mapNotNull { id -> uuidDao.getDeviceUuidByLocal(id) }
-                if (uuidsToDelete.isNotEmpty()) {
-                    runCatching {
-                        val ops = Ops(
-                            rooms = null,
-                            groups = null,
-                            devices = OpBucket(upsert = emptyList(), delete = uuidsToDelete)
-                        )
-                        projectsApi.applyBatch(projectId, ProjectBatchRequest(baseVersion = null, ops = ops))
-                        Log.i("DeviceDelete", "Server delete ok: count=${uuidsToDelete.size} project=$projectId")
-                    }.onFailure { t ->
-                        Log.w("DeviceDelete", "Server delete failed: ${t.message}", t)
-                    }
+        val anyDevice = deviceDao.getDeviceById(deviceIds.first().toInt()) ?: return@withContext
+        val projectId = anyDevice.projectId
+        val isDraft = projectId.isNullOrBlank() || projectId.startsWith("draft-")
+
+        if (!isDraft) {
+            val uuidsToDelete = deviceIds.mapNotNull { id -> uuidDao.getDeviceUuidByLocal(id) }
+            if (uuidsToDelete.isNotEmpty()) {
+                try {
+                    val ops = Ops(
+                        rooms = null, groups = null,
+                        devices = OpBucket(upsert = emptyList(), delete = uuidsToDelete)
+                    )
+                    projectsApi.applyBatch(projectId!!, ProjectBatchRequest(baseVersion = null, ops = ops))
+                    Log.i("DeviceDelete", "Server delete ok: count=${uuidsToDelete.size} project=$projectId")
+                } catch (t: Throwable) {
+                    Log.w("DeviceDelete", "Server delete failed, keep local. reason=${t.message}", t)
+                    throw t
                 }
             }
-
-            // 2) Локальное удаление
-            roomsTxDao.deleteDevicesByIds(deviceIds)
-            projectId?.let { SyncProjectsWorker.enqueue(context, it) }
         }
+
+        roomsTxDao.deleteDevicesByIds(deviceIds)
+        projectId?.let { SyncProjectsWorker.enqueue(context, it) }
     }
 
     private fun expand(
