@@ -34,13 +34,12 @@ fun NavGraphApp(
 ) {
     NavHost(
         navController = navController,
-        startDestination = BottomNavItem.Rooms.route,
-        modifier = Modifier.padding(padding)
+        startDestination = Screens.RoomsList.route, // было BottomNavItem.Rooms.route
+        modifier = modifier // паддинги уже применены наверху
     ) {
-        // Комнаты
         composable(route = Screens.RoomsList.route) {
             RoomsScreen(
-                onAddRoom = { /* handled inside RoomsScreen */ },
+                onAddRoom = { /* ... */ },
                 onClickRoom = { roomId ->
                     navController.navigate(Screens.RoomDetailScreen.createRoute(roomId)) {
                         launchSingleTop = true
@@ -48,23 +47,17 @@ fun NavGraphApp(
                 }
             )
         }
-
-        // Нагрузки
         composable(route = Screens.LoadsScreen.route) { PhaseLoadScreen() }
+        composable(route = Screens.ExploitationScreen.route) { ExplicationScreen() }
 
-        // Экспликация
-        composable(route = BottomNavItem.Exploitation.route) { ExplicationScreen() }
-
-        // Детали комнаты
         composable(
             route = Screens.RoomDetailScreen.route,
             arguments = listOf(navArgument("roomId") { type = NavType.LongType })
-        ) { backStackEntry ->
-            val vm: RoomDetailViewModel = hiltViewModel(backStackEntry)
+        ) {
+            val vm: RoomDetailViewModel = hiltViewModel(it)
             RoomDetailScreen(vm = vm, onBack = { navController.popBackStack() })
         }
 
-        // Настройки
         composable(Screens.SettingsScreen.route) {
             SettingsScreen(
                 onBack = { navController.popBackStack() },
@@ -72,20 +65,14 @@ fun NavGraphApp(
             )
         }
 
-        // Объяснение алгоритма
         composable(Screens.AlgorithmExplanationScreen.route) {
             AlgorithmExplanationScreen(navController)
         }
 
-        // Фазная нагрузка
         composable(Screens.PhaseLoadScreen.route) { PhaseLoadScreen() }
 
-        // Профиль — сюда передаём общий authVm
         composable(Screens.ProfileScreen.route) {
-            ProfileScreen(
-                authVm = authVm,
-                onBack = { navController.popBackStack() }
-            )
+            ProfileScreen(authVm = authVm, onBack = { navController.popBackStack() })
         }
     }
 }

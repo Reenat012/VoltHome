@@ -7,10 +7,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.WorkspacePremium
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Divider
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -21,11 +23,14 @@ import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,7 +45,7 @@ import ru.mugalimov.volthome.ui.model.UserProfileUi
 
 /**
  * Левый Start Drawer + AppBar.
- * Секция проектов: без плейсхолдера «Проектов пока нет».
+ * Секция проектов: с меню у каждой карточки: переименовать / удалить.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,10 +61,19 @@ fun StartDrawer(
     onOpenProfile: () -> Unit,
     onOpenSubscription: () -> Unit,
     onOpenAbout: () -> Unit,
+    // ↓↓↓ новое
+    onRenameProject: (id: String, newName: String) -> Unit = { _, _ -> },
+    onDeleteProject: (id: String) -> Unit = {},
+    // ↑↑↑ новое
     bottomBar: @Composable () -> Unit = {},
     content: @Composable (openDrawer: () -> Unit) -> Unit
 ) {
     val scope = rememberCoroutineScope()
+
+    // ------------ локальное UI-состояние меню и диалогов ------------
+    var menuForProjectId by remember { mutableStateOf<String?>(null) }
+    var renameDialog by remember { mutableStateOf<Pair<String, String>?>(null) } // (id, currentName)
+    var deleteConfirmForId by remember { mutableStateOf<String?>(null) }
 
     BackHandler(enabled = drawerState.isOpen) {
         scope.launch { drawerState.close() }
@@ -83,25 +97,72 @@ fun StartDrawer(
                 // --- Мои проекты ---
                 DrawerSectionTitle("Мои проекты")
 
-                // без плейсхолдера — просто список, если пусто, ниже есть «+ Новый проект»
                 projects.forEach { p ->
-                    NavigationDrawerItem(
-                        label = {
-                            Text(
-                                text = p.name,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                fontWeight = if (p.isActive) FontWeight.SemiBold else null
+                    // сам айтем проекта
+                    Box {
+                        NavigationDrawerItem(
+                            label = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    // СЛЕВА: кнопка вызова меню (три точки)
+                                    IconButton(
+                                        onClick = { menuForProjectId = p.id },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(Icons.Default.MoreVert, contentDescription = "Меню проекта")
+                                    }
+                                    Spacer(Modifier.width(4.dp))
+
+                                    // Иконка проекта (опционально оставляем щит)
+                                    Icon(
+                                        Icons.Default.Shield,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+
+                                    // Название
+                                    Text(
+                                        text = p.name,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        fontWeight = if (p.isActive) FontWeight.SemiBold else null
+                                    )
+                                }
+                            },
+                            selected = p.isActive,
+                            onClick = {
+                                scope.launch { drawerState.close() }
+                                onSelectProject(p.id)
+                            },
+                            // icon-слот уже занят внутри label по факту – поэтому здесь пусто
+                            icon = {},
+                            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                        )
+
+                        // Выпадающее меню конкретно для этого проекта
+                        DropdownMenu(
+                            expanded = menuForProjectId == p.id,
+                            onDismissRequest = { menuForProjectId = null }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Переименовать") },
+                                onClick = {
+                                    menuForProjectId = null
+                                    renameDialog = p.id to p.name
+                                }
                             )
-                        },
-                        selected = p.isActive,
-                        onClick = {
-                            scope.launch { drawerState.close() }
-                            onSelectProject(p.id)
-                        },
-                        icon = { Icon(Icons.Default.Shield, contentDescription = null) },
-                        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-                    )
+                            DropdownMenuItem(
+                                text = { Text("Удалить") },
+                                onClick = {
+                                    menuForProjectId = null
+                                    deleteConfirmForId = p.id
+                                }
+                            )
+                        }
+                    }
                 }
 
                 NavigationDrawerItem(
@@ -179,6 +240,57 @@ fun StartDrawer(
                 content { scope.launch { drawerState.open() } }
             }
         }
+    }
+
+    // ---------------- Диалог «Переименовать» ----------------
+    val renameData = renameDialog
+    if (renameData != null) {
+        var text by remember(renameData.first) { mutableStateOf(renameData.second) }
+        AlertDialog(
+            onDismissRequest = { renameDialog = null },
+            title = { Text("Переименовать проект") },
+            text = {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    singleLine = true,
+                    label = { Text("Название") }
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = text.isNotBlank(),
+                    onClick = {
+                        onRenameProject(renameData.first, text.trim())
+                        renameDialog = null
+                    }
+                ) { Text("Сохранить") }
+            },
+            dismissButton = {
+                TextButton(onClick = { renameDialog = null }) { Text("Отмена") }
+            }
+        )
+    }
+
+    // ---------------- Диалог подтверждения удаления ----------------
+    val toDelete = deleteConfirmForId
+    if (toDelete != null) {
+        AlertDialog(
+            onDismissRequest = { deleteConfirmForId = null },
+            title = { Text("Удалить проект?") },
+            text = { Text("Проект и связанные данные будут удалены. Это действие нельзя отменить.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeleteProject(toDelete)
+                        deleteConfirmForId = null
+                    }
+                ) { Text("Удалить") }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteConfirmForId = null }) { Text("Отмена") }
+            }
+        )
     }
 }
 

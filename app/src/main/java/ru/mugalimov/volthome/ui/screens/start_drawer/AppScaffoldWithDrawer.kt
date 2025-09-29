@@ -16,7 +16,7 @@ import ru.mugalimov.volthome.ui.model.UserProfileUi
 
 /**
  * Обёртка для интеграции Drawer в основной контейнер.
- * Теперь поддерживает [bottomBar].
+ * Теперь поддерживает [bottomBar] и меню проекта (переименовать/удалить).
  */
 @Composable
 fun AppScaffoldWithDrawer(
@@ -31,6 +31,10 @@ fun AppScaffoldWithDrawer(
     onOpenProfile: () -> Unit,
     onOpenSubscription: () -> Unit,
     onOpenAbout: () -> Unit,
+    // ↓↓↓ новое
+    onRenameProject: (id: String, newName: String) -> Unit = { _, _ -> },
+    onDeleteProject: (id: String) -> Unit = {},
+    // ↑↑↑ новое
     bottomBar: @Composable () -> Unit = {},
     content: @Composable () -> Unit
 ) {
@@ -49,6 +53,8 @@ fun AppScaffoldWithDrawer(
         onOpenProfile = onOpenProfile,
         onOpenSubscription = onOpenSubscription,
         onOpenAbout = onOpenAbout,
+        onRenameProject = onRenameProject,   // проброс
+        onDeleteProject = onDeleteProject,   // проброс
         bottomBar = bottomBar
     ) { _ ->
         Box(Modifier.fillMaxSize()) {
