@@ -38,4 +38,16 @@ interface UuidMapDao {
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun putDevices(items: List<UuidMapDevice>)
+
+    @Query("""
+        DELETE FROM uuid_map_rooms 
+        WHERE local_id IN (SELECT id FROM rooms WHERE project_id = :projectId)
+    """)
+    suspend fun deleteRoomMapsByProject(projectId: String): Int
+
+    @Query("""
+        DELETE FROM uuid_map_devices 
+        WHERE local_id IN (SELECT device_id FROM devices WHERE project_id = :projectId)
+    """)
+    suspend fun deleteDeviceMapsByProject(projectId: String): Int
 }

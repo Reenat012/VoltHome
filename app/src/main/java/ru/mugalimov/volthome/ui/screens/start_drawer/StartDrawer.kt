@@ -106,30 +106,22 @@ fun StartDrawer(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    // СЛЕВА: кнопка вызова меню (три точки)
+                                    // Название
+                                    Text(
+                                        text = p.name,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        fontWeight = if (p.isActive) FontWeight.SemiBold else null,
+                                        modifier = Modifier.weight(1f) // <-- растягиваем, чтобы текст занимал всё доступное
+                                    )
+
+                                    // СПРАВА: кнопка вызова меню (три точки)
                                     IconButton(
                                         onClick = { menuForProjectId = p.id },
                                         modifier = Modifier.size(36.dp)
                                     ) {
                                         Icon(Icons.Default.MoreVert, contentDescription = "Меню проекта")
                                     }
-                                    Spacer(Modifier.width(4.dp))
-
-                                    // Иконка проекта (опционально оставляем щит)
-                                    Icon(
-                                        Icons.Default.Shield,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(Modifier.width(8.dp))
-
-                                    // Название
-                                    Text(
-                                        text = p.name,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        fontWeight = if (p.isActive) FontWeight.SemiBold else null
-                                    )
                                 }
                             },
                             selected = p.isActive,
@@ -137,7 +129,6 @@ fun StartDrawer(
                                 scope.launch { drawerState.close() }
                                 onSelectProject(p.id)
                             },
-                            // icon-слот уже занят внутри label по факту – поэтому здесь пусто
                             icon = {},
                             modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                         )
@@ -166,7 +157,7 @@ fun StartDrawer(
                 }
 
                 NavigationDrawerItem(
-                    label = { Text("+ Новый проект") },
+                    label = { Text("+ Добавить проект") },
                     selected = false,
                     onClick = {
                         scope.launch { drawerState.close() }
@@ -284,6 +275,7 @@ fun StartDrawer(
                     onClick = {
                         onDeleteProject(toDelete)
                         deleteConfirmForId = null
+                        scope.launch { drawerState.close() }
                     }
                 ) { Text("Удалить") }
             },

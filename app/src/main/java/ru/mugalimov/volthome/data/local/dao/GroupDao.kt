@@ -76,4 +76,7 @@ interface GroupDao {
 
     @Query("UPDATE `groups` SET project_id = :newId WHERE project_id = :oldId")
     suspend fun rebindProjectGroups(oldId: String, newId: String): Int
+
+    @Query("DELETE FROM `groups` WHERE project_id = :projectId")
+    suspend fun deleteGroupsByProject(projectId: String): Int
 }

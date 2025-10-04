@@ -57,44 +57,12 @@ sealed class BottomNavItem(
 ) {
     data object Rooms : BottomNavItem("Комнаты", Icons.Default.Home, "rooms")
     data object Loads : BottomNavItem("Нагрузки", Icons.Default.Speed, "loads")
-    data object Exploitation : BottomNavItem("Экспликация", Icons.Default.List, "exploitation")
+    data object Explication : BottomNavItem("Экспликация", Icons.Default.List, "explication")
 }
 
 // ---------- Drawer state через CompositionLocal ----------
 
 val LocalDrawerState = staticCompositionLocalOf<DrawerState?> { null }
-
-// ---------- TopAppBar с гамбургером и БЕЗ actions ----------
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun MainTopAppBar(
-    rootNavController: NavHostController,
-    mainNavController: NavHostController
-) {
-    val drawerState = LocalDrawerState.current
-    val scope = rememberCoroutineScope()
-
-    TopAppBar(
-        title = { Text("VoltHome") },
-        navigationIcon = {
-            IconButton(
-                onClick = {
-                    drawerState?.let { ds ->
-                        scope.launch { ds.open() }
-                    }
-                }
-            ) {
-                Icon(Icons.Filled.Menu, contentDescription = "Открыть меню")
-            }
-        },
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-        )
-        // ВАЖНО: никаких actions — профиль/настройки теперь в Drawer
-    )
-}
 
 // ---------- Bottom bar (как у тебя было) ----------
 
@@ -106,7 +74,7 @@ fun MainBottomNavBar(navController: NavHostController) {
         listOf(
             BottomNavItem.Rooms,
             BottomNavItem.Loads,
-            BottomNavItem.Exploitation
+            BottomNavItem.Explication
         ).forEach { item ->
             NavigationBarItem(
                 icon = { Icon(item.icon, item.title) },

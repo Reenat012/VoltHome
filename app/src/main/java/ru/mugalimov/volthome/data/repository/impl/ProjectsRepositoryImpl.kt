@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.data.repository.impl
 
+import androidx.room.withTransaction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
@@ -7,6 +8,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import retrofit2.HttpException
 import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
 import ru.mugalimov.volthome.data.local.entity.ProjectEntity
 import ru.mugalimov.volthome.data.mapper.toDomainProject
@@ -177,52 +179,63 @@ class ProjectsRepositoryImpl @Inject constructor(
             val dao = db.projectDao()
             val current = dao.getById(id)
 
+            // 1) Optimistic update локально
             dao.upsert(
                 (current ?: ProjectEntity(
-                    id = id,
-                    name = name,
-                    note = null,
-                    version = 0,
-                    updated_at = nowIso,
-                    is_deleted = false
-                )).copy(
-                    name = name,
-                    updated_at = nowIso
-                )
+                    id = id, name = name, note = null, version = 0, updated_at = nowIso, is_deleted = false
+                )).copy(name = name, updated_at = nowIso)
             )
 
+            // 2) Помечаем как «грязный»
             val stateDao = db.projectLocalStateDao()
             val st = stateDao.get(id)
             stateDao.upsert(
                 (st ?: ru.mugalimov.volthome.data.local.entity.ProjectLocalStateEntity(
-                    project_id = id,
-                    remote_version = 0,
-                    last_sync_at = null,
-                    has_local_changes = false
+                    project_id = id, remote_version = 0, last_sync_at = null, has_local_changes = false
                 )).copy(has_local_changes = true)
             )
 
-            runCatching {
-                val updated = api.updateProjectMeta(id, UpdateProjectRequest(name = name, note = current?.note))
-                db.projectDao().upsert(
-                    ProjectEntity(
-                        id = updated.id,
-                        name = updated.name,
-                        note = updated.note,
-                        version = updated.version,
-                        updated_at = updated.updated_at,
-                        is_deleted = updated.is_deleted
-                    )
-                )
-                stateDao.upsert(
-                    ru.mugalimov.volthome.data.local.entity.ProjectLocalStateEntity(
-                        project_id = updated.id,
-                        remote_version = updated.version,
-                        last_sync_at = TimeUtils.formatIso(TimeUtils.now()),
-                        has_local_changes = false
-                    )
-                )
+            // 3) Пытаемся отправить на сервер, НО безопасно
+            val body = UpdateProjectRequest(name = name, note = current?.note)
+
+            val updated = runCatching {
+                api.updateProjectMetaPatch(id, body)
+            }.recoverCatching { e1 ->
+                if (e1 is HttpException && (e1.code() == 404 || e1.code() == 405)) {
+                    api.updateProjectMetaPutLegacy(id, body)
+                } else throw e1
+            }.recoverCatching { e2 ->
+                if (e2 is HttpException && (e2.code() == 404 || e2.code() == 405)) {
+                    api.updateProjectPutRootLegacy(id, body)
+                } else throw e2
+            }.getOrNull()
+
+            if (updated == null) {
+                // офлайн/сервер недоступен — оставляем локальные изменения и выходим
+                // (опционально) дернуть воркер синка, чтобы он сам допушил позже
+                // SyncProjectsWorker.enqueue(appContext, id)  // см. пункт 3 ниже
+                return@withContext
             }
+
+            // 4) Сервер подтвердил — фиксируем и снимаем флаг «грязный»
+            db.projectDao().upsert(
+                ProjectEntity(
+                    id = updated.id,
+                    name = updated.name,
+                    note = updated.note,
+                    version = updated.version,
+                    updated_at = updated.updated_at,
+                    is_deleted = updated.is_deleted
+                )
+            )
+            stateDao.upsert(
+                ru.mugalimov.volthome.data.local.entity.ProjectLocalStateEntity(
+                    project_id = updated.id,
+                    remote_version = updated.version,
+                    last_sync_at = TimeUtils.formatIso(TimeUtils.now()),
+                    has_local_changes = false
+                )
+            )
         }
     }
 
@@ -232,23 +245,21 @@ class ProjectsRepositoryImpl @Inject constructor(
             val dao = db.projectDao()
             val current = dao.getById(id) ?: return@withContext
 
-            // Локальное мягкое удаление
+            // локальное мягкое удаление (чтобы UI сразу скрыл)
             dao.softDelete(id = id, updatedAt = nowIso, version = current.version)
 
             val stateDao = db.projectLocalStateDao()
             val st = stateDao.get(id)
             stateDao.upsert(
                 (st ?: ru.mugalimov.volthome.data.local.entity.ProjectLocalStateEntity(
-                    project_id = id,
-                    remote_version = 0,
-                    last_sync_at = null,
-                    has_local_changes = false
+                    project_id = id, remote_version = 0, last_sync_at = null, has_local_changes = false
                 )).copy(has_local_changes = true)
             )
 
             // Серверное удаление
             runCatching {
                 val deleted = api.deleteProject(id)
+
                 db.projectDao().upsert(
                     ProjectEntity(
                         id = deleted.id,
@@ -267,9 +278,17 @@ class ProjectsRepositoryImpl @Inject constructor(
                         has_local_changes = false
                     )
                 )
+
+                // 🔻 после успешного ответа сервера — подчистка локальных сущностей проекта
+                db.withTransaction {
+                    // Если у тебя есть соответствующие методы — оставь. Если нет — убери.
+                    runCatching { db.groupDao().deleteGroupsByProject(id) }.getOrElse { /* ok */ }
+                    db.deviceDao().deleteDevicesByProject(id)
+                    db.roomDao().deleteRoomsByProject(id)
+                }
             }
 
-            // Если удаляем активный — снимаем выбор
+            // если удаляем активный — ProjectsViewModel уже переключит на следующий/черновик
             val active = activeProjectDataStore.activeProjectId.firstOrNull()
             if (active == id) {
                 activeProjectDataStore.setActiveProjectId(null)
@@ -281,6 +300,4 @@ class ProjectsRepositoryImpl @Inject constructor(
         activeProjectDataStore.setActiveProjectId(id)
         runCatching { syncManager.syncProject(id) }
     }
-
-
 }

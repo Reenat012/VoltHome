@@ -4,11 +4,13 @@ import android.content.Context
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.withContext
 import ru.mugalimov.volthome.core.error.RoomAlreadyExistsException
 import ru.mugalimov.volthome.core.error.RoomNotFoundException
@@ -63,11 +65,15 @@ class RoomRepositoryImpl @Inject constructor(
 
     private val uuidDao get() = appDb.uuidMapDao()
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     override fun observeRooms(): Flow<List<Room>> {
         return activeProjectDs.activeProjectId
             .flatMapLatest { projectId ->
-                if (projectId != null) roomDao.observeAllRoomsByProject(projectId)
-                else roomDao.observeAllRooms()
+                if (projectId.isNullOrBlank()) {
+                    flowOf(emptyList())
+                } else {
+                    roomDao.observeAllRoomsByProject(projectId)
+                }
             }
             .map { entities -> entities.mapToDomainRooms() }
             .flowOn(dispatchers)
@@ -169,12 +175,11 @@ class RoomRepositoryImpl @Inject constructor(
     override suspend fun getRoomsWithDevices(): List<RoomWithDevice> =
         withContext(dispatchers) {
             val projectId = activeProjectDs.activeProjectId.first()
-            if (projectId != null) {
+            if (!projectId.isNullOrBlank()) {
                 roomDao.observeAllRoomsWithDevicesByProject(projectId)
                     .toDomainModelListRoomWithDevices()
             } else {
-                roomDao.observeAllRoomsWithDevices()
-                    .toDomainModelListRoomWithDevices()
+                emptyList()
             }
         }
 

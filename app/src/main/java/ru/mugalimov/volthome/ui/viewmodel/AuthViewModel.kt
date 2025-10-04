@@ -10,15 +10,12 @@ import kotlinx.coroutines.flow.StateFlow
 import ru.mugalimov.volthome.data.remote.auth.AuthSession
 import ru.mugalimov.volthome.data.repository.AuthRepository
 import ru.mugalimov.volthome.data.repository.ProjectsRepository
-import ru.mugalimov.volthome.data.repository.impl.ProjectsRepositoryImpl
 import javax.inject.Inject
 
 @HiltViewModel
 class AuthViewModel @Inject constructor(
     private val authRepo: AuthRepository,
-    private val projectsRepo: ProjectsRepository,
-    // нам нужен ensureActiveOrCreateLocalDraft(); он в impl — инжектим через интерфейс сверху,
-    // а вызвать будем через safe cast, если реализация наша.
+    private val projectsRepo: ProjectsRepository
 ) : ViewModel() {
 
     sealed interface State {
@@ -35,13 +32,11 @@ class AuthViewModel @Inject constructor(
         viewModelScope.launch {
             val session = authRepo.currentSession()
             if (session != null && !session.isExpired) {
-                // 1) сразу даём UI зелёный свет
+                // 1) даём UI зелёный свет
                 _state.value = State.Success(session)
 
-                // 2) гарантируем активный проект (черновик при необходимости)
-                launch { runCatching { projectsRepo.ensureActiveDraft() } }
-
-                // 3) фоном подтягиваем проекты в Room (будет 1 раз благодаря защите в репозитории)
+                // 2) фоновый бутстрап проектов с сервера (ИДЕМПОТЕНТНО)
+                // ВАЖНО: тут НЕ создаём локальный черновик.
                 launch { runCatching { projectsRepo.bootstrapFromRemote() } }
             } else {
                 _state.value = State.Idle
@@ -56,12 +51,9 @@ class AuthViewModel @Inject constructor(
             val res = authRepo.handleAuthResult(result)
             _state.value = res.fold(
                 onSuccess = { session ->
-                    // Успех авторизации
-                    projectsRepo.ensureActiveDraft()
-
-                    // чФоновый бутстрап (идемпотентно)
+                    // Успех авторизации: НЕ создаём проект автоматически.
+                    // Фоново подтянем проекты (если есть).
                     launch { runCatching { projectsRepo.bootstrapFromRemote() } }
-
                     State.Success(session)
                 },
                 onFailure = { State.Error(mapThrowableToUi(it)) }

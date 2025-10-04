@@ -65,4 +65,7 @@ interface DeviceDao {
 
     @Query("UPDATE devices SET project_id = :newId WHERE project_id = :oldId")
     suspend fun rebindProjectDevices(oldId: String, newId: String): Int
+
+    @Query("DELETE FROM devices WHERE project_id = :projectId")
+    suspend fun deleteDevicesByProject(projectId: String): Int
 }

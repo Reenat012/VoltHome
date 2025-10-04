@@ -36,7 +36,7 @@ fun MainApp(
         setOf(
             Screens.RoomsList.route,
             Screens.LoadsScreen.route,
-            Screens.ExploitationScreen.route
+            Screens.ExplicationScreen.route
         )
     }
     val navBackStackEntry = appNavController.currentBackStackEntryAsState().value
@@ -54,7 +54,8 @@ fun MainApp(
         onOpenProfile = { appNavController.navigate(Screens.ProfileScreen.route) },
         onOpenSubscription = { /* TODO: экран подписки */ },
         onOpenAbout = { rootNavController.navigate(Screens.AboutScreen.route) },
-        // ↓↓↓ нижняя панель вернулась
+        onRenameProject = { id, newName -> projectsVm.renameProject(id, newName) },
+        onDeleteProject = { id -> projectsVm.deleteProject(id) },
         bottomBar = {
             if (currentRoute in bottomRoutes) {
                 MainBottomNavBar(navController = appNavController)

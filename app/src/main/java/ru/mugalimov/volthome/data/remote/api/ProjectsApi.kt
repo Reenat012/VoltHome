@@ -3,6 +3,7 @@ package ru.mugalimov.volthome.data.remote.api
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Path
@@ -42,8 +43,29 @@ interface ProjectsApi {
         val note: String? = null
     )
 
+    /**
+     * Основной актуальный эндпоинт: частичное обновление метаданных.
+     */
+    @PATCH("/v1/projects/{id}/meta")
+    suspend fun updateProjectMetaPatch(
+        @Path("id") id: String,
+        @Body body: UpdateProjectRequest
+    ): ProjectShortDto
+
+    /**
+     * Фолбэк №1: если сервер ожидает PUT на /meta.
+     */
+    @PUT("/v1/projects/{id}/meta")
+    suspend fun updateProjectMetaPutLegacy(
+        @Path("id") id: String,
+        @Body body: UpdateProjectRequest
+    ): ProjectShortDto
+
+    /**
+     * Фолбэк №2: если сервер принимает обновление по корню /v1/projects/{id}.
+     */
     @PUT("/v1/projects/{id}")
-    suspend fun updateProjectMeta(
+    suspend fun updateProjectPutRootLegacy(
         @Path("id") id: String,
         @Body body: UpdateProjectRequest
     ): ProjectShortDto
@@ -60,7 +82,7 @@ interface ProjectsApi {
         @Query("since") since: String
     ): ProjectDeltaResponse
 
-    // ------- ДОБАВЛЕНО: snapshot дерева проекта -------
+    // snapshot дерева проекта
     @GET("/v1/projects/{id}")
     suspend fun getProjectTree(
         @Path("id") id: String

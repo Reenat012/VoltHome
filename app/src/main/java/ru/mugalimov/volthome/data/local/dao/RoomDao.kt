@@ -75,5 +75,8 @@ interface RoomDao {
     @Query("UPDATE rooms SET project_id = :newId WHERE project_id = :oldId")
     suspend fun rebindProjectRooms(oldId: String, newId: String): Int
 
+    @Query("DELETE FROM rooms WHERE project_id = :projectId")
+    suspend fun deleteRoomsByProject(projectId: String): Int
+
 
 }

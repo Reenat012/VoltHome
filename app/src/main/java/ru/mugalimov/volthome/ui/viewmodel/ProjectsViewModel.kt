@@ -66,9 +66,16 @@ class ProjectsViewModel @Inject constructor(
             repo.deleteProject(id)
             val active = activeIdFlow.first()
             if (active == id) {
+                // Если удалили активный — пробуем выбрать следующий НЕ удалённый.
                 val next = repo.listProjects().first().firstOrNull { !it.isDeleted }
-                activeDs.setActiveProjectId(next?.id)
-                next?.let { repo.openProject(it.id) }
+                if (next != null) {
+                    activeDs.setActiveProjectId(next.id)
+                    repo.openProject(next.id)
+                } else {
+                    // ❗ Больше проектов нет — НЕ создаём черновик автоматически.
+                    // Оставляем activeProjectId = null, UI покажет пустое состояние.
+                    activeDs.setActiveProjectId(null)
+                }
             }
         }
     }

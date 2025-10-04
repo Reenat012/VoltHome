@@ -48,7 +48,7 @@ fun NavGraphApp(
             )
         }
         composable(route = Screens.LoadsScreen.route) { PhaseLoadScreen() }
-        composable(route = Screens.ExploitationScreen.route) { ExplicationScreen() }
+        composable(route = Screens.ExplicationScreen.route) { ExplicationScreen() }
 
         composable(
             route = Screens.RoomDetailScreen.route,
