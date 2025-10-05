@@ -89,8 +89,10 @@ fun StartDrawer(
                 DrawerHeader(
                     profile = profile,
                     onLogout = {
-                        scope.launch { drawerState.close() }
-                        onLogout()
+                        scope.launch {
+                            drawerState.close()
+                            onLogout()
+                        }
                     }
                 )
 
@@ -112,7 +114,7 @@ fun StartDrawer(
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                         fontWeight = if (p.isActive) FontWeight.SemiBold else null,
-                                        modifier = Modifier.weight(1f) // <-- растягиваем, чтобы текст занимал всё доступное
+                                        modifier = Modifier.weight(1f)
                                     )
 
                                     // СПРАВА: кнопка вызова меню (три точки)
@@ -126,8 +128,12 @@ fun StartDrawer(
                             },
                             selected = p.isActive,
                             onClick = {
-                                scope.launch { drawerState.close() }
-                                onSelectProject(p.id)
+                                // ВАЖНО: навигацию делаем ПОСЛЕ закрытия Drawer,
+                                // в одной корутине — иначе на некоторых экранах переход «глотается».
+                                scope.launch {
+                                    drawerState.close()
+                                    onSelectProject(p.id)
+                                }
                             },
                             icon = {},
                             modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
@@ -160,8 +166,10 @@ fun StartDrawer(
                     label = { Text("+ Добавить проект") },
                     selected = false,
                     onClick = {
-                        scope.launch { drawerState.close() }
-                        onCreateProject()
+                        scope.launch {
+                            drawerState.close()
+                            onCreateProject()
+                        }
                     },
                     icon = { Icon(Icons.Default.Shield, contentDescription = null) },
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
@@ -175,8 +183,10 @@ fun StartDrawer(
                     label = { Text("Настройки") },
                     selected = false,
                     onClick = {
-                        scope.launch { drawerState.close() }
-                        onOpenSettings()
+                        scope.launch {
+                            drawerState.close()
+                            onOpenSettings()
+                        }
                     },
                     icon = { Icon(Icons.Default.Settings, contentDescription = null) },
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
@@ -185,8 +195,10 @@ fun StartDrawer(
                     label = { Text("Профиль") },
                     selected = false,
                     onClick = {
-                        scope.launch { drawerState.close() }
-                        onOpenProfile()
+                        scope.launch {
+                            drawerState.close()
+                            onOpenProfile()
+                        }
                     },
                     icon = { Icon(Icons.Default.Person, contentDescription = null) },
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
@@ -195,8 +207,10 @@ fun StartDrawer(
                     label = { Text("Подписка PRO") },
                     selected = false,
                     onClick = {
-                        scope.launch { drawerState.close() }
-                        onOpenSubscription()
+                        scope.launch {
+                            drawerState.close()
+                            onOpenSubscription()
+                        }
                     },
                     icon = { Icon(Icons.Default.WorkspacePremium, contentDescription = null) },
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
@@ -205,8 +219,10 @@ fun StartDrawer(
                     label = { Text("О приложении") },
                     selected = false,
                     onClick = {
-                        scope.launch { drawerState.close() }
-                        onOpenAbout()
+                        scope.launch {
+                            drawerState.close()
+                            onOpenAbout()
+                        }
                     },
                     icon = { Icon(Icons.Default.Info, contentDescription = null) },
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)

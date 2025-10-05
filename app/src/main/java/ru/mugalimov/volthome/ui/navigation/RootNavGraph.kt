@@ -11,6 +11,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.yandex.authsdk.YandexAuthSdk
 import kotlinx.coroutines.flow.collectLatest
+import ru.mugalimov.volthome.ui.screens.MainApp
 import ru.mugalimov.volthome.ui.screens.auth.AuthScreen
 import ru.mugalimov.volthome.ui.viewmodel.AuthViewModel
 

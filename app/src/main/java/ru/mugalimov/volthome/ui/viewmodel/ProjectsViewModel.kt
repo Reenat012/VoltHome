@@ -22,14 +22,15 @@ class ProjectsViewModel @Inject constructor(
     private val activeDs: ActiveProjectDataStore
 ) : ViewModel() {
 
-    private val activeIdFlow: Flow<String?> = activeDs.activeProjectId.distinctUntilChanged()
+    // Публичный поток активного проекта (важно для навигации из любых экранов)
+    val activeProjectId: Flow<String?> = activeDs.activeProjectId.distinctUntilChanged()
 
     /**
-     * Порядок теперь отдаёт DAO (rowid ASC = порядок создания).
-     * Никакой дополнительной сортировки по updatedAt в VM не делаем.
+     * Порядок отдаёт DAO (rowid ASC = порядок создания).
+     * Без дополнительной сортировки по updatedAt.
      */
     val projectsUi: Flow<List<ProjectUi>> =
-        combine(repo.listProjects(), activeIdFlow) { list, activeId ->
+        combine(repo.listProjects(), activeProjectId) { list, activeId ->
             list.map { p ->
                 ProjectUi(
                     id = p.id,
@@ -44,8 +45,7 @@ class ProjectsViewModel @Inject constructor(
             val title = name?.takeIf { it.isNotBlank() } ?: defaultProjectName()
             repo.createProject(title, note = null)
 
-            // Активным делаем "самый новый" — в нашем случае это последний по rowid,
-            // но безопаснее взять по updatedAt из доменной модели:
+            // Активным делаем "самый новый"
             val newest: Project? = repo.listProjects().first().maxByOrNull { it.updatedAt }
             newest?.let {
                 activeDs.setActiveProjectId(it.id)
@@ -68,8 +68,8 @@ class ProjectsViewModel @Inject constructor(
     fun deleteProject(id: String) {
         viewModelScope.launch {
             repo.deleteProject(id)
-            val active = activeIdFlow.first()
-            if (active == id) {
+            val current = activeProjectId.first()
+            if (current == id) {
                 val next = repo.listProjects().first().firstOrNull { !it.isDeleted }
                 if (next != null) {
                     activeDs.setActiveProjectId(next.id)
