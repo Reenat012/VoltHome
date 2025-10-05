@@ -113,15 +113,12 @@ class OutboxPusher @Inject constructor(
                         total += items.size
                         done  += result.done
                         failed += result.failed
-
-                        // считаем прогресс только если мы хоть что-то отметили DONE/FAILED
                         if (result.done > 0 || result.failed > 0) madeProgress = true
                     } catch (t: Throwable) {
                         Log.w("Outbox", "group push failed: ${t.message}", t)
                         items.forEach { outboxDao.markAttempt(it.id, OutboxState.FAILED_RETRYABLE, t.message) }
                         total += items.size
                         failed += items.size
-                        // это тоже прогресс: мы обновили попытку/стейт
                         madeProgress = true
                     }
                     delay(jitterMs())
@@ -158,7 +155,6 @@ class OutboxPusher @Inject constructor(
 
     /** Обработка одной проектной группы outbox-записей: публикация драфта (если нужно) + batch. */
     private suspend fun pushOneProjectGroup(rawProjectId: String?, items: List<OutboxEntity>): PushStats {
-        // Глобальных операций без project_id сейчас не поддерживаем — помечаем фаталом.
         if (rawProjectId.isNullOrBlank()) {
             outboxDao.markState(items.map { it.id }, OutboxState.FAILED_FATAL)
             return PushStats(total = items.size, done = 0, failed = items.size)
@@ -173,13 +169,11 @@ class OutboxPusher @Inject constructor(
         var effectiveProjectId = rawProjectId
         var remainingItems = items
 
-        // Если это драфт — попробуем опубликовать прямо здесь (ищем PROJECT_CREATE)
         if (rawProjectId.startsWith("draft-")) {
             val createItem = items.firstOrNull { it.op_type == OutboxOpType.PROJECT_CREATE }
             if (createItem == null) {
-                // Нет PROJECT_CREATE → ещё рано пушить, ждём появления этой операции
                 Log.d("Outbox", "draft group without PROJECT_CREATE → skip (no-op): project=$rawProjectId")
-                return PushStats(total = items.size, done = 0, failed = 0) // нет прогресса, pushAll завершит проход
+                return PushStats(total = items.size, done = 0, failed = 0)
             }
 
             try {
@@ -190,12 +184,10 @@ class OutboxPusher @Inject constructor(
                 val remoteId = created.id
                 Log.i("Outbox", "draft published ok: remoteId=$remoteId (v${created.version})")
 
-                // Ребайнд локальных сущностей и перенос состояния
                 val groupDaoOrNull = runCatching { appDb.groupDao() }.getOrNull()
                 val stateDao = appDb.projectLocalStateDao()
 
                 appDb.withTransaction {
-                    // новая серверная запись
                     projectDao.upsert(
                         ru.mugalimov.volthome.data.local.entity.ProjectEntity(
                             id = created.id,
@@ -206,7 +198,6 @@ class OutboxPusher @Inject constructor(
                             is_deleted = created.is_deleted
                         )
                     )
-                    // ребайнд зависимостей с draft → remote
                     val roomsRebound = roomDao.rebindProjectRooms(rawProjectId, remoteId)
                     val devicesRebound = deviceDao.rebindProjectDevices(rawProjectId, remoteId)
                     val groupsRebound = if (groupDaoOrNull != null) {
@@ -214,7 +205,6 @@ class OutboxPusher @Inject constructor(
                     } else 0
                     Log.i("Outbox", "rebind done: rooms=$roomsRebound, devices=$devicesRebound, groups=$groupsRebound")
 
-                    // перенос локального состояния
                     stateDao.delete(rawProjectId)
                     stateDao.upsert(
                         ru.mugalimov.volthome.data.local.entity.ProjectLocalStateEntity(
@@ -225,14 +215,11 @@ class OutboxPusher @Inject constructor(
                         )
                     )
 
-                    // удаляем строку драфта
                     projectDao.deleteById(rawProjectId)
                 }
 
-                // помечаем PROJECT_CREATE как DONE
                 outboxDao.markState(listOf(createItem.id), OutboxState.DONE)
 
-                // теперь пушим оставшиеся операции на серверный UUID
                 effectiveProjectId = remoteId
                 remainingItems = items.filter { it.id != createItem.id }
             } catch (t: Throwable) {
@@ -243,17 +230,14 @@ class OutboxPusher @Inject constructor(
                 } else {
                     outboxDao.markState(listOf(createItem.id), OutboxState.FAILED_FATAL)
                 }
-                // Остальные элементы пока не трогаем — вернёмся в следующем ране
                 return PushStats(total = remainingItems.size + 1, done = 0, failed = if (retryable) 0 else 1)
             }
         }
 
-        // Если после публикации/фильтрации нечего отправлять — помечаем как выполненные
         if (remainingItems.isEmpty()) {
             return PushStats(total = 0, done = 0, failed = 0)
         }
 
-        // Сборка и отправка batch на server UUID
         return try {
             val req = buildBatch(effectiveProjectId, remainingItems)
             if (req.ops == null) {
@@ -277,13 +261,16 @@ class OutboxPusher @Inject constructor(
         }
     }
 
-    /** Собираем batch из группы outbox-записей одного проекта */
+    /** Собираем batch из группы outbox-записей одного проекта (с дедупликацией) */
     private suspend fun buildBatch(projectId: String, items: List<OutboxEntity>): ProjectBatchRequest {
-        val roomUps = mutableListOf<RoomUpsert>()
-        val roomDel = mutableListOf<String>()
+        // --- ROOMS: last-write-wins на уровне uuid ---
+        val roomUpById = LinkedHashMap<String, RoomUpsert>()    // uuid -> upsert
+        val roomDelIds = LinkedHashSet<String>()                 // set(uuid)
 
-        val deviceUps = mutableListOf<DeviceUpsert>()
-        val deviceDel = mutableListOf<String>()
+        // --- DEVICES: last-write-wins; учитываем и uuid, и localId (когда uuid ещё нет) ---
+        val deviceUpById = LinkedHashMap<String, DeviceUpsert>() // uuid -> upsert
+        val deviceUpByLocal = LinkedHashMap<Long, DeviceUpsert>()// localId -> upsert (id=null)
+        val deviceDelIds = LinkedHashSet<String>()               // set(uuid)
 
         for (it in items) {
             when (it.op_type) {
@@ -291,67 +278,61 @@ class OutboxPusher @Inject constructor(
                 OutboxOpType.ROOM_CREATE -> {
                     val p = gson.fromJson(it.payload_json, RoomCreatePayload::class.java)
                     val name = p.name
-                    val roomUuid = uuidDao.getRoomUuidByLocal(p.localId)
-                    if (roomUuid == null) {
-                        val uuid = java.util.UUID.randomUUID().toString()
-                        uuidDao.putRooms(listOf(UuidMapRoom(roomUuid = uuid, localId = p.localId)))
-                        roomUps += RoomUpsert(
-                            id = uuid,
-                            name = name,
-                            meta = mapOf(
-                                "room_type" to p.roomType.name,
-                                "created_at_iso" to iso(Date(p.createdAt))
-                            )
-                        )
-                    } else {
-                        roomUps += RoomUpsert(
-                            id = roomUuid,
-                            name = name,
-                            meta = mapOf(
-                                "room_type" to p.roomType.name,
-                                "created_at_iso" to iso(Date(p.createdAt))
-                            )
-                        )
+                    val existingUuid = uuidDao.getRoomUuidByLocal(p.localId)
+                    val uuid = existingUuid ?: java.util.UUID.randomUUID().toString().also {
+                        uuidDao.putRooms(listOf(UuidMapRoom(roomUuid = it, localId = p.localId)))
                     }
+
+                    val up = RoomUpsert(
+                        id = uuid,
+                        name = name,
+                        meta = mapOf(
+                            "room_type" to p.roomType.name,
+                            "created_at_iso" to iso(Date(p.createdAt))
+                        )
+                    )
+                    // last-wins: upsert затирает, delete снимается
+                    roomDelIds.remove(uuid)
+                    roomUpById[uuid] = up
                 }
 
                 OutboxOpType.ROOM_UPDATE -> {
                     val p = gson.fromJson(it.payload_json, RoomUpdatePayload::class.java)
                     val uuid = uuidDao.getRoomUuidByLocal(p.localId)
-                    if (uuid != null) {
-                        roomUps += RoomUpsert(
-                            id = uuid,
-                            name = p.name,
-                            meta = mapOf("room_type" to p.roomType.name)
-                        )
-                    } else {
-                        val newUuid = java.util.UUID.randomUUID().toString()
-                        uuidDao.putRooms(listOf(UuidMapRoom(roomUuid = newUuid, localId = p.localId)))
-                        roomUps += RoomUpsert(
-                            id = newUuid,
-                            name = p.name,
-                            meta = mapOf("room_type" to p.roomType.name)
-                        )
-                    }
+                        ?: java.util.UUID.randomUUID().toString().also {
+                            uuidDao.putRooms(listOf(UuidMapRoom(roomUuid = it, localId = p.localId)))
+                        }
+
+                    val up = RoomUpsert(
+                        id = uuid,
+                        name = p.name,
+                        meta = mapOf("room_type" to p.roomType.name)
+                    )
+                    roomDelIds.remove(uuid)
+                    roomUpById[uuid] = up
                 }
 
                 OutboxOpType.ROOM_DELETE -> {
                     val p = gson.fromJson(it.payload_json, RoomDeletePayload::class.java)
                     val uuid = p.serverUuid ?: p.localId?.let { lid -> uuidDao.getRoomUuidByLocal(lid) }
-                    if (uuid != null) roomDel += uuid
+                    if (uuid != null) {
+                        // delete побеждает: снимаем upsert и ставим в delete
+                        roomUpById.remove(uuid)
+                        roomDelIds.add(uuid)
+                    }
                 }
 
                 // ---------------- Devices ----------------
                 OutboxOpType.DEVICE_CREATE -> {
                     val p = gson.fromJson(it.payload_json, DeviceCreatePayload::class.java)
-                    val existingUuid = uuidDao.getDeviceUuidByLocal(p.localId)
+                    val deviceUuid = uuidDao.getDeviceUuidByLocal(p.localId)
                     val roomUuid = uuidDao.getRoomUuidByLocal(p.roomLocalId)
                     if (roomUuid == null) {
                         Log.w("Outbox", "device CREATE skip: room has no uuid yet (roomLocal=${p.roomLocalId})")
                         continue
                     }
-                    deviceUps += DeviceUpsert(
-                        id = existingUuid,
+                    val up = DeviceUpsert(
+                        id = deviceUuid, // может быть null — сервер создаст
                         group_id = null,
                         name = p.name,
                         meta = deviceMeta(
@@ -367,16 +348,25 @@ class OutboxPusher @Inject constructor(
                             requiresSocket = p.requiresSocketConnection
                         )
                     )
+                    if (deviceUuid != null) {
+                        deviceDelIds.remove(deviceUuid)
+                        deviceUpById[deviceUuid] = up
+                        deviceUpByLocal.remove(p.localId)
+                    } else {
+                        // пока нет server uuid — ведём last-wins по localId
+                        deviceUpByLocal[p.localId] = up
+                    }
                 }
 
                 OutboxOpType.DEVICE_UPDATE -> {
                     val p = gson.fromJson(it.payload_json, DeviceUpdatePayload::class.java)
-                    val uuid = uuidDao.getDeviceUuidByLocal(p.localId)
+                    val deviceUuid = uuidDao.getDeviceUuidByLocal(p.localId)
                     val roomLocal = p.roomLocalId
                     val roomUuid = roomLocal?.let { uuidDao.getRoomUuidByLocal(it) }
-                    if (uuid == null) {
+
+                    if (deviceUuid == null) {
                         if (roomUuid != null) {
-                            deviceUps += DeviceUpsert(
+                            val up = DeviceUpsert(
                                 id = null,
                                 group_id = null,
                                 name = p.name,
@@ -393,12 +383,14 @@ class OutboxPusher @Inject constructor(
                                     requiresSocket = p.requiresSocketConnection
                                 )
                             )
+                            // last-wins по localId
+                            deviceUpByLocal[p.localId] = up
                         } else {
                             Log.w("Outbox", "device UPDATE skip: no device uuid & no room uuid yet")
                         }
                     } else {
-                        deviceUps += DeviceUpsert(
-                            id = uuid,
+                        val up = DeviceUpsert(
+                            id = deviceUuid,
                             group_id = null,
                             name = p.name,
                             meta = deviceMeta(
@@ -414,16 +406,25 @@ class OutboxPusher @Inject constructor(
                                 requiresSocket = p.requiresSocketConnection
                             )
                         )
+                        deviceDelIds.remove(deviceUuid)
+                        deviceUpById[deviceUuid] = up
+                        deviceUpByLocal.remove(p.localId)
                     }
                 }
 
                 OutboxOpType.DEVICE_DELETE -> {
                     val p = gson.fromJson(it.payload_json, DeviceDeletePayload::class.java)
                     val uuid = p.serverUuid ?: p.localId?.let { lid -> uuidDao.getDeviceUuidByLocal(lid) }
-                    if (uuid != null) deviceDel += uuid
+                    if (uuid != null) {
+                        deviceUpById.remove(uuid)
+                        deviceDelIds.add(uuid)
+                    } else if (p.localId != null) {
+                        // если ещё не было uuid — снимем отложенный upsert по localId
+                        deviceUpByLocal.remove(p.localId)
+                    }
                 }
 
-                // Projects/Groups — здесь не формируем batch; PROJECT_CREATE уже обработали выше.
+                // Projects/Groups — не формируем batch; PROJECT_CREATE уже обработали выше.
                 OutboxOpType.PROJECT_CREATE,
                 OutboxOpType.PROJECT_UPDATE,
                 OutboxOpType.PROJECT_DELETE,
@@ -433,11 +434,21 @@ class OutboxPusher @Inject constructor(
             }
         }
 
-        // Формируем buckets и не шлём пустой ops
-        val roomsBucket = if (roomUps.isNotEmpty() || roomDel.isNotEmpty())
-            OpBucket(upsert = roomUps, delete = roomDel) else null
-        val devicesBucket = if (deviceUps.isNotEmpty() || deviceDel.isNotEmpty())
-            OpBucket(upsert = deviceUps, delete = deviceDel) else null
+        // Собираем buckets. Порядок вставки сохранён (LinkedHash*)
+        val roomsBucket =
+            if (roomUpById.isNotEmpty() || roomDelIds.isNotEmpty())
+                OpBucket(upsert = roomUpById.values.toList(), delete = roomDelIds.toList())
+            else null
+
+        val deviceUps: List<DeviceUpsert> =
+            buildList(deviceUpById.size + deviceUpByLocal.size) {
+                addAll(deviceUpById.values)
+                addAll(deviceUpByLocal.values)
+            }
+        val devicesBucket =
+            if (deviceUps.isNotEmpty() || deviceDelIds.isNotEmpty())
+                OpBucket(upsert = deviceUps, delete = deviceDelIds.toList())
+            else null
 
         val ops: Ops? = if (roomsBucket == null && devicesBucket == null) null
         else Ops(rooms = roomsBucket, groups = null, devices = devicesBucket)
@@ -493,7 +504,7 @@ class OutboxPusher @Inject constructor(
         "room_name" to null,
         "power" to power,
         "voltage_value" to voltage.value,
-        "voltage_type" to deviceType.voltageTypeNameFallback(voltage), // не критично, но даёт явный тип
+        "voltage_type" to deviceType.voltageTypeNameFallback(voltage),
         "demand_ratio" to demandRatio,
         "created_at_iso" to iso(createdAt),
         "device_type" to deviceType.name,
@@ -514,22 +525,19 @@ data class PushStats(
 )
 
 private fun isRetryableError(t: Throwable): Boolean {
-    // сетевые/SSL/таймауты — ретраим
     if (t is java.net.ConnectException ||
         t is java.net.UnknownHostException ||
         t is java.net.SocketTimeoutException ||
         t is javax.net.ssl.SSLException
     ) return true
 
-    // HTTP — ретраим 408/409/425/429/5xx
     if (t is HttpException) {
         val code = t.code()
         if (code == 408 || code == 409 || code == 425 || code == 429) return true
         if (code in 500..599) return true
-        return false // 4xx (кроме перечисленных) — фатал
+        return false
     }
 
-    // по тексту сообщения — запасной план
     val msg = t.message?.lowercase().orEmpty()
     return !(msg.contains("400") || msg.contains("401") || msg.contains("403") || msg.contains("404"))
 }
