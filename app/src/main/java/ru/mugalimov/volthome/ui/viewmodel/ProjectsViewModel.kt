@@ -24,17 +24,19 @@ class ProjectsViewModel @Inject constructor(
 
     private val activeIdFlow: Flow<String?> = activeDs.activeProjectId.distinctUntilChanged()
 
+    /**
+     * Порядок теперь отдаёт DAO (rowid ASC = порядок создания).
+     * Никакой дополнительной сортировки по updatedAt в VM не делаем.
+     */
     val projectsUi: Flow<List<ProjectUi>> =
         combine(repo.listProjects(), activeIdFlow) { list, activeId ->
-            list
-                .sortedByDescending { it.updatedAt }
-                .map { p ->
-                    ProjectUi(
-                        id = p.id,
-                        name = p.name,
-                        isActive = p.id == activeId
-                    )
-                }
+            list.map { p ->
+                ProjectUi(
+                    id = p.id,
+                    name = p.name,
+                    isActive = p.id == activeId
+                )
+            }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun createNewProject(name: String? = null) {
@@ -42,6 +44,8 @@ class ProjectsViewModel @Inject constructor(
             val title = name?.takeIf { it.isNotBlank() } ?: defaultProjectName()
             repo.createProject(title, note = null)
 
+            // Активным делаем "самый новый" — в нашем случае это последний по rowid,
+            // но безопаснее взять по updatedAt из доменной модели:
             val newest: Project? = repo.listProjects().first().maxByOrNull { it.updatedAt }
             newest?.let {
                 activeDs.setActiveProjectId(it.id)
@@ -66,14 +70,11 @@ class ProjectsViewModel @Inject constructor(
             repo.deleteProject(id)
             val active = activeIdFlow.first()
             if (active == id) {
-                // Если удалили активный — пробуем выбрать следующий НЕ удалённый.
                 val next = repo.listProjects().first().firstOrNull { !it.isDeleted }
                 if (next != null) {
                     activeDs.setActiveProjectId(next.id)
                     repo.openProject(next.id)
                 } else {
-                    // ❗ Больше проектов нет — НЕ создаём черновик автоматически.
-                    // Оставляем activeProjectId = null, UI покажет пустое состояние.
                     activeDs.setActiveProjectId(null)
                 }
             }
