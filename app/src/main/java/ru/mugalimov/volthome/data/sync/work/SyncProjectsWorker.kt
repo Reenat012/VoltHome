@@ -119,9 +119,7 @@ class SyncProjectsWorker @AssistedInject constructor(
                 Log.w(TAG, "failed to setActiveProjectId($remoteId): ${it.message}", it)
             }
 
-            // ставим ещё один синк уже на удалённый id
-            enqueue(applicationContext, remoteId)
-
+            // ⛔️ НЕ enqueue здесь — текущий воркер уже вызовет syncProject(remoteId)
             return remoteId
         } catch (e: HttpException) {
             if (e.code() == 409) {

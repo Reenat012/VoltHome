@@ -44,7 +44,6 @@ class ProjectsRepositoryImpl @Inject constructor(
     private val db: AppDatabase,
     private val syncManager: SyncManager,
     private val activeProjectDataStore: ActiveProjectDataStore,
-    // 🔹 новое:
     private val outboxDao: OutboxDao,
     private val tombstoneDao: TombstoneDao,
     @ApplicationContext private val appContext: Context
@@ -94,10 +93,10 @@ class ProjectsRepositoryImpl @Inject constructor(
         )
         activeProjectDataStore.setActiveProjectId(id)
 
-        // поставить в outbox создание проекта (серверная публикация произойдёт позже pusher'ом)
+        // поставить в outbox создание проекта
         outboxDao.insert(
             OutboxEntity(
-                project_id = null, // проект ещё не серверный
+                project_id = id, // проект ещё не серверный
                 op_type = OutboxOpType.PROJECT_CREATE,
                 payload_json = ProjectCreatePayload(
                     localId = id,
@@ -111,7 +110,6 @@ class ProjectsRepositoryImpl @Inject constructor(
     }
 
     override suspend fun bootstrapFromRemote(): Int = withContext(Dispatchers.IO) {
-        // Оставляем как есть: если сеть есть — подтягиваем; офлайн — просто вернём 0.
         if (!isBootstrapping.compareAndSet(false, true)) return@withContext 0
         try {
             bootstrapMutex.withLock {
@@ -120,7 +118,9 @@ class ProjectsRepositoryImpl @Inject constructor(
                 val stateDao = db.projectLocalStateDao()
 
                 do {
-                    val page = api.listProjects(since = null, limit = 100)
+                    // NOTE: если сервер действительно поддерживает курсор в "since",
+                    // то это корректно; если нет — заменить на однократный вызов.
+                    val page = api.listProjects(since = cursor, limit = 100)
                     for (p in page.items) {
                         db.projectDao().upsert(
                             ProjectEntity(
@@ -187,7 +187,7 @@ class ProjectsRepositoryImpl @Inject constructor(
         // кладём в outbox PROJECT_CREATE
         outboxDao.insert(
             OutboxEntity(
-                project_id = null,
+                project_id = id,
                 op_type = OutboxOpType.PROJECT_CREATE,
                 payload_json = ProjectCreatePayload(
                     localId = id,
@@ -198,7 +198,7 @@ class ProjectsRepositoryImpl @Inject constructor(
             )
         )
 
-        // Активируем этот проект и пусть UI сразу работает
+        // Активируем этот проект — UI сразу работает
         activeProjectDataStore.setActiveProjectId(id)
 
         // фоновая попытка пуша (если сеть уже есть)

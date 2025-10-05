@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.util.Log
+import androidx.room.withTransaction
 import com.google.gson.Gson
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -23,6 +24,7 @@ import ru.mugalimov.volthome.data.local.entity.OutboxOpType
 import ru.mugalimov.volthome.data.local.entity.OutboxState
 import ru.mugalimov.volthome.data.local.entity.UuidMapDevice
 import ru.mugalimov.volthome.data.local.entity.UuidMapRoom
+import ru.mugalimov.volthome.data.remote.api.CreateProjectRequest
 import ru.mugalimov.volthome.data.remote.api.ProjectsApi
 import ru.mugalimov.volthome.data.remote.dto.DeviceUpsert
 import ru.mugalimov.volthome.data.remote.dto.OpBucket
@@ -33,16 +35,29 @@ import ru.mugalimov.volthome.data.remote.dto.RoomUpsert
 import ru.mugalimov.volthome.di.database.AppDatabase
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.Voltage
+import ru.mugalimov.volthome.util.TimeUtils
 import java.util.Date
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.random.Random
 
+// payloads
+import ru.mugalimov.volthome.data.sync.outbox.RoomCreatePayload
+import ru.mugalimov.volthome.data.sync.outbox.RoomUpdatePayload
+import ru.mugalimov.volthome.data.sync.outbox.RoomDeletePayload
+import ru.mugalimov.volthome.data.sync.outbox.DeviceCreatePayload
+import ru.mugalimov.volthome.data.sync.outbox.DeviceUpdatePayload
+import ru.mugalimov.volthome.data.sync.outbox.DeviceDeletePayload
+import ru.mugalimov.volthome.data.sync.outbox.ProjectCreatePayload
+
 /**
  * OutboxPusher — вытягивает записи из outbox и отправляет на сервер пачками.
- * Идемпотентность:
- *  - group_key в outbox + идемпотентное формирование batch
- *  - после успешного push тянем snapshot для выравнивания UUID-мапов
+ * Особенности:
+ *  • Оффлайн guard: ничего не делаем без валидного онлайна — WorkManager поднимет заново.
+ *  • Публикация драфта: если группа outbox относится к draft-*, сначала выполняем PROJECT_CREATE,
+ *    ребиндим локальные сущности на remoteId, переносим local state, удаляем строку драфта, и
+ *    только потом пушим оставшийся batch на remoteId.
+ *  • Идемпотентность: group_key + аккуратные DONE/FAILED_RETRYABLE/FAILED_FATAL.
  */
 @Singleton
 class OutboxPusher @Inject constructor(
@@ -59,8 +74,7 @@ class OutboxPusher @Inject constructor(
 
     private val pushMutex = Mutex()
     private val gson by lazy { Gson() }
-    private fun jitterMs(base: Long = 100L): Long =
-        base + Random.nextLong(50L, 150L)
+    private fun jitterMs(base: Long = 100L): Long = base + Random.nextLong(50L, 150L)
 
     /** Простая проверка онлайна, чтобы не дёргать сеть оффлайн. */
     private fun isOnline(): Boolean {
@@ -73,7 +87,6 @@ class OutboxPusher @Inject constructor(
 
     suspend fun pushAll(): PushStats = withContext(Dispatchers.IO) {
         pushMutex.withLock {
-            // 🔴 В офлайне вообще ничего не делаем: WorkManager переотложит по сетевым ограничениям воркера.
             if (!isOnline()) {
                 Log.i("Outbox", "offline => skip pushAll (no DB/state changes)")
                 return@withLock PushStats(total = 0, done = 0, failed = 0)
@@ -83,94 +96,54 @@ class OutboxPusher @Inject constructor(
             var done = 0
             var failed = 0
 
-            while (true) {
+            var madeProgress: Boolean
+            do {
+                madeProgress = false
+
                 val batch = outboxDao.pickByStates(
                     states = listOf(OutboxState.PENDING, OutboxState.FAILED_RETRYABLE),
                     limit = 200
                 )
                 if (batch.isEmpty()) break
-                total += batch.size
 
                 val grouped = batch.groupBy { it.project_id }
-                for ((projectId, items) in grouped) {
+                for ((rawProjectId, items) in grouped) {
                     try {
-                        if (projectId.isNullOrBlank()) {
-                            // Сейчас все операции завязаны на проект; глобальные операции обрабатывать здесь.
-                            outboxDao.markState(items.map { it.id }, OutboxState.FAILED_FATAL)
-                            failed += items.size
-                            continue
-                        }
-                        val project = projectDao.getById(projectId)
-                        if (project == null) {
-                            // Проект локально отсутствует — помечаем фаталом
-                            outboxDao.markState(items.map { it.id }, OutboxState.FAILED_FATAL)
-                            failed += items.size
-                            continue
-                        }
+                        val result = pushOneProjectGroup(rawProjectId, items)
+                        total += items.size
+                        done  += result.done
+                        failed += result.failed
 
-                        val req = buildBatch(projectId, items)
-                        if (req.ops == null) {
-                            // Нечего отправлять — считаем выполненным (и точно не шлём пустой JSON)
-                            outboxDao.markState(items.map { it.id }, OutboxState.DONE)
-                            done += items.size
-                            continue
-                        }
-
-                        try {
-                            projectsApi.applyBatch(projectId, req)
-                            // Успех
-                            outboxDao.markState(items.map { it.id }, OutboxState.DONE)
-                            refreshUuidFromSnapshot(projectId)
-                            done += items.size
-                        } catch (t: Throwable) {
-                            Log.w("Outbox", "push failed for project=$projectId: ${t.message}", t)
-                            val retryable = isRetryableError(t)
-                            if (retryable) {
-                                items.forEach { outboxDao.markAttempt(it.id, OutboxState.FAILED_RETRYABLE, t.message) }
-                            } else {
-                                outboxDao.markState(items.map { it.id }, OutboxState.FAILED_FATAL)
-                            }
-                            failed += items.size
-                        }
+                        // считаем прогресс только если мы хоть что-то отметили DONE/FAILED
+                        if (result.done > 0 || result.failed > 0) madeProgress = true
                     } catch (t: Throwable) {
                         Log.w("Outbox", "group push failed: ${t.message}", t)
                         items.forEach { outboxDao.markAttempt(it.id, OutboxState.FAILED_RETRYABLE, t.message) }
+                        total += items.size
                         failed += items.size
+                        // это тоже прогресс: мы обновили попытку/стейт
+                        madeProgress = true
                     }
-
-                    // лёгкий троттлинг, чтобы не долбить подряд
                     delay(jitterMs())
                 }
-            }
+            } while (madeProgress)
             PushStats(total = total, done = done, failed = failed)
         }
     }
 
-    // pushProject(projectId): офлайн — выходим без изменений, как в pushAll()
     suspend fun pushProject(projectId: String): PushStats = withContext(Dispatchers.IO) {
         pushMutex.withLock {
             val items = outboxDao.pickByProject(projectId, OutboxState.PENDING, limit = 200)
                 .ifEmpty { outboxDao.pickByProject(projectId, OutboxState.FAILED_RETRYABLE, limit = 200) }
 
             if (items.isEmpty()) return@withLock PushStats(0, 0, 0)
-
             if (!isOnline()) {
                 Log.i("Outbox", "offline => skip pushProject (no DB/state changes) project=$projectId")
-                // Раньше тут было markAttempt(... FAILED_RETRYABLE ...)
                 return@withLock PushStats(total = items.size, done = 0, failed = 0)
             }
 
             return@withLock try {
-                val req = buildBatch(projectId, items)
-                if (req.ops == null) {
-                    outboxDao.markState(items.map { it.id }, OutboxState.DONE)
-                    PushStats(total = items.size, done = items.size, failed = 0)
-                } else {
-                    projectsApi.applyBatch(projectId, req)
-                    outboxDao.markState(items.map { it.id }, OutboxState.DONE)
-                    refreshUuidFromSnapshot(projectId)
-                    PushStats(total = items.size, done = items.size, failed = 0)
-                }
+                pushOneProjectGroup(projectId, items)
             } catch (t: Throwable) {
                 val retryable = isRetryableError(t)
                 if (retryable) {
@@ -180,6 +153,127 @@ class OutboxPusher @Inject constructor(
                 }
                 PushStats(total = items.size, done = 0, failed = items.size)
             }
+        }
+    }
+
+    /** Обработка одной проектной группы outbox-записей: публикация драфта (если нужно) + batch. */
+    private suspend fun pushOneProjectGroup(rawProjectId: String?, items: List<OutboxEntity>): PushStats {
+        // Глобальных операций без project_id сейчас не поддерживаем — помечаем фаталом.
+        if (rawProjectId.isNullOrBlank()) {
+            outboxDao.markState(items.map { it.id }, OutboxState.FAILED_FATAL)
+            return PushStats(total = items.size, done = 0, failed = items.size)
+        }
+
+        val project = projectDao.getById(rawProjectId)
+        if (project == null) {
+            outboxDao.markState(items.map { it.id }, OutboxState.FAILED_FATAL)
+            return PushStats(total = items.size, done = 0, failed = items.size)
+        }
+
+        var effectiveProjectId = rawProjectId
+        var remainingItems = items
+
+        // Если это драфт — попробуем опубликовать прямо здесь (ищем PROJECT_CREATE)
+        if (rawProjectId.startsWith("draft-")) {
+            val createItem = items.firstOrNull { it.op_type == OutboxOpType.PROJECT_CREATE }
+            if (createItem == null) {
+                // Нет PROJECT_CREATE → ещё рано пушить, ждём появления этой операции
+                Log.d("Outbox", "draft group without PROJECT_CREATE → skip (no-op): project=$rawProjectId")
+                return PushStats(total = items.size, done = 0, failed = 0) // нет прогресса, pushAll завершит проход
+            }
+
+            try {
+                val payload = gson.fromJson(createItem.payload_json, ProjectCreatePayload::class.java)
+                Log.i("Outbox", "publishing draft project: localId=$rawProjectId, name='${payload.name}'")
+
+                val created = projectsApi.createProject(CreateProjectRequest(name = payload.name, note = payload.note))
+                val remoteId = created.id
+                Log.i("Outbox", "draft published ok: remoteId=$remoteId (v${created.version})")
+
+                // Ребайнд локальных сущностей и перенос состояния
+                val groupDaoOrNull = runCatching { appDb.groupDao() }.getOrNull()
+                val stateDao = appDb.projectLocalStateDao()
+
+                appDb.withTransaction {
+                    // новая серверная запись
+                    projectDao.upsert(
+                        ru.mugalimov.volthome.data.local.entity.ProjectEntity(
+                            id = created.id,
+                            name = created.name,
+                            note = created.note,
+                            version = created.version,
+                            updated_at = created.updated_at,
+                            is_deleted = created.is_deleted
+                        )
+                    )
+                    // ребайнд зависимостей с draft → remote
+                    val roomsRebound = roomDao.rebindProjectRooms(rawProjectId, remoteId)
+                    val devicesRebound = deviceDao.rebindProjectDevices(rawProjectId, remoteId)
+                    val groupsRebound = if (groupDaoOrNull != null) {
+                        runCatching { groupDaoOrNull.rebindProjectGroups(rawProjectId, remoteId) }.getOrElse { 0 }
+                    } else 0
+                    Log.i("Outbox", "rebind done: rooms=$roomsRebound, devices=$devicesRebound, groups=$groupsRebound")
+
+                    // перенос локального состояния
+                    stateDao.delete(rawProjectId)
+                    stateDao.upsert(
+                        ru.mugalimov.volthome.data.local.entity.ProjectLocalStateEntity(
+                            project_id = created.id,
+                            remote_version = created.version,
+                            last_sync_at = TimeUtils.formatIso(TimeUtils.now()),
+                            has_local_changes = true
+                        )
+                    )
+
+                    // удаляем строку драфта
+                    projectDao.deleteById(rawProjectId)
+                }
+
+                // помечаем PROJECT_CREATE как DONE
+                outboxDao.markState(listOf(createItem.id), OutboxState.DONE)
+
+                // теперь пушим оставшиеся операции на серверный UUID
+                effectiveProjectId = remoteId
+                remainingItems = items.filter { it.id != createItem.id }
+            } catch (t: Throwable) {
+                Log.w("Outbox", "draft publish failed: ${t.message}", t)
+                val retryable = isRetryableError(t)
+                if (retryable) {
+                    outboxDao.markAttempt(createItem.id, OutboxState.FAILED_RETRYABLE, t.message)
+                } else {
+                    outboxDao.markState(listOf(createItem.id), OutboxState.FAILED_FATAL)
+                }
+                // Остальные элементы пока не трогаем — вернёмся в следующем ране
+                return PushStats(total = remainingItems.size + 1, done = 0, failed = if (retryable) 0 else 1)
+            }
+        }
+
+        // Если после публикации/фильтрации нечего отправлять — помечаем как выполненные
+        if (remainingItems.isEmpty()) {
+            return PushStats(total = 0, done = 0, failed = 0)
+        }
+
+        // Сборка и отправка batch на server UUID
+        return try {
+            val req = buildBatch(effectiveProjectId, remainingItems)
+            if (req.ops == null) {
+                outboxDao.markState(remainingItems.map { it.id }, OutboxState.DONE)
+                PushStats(total = remainingItems.size, done = remainingItems.size, failed = 0)
+            } else {
+                projectsApi.applyBatch(effectiveProjectId, req)
+                outboxDao.markState(remainingItems.map { it.id }, OutboxState.DONE)
+                refreshUuidFromSnapshot(effectiveProjectId)
+                PushStats(total = remainingItems.size, done = remainingItems.size, failed = 0)
+            }
+        } catch (t: Throwable) {
+            Log.w("Outbox", "push failed for project=$effectiveProjectId: ${t.message}", t)
+            val retryable = isRetryableError(t)
+            if (retryable) {
+                remainingItems.forEach { outboxDao.markAttempt(it.id, OutboxState.FAILED_RETRYABLE, t.message) }
+            } else {
+                outboxDao.markState(remainingItems.map { it.id }, OutboxState.FAILED_FATAL)
+            }
+            PushStats(total = remainingItems.size, done = 0, failed = remainingItems.size)
         }
     }
 
@@ -250,14 +344,14 @@ class OutboxPusher @Inject constructor(
                 // ---------------- Devices ----------------
                 OutboxOpType.DEVICE_CREATE -> {
                     val p = gson.fromJson(it.payload_json, DeviceCreatePayload::class.java)
-                    val hasUuid = uuidDao.getDeviceUuidByLocal(p.localId) != null
+                    val existingUuid = uuidDao.getDeviceUuidByLocal(p.localId)
                     val roomUuid = uuidDao.getRoomUuidByLocal(p.roomLocalId)
                     if (roomUuid == null) {
                         Log.w("Outbox", "device CREATE skip: room has no uuid yet (roomLocal=${p.roomLocalId})")
                         continue
                     }
                     deviceUps += DeviceUpsert(
-                        id = if (hasUuid) uuidDao.getDeviceUuidByLocal(p.localId) else null,
+                        id = existingUuid,
                         group_id = null,
                         name = p.name,
                         meta = deviceMeta(
@@ -329,7 +423,7 @@ class OutboxPusher @Inject constructor(
                     if (uuid != null) deviceDel += uuid
                 }
 
-                // Projects/Groups — пока не пушим отсюда
+                // Projects/Groups — здесь не формируем batch; PROJECT_CREATE уже обработали выше.
                 OutboxOpType.PROJECT_CREATE,
                 OutboxOpType.PROJECT_UPDATE,
                 OutboxOpType.PROJECT_DELETE,
@@ -399,7 +493,7 @@ class OutboxPusher @Inject constructor(
         "room_name" to null,
         "power" to power,
         "voltage_value" to voltage.value,
-        "voltage_type" to voltage.type.name,
+        "voltage_type" to deviceType.voltageTypeNameFallback(voltage), // не критично, но даёт явный тип
         "demand_ratio" to demandRatio,
         "created_at_iso" to iso(createdAt),
         "device_type" to deviceType.name,
@@ -409,6 +503,9 @@ class OutboxPusher @Inject constructor(
         "requires_socket" to requiresSocket
     )
 }
+
+/** Небольшой хелпер — можно убрать, если не нужен специфичный тип в meta */
+private fun DeviceType.voltageTypeNameFallback(v: Voltage): String = v.type.name
 
 data class PushStats(
     val total: Int,

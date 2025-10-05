@@ -107,9 +107,9 @@ class SyncManager @Inject constructor(
                     val stage = if (isFirstLoad) "snapshot" else "delta"
                     Log.i("Sync", "Sync[project=$projectId] stage=$stage")
 
-                    // -------- PUSH (через OutboxPusher) --------
+                    // -------- PUSH (точечно по проекту) --------
                     try {
-                        val stats = outboxPusher.pushAll()
+                        val stats = outboxPusher.pushProject(projectId)
                         Log.i("Sync", "push phase done: total=${stats.total} ok=${stats.done} failed=${stats.failed}")
                     } catch (t: Throwable) {
                         Log.w("Sync", "push phase failed (will still try pull): ${t.message}", t)
@@ -127,7 +127,10 @@ class SyncManager @Inject constructor(
                             } else throw e
                         }
 
-                        Log.i("Sync", "snapshot pull: rooms=${tree.rooms.size}, groups=${tree.groups.size}, devices=${tree.devices.size}")
+                        Log.i(
+                            "Sync",
+                            "snapshot pull: rooms=${tree.rooms.size}, groups=${tree.groups.size}, devices=${tree.devices.size}"
+                        )
 
                         val toMapRooms = mutableListOf<Pair<String, Long>>()
                         val toMapGroups = mutableListOf<Pair<String, Long>>()
@@ -337,7 +340,7 @@ class SyncManager @Inject constructor(
         }
     }
 
-    // ----------------------- DELТА -----------------------
+    // ----------------------- ДЕЛЬТА -----------------------
     private suspend fun applyRoomsDeltaTx(
         projectId: String,
         delta: ProjectDeltaResponse,
@@ -686,5 +689,5 @@ private inline fun <T, K, V> Iterable<T>.associateNotNull(transform: (T) -> Pair
     return map
 }
 
-// Маленькая утилита для null-безопасного доступа к meta
+/** Маленькая утилита для null-безопасного доступа к meta */
 private fun Map<String, Any?>?.orElseEmpty(): Map<String, Any?> = this ?: emptyMap()

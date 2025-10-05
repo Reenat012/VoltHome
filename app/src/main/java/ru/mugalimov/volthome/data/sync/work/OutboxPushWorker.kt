@@ -6,13 +6,12 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
+import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequest
-import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import androidx.work.workDataOf
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
@@ -26,12 +25,7 @@ import java.util.concurrent.TimeUnit
  *
  * Констрейнты:
  *  - требуется валидное сетевое соединение (CONNECTED)
- *  - не запускаем на низком заряде
  *  - экспоненциальный бэкофф
- *
- * Уникальность:
- *  - общий пуш: UNIQUE_ALL (KEEP)
- *  - пуш по проекту: UNIQUE_PROJECT_PREFIX + projectId (KEEP)
  */
 @HiltWorker
 class OutboxPushWorker @AssistedInject constructor(
@@ -46,11 +40,13 @@ class OutboxPushWorker @AssistedInject constructor(
             if (projectId.isNullOrBlank()) {
                 Log.i(TAG, "push ALL outbox")
                 pusher.pushAll()
+                Result.success()
             } else {
+                // Пушим и для draft-* — OutboxPusher сам опубликует драфт и допушит изменения.
                 Log.i(TAG, "push outbox for project=$projectId")
                 pusher.pushProject(projectId)
+                Result.success()
             }
-            Result.success()
         } catch (t: Throwable) {
             Log.w(TAG, "Outbox push failed: ${t.message}", t)
             Result.retry()
@@ -59,47 +55,53 @@ class OutboxPushWorker @AssistedInject constructor(
 
     companion object {
         private const val TAG = "OutboxPushWorker"
-
-        // Ключи/unique names/tags
         private const val KEY_PROJECT_ID = "project_id"
+
         private const val UNIQUE_ALL = "outbox_push_all"
         private const val UNIQUE_PROJECT_PREFIX = "outbox_push_project_"
+
         private const val TAG_ALL = "tag_outbox_all"
         private const val TAG_PROJECT_PREFIX = "tag_outbox_project_"
 
-        // Общие констрейнты для всех запусков
-        private val NET_CONSTRAINTS = Constraints.Builder()
+        // Требуем подключение к интернету, чтобы пуш не выполнялся оффлайн
+        private val NET_CONSTRAINTS: Constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
-            .setRequiresBatteryNotLow(true)
             .build()
 
-        private fun buildRequest(projectId: String? = null): OneTimeWorkRequest {
-            val builder = OneTimeWorkRequestBuilder<OutboxPushWorker>()
+        private fun baseRequestBuilder(): OneTimeWorkRequest.Builder =
+            OneTimeWorkRequest.Builder(OutboxPushWorker::class.java)
                 .setConstraints(NET_CONSTRAINTS)
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
 
-            if (!projectId.isNullOrBlank()) {
-                builder.setInputData(workDataOf(KEY_PROJECT_ID to projectId))
-                    .addTag(TAG_PROJECT_PREFIX + projectId)
-            } else {
-                builder.addTag(TAG_ALL)
-            }
-            return builder.build()
-        }
-
-        /** Единичный пуш «всё» (уникален, без дубликатов) */
+        /** Пушить всё */
         fun enqueueAll(context: Context) {
-            val req = buildRequest()
-            WorkManager.getInstance(context)
-                .enqueueUniqueWork(UNIQUE_ALL, ExistingWorkPolicy.KEEP, req)
+            val req: OneTimeWorkRequest = baseRequestBuilder()
+                .addTag(TAG_ALL)
+                .build()
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                UNIQUE_ALL, ExistingWorkPolicy.KEEP, req
+            )
         }
 
-        /** Единичный пуш по проекту (уникален на projectId) */
+        /** Пуш по проекту (уникальна на проект).
+         *  Включая draft-* — публикацию и последующий batch сделает OutboxPusher.
+         */
         fun enqueueProject(context: Context, projectId: String) {
-            val unique = UNIQUE_PROJECT_PREFIX + projectId
-            val req = buildRequest(projectId)
-            WorkManager.getInstance(context)
-                .enqueueUniqueWork(unique, ExistingWorkPolicy.KEEP, req)
+            val input: Data = Data.Builder()
+                .putString(KEY_PROJECT_ID, projectId)
+                .build()
+
+            val unique = "$UNIQUE_PROJECT_PREFIX$projectId"
+            val tag = "$TAG_PROJECT_PREFIX$projectId"
+
+            val req: OneTimeWorkRequest = baseRequestBuilder()
+                .setInputData(input)
+                .addTag(tag)
+                .build()
+
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                unique, ExistingWorkPolicy.KEEP, req
+            )
         }
     }
 }
