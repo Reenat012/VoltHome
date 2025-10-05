@@ -29,7 +29,7 @@ class RecalculateGroupsOnDeviceChangeUseCase @Inject constructor(
     @OptIn(FlowPreview::class)
     fun launch(scope: CoroutineScope): Job {
         return combine(
-            deviceDao.observeDevices(),          // Flow<List<DeviceEntity>>
+            deviceDao.observeAllDevices(),          // Flow<List<DeviceEntity>>
             joinDao.observeJoins(),              // Flow<List<GroupDeviceJoin>>
             preferencesRepository.phaseMode      // Flow<PhaseMode>
         ) { devices, joins, mode ->

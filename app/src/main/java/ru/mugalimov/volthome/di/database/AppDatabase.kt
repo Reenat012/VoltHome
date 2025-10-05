@@ -33,9 +33,13 @@ import kotlin.synchronized
 
         UuidMapRoom::class,
         UuidMapGroup::class,
-        UuidMapDevice::class
+        UuidMapDevice::class,
+
+        // 🔹 новые:
+        OutboxEntity::class,
+        TombstoneEntity::class
     ],
-    version = 20,
+    version = 21,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -52,6 +56,10 @@ abstract class AppDatabase : RoomDatabase() {
 
     abstract fun uuidMapDao(): UuidMapDao
 
+    // 🔹 новые DAO:
+    abstract fun outboxDao(): OutboxDao
+    abstract fun tombstoneDao(): TombstoneDao
+
     companion object {
         private val callback = object : Callback() {
             override fun onCreate(db: SupportSQLiteDatabase) {
@@ -60,36 +68,27 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        // Если у тебя уже была своя MIGRATION_16_17 — оставь. Иначе — no-op.
+        // Оставляем ваши прежние миграции
         val MIGRATION_16_17 = object : Migration(16, 17) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // no-op в рамках этой поставки
+                // no-op
             }
         }
 
-        /**
-         * 17 → 18:
-         *  - Добавляем колонку project_id (TEXT NULL) в rooms/devices/groups/loads
-         *  - Индекс по project_id
-         *  - Создаём Default Project и проставляем его id во все существующие строки
-         */
         val MIGRATION_17_18 = object : Migration(17, 18) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("PRAGMA foreign_keys=OFF")
 
-                // 1) Добавляем project_id в основные таблицы (если ещё нет)
                 safeAddColumn(db, "rooms", "project_id", "TEXT")
                 safeAddColumn(db, "devices", "project_id", "TEXT")
                 safeAddColumn(db, "groups", "project_id", "TEXT")
                 safeAddColumn(db, "loads", "project_id", "TEXT")
 
-                // 2) Индексы по project_id (idempotent)
                 safeCreateIndex(db, "idx_rooms_project_id", "rooms", "project_id")
                 safeCreateIndex(db, "idx_devices_project_id", "devices", "project_id")
                 safeCreateIndex(db, "idx_groups_project_id", "groups", "project_id")
                 safeCreateIndex(db, "idx_loads_project_id", "loads", "project_id")
 
-                // 3) Создаём Default Project (если таблица projects есть и записи с таким id нет)
                 val defaultProjectId = UUID.randomUUID().toString()
                 val nowIso =
                     SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).format(Date())
@@ -103,7 +102,6 @@ abstract class AppDatabase : RoomDatabase() {
                     arrayOf(defaultProjectId, nowIso, defaultProjectId)
                 )
 
-                // 4) Проставляем во все строки, где project_id IS NULL
                 db.execSQL(
                     "UPDATE rooms  SET project_id = COALESCE(project_id, ?) WHERE project_id IS NULL",
                     arrayOf(defaultProjectId)
@@ -130,20 +128,15 @@ abstract class AppDatabase : RoomDatabase() {
                 col: String,
                 type: String
             ) {
-                // Проверяем, есть ли колонка
                 val cursor = db.query("PRAGMA table_info($table)")
                 var exists = false
                 cursor.use {
                     val nameIdx = it.getColumnIndex("name")
                     while (it.moveToNext()) {
-                        if (it.getString(nameIdx) == col) {
-                            exists = true; break
-                        }
+                        if (it.getString(nameIdx) == col) { exists = true; break }
                     }
                 }
-                if (!exists) {
-                    db.execSQL("ALTER TABLE $table ADD COLUMN $col $type")
-                }
+                if (!exists) db.execSQL("ALTER TABLE $table ADD COLUMN $col $type")
             }
 
             private fun safeCreateIndex(
@@ -152,12 +145,8 @@ abstract class AppDatabase : RoomDatabase() {
                 table: String,
                 col: String
             ) {
-                // SQLite не имеет IF NOT EXISTS для CREATE INDEX до некоторых версий,
-                // поэтому просто пробуем создать и ловим ошибку — Room её проглотит.
-                try {
-                    db.execSQL("CREATE INDEX IF NOT EXISTS $indexName ON $table($col)")
-                } catch (_: Throwable) { /* ignore */
-                }
+                try { db.execSQL("CREATE INDEX IF NOT EXISTS $indexName ON $table($col)") }
+                catch (_: Throwable) { /* ignore */ }
             }
         }
 
@@ -168,7 +157,6 @@ abstract class AppDatabase : RoomDatabase() {
                     c.use { return it.moveToFirst() }
                 }
 
-                // ---- rooms ----
                 db.execSQL("""
             CREATE TABLE IF NOT EXISTS uuid_map_rooms_tmp (
                 room_uuid TEXT NOT NULL PRIMARY KEY,
@@ -181,14 +169,12 @@ abstract class AppDatabase : RoomDatabase() {
                 SELECT room_uuid, local_id FROM uuid_map_rooms
                 WHERE room_uuid IS NOT NULL
             """.trimIndent())
-                    // сносим старый индекс/таблицу, если были
                     try { db.execSQL("DROP INDEX IF EXISTS idx_uuid_map_rooms_local") } catch (_: Throwable) {}
                     try { db.execSQL("DROP TABLE IF EXISTS uuid_map_rooms") } catch (_: Throwable) {}
                 }
                 db.execSQL("ALTER TABLE uuid_map_rooms_tmp RENAME TO uuid_map_rooms")
                 db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_uuid_map_rooms_local_id ON uuid_map_rooms(local_id)")
 
-                // ---- groups ----
                 db.execSQL("""
             CREATE TABLE IF NOT EXISTS uuid_map_groups_tmp (
                 group_uuid TEXT NOT NULL PRIMARY KEY,
@@ -207,7 +193,6 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE uuid_map_groups_tmp RENAME TO uuid_map_groups")
                 db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_uuid_map_groups_local_id ON uuid_map_groups(local_id)")
 
-                // ---- devices ----
                 db.execSQL("""
             CREATE TABLE IF NOT EXISTS uuid_map_devices_tmp (
                 device_uuid TEXT NOT NULL PRIMARY KEY,
@@ -230,12 +215,8 @@ abstract class AppDatabase : RoomDatabase() {
 
         val MIGRATION_19_20 = object : Migration(19, 20) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // На время миграции отключаем FK, чтобы спокойно перенести данные
                 db.execSQL("PRAGMA foreign_keys=OFF")
 
-                // 1) Создаём новую таблицу devices_tmp с нужной схемой:
-                //    - room_id NULL
-                //    - FK(room_id) → rooms(id) ON DELETE SET NULL
                 db.execSQL(
                     """
             CREATE TABLE IF NOT EXISTS devices_tmp (
@@ -257,7 +238,6 @@ abstract class AppDatabase : RoomDatabase() {
             """.trimIndent()
                 )
 
-                // 2) Переносим данные из старой devices в devices_tmp 1:1
                 db.execSQL(
                     """
             INSERT INTO devices_tmp (
@@ -273,20 +253,56 @@ abstract class AppDatabase : RoomDatabase() {
             """.trimIndent()
                 )
 
-                // 3) Сносим старые индексы (если были)
                 try { db.execSQL("DROP INDEX IF EXISTS idx_devices_room_id") } catch (_: Throwable) {}
                 try { db.execSQL("DROP INDEX IF EXISTS idx_devices_project_id") } catch (_: Throwable) {}
 
-                // 4) Заменяем таблицу
                 db.execSQL("DROP TABLE devices")
                 db.execSQL("ALTER TABLE devices_tmp RENAME TO devices")
 
-                // 5) Восстанавливаем индексы в соответствии со схемой Entity
                 db.execSQL("CREATE INDEX IF NOT EXISTS idx_devices_room_id ON devices(room_id)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS idx_devices_project_id ON devices(project_id)")
 
-                // Возвращаем контроль ссылочной целостности
                 db.execSQL("PRAGMA foreign_keys=ON")
+            }
+        }
+
+        // 🔹 новая миграция: 20 → 21 (создаём outbox и tombstones)
+        val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Outbox
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS outbox (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        project_id TEXT NULL,
+                        op_type TEXT NOT NULL,
+                        payload_json TEXT NOT NULL,
+                        requires_online INTEGER NOT NULL DEFAULT 1,
+                        state TEXT NOT NULL,
+                        attempt INTEGER NOT NULL DEFAULT 0,
+                        last_error TEXT NULL,
+                        group_key TEXT NULL,
+                        created_at INTEGER NOT NULL,
+                        updated_at INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_outbox_state_created_at ON outbox(state, created_at)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_outbox_project_state ON outbox(project_id, state)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_outbox_group_key ON outbox(group_key)")
+
+                // Tombstones
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS tombstones (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        project_id TEXT NULL,
+                        entity_type TEXT NOT NULL,
+                        local_id INTEGER NULL,
+                        server_uuid TEXT NULL,
+                        created_at INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_tombstones_type_project ON tombstones(entity_type, project_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_tombstones_type_local ON tombstones(entity_type, local_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_tombstones_type_uuid ON tombstones(entity_type, server_uuid)")
             }
         }
     }

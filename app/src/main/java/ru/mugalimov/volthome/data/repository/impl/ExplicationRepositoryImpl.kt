@@ -54,7 +54,7 @@ class ExplicationRepositoryImpl @Inject constructor(
 
     /** Поток сущностей для PhaseLoad: строго в рамках активного проекта. */
     override fun observeGroupsWithDevices(): Flow<List<CircuitGroupWithDevices>> {
-        val allDevicesFlow = deviceDao.observeDevices()
+        val allDevicesFlow = deviceDao.observeAllDevices()
         val joinsFlow = groupDeviceJoinDao.observeJoins()
 
         return activeProjectDs.activeProjectId.flatMapLatest { projectId ->
@@ -80,9 +80,13 @@ class ExplicationRepositoryImpl @Inject constructor(
 
     override suspend fun getGroupsWithDevices(): List<GroupWithDevices> {
         val projectId = activeProjectDs.activeProjectId.first()
-        val groups = if (projectId != null) groupDao.getAllGroupsByProject(projectId) else groupDao.getAllGroups()
+        val groups = if (projectId != null)
+            groupDao.getAllGroupsByProject(projectId)
+        else
+            groupDao.getAllGroups()
+
         return groups.map { entity ->
-            val devices = deviceDao.getDevicesForGroup(entity.groupId)
+            val devices = groupDeviceJoinDao.getDevicesForGroup(entity.groupId)  // 🔁 было deviceDao.getDevicesForGroup(...)
             GroupWithDevices(
                 group = entity.toDomainGroup(devices.map { it.toDomainDevice() }),
                 devices = devices.map { it.toDomainDevice() }

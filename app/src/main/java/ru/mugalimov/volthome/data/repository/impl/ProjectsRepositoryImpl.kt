@@ -1,6 +1,8 @@
 package ru.mugalimov.volthome.data.repository.impl
 
+import android.content.Context
 import androidx.room.withTransaction
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
@@ -8,13 +10,11 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import retrofit2.HttpException
 import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
 import ru.mugalimov.volthome.data.local.entity.ProjectEntity
 import ru.mugalimov.volthome.data.mapper.toDomainProject
 import ru.mugalimov.volthome.data.remote.api.CreateProjectRequest
 import ru.mugalimov.volthome.data.remote.api.ProjectsApi
-import ru.mugalimov.volthome.data.remote.api.ProjectsApi.UpdateProjectRequest
 import ru.mugalimov.volthome.data.repository.ProjectsRepository
 import ru.mugalimov.volthome.data.sync.SyncManager
 import ru.mugalimov.volthome.di.database.AppDatabase
@@ -25,12 +25,29 @@ import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
 
+// outbox / tombstones
+import ru.mugalimov.volthome.data.local.dao.OutboxDao
+import ru.mugalimov.volthome.data.local.dao.TombstoneDao
+import ru.mugalimov.volthome.data.local.entity.OutboxEntity
+import ru.mugalimov.volthome.data.local.entity.OutboxOpType
+import ru.mugalimov.volthome.data.local.entity.TombstoneEntity
+import ru.mugalimov.volthome.data.local.entity.TombstoneEntityType
+import ru.mugalimov.volthome.data.sync.outbox.OutboxPushWorker
+import ru.mugalimov.volthome.data.sync.outbox.ProjectCreatePayload
+import ru.mugalimov.volthome.data.sync.outbox.ProjectUpdatePayload
+import ru.mugalimov.volthome.data.sync.outbox.ProjectDeletePayload
+import ru.mugalimov.volthome.data.sync.outbox.toJson
+
 @Singleton
 class ProjectsRepositoryImpl @Inject constructor(
     private val api: ProjectsApi,
     private val db: AppDatabase,
     private val syncManager: SyncManager,
-    private val activeProjectDataStore: ActiveProjectDataStore
+    private val activeProjectDataStore: ActiveProjectDataStore,
+    // 🔹 новое:
+    private val outboxDao: OutboxDao,
+    private val tombstoneDao: TombstoneDao,
+    @ApplicationContext private val appContext: Context
 ) : ProjectsRepository {
 
     private val bootstrapMutex = Mutex()
@@ -72,14 +89,29 @@ class ProjectsRepositoryImpl @Inject constructor(
                 project_id = id,
                 remote_version = 0,
                 last_sync_at = null,
-                has_local_changes = false
+                has_local_changes = true
             )
         )
         activeProjectDataStore.setActiveProjectId(id)
+
+        // поставить в outbox создание проекта (серверная публикация произойдёт позже pusher'ом)
+        outboxDao.insert(
+            OutboxEntity(
+                project_id = null, // проект ещё не серверный
+                op_type = OutboxOpType.PROJECT_CREATE,
+                payload_json = ProjectCreatePayload(
+                    localId = id,
+                    name = "Новый проект",
+                    note = null
+                ).toJson(),
+                group_key = "project:create:$id"
+            )
+        )
         id
     }
 
     override suspend fun bootstrapFromRemote(): Int = withContext(Dispatchers.IO) {
+        // Оставляем как есть: если сеть есть — подтягиваем; офлайн — просто вернём 0.
         if (!isBootstrapping.compareAndSet(false, true)) return@withContext 0
         try {
             bootstrapMutex.withLock {
@@ -120,13 +152,16 @@ class ProjectsRepositoryImpl @Inject constructor(
                 }
                 imported
             }
+        } catch (_: Throwable) {
+            0
         } finally {
             isBootstrapping.set(false)
         }
     }
 
     override suspend fun createProject(name: String, note: String?): String = withContext(Dispatchers.IO) {
-        val id = UUID.randomUUID().toString()
+        // офлайн-first: создаём ЛОКАЛЬНО draft-*, сервер — через outbox
+        val id = "draft-" + UUID.randomUUID().toString()
         val nowIso = TimeUtils.formatIso(TimeUtils.now())
 
         db.projectDao().upsert(
@@ -149,27 +184,26 @@ class ProjectsRepositoryImpl @Inject constructor(
             )
         )
 
-        runCatching {
-            val created = api.createProject(CreateProjectRequest(id = id, name = name, note = note))
-            db.projectDao().upsert(
-                ProjectEntity(
-                    id = created.id,
-                    name = created.name,
-                    note = created.note,
-                    version = created.version,
-                    updated_at = created.updated_at,
-                    is_deleted = created.is_deleted
-                )
+        // кладём в outbox PROJECT_CREATE
+        outboxDao.insert(
+            OutboxEntity(
+                project_id = null,
+                op_type = OutboxOpType.PROJECT_CREATE,
+                payload_json = ProjectCreatePayload(
+                    localId = id,
+                    name = name,
+                    note = note
+                ).toJson(),
+                group_key = "project:create:$id"
             )
-            stateDao.upsert(
-                ru.mugalimov.volthome.data.local.entity.ProjectLocalStateEntity(
-                    project_id = created.id,
-                    remote_version = created.version,
-                    last_sync_at = TimeUtils.formatIso(TimeUtils.now()),
-                    has_local_changes = false
-                )
-            )
-        }
+        )
+
+        // Активируем этот проект и пусть UI сразу работает
+        activeProjectDataStore.setActiveProjectId(id)
+
+        // фоновая попытка пуша (если сеть уже есть)
+        OutboxPushWorker.enqueueAll(appContext)
+
         id
     }
 
@@ -179,63 +213,46 @@ class ProjectsRepositoryImpl @Inject constructor(
             val dao = db.projectDao()
             val current = dao.getById(id)
 
-            // 1) Optimistic update локально
             dao.upsert(
                 (current ?: ProjectEntity(
-                    id = id, name = name, note = null, version = 0, updated_at = nowIso, is_deleted = false
-                )).copy(name = name, updated_at = nowIso)
+                    id = id,
+                    name = name,
+                    note = null,
+                    version = 0,
+                    updated_at = nowIso,
+                    is_deleted = false
+                )).copy(
+                    name = name,
+                    updated_at = nowIso
+                )
             )
 
-            // 2) Помечаем как «грязный»
             val stateDao = db.projectLocalStateDao()
             val st = stateDao.get(id)
             stateDao.upsert(
                 (st ?: ru.mugalimov.volthome.data.local.entity.ProjectLocalStateEntity(
-                    project_id = id, remote_version = 0, last_sync_at = null, has_local_changes = false
+                    project_id = id,
+                    remote_version = 0,
+                    last_sync_at = null,
+                    has_local_changes = false
                 )).copy(has_local_changes = true)
             )
 
-            // 3) Пытаемся отправить на сервер, НО безопасно
-            val body = UpdateProjectRequest(name = name, note = current?.note)
-
-            val updated = runCatching {
-                api.updateProjectMetaPatch(id, body)
-            }.recoverCatching { e1 ->
-                if (e1 is HttpException && (e1.code() == 404 || e1.code() == 405)) {
-                    api.updateProjectMetaPutLegacy(id, body)
-                } else throw e1
-            }.recoverCatching { e2 ->
-                if (e2 is HttpException && (e2.code() == 404 || e2.code() == 405)) {
-                    api.updateProjectPutRootLegacy(id, body)
-                } else throw e2
-            }.getOrNull()
-
-            if (updated == null) {
-                // офлайн/сервер недоступен — оставляем локальные изменения и выходим
-                // (опционально) дернуть воркер синка, чтобы он сам допушил позже
-                // SyncProjectsWorker.enqueue(appContext, id)  // см. пункт 3 ниже
-                return@withContext
-            }
-
-            // 4) Сервер подтвердил — фиксируем и снимаем флаг «грязный»
-            db.projectDao().upsert(
-                ProjectEntity(
-                    id = updated.id,
-                    name = updated.name,
-                    note = updated.note,
-                    version = updated.version,
-                    updated_at = updated.updated_at,
-                    is_deleted = updated.is_deleted
+            // outbox PROJECT_UPDATE
+            outboxDao.insert(
+                OutboxEntity(
+                    project_id = id,
+                    op_type = OutboxOpType.PROJECT_UPDATE,
+                    payload_json = ProjectUpdatePayload(
+                        id = id,
+                        name = name,
+                        note = current?.note
+                    ).toJson(),
+                    group_key = "project:update:$id"
                 )
             )
-            stateDao.upsert(
-                ru.mugalimov.volthome.data.local.entity.ProjectLocalStateEntity(
-                    project_id = updated.id,
-                    remote_version = updated.version,
-                    last_sync_at = TimeUtils.formatIso(TimeUtils.now()),
-                    has_local_changes = false
-                )
-            )
+
+            OutboxPushWorker.enqueueAll(appContext)
         }
     }
 
@@ -256,48 +273,40 @@ class ProjectsRepositoryImpl @Inject constructor(
                 )).copy(has_local_changes = true)
             )
 
-            // Серверное удаление
-            runCatching {
-                val deleted = api.deleteProject(id)
-
-                db.projectDao().upsert(
-                    ProjectEntity(
-                        id = deleted.id,
-                        name = deleted.name,
-                        note = deleted.note,
-                        version = deleted.version,
-                        updated_at = deleted.updated_at,
-                        is_deleted = deleted.is_deleted
-                    )
+            // tombstone — чтобы pull не вернул
+            tombstoneDao.insert(
+                TombstoneEntity(
+                    project_id = id,
+                    entity_type = TombstoneEntityType.PROJECT,
+                    local_id = null,
+                    server_uuid = if (!id.startsWith("draft-")) id else null
                 )
-                stateDao.upsert(
-                    ru.mugalimov.volthome.data.local.entity.ProjectLocalStateEntity(
-                        project_id = deleted.id,
-                        remote_version = deleted.version,
-                        last_sync_at = TimeUtils.formatIso(TimeUtils.now()),
-                        has_local_changes = false
-                    )
+            )
+
+            // outbox PROJECT_DELETE
+            outboxDao.insert(
+                OutboxEntity(
+                    project_id = id,
+                    op_type = OutboxOpType.PROJECT_DELETE,
+                    payload_json = ProjectDeletePayload(id = id).toJson(),
+                    group_key = "project:delete:$id"
                 )
+            )
 
-                // 🔻 после успешного ответа сервера — подчистка локальных сущностей проекта
-                db.withTransaction {
-                    // Если у тебя есть соответствующие методы — оставь. Если нет — убери.
-                    runCatching { db.groupDao().deleteGroupsByProject(id) }.getOrElse { /* ok */ }
-                    db.deviceDao().deleteDevicesByProject(id)
-                    db.roomDao().deleteRoomsByProject(id)
-                }
-            }
-
-            // если удаляем активный — ProjectsViewModel уже переключит на следующий/черновик
+            // если удаляем активный — ProjectsViewModel переключит; на всякий случай обнулим
             val active = activeProjectDataStore.activeProjectId.firstOrNull()
             if (active == id) {
                 activeProjectDataStore.setActiveProjectId(null)
             }
+
+            OutboxPushWorker.enqueueAll(appContext)
         }
     }
 
     override suspend fun openProject(id: String) {
         activeProjectDataStore.setActiveProjectId(id)
+        // офлайн-first: syncManager сам сделает push→pull, когда сеть доступна
         runCatching { syncManager.syncProject(id) }
+        OutboxPushWorker.enqueueAll(appContext)
     }
 }

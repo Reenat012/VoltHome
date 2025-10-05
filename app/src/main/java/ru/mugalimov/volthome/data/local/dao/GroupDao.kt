@@ -79,4 +79,5 @@ interface GroupDao {
 
     @Query("DELETE FROM `groups` WHERE project_id = :projectId")
     suspend fun deleteGroupsByProject(projectId: String): Int
+
 }
