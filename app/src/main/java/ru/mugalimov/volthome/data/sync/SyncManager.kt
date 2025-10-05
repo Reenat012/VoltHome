@@ -50,7 +50,7 @@ class SyncManager @Inject constructor(
     private val projectsApi: ProjectsApi,
     private val activeProjectDataStore: ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore,
     private val outboxPusher: OutboxPusher,
-    @ApplicationContext private val appContext: Context, // ← для оффлайн-проверки
+    @ApplicationContext private val appContext: Context, // для оффлайн-проверки
 ) {
     private val uuidDao get() = appDb.uuidMapDao()
 
@@ -68,7 +68,7 @@ class SyncManager @Inject constructor(
         val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val nw = cm.activeNetwork ?: return false
         val caps = cm.getNetworkCapabilities(nw) ?: return false
-        // Требуем и INTERNET, и VALIDATED, чтобы исключить "Captive portal / оффлайн"
+        // Требуем и INTERNET, и VALIDATED — исключаем captive portal/оффлайн Wi-Fi
         return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
                 caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }
@@ -96,14 +96,13 @@ class SyncManager @Inject constructor(
                         return@withLock
                     }
 
-                    // Оффлайн — не выполняем push/pull, просто выходим (WorkManager поднимет, когда будет сеть)
+                    // Оффлайн — не выполняем push/pull (WorkManager сам перезапустит при появлении сети)
                     if (!isOnline()) {
                         Log.i("Sync", "Offline detected — skip network phases for project=$projectId")
                         return@withLock
                     }
 
-                    // 🔹 Определяем «первую загрузку» без countByProjectId:
-                    //    если локальная версия == 0 или updated_at пустой — считаем, что снапшот ещё не тянули
+                    // «Первая загрузка»: локальная версия == 0 или updated_at пустой
                     val isFirstLoad = (project.version == 0) || project.updated_at.isBlank()
                     val stage = if (isFirstLoad) "snapshot" else "delta"
                     Log.i("Sync", "Sync[project=$projectId] stage=$stage")
@@ -186,7 +185,7 @@ class SyncManager @Inject constructor(
                             applyGroupsDeltaTx(projectId, delta, toMapGroups)
                             applyDevicesDeltaTx(projectId, delta, toMapDevices)
 
-                            // обновим только updated_at (или версию, если она приходит где-то в другом месте)
+                            // обновим только updated_at (версию тут не меняем — источник истины сервер)
                             projectDao.upsert(
                                 ProjectEntity(
                                     id = project.id,
@@ -261,7 +260,7 @@ class SyncManager @Inject constructor(
                 continue
             }
 
-            val meta = g.meta.orEmpty()
+            val meta = g.meta.orElseEmpty()
             val roomUuid = meta["room_id"] as? String
             val roomLocal = roomUuid?.let { roomUuidToLocal[it] }
             val roomName = (meta["room_name"] as? String)?.trim().orEmpty()
@@ -299,7 +298,7 @@ class SyncManager @Inject constructor(
                 continue
             }
 
-            val meta = d.meta.orEmpty()
+            val meta = d.meta.orElseEmpty()
             val roomUuid = meta["room_id"] as? String
             val roomName = (meta["room_name"] as? String)?.trim().orEmpty()
 
@@ -399,7 +398,7 @@ class SyncManager @Inject constructor(
                 continue
             }
             val localId = uuidDao.getGroupLocal(g.id)
-            val meta = g.meta.orEmpty()
+            val meta = g.meta.orElseEmpty()
 
             val roomUuid = meta["room_id"] as? String
             val roomLocal = roomUuid?.let { uuidDao.getRoomLocal(it) }
@@ -491,7 +490,7 @@ class SyncManager @Inject constructor(
             }
 
             val localId = uuidDao.getDeviceLocal(d.id)
-            val meta = d.meta.orEmpty()
+            val meta = d.meta.orElseEmpty()
 
             val roomUuid: String? = meta["room_id"] as? String
             val roomName: String = (meta["room_name"] as? String)?.trim().orEmpty()
@@ -686,3 +685,6 @@ private inline fun <T, K, V> Iterable<T>.associateNotNull(transform: (T) -> Pair
     }
     return map
 }
+
+// Маленькая утилита для null-безопасного доступа к meta
+private fun Map<String, Any?>?.orElseEmpty(): Map<String, Any?> = this ?: emptyMap()

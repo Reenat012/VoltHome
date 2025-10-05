@@ -36,6 +36,7 @@ import ru.mugalimov.volthome.domain.model.Voltage
 import java.util.Date
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.random.Random
 
 /**
  * OutboxPusher — вытягивает записи из outbox и отправляет на сервер пачками.
@@ -58,6 +59,8 @@ class OutboxPusher @Inject constructor(
 
     private val pushMutex = Mutex()
     private val gson by lazy { Gson() }
+    private fun jitterMs(base: Long = 100L): Long =
+        base + Random.nextLong(50L, 150L)
 
     /** Простая проверка онлайна, чтобы не дёргать сеть оффлайн. */
     private fun isOnline(): Boolean {
@@ -136,26 +139,26 @@ class OutboxPusher @Inject constructor(
                     }
 
                     // лёгкий троттлинг, чтобы не долбить подряд
-                    delay(100)
+                    delay(jitterMs())
                 }
             }
             PushStats(total = total, done = done, failed = failed)
         }
     }
 
+    // pushProject(projectId): офлайн — выходим без изменений, как в pushAll()
     suspend fun pushProject(projectId: String): PushStats = withContext(Dispatchers.IO) {
         pushMutex.withLock {
-            // 🔴 В офлайне — ничего не трогаем и не меняем статусы
-            if (!isOnline()) {
-                Log.i("Outbox", "offline => skip pushProject($projectId) (no DB/state changes)")
-                return@withLock PushStats(total = 0, done = 0, failed = 0)
-            }
-
-            // Подберём и PENDING, и ранее помеченные как RETRYABLE
             val items = outboxDao.pickByProject(projectId, OutboxState.PENDING, limit = 200)
                 .ifEmpty { outboxDao.pickByProject(projectId, OutboxState.FAILED_RETRYABLE, limit = 200) }
 
             if (items.isEmpty()) return@withLock PushStats(0, 0, 0)
+
+            if (!isOnline()) {
+                Log.i("Outbox", "offline => skip pushProject (no DB/state changes) project=$projectId")
+                // Раньше тут было markAttempt(... FAILED_RETRYABLE ...)
+                return@withLock PushStats(total = items.size, done = 0, failed = 0)
+            }
 
             return@withLock try {
                 val req = buildBatch(projectId, items)

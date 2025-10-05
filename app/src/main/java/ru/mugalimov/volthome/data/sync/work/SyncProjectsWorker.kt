@@ -4,15 +4,15 @@ import android.content.Context
 import android.util.Log
 import androidx.hilt.work.HiltWorker
 import androidx.room.withTransaction
+import androidx.work.BackoffPolicy
+import androidx.work.Constraints
+import androidx.work.CoroutineWorker
+import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
-import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import androidx.work.CoroutineWorker
-import androidx.work.workDataOf
-import androidx.work.Constraints
-import androidx.work.NetworkType
-import androidx.work.BackoffPolicy
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
@@ -42,13 +42,13 @@ class SyncProjectsWorker @AssistedInject constructor(
             if (projectId.isNullOrBlank()) {
                 // Синк активного
                 syncManager.syncActiveProject()
-                return@withContext Result.success()
+                Result.success()
             } else {
-                // Если локальный драфт — публикуем
+                // Если локальный драфт — публикуем, затем синкаем по remoteId
                 val maybeRemote = publishDraftIfNeeded(projectId)
                 val idForSync = maybeRemote ?: projectId
                 syncManager.syncProject(idForSync)
-                return@withContext Result.success()
+                Result.success()
             }
         } catch (t: Throwable) {
             Log.e(TAG, "sync failed: ${t.message}", t)
@@ -119,7 +119,7 @@ class SyncProjectsWorker @AssistedInject constructor(
                 Log.w(TAG, "failed to setActiveProjectId($remoteId): ${it.message}", it)
             }
 
-            // ставим ещё один синк уже на удалённый id (с такими же констринтами)
+            // ставим ещё один синк уже на удалённый id
             enqueue(applicationContext, remoteId)
 
             return remoteId
@@ -137,25 +137,35 @@ class SyncProjectsWorker @AssistedInject constructor(
     }
 
     companion object {
-        private const val TAG = "SyncWorker"
+        private const val TAG = "SyncProjectsWorker"
         private const val KEY_PROJECT_ID = "project_id"
         private const val UNIQUE_NAME_PREFIX = "sync-project-"
 
-        private val NET_CONSTRAINTS = Constraints.Builder()
+        // Требуем сеть и щадим батарею
+        private val NET_CONSTRAINTS: Constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
+            .setRequiresBatteryNotLow(true)
             .build()
 
-        fun enqueue(context: Context, projectId: String) {
-            val req = OneTimeWorkRequestBuilder<SyncProjectsWorker>()
-                .setInputData(workDataOf(KEY_PROJECT_ID to projectId))
-                .setInitialDelay(300, TimeUnit.MILLISECONDS)
+        private fun baseRequestBuilder(): OneTimeWorkRequest.Builder =
+            OneTimeWorkRequest.Builder(SyncProjectsWorker::class.java)
                 .setConstraints(NET_CONSTRAINTS)
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
-                .addTag("$UNIQUE_NAME_PREFIX$projectId")
+                .setInitialDelay(300, TimeUnit.MILLISECONDS)
+
+        fun enqueue(context: Context, projectId: String) {
+            val unique = "$UNIQUE_NAME_PREFIX$projectId"
+            val input: Data = Data.Builder()
+                .putString(KEY_PROJECT_ID, projectId)
+                .build()
+
+            val req: OneTimeWorkRequest = baseRequestBuilder()
+                .setInputData(input)
+                .addTag(unique)
                 .build()
 
             WorkManager.getInstance(context).enqueueUniqueWork(
-                "$UNIQUE_NAME_PREFIX$projectId",
+                unique,
                 ExistingWorkPolicy.KEEP,
                 req
             )
