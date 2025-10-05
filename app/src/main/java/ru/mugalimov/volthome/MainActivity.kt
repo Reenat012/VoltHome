@@ -1,47 +1,45 @@
 package ru.mugalimov.volthome
 
 import android.content.Context
-import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.lifecycleScope
+import com.yandex.authsdk.YandexAuthSdk
 import com.yandex.metrica.YandexMetrica
 import com.yandex.metrica.YandexMetricaConfig
-import com.yandex.authsdk.YandexAuthSdk
 import dagger.hilt.android.AndroidEntryPoint
-import javax.inject.Inject
+import kotlinx.coroutines.launch
+import ru.mugalimov.volthome.data.remote.auth.SessionManager
+import ru.mugalimov.volthome.data.sync.work.TokenRefreshScheduler
 import ru.mugalimov.volthome.ui.navigation.RootNavGraph
 import ru.mugalimov.volthome.ui.navigation.Screens
 import ru.mugalimov.volthome.ui.screens.welcome.AppTheme
-
-// CompositionLocal: из любого экрана можно вызвать авторизацию
-val LocalVkidAuthorize = compositionLocalOf<(Set<String>) -> Unit> {
-    { _ -> /* no-op by default */ }
-}
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
     companion object {
-        @Volatile
-        private var metricaInit = false
+        @Volatile private var metricaInit = false
     }
 
-    @Inject
-    lateinit var yandexSdk: YandexAuthSdk
+    @Inject lateinit var yandexSdk: YandexAuthSdk
+    @Inject lateinit var sessionManager: SessionManager
+    @Inject lateinit var tokenRefreshScheduler: TokenRefreshScheduler
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         val cid = BuildConfig.YANDEX_CLIENT_ID
         Log.d("YA_AUTH", "client_id set: ${cid.isNotBlank()}, tail=***${cid.takeLast(3)}")
 
-        // Инициализация AppMetrica — один раз за процесс
         if (!metricaInit) {
             val config = YandexMetricaConfig
                 .newConfigBuilder(Secret.APP_METRICA_API_KEY)
@@ -55,12 +53,22 @@ class MainActivity : ComponentActivity() {
         // 🚫 Отключаем ночной режим глобально
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
 
+        // 🔄 Подстраховочное планирование фонового refresh при старте процесса
+        lifecycleScope.launch {
+            val s = sessionManager.load()
+            if (s != null) {
+                tokenRefreshScheduler.scheduleFromExpiry(s.expiresAtMillis)
+            }
+        }
+
         setContent {
-            VoltHomeApp(sdk = yandexSdk)
+            AppTheme {
+                RootNavGraph(sdk = yandexSdk)
+            }
         }
     }
 
-    override fun onNewIntent(intent: Intent) {
+    override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         Log.d("YA_AUTH", "onNewIntent data=${intent?.data}")
     }
