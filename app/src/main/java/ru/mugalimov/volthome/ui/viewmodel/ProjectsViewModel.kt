@@ -25,6 +25,12 @@ class ProjectsViewModel @Inject constructor(
     // Публичный поток активного проекта (важно для навигации из любых экранов)
     val activeProjectId: Flow<String?> = activeDs.activeProjectId.distinctUntilChanged()
 
+    // НОВОЕ: заголовок для AppBar — имя активного проекта или "Проект не задан"
+    val activeProjectTitle =
+        combine(repo.listProjects(), activeProjectId) { list, activeId ->
+            list.firstOrNull { it.id == activeId }?.name ?: "Проект не задан"
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "Проект не задан")
+
     /**
      * Порядок отдаёт DAO (rowid ASC = порядок создания).
      * Без дополнительной сортировки по updatedAt.

@@ -37,6 +37,7 @@ fun MainApp(
     // --- проекты
     val projectsVm: ProjectsViewModel = hiltViewModel()
     val projectsFlow: Flow<List<ProjectUi>> = projectsVm.projectsUi
+    val appBarTitle = projectsVm.activeProjectTitle.collectAsState().value
 
     // --- профиль
     val profileVm: ProfileViewModel = hiltViewModel()
@@ -77,7 +78,7 @@ fun MainApp(
     val currentRoute = navBackStackEntry?.destination?.route
 
     AppScaffoldWithDrawer(
-        title = "VoltHome",
+        title = appBarTitle, // ← было "VoltHome"
         profileFlow = profileFlow,
         projectsFlow = projectsFlow,
         drawerState = drawerState,
