@@ -48,10 +48,14 @@ class ProjectsViewModel @Inject constructor(
 
     fun createNewProject(name: String? = null) {
         viewModelScope.launch {
-            val title = name?.takeIf { it.isNotBlank() } ?: run {
-                val existing = repo.listProjects().first()
-                nextSequentialProjectName(existing)
+            // --- ЛИМИТ 3 ПРОЕКТА (ранняя проверка для UI) ---
+            val existing = repo.listProjects().first()
+            if (existing.count { !it.isDeleted } >= 3) {
+                // тут можно эмитить событие для тоста/snackbar, если у вас есть механизм
+                return@launch
             }
+
+            val title = name?.takeIf { it.isNotBlank() } ?: nextSequentialProjectName(existing)
             repo.createProject(title, note = null)
 
             // Активным делаем "самый новый"

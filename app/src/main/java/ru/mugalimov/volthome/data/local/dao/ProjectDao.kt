@@ -17,6 +17,13 @@ interface ProjectDao {
     @Query("SELECT * FROM projects WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): ProjectEntity?
 
+    // ---- Новый функционал: счётчик активных проектов ----
+    @Query("SELECT COUNT(*) FROM projects WHERE is_deleted = 0")
+    suspend fun countActive(): Int
+
+    @Query("SELECT COUNT(*) FROM projects WHERE is_deleted = 0")
+    fun observeActiveCount(): Flow<Int>
+
     // ---- Апсёрт без REPLACE: insertOrIgnore + update ----
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)

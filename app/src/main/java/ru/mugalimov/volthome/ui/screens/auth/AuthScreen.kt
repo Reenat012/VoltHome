@@ -192,7 +192,6 @@ private fun YandexSignInButton(
     loading: Boolean,
     onClick: () -> Unit
 ) {
-    // Плавный переход цветов между enabled/disabled
     val container by animateColorAsState(
         targetValue = if (enabled) MaterialTheme.colorScheme.primary
         else MaterialTheme.colorScheme.surfaceVariant,
@@ -216,9 +215,7 @@ private fun YandexSignInButton(
             disabledContainerColor = container,
             disabledContentColor = content
         ),
-        elevation = ButtonDefaults.buttonElevation(
-            defaultElevation = if (enabled) 0.dp else 0.dp
-        ),
+        elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp),
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
         modifier = Modifier
             .fillMaxWidth()
@@ -230,11 +227,12 @@ private fun YandexSignInButton(
             modifier = Modifier.fillMaxWidth()
         ) {
             if (loading) {
+                // увеличенный индикатор — того же размера, что и логотип
                 CircularProgressIndicator(
                     color = content,
-                    strokeWidth = 2.dp,
+                    strokeWidth = 3.dp,
                     modifier = Modifier
-                        .size(18.dp)
+                        .size(40.dp)
                         .padding(end = 10.dp)
                 )
             } else {
@@ -246,6 +244,7 @@ private fun YandexSignInButton(
                         .padding(end = 10.dp)
                 )
             }
+
             Text(
                 text = if (loading) "Входим…" else "Войти с Яндекс ID",
                 style = MaterialTheme.typography.labelLarge

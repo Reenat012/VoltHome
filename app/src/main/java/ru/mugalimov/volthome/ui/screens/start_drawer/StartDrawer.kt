@@ -77,6 +77,8 @@ fun StartDrawer(
     var renameDialog by remember { mutableStateOf<Pair<String, String>?>(null) } // (id, currentName)
     var deleteConfirmForId by remember { mutableStateOf<String?>(null) }
 
+    val limitReached = projects.count() >= 3
+
     BackHandler(enabled = drawerState.isOpen) {
         scope.launch { drawerState.close() }
     }
@@ -165,17 +167,36 @@ fun StartDrawer(
                             )
                         }
 
+                        // --- Добавить проект ---
+                        // --- Добавить проект ---
                         item {
+                            val disabled = projects.size >= 3
+
                             NavigationDrawerItem(
-                                label = { Text("+ Добавить проект") },
+                                label = {
+                                    Text(if (!disabled) "+ Добавить проект" else "Лимит: 3 проекта")
+                                },
                                 selected = false,
                                 onClick = {
-                                    scope.launch {
-                                        drawerState.close()
-                                        onCreateProject()
+                                    if (!disabled) {
+                                        scope.launch {
+                                            drawerState.close()
+                                            onCreateProject()
+                                        }
                                     }
                                 },
                                 icon = { Icon(Icons.Default.Shield, contentDescription = null) },
+                                // визуально приглушаем пункт, когда лимит достигнут
+                                colors = NavigationDrawerItemDefaults.colors(
+                                    selectedTextColor = if (disabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    else MaterialTheme.colorScheme.onSurface,
+                                    unselectedTextColor = if (disabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    else MaterialTheme.colorScheme.onSurface,
+                                    selectedIconColor = if (disabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    unselectedIconColor = if (disabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                ),
                                 modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                             )
                         }
@@ -214,22 +235,6 @@ fun StartDrawer(
                                 modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                             )
                         }
-
-                        // Если вернёшь PRO/О приложении — добавь сюда item { ... }
-                        // item {
-                        //     NavigationDrawerItem(
-                        //         label = { Text("Подписка PRO") },
-                        //         selected = false,
-                        //         onClick = {
-                        //             scope.launch {
-                        //                 drawerState.close()
-                        //                 onOpenSubscription()
-                        //             }
-                        //         },
-                        //         icon = { Icon(Icons.Default.WorkspacePremium, contentDescription = null) },
-                        //         modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-                        //     )
-                        // }
                     }
                 }
             }

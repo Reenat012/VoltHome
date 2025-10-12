@@ -54,6 +54,10 @@ class ProjectsRepositoryImpl @Inject constructor(
     private val bootstrapMutex = Mutex()
     private val isBootstrapping = AtomicBoolean(false)
 
+    private companion object {
+        const val MAX_PROJECTS = 3
+    }
+
     override fun listProjects(): Flow<List<Project>> =
         db.projectDao()
             .observeAll()
@@ -72,7 +76,7 @@ class ProjectsRepositoryImpl @Inject constructor(
             return@withContext latest.id
         }
 
-        // ---- создаём самый первый локальный проект с лаконичным именем «Проект №1» ----
+        // если проектов совсем нет — создаём первый (не считаем это обходом лимита)
         val id = "draft-" + UUID.randomUUID().toString()
         val nowIso = TimeUtils.formatIso(TimeUtils.now())
         val defaultName = nextSequentialProjectName(all) // -> «Проект №1»
@@ -168,6 +172,12 @@ class ProjectsRepositoryImpl @Inject constructor(
     }
 
     override suspend fun createProject(name: String, note: String?): String = withContext(Dispatchers.IO) {
+        // --- ЛИМИТ 3 ПРОЕКТА ---
+        val activeCount = db.projectDao().countActive()
+        if (activeCount >= MAX_PROJECTS) {
+            throw IllegalStateException("Достигнут лимит: не более $MAX_PROJECTS проектов")
+        }
+
         // офлайн-first: создаём ЛОКАЛЬНО draft-*, сервер — через outbox
         val id = "draft-" + UUID.randomUUID().toString()
         val nowIso = TimeUtils.formatIso(TimeUtils.now())
