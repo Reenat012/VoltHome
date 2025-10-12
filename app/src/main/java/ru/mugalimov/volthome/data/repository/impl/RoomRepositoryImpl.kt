@@ -51,6 +51,7 @@ import ru.mugalimov.volthome.data.local.entity.TombstoneEntityType
 import ru.mugalimov.volthome.data.sync.outbox.RoomCreatePayload
 import ru.mugalimov.volthome.data.sync.outbox.RoomUpdatePayload
 import ru.mugalimov.volthome.data.sync.outbox.RoomDeletePayload
+import ru.mugalimov.volthome.data.sync.outbox.DeviceCreatePayload
 import ru.mugalimov.volthome.data.sync.outbox.DeviceDeletePayload
 import ru.mugalimov.volthome.data.sync.outbox.OutboxPushWorker
 import ru.mugalimov.volthome.data.sync.outbox.toJson
@@ -286,6 +287,33 @@ class RoomRepositoryImpl @Inject constructor(
                 )
             )
 
+            // outbox DEVICE_CREATE для каждого устройства (сопоставляем ids с исходными entities)
+            deviceIds.forEachIndexed { index, devId ->
+                val dev = devices[index]
+                outboxDao.insert(
+                    OutboxEntity(
+                        project_id = projectId,
+                        op_type = OutboxOpType.DEVICE_CREATE,
+                        payload_json = DeviceCreatePayload(
+                            projectId = projectId,
+                            localId = devId,
+                            roomLocalId = roomId,
+                            name = dev.name,
+                            power = dev.power,
+                            voltage = dev.voltage,
+                            demandRatio = dev.demandRatio,
+                            createdAt = dev.createdAt.time,
+                            deviceType = dev.deviceType,
+                            powerFactor = dev.powerFactor,
+                            hasMotor = dev.hasMotor,
+                            requiresDedicatedCircuit = dev.requiresDedicatedCircuit,
+                            requiresSocketConnection = dev.requiresSocketConnection
+                        ).toJson(),
+                        group_key = "device:create:$projectId:$devId"
+                    )
+                )
+            }
+
             OutboxPushWorker.enqueueProject(context, projectId)
             CreatedRoomResult(roomId = roomId, deviceIds = deviceIds)
         }
@@ -297,9 +325,39 @@ class RoomRepositoryImpl @Inject constructor(
         val room = roomDao.getRoomById(roomId)
             ?: throw RoomNotFoundException("Комната $roomId не найдена")
         val projectId = room.projectId
+            ?: throw RoomNotFoundException("У комнаты нет projectId")
+
         val entities = expand(devices, roomId = roomId, projectId = projectId)
         val ids = roomsTxDao.insertDevices(entities)
-        projectId?.let { OutboxPushWorker.enqueueProject(context, it) }
+
+        // outbox DEVICE_CREATE для каждого добавленного устройства
+        ids.forEachIndexed { index, devId ->
+            val dev = entities[index]
+            outboxDao.insert(
+                OutboxEntity(
+                    project_id = projectId,
+                    op_type = OutboxOpType.DEVICE_CREATE,
+                    payload_json = DeviceCreatePayload(
+                        projectId = projectId,
+                        localId = devId,
+                        roomLocalId = roomId,
+                        name = dev.name,
+                        power = dev.power,
+                        voltage = dev.voltage,
+                        demandRatio = dev.demandRatio,
+                        createdAt = dev.createdAt.time,
+                        deviceType = dev.deviceType,
+                        powerFactor = dev.powerFactor,
+                        hasMotor = dev.hasMotor,
+                        requiresDedicatedCircuit = dev.requiresDedicatedCircuit,
+                        requiresSocketConnection = dev.requiresSocketConnection
+                    ).toJson(),
+                    group_key = "device:create:$projectId:$devId"
+                )
+            )
+        }
+
+        OutboxPushWorker.enqueueProject(context, projectId)
         ids
     }
 

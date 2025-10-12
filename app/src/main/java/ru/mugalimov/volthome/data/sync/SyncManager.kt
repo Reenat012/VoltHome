@@ -50,7 +50,7 @@ class SyncManager @Inject constructor(
     private val projectsApi: ProjectsApi,
     private val activeProjectDataStore: ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore,
     private val outboxPusher: OutboxPusher,
-    @ApplicationContext private val appContext: Context, // для оффлайн-проверки
+    @ApplicationContext private val appContext: Context,
 ) {
     private val uuidDao get() = appDb.uuidMapDao()
 
@@ -68,7 +68,6 @@ class SyncManager @Inject constructor(
         val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val nw = cm.activeNetwork ?: return false
         val caps = cm.getNetworkCapabilities(nw) ?: return false
-        // Требуем и INTERNET, и VALIDATED — исключаем captive portal/оффлайн Wi-Fi
         return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
                 caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }
@@ -83,7 +82,6 @@ class SyncManager @Inject constructor(
             lockFor(projectId).withLock {
                 Log.i("Sync", "syncProject START project=$projectId thread=${Thread.currentThread().name}")
                 val tStart = System.currentTimeMillis()
-
                 try {
                     val project = projectDao.getById(projectId)
                     if (project == null) {
@@ -96,18 +94,18 @@ class SyncManager @Inject constructor(
                         return@withLock
                     }
 
-                    // Оффлайн — не выполняем push/pull (WorkManager сам перезапустит при появлении сети)
                     if (!isOnline()) {
                         Log.i("Sync", "Offline detected — skip network phases for project=$projectId")
                         return@withLock
                     }
 
-                    // «Первая загрузка»: локальная версия == 0 или updated_at пустой
-                    val isFirstLoad = (project.version == 0) || project.updated_at.isBlank()
+                    // Улучшенная эвристика «первая загрузка»: нет ни одной комнаты в локальной БД
+                    val localRoomsCount = roomDao.countByProjectId(projectId)
+                    val isFirstLoad = (project.version == 0) || project.updated_at.isBlank() || (localRoomsCount == 0)
                     val stage = if (isFirstLoad) "snapshot" else "delta"
-                    Log.i("Sync", "Sync[project=$projectId] stage=$stage")
+                    Log.i("Sync", "Sync[project=$projectId] stage=$stage (localRooms=$localRoomsCount)")
 
-                    // -------- PUSH (точечно по проекту) --------
+                    // -------- PUSH --------
                     try {
                         val stats = outboxPusher.pushProject(projectId)
                         Log.i("Sync", "push phase done: total=${stats.total} ok=${stats.done} failed=${stats.failed}")
@@ -127,10 +125,7 @@ class SyncManager @Inject constructor(
                             } else throw e
                         }
 
-                        Log.i(
-                            "Sync",
-                            "snapshot pull: rooms=${tree.rooms.size}, groups=${tree.groups.size}, devices=${tree.devices.size}"
-                        )
+                        Log.i("Sync", "snapshot pull: rooms=${tree.rooms.size}, groups=${tree.groups.size}, devices=${tree.devices.size}")
 
                         val toMapRooms = mutableListOf<Pair<String, Long>>()
                         val toMapGroups = mutableListOf<Pair<String, Long>>()
@@ -182,26 +177,145 @@ class SyncManager @Inject constructor(
                         val toMapRooms = mutableListOf<Pair<String, Long>>()
                         val toMapGroups = mutableListOf<Pair<String, Long>>()
                         val toMapDevices = mutableListOf<Pair<String, Long>>()
+                        val freshRoomMappings = mutableMapOf<String, Long>()
 
-                        appDb.withTransaction {
-                            applyRoomsDeltaTx(projectId, delta, toMapRooms)
+                        // 1-й проход: применяем дельту и собираем неразрешённые room_uuid из devices
+                        val unresolvedRooms1: Set<String> = appDb.withTransaction {
+                            applyRoomsDeltaTx(projectId, delta, toMapRooms, freshRoomMappings)
                             applyGroupsDeltaTx(projectId, delta, toMapGroups)
-                            applyDevicesDeltaTx(projectId, delta, toMapDevices)
-
-                            // обновим только updated_at (версию тут не меняем — источник истины сервер)
-                            projectDao.upsert(
-                                ProjectEntity(
-                                    id = project.id,
-                                    name = project.name,
-                                    note = project.note,
-                                    version = project.version,
-                                    updated_at = isoNow(),
-                                    is_deleted = project.is_deleted
-                                )
-                            )
+                            applyDevicesDeltaTx(projectId, delta, toMapDevices, freshRoomMappings, /*collectUnresolved=*/true)
                         }
 
+                        // Не меняем версию; updated_at локально не ставим isoNow()
                         putUuidMappings(toMapRooms, toMapGroups, toMapDevices)
+
+                        // Если есть устройства с room_uuid, которых ещё нет локально — подтягиваем комнаты снапшотом и повторяем устройства
+                        if (unresolvedRooms1.isNotEmpty()) {
+                            Log.w("Sync", "delta backfill: need rooms for uuids=$unresolvedRooms1")
+                            val tree: ProjectTreeDto = try {
+                                projectsApi.getProjectTree(projectId)
+                            } catch (e: retrofit2.HttpException) {
+                                if (e.code() == 400) {
+                                    Log.w("Sync", "backfill snapshot -> 400 invalid_id; skip")
+                                    return@withLock
+                                } else throw e
+                            }
+
+                            val toMapRoomsBackfill = mutableListOf<Pair<String, Long>>()
+                            appDb.withTransaction {
+                                for (r in tree.rooms) {
+                                    if (!unresolvedRooms1.contains(r.id)) continue
+                                    if (r.is_deleted) continue
+
+                                    val createdAt = parseDate(r.meta?.get("created_at_iso") as? String)
+                                    val roomType = (r.meta?.get("room_type") as? String)?.let { safeRoomType(it) } ?: RoomType.STANDARD
+
+                                    val existingId = uuidDao.getRoomLocal(r.id)
+                                        ?: roomDao.findIdByProjectAndName(projectId, r.name)
+
+                                    val localId: Long = if (existingId != null) {
+                                        existingId
+                                    } else {
+                                        val entity = RoomEntity(
+                                            id = 0,
+                                            name = r.name,
+                                            createdAt = createdAt,
+                                            roomType = roomType,
+                                            projectId = projectId
+                                        )
+                                        val ids = roomDao.insertAll(listOf(entity))
+                                        ids.firstOrNull()?.takeIf { it > 0 }
+                                            ?: roomDao.findIdByProjectAndName(projectId, r.name)
+                                            ?: continue
+                                    }
+                                    toMapRoomsBackfill += r.id to localId
+                                }
+
+                                projectDao.upsert(
+                                    ProjectEntity(
+                                        id = project.id,
+                                        name = project.name,
+                                        note = project.note,
+                                        version = project.version,
+                                        updated_at = tree.project.updated_at,
+                                        is_deleted = project.is_deleted
+                                    )
+                                )
+                            }
+                            putUuidMappings(toMapRoomsBackfill, emptyList(), emptyList())
+
+                            // Второй проход по тем же devices (идемпотентно)
+                            val toMapDevicesRetry = mutableListOf<Pair<String, Long>>()
+                            appDb.withTransaction {
+                                applyDevicesDeltaTx(
+                                    projectId = projectId,
+                                    delta = delta,
+                                    toMapDevices = toMapDevicesRetry,
+                                    freshRoomMappings = emptyMap(),
+                                    collectUnresolved = false
+                                )
+                            }
+                            if (toMapDevicesRetry.isNotEmpty()) {
+                                uuidDao.putDevices(toMapDevicesRetry.map { (u, l) -> UuidMapDevice(deviceUuid = u, localId = l) })
+                            }
+
+                            // 🔹 Safety backfill: если после дельты не осталось локальных комнат — подтянем комнаты снапшотом
+                            val roomsAfterDelta = roomDao.countByProjectId(projectId)
+                            if (roomsAfterDelta == 0) {
+                                Log.w("Sync", "delta safety-backfill: no local rooms; pulling snapshot rooms for project=$projectId")
+                                val treeForRooms = try {
+                                    projectsApi.getProjectTree(projectId)
+                                } catch (e: retrofit2.HttpException) {
+                                    if (e.code() == 400) {
+                                        Log.w("Sync", "delta safety-backfill snapshot -> 400 invalid_id; skip")
+                                        null
+                                    } else throw e
+                                }
+
+                                treeForRooms?.let { tree2 ->
+                                    val toMapRoomsBackfill2 = mutableListOf<Pair<String, Long>>()
+                                    appDb.withTransaction {
+                                        for (r in tree2.rooms) {
+                                            if (r.is_deleted) continue
+                                            val createdAt = parseDate(r.meta?.get("created_at_iso") as? String)
+                                            val roomType = (r.meta?.get("room_type") as? String)?.let { safeRoomType(it) } ?: RoomType.STANDARD
+
+                                            val existingId = uuidDao.getRoomLocal(r.id)
+                                                ?: roomDao.findIdByProjectAndName(projectId, r.name)
+
+                                            val localId: Long = if (existingId != null) {
+                                                existingId
+                                            } else {
+                                                val entity = RoomEntity(
+                                                    id = 0,
+                                                    name = r.name,
+                                                    createdAt = createdAt,
+                                                    roomType = roomType,
+                                                    projectId = projectId
+                                                )
+                                                val ids = roomDao.insertAll(listOf(entity))
+                                                ids.firstOrNull()?.takeIf { it > 0 }
+                                                    ?: roomDao.findIdByProjectAndName(projectId, r.name)
+                                                    ?: continue
+                                            }
+                                            toMapRoomsBackfill2 += r.id to localId
+                                        }
+
+                                        projectDao.upsert(
+                                            ProjectEntity(
+                                                id = project.id,
+                                                name = project.name,
+                                                note = project.note,
+                                                version = project.version,
+                                                updated_at = tree2.project.updated_at,
+                                                is_deleted = project.is_deleted
+                                            )
+                                        )
+                                    }
+                                    putUuidMappings(toMapRoomsBackfill2, emptyList(), emptyList())
+                                }
+                            }
+                        }
                     }
                 } finally {
                     val ms = System.currentTimeMillis() - tStart
@@ -219,10 +333,13 @@ class SyncManager @Inject constructor(
         toMapGroups: MutableList<Pair<String, Long>>,
         toMapDevices: MutableList<Pair<String, Long>>
     ) {
-        val roomUuidToLocal = mutableMapOf<String, Long>()
+        val roomUuidToLocal = mutableMapOf<String, Long>() // только живые
+        val roomUuidToNameAll = mutableMapOf<String, String>() // все, включая удалённые
 
         // ROOMS
         for (r in tree.rooms) {
+            roomUuidToNameAll[r.id] = r.name
+
             if (r.is_deleted) {
                 uuidDao.getRoomLocal(r.id)?.let { roomDao.deleteRoomById(it) }
                 continue
@@ -265,20 +382,41 @@ class SyncManager @Inject constructor(
 
             val meta = g.meta.orElseEmpty()
             val roomUuid = meta["room_id"] as? String
-            val roomLocal = roomUuid?.let { roomUuidToLocal[it] }
             val roomName = (meta["room_name"] as? String)?.trim().orEmpty()
 
-            val ensuredRoomId = when {
-                roomLocal != null -> roomLocal
-                roomName.isNotEmpty() -> ensureRoomByNameTx(projectId, roomName)
-                else -> ensurePlaceholderRoomTx(projectId, "Room")
+            // 1) по UUID среди живых
+            var ensuredRoomId: Long? = roomUuid?.let { roomUuidToLocal[it] }
+
+            // 2) если UUID указывает на удалённую — пробуем по имени (имя удалённой или из meta)
+            if (ensuredRoomId == null && !roomUuid.isNullOrBlank()) {
+                val nameFromDeleted = roomUuidToNameAll[roomUuid].orEmpty()
+                val candidateName = when {
+                    roomName.isNotEmpty() -> roomName
+                    nameFromDeleted.isNotEmpty() -> nameFromDeleted
+                    else -> ""
+                }
+                if (candidateName.isNotEmpty()) {
+                    ensuredRoomId = roomNameToLocalId[candidateName]
+                        ?: roomDao.findIdByProjectAndName(projectId, candidateName)
+                }
+            }
+
+            // 3) если meta содержит имя — позволяем создать комнату по имени
+            if (ensuredRoomId == null && roomName.isNotEmpty()) {
+                ensuredRoomId = ensureRoomByNameTx(projectId, roomName)
+            }
+
+            // 4) иначе — пропускаем группу, никаких плейсхолдеров
+            if (ensuredRoomId == null) {
+                Log.w("Sync", "snapshot groups.skip: cannot resolve room for group '${g.id}' name='${g.name}' roomUuid=$roomUuid roomName='$roomName'")
+                continue
             }
 
             val entity = CircuitGroupEntity(
                 groupId = 0,
                 groupNumber = (meta["group_number"] as? Number)?.toInt() ?: 0,
                 roomId = ensuredRoomId,
-                roomName = if (roomName.isNotEmpty()) roomName else "Room",
+                roomName = if (roomName.isNotEmpty()) roomName else roomUuidToNameAll[roomUuid].orEmpty(),
                 groupType = (meta["group_type"] as? String) ?: "OTHER",
                 nominalCurrent = (meta["nominal_current"] as? Number)?.toDouble() ?: 0.0,
                 circuitBreaker = (meta["circuit_breaker"] as? Number)?.toInt() ?: 16,
@@ -303,18 +441,35 @@ class SyncManager @Inject constructor(
 
             val meta = d.meta.orElseEmpty()
             val roomUuid = meta["room_id"] as? String
-            val roomName = (meta["room_name"] as? String)?.trim().orEmpty()
+            val roomNameMeta = (meta["room_name"] as? String)?.trim().orEmpty()
 
-            val roomLocalFromUuid = roomUuid?.let { roomUuidToLocal[it] }
-            val roomLocalFromName = if (roomLocalFromUuid == null && roomName.isNotEmpty()) {
-                roomNameToLocalId[roomName] ?: roomDao.findIdByProjectAndName(projectId, roomName)
-            } else null
+            // 1) по UUID среди живых
+            var ensuredRoomId: Long? = roomUuid?.let { roomUuidToLocal[it] }
 
-            val ensuredRoomId = when {
-                roomLocalFromUuid != null -> roomLocalFromUuid
-                roomLocalFromName != null -> roomLocalFromName
-                roomName.isNotEmpty() -> ensureRoomByNameTx(projectId, roomName)
-                else -> ensurePlaceholderRoomTx(projectId, "Room")
+            // 2) по room_name из meta среди живых
+            if (ensuredRoomId == null && roomNameMeta.isNotEmpty()) {
+                ensuredRoomId = roomNameToLocalId[roomNameMeta]
+                    ?: roomDao.findIdByProjectAndName(projectId, roomNameMeta)
+            }
+
+            // 3) UUID указывает на удалённую комнату — пробуем по имени удалённой
+            if (ensuredRoomId == null && !roomUuid.isNullOrBlank()) {
+                val deletedRoomName = roomUuidToNameAll[roomUuid]?.trim().orEmpty()
+                if (deletedRoomName.isNotEmpty()) {
+                    ensuredRoomId = roomNameToLocalId[deletedRoomName]
+                        ?: roomDao.findIdByProjectAndName(projectId, deletedRoomName)
+                }
+            }
+
+            // 4) если meta содержит имя — позволяем СОЗДАТЬ комнату по имени (не плейсхолдер!)
+            if (ensuredRoomId == null && roomNameMeta.isNotEmpty()) {
+                ensuredRoomId = ensureRoomByNameTx(projectId, roomNameMeta)
+            }
+
+            // 5) иначе — пропускаем устройство (никаких "Room")
+            if (ensuredRoomId == null) {
+                Log.w("Sync", "snapshot devices.skip: room unresolved for device='${d.name}' roomUuid=$roomUuid roomName='$roomNameMeta' (avoid placeholder)")
+                continue
             }
 
             val entity = DeviceEntity(
@@ -344,7 +499,8 @@ class SyncManager @Inject constructor(
     private suspend fun applyRoomsDeltaTx(
         projectId: String,
         delta: ProjectDeltaResponse,
-        toMapRooms: MutableList<Pair<String, Long>>
+        toMapRooms: MutableList<Pair<String, Long>>,
+        freshRoomMappings: MutableMap<String, Long>
     ) {
         for (r in delta.rooms.upsert) {
             if (r.is_deleted) {
@@ -373,6 +529,7 @@ class SyncManager @Inject constructor(
                         ?: continue
                 }
                 toMapRooms += r.id to finalId
+                freshRoomMappings[r.id] = finalId
             } else {
                 val existing = roomDao.getRoomById(localId) ?: continue
                 roomDao.updateRoom(
@@ -383,10 +540,16 @@ class SyncManager @Inject constructor(
                         projectId = projectId
                     )
                 )
+                freshRoomMappings[r.id] = localId
             }
         }
         for (id in delta.rooms.delete) {
             uuidDao.getRoomLocal(id)?.let { roomDao.deleteRoomById(it) }
+        }
+
+        // Чтобы устройства в этой же транзакции могли увидеть маппинги
+        if (freshRoomMappings.isNotEmpty()) {
+            uuidDao.putRooms(freshRoomMappings.map { (u, l) -> UuidMapRoom(roomUuid = u, localId = l) })
         }
     }
 
@@ -484,30 +647,37 @@ class SyncManager @Inject constructor(
     private suspend fun applyDevicesDeltaTx(
         projectId: String,
         delta: ProjectDeltaResponse,
-        toMapDevices: MutableList<Pair<String, Long>>
-    ) {
+        toMapDevices: MutableList<Pair<String, Long>>,
+        freshRoomMappings: Map<String, Long>,
+        collectUnresolved: Boolean
+    ): Set<String> {
+        val unresolvedRoomUuids = mutableSetOf<String>()
+
         for (d in delta.devices.upsert) {
             if (d.is_deleted) {
                 uuidDao.getDeviceLocal(d.id)?.let { deviceDao.deleteDeviceById(it) }
                 continue
             }
 
-            val localId = uuidDao.getDeviceLocal(d.id)
             val meta = d.meta.orElseEmpty()
+            val localId: Long? = uuidDao.getDeviceLocal(d.id)
 
-            val roomUuid: String? = meta["room_id"] as? String
-            val roomName: String = (meta["room_name"] as? String)?.trim().orEmpty()
+            val roomUuid = meta["room_id"] as? String
+            val roomName = (meta["room_name"] as? String)?.trim().orEmpty()
 
-            var ensuredRoomId: Long? = roomUuid?.let { uuidDao.getRoomLocal(it) }
+            var ensuredRoomId: Long? = roomUuid?.let { freshRoomMappings[it] }
+            if (ensuredRoomId == null && roomUuid != null) {
+                ensuredRoomId = uuidDao.getRoomLocal(roomUuid)
+            }
             if (ensuredRoomId == null && roomName.isNotEmpty()) {
                 ensuredRoomId = roomDao.findIdByProjectAndName(projectId, roomName)
             }
+
             if (ensuredRoomId == null) {
-                Log.w(
-                    "Sync",
-                    "devices.upsert skip: cannot resolve room for device='${d.name}' " +
-                            "roomUuid=$roomUuid roomName='$roomName' project=$projectId"
-                )
+                if (collectUnresolved && !roomUuid.isNullOrBlank()) {
+                    unresolvedRoomUuids += roomUuid
+                }
+                Log.w("Sync", "devices.upsert skip: cannot resolve room for device='${d.name}' roomUuid=$roomUuid roomName='$roomName' project=$projectId")
                 continue
             }
 
@@ -558,10 +728,9 @@ class SyncManager @Inject constructor(
                         requiresSocketConnection = requiresSocket,
                         projectId = projectId
                     )
-                    val newLocal = deviceDao.insert(entity)
-                    val resolvedId = if (newLocal > 0) newLocal
+                    val insertedId = deviceDao.insert(entity)
+                    val resolvedId = if (insertedId > 0) insertedId
                     else deviceDao.findByRoomAndName(ensuredRoomId!!, name)?.deviceId ?: continue
-
                     toMapDevices += d.id to resolvedId
                 }
             } else {
@@ -588,6 +757,8 @@ class SyncManager @Inject constructor(
         for (id in delta.devices.delete) {
             uuidDao.getDeviceLocal(id)?.let { deviceDao.deleteDeviceById(it) }
         }
+
+        return unresolvedRoomUuids
     }
 
     // ----------------- UUID map flush (вне транзакций) -----------------
@@ -657,25 +828,6 @@ class SyncManager @Inject constructor(
         return ids.firstOrNull()?.takeIf { it > 0 }
             ?: (roomDao.findIdByProjectAndName(projectId, name)
                 ?: error("failed to create room by name"))
-    }
-
-    /** Плейсхолдер-комната (внутри транзакции) */
-    private suspend fun ensurePlaceholderRoomTx(projectId: String, roomName: String): Long {
-        val name = roomName.ifBlank { "Room" }
-        val byName = roomDao.findIdByProjectAndName(projectId, name)
-        if (byName != null) return byName
-
-        val entity = RoomEntity(
-            id = 0,
-            name = name,
-            createdAt = Date(),
-            roomType = RoomType.STANDARD,
-            projectId = projectId
-        )
-        val ids = roomDao.insertAll(listOf(entity))
-        return ids.firstOrNull()?.takeIf { it > 0 }
-            ?: (roomDao.findIdByProjectAndName(projectId, name)
-                ?: error("failed to create placeholder room"))
     }
 }
 
