@@ -1,27 +1,23 @@
 package ru.mugalimov.volthome.ui.screens.profile
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.Divider
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.ui.viewmodel.AuthViewModel
 import ru.mugalimov.volthome.ui.viewmodel.ProfileViewModel
@@ -38,70 +34,159 @@ fun ProfileScreen(
 
     LaunchedEffect(Unit) { profileVm.refresh() }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 20.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.Top,
-        horizontalAlignment = Alignment.Start
-    ) {
-        TopAppBar(
-            title = { Text("Профиль") },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Профиль") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.Default.ArrowBack,
+                            contentDescription = "Назад"
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    titleContentColor = MaterialTheme.colorScheme.onBackground,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onBackground
+                )
             )
-        )
-
-        Spacer(Modifier.height(12.dp))
-
+        }
+    ) { inner ->
         when (val s = profileState) {
             is ProfileViewModel.UiState.Loading -> {
-                Text("Загружаем профиль…")
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(inner),
+                    contentAlignment = Alignment.Center
+                ) { CircularProgressIndicator() }
             }
 
             is ProfileViewModel.UiState.Error -> {
-                Text(
-                    s.message,
-                    color = MaterialTheme.colorScheme.error
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(inner)
+                        .padding(20.dp),
+                ) { Text(s.message, color = MaterialTheme.colorScheme.error) }
             }
 
             is ProfileViewModel.UiState.Data -> {
                 val me = s.me
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(inner)
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Карточка профиля
+                    item {
+                        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val avatarModifier = Modifier
+                                    .size(64.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
 
-                Text(
-                    "Имя: ${me.displayName}",
-                    style = MaterialTheme.typography.titleMedium
-                )
-                Spacer(Modifier.height(6.dp))
+                                if (me.avatarUrl.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = "file:///android_asset/report_pdf/img/logo.png",
+                                        contentDescription = "VoltHome",
+                                        contentScale = ContentScale.Fit,
+                                        modifier = avatarModifier
+                                    )
+                                } else {
+                                    AsyncImage(
+                                        model = me.avatarUrl,
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = avatarModifier
+                                    )
+                                }
 
-                Text("E-mail: ${me.email ?: "—"}")
+                                Spacer(Modifier.width(16.dp))
 
-                if (me.plan.isNotBlank()) {
-                    Spacer(Modifier.height(6.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = me.displayName,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = me.email ?: "—",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
 
-                    val untilStr = me.planUntilEpochSeconds
-                        ?.takeIf { it > 0 }
-                        ?.let {
-                            java.time.Instant.ofEpochSecond(it)
-                                .atZone(java.time.ZoneId.systemDefault())
-                                .toLocalDate()
-                                .toString()
+                                    if (me.plan.isNotBlank()) {
+                                        Spacer(Modifier.height(8.dp))
+                                        PlanChip(
+                                            plan = me.plan,
+                                            untilEpochSeconds = me.planUntilEpochSeconds
+                                        )
+                                    }
+                                }
+                            }
                         }
-                        ?: ""
+                    }
 
-                    Text("Подписка: ${me.plan}${if (untilStr.isNotEmpty()) " (до $untilStr)" else ""}")
+                    // Кнопка выхода
+                    item {
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            Button(onClick = { scope.launch { authVm.signOut() } }) {
+                                Icon(Icons.Default.ExitToApp, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Выйти")
+                            }
+                        }
+                    }
                 }
-
-                Spacer(Modifier.height(16.dp))
-                Divider()
-                Spacer(Modifier.height(16.dp))
-
-                Button(
-                    onClick = { scope.launch { authVm.signOut() } }
-                ) { Text("Выйти") }
             }
         }
     }
+}
+
+@Composable
+private fun PlanChip(
+    plan: String,
+    untilEpochSeconds: Long?
+) {
+    val label = buildString {
+        append(
+            when (plan.lowercase()) {
+                "free" -> "Free"
+                "pro" -> "PRO"
+                else -> plan
+            }
+        )
+        val untilStr = untilEpochSeconds
+            ?.takeIf { it > 0 }
+            ?.let {
+                java.time.Instant.ofEpochSecond(it)
+                    .atZone(java.time.ZoneId.systemDefault())
+                    .toLocalDate()
+                    .toString()
+            }
+        if (!untilStr.isNullOrBlank()) append(" • до $untilStr")
+    }
+
+    AssistChip(
+        onClick = {},
+        label = { Text(label) },
+        leadingIcon = {
+            Icon(
+                imageVector = Icons.Default.Person,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    )
 }

@@ -39,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import coil.compose.rememberAsyncImagePainter
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.ui.model.ProjectUi
@@ -323,15 +324,14 @@ private fun DrawerHeader(
                 .clip(MaterialTheme.shapes.medium)
 
             if (profile?.avatarUrl.isNullOrBlank()) {
-                Box(
-                    avatarModifier,
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = null
-                    )
-                }
+                // Логотип VoltHome из assets вместо заглушки-иконки
+                // Путь: app/src/main/assets/report_pdf/img/logo.png
+                AsyncImage(
+                    model = "file:///android_asset/report_pdf/img/logo.png",
+                    contentDescription = "VoltHome",
+                    contentScale = ContentScale.Fit,
+                    modifier = avatarModifier
+                )
             } else {
                 Image(
                     painter = rememberAsyncImagePainter(profile!!.avatarUrl),
