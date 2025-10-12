@@ -26,6 +26,7 @@ import ru.mugalimov.volthome.data.local.entity.UuidMapDevice
 import ru.mugalimov.volthome.data.local.entity.UuidMapRoom
 import ru.mugalimov.volthome.data.remote.api.CreateProjectRequest
 import ru.mugalimov.volthome.data.remote.api.ProjectsApi
+import ru.mugalimov.volthome.data.remote.api.ProjectsApi.UpdateProjectRequest
 import ru.mugalimov.volthome.data.remote.dto.DeviceUpsert
 import ru.mugalimov.volthome.data.remote.dto.OpBucket
 import ru.mugalimov.volthome.data.remote.dto.Ops
@@ -49,14 +50,17 @@ import ru.mugalimov.volthome.data.sync.outbox.DeviceCreatePayload
 import ru.mugalimov.volthome.data.sync.outbox.DeviceUpdatePayload
 import ru.mugalimov.volthome.data.sync.outbox.DeviceDeletePayload
 import ru.mugalimov.volthome.data.sync.outbox.ProjectCreatePayload
+import ru.mugalimov.volthome.data.sync.outbox.ProjectUpdatePayload
+import ru.mugalimov.volthome.data.sync.outbox.ProjectDeletePayload
 
 /**
  * OutboxPusher — вытягивает записи из outbox и отправляет на сервер пачками.
  * Особенности:
  *  • Оффлайн guard: ничего не делаем без валидного онлайна — WorkManager поднимет заново.
- *  • Публикация драфта: если группа outbox относится к draft-*, сначала выполняем PROJECT_CREATE,
- *    ребиндим локальные сущности на remoteId, переносим local state, удаляем строку драфта, и
- *    только потом пушим оставшийся batch на remoteId.
+ *  • Публикация драфта: если группа outbox относится к draft-*, сначала выполняем PROJECT_CREATE
+ *    (с учётом последнего PROJECT_UPDATE для имени/заметки), затем ребиндим локальные сущности и
+ *    только после этого пушим оставшийся батч на remoteId.
+ *  • Удаление проекта: PROJECT_DELETE обрабатывается как для draft-* (локально), так и для серверного UUID (через DELETE API).
  *  • Идемпотентность: group_key + аккуратные DONE/FAILED_RETRYABLE/FAILED_FATAL.
  */
 @Singleton
@@ -153,7 +157,7 @@ class OutboxPusher @Inject constructor(
         }
     }
 
-    /** Обработка одной проектной группы outbox-записей: публикация драфта (если нужно) + batch. */
+    /** Обработка одной проектной группы outbox-записей */
     private suspend fun pushOneProjectGroup(rawProjectId: String?, items: List<OutboxEntity>): PushStats {
         if (rawProjectId.isNullOrBlank()) {
             outboxDao.markState(items.map { it.id }, OutboxState.FAILED_FATAL)
@@ -169,6 +173,7 @@ class OutboxPusher @Inject constructor(
         var effectiveProjectId = rawProjectId
         var remainingItems = items
 
+        // -------- Публикация драфта, если требуется (с учётом последнего PROJECT_UPDATE) --------
         if (rawProjectId.startsWith("draft-")) {
             val createItem = items.firstOrNull { it.op_type == OutboxOpType.PROJECT_CREATE }
             if (createItem == null) {
@@ -177,10 +182,17 @@ class OutboxPusher @Inject constructor(
             }
 
             try {
-                val payload = gson.fromJson(createItem.payload_json, ProjectCreatePayload::class.java)
-                Log.i("Outbox", "publishing draft project: localId=$rawProjectId, name='${payload.name}'")
+                val createPayload = gson.fromJson(createItem.payload_json, ProjectCreatePayload::class.java)
+                // если был PROJECT_UPDATE до публикации — берём самое позднее имя/заметку
+                val latestUpdate = items.lastOrNull { it.op_type == OutboxOpType.PROJECT_UPDATE }
+                val upd = latestUpdate?.let { gson.fromJson(it.payload_json, ProjectUpdatePayload::class.java) }
 
-                val created = projectsApi.createProject(CreateProjectRequest(name = payload.name, note = payload.note))
+                val createName = upd?.name ?: createPayload.name
+                val createNote = upd?.note ?: createPayload.note
+
+                Log.i("Outbox", "publishing draft project: localId=$rawProjectId, name='$createName'")
+
+                val created = projectsApi.createProject(CreateProjectRequest(name = createName, note = createNote))
                 val remoteId = created.id
                 Log.i("Outbox", "draft published ok: remoteId=$remoteId (v${created.version})")
 
@@ -219,9 +231,15 @@ class OutboxPusher @Inject constructor(
                 }
 
                 outboxDao.markState(listOf(createItem.id), OutboxState.DONE)
+                // Если использовали PROJECT_UPDATE при публикации — он уже учтён, пометим DONE
+                val toSkipIds = mutableSetOf(createItem.id)
+                if (latestUpdate != null) {
+                    outboxDao.markState(listOf(latestUpdate.id), OutboxState.DONE)
+                    toSkipIds.add(latestUpdate.id)
+                }
 
                 effectiveProjectId = remoteId
-                remainingItems = items.filter { it.id != createItem.id }
+                remainingItems = items.filter { it.id !in toSkipIds }
             } catch (t: Throwable) {
                 Log.w("Outbox", "draft publish failed: ${t.message}", t)
                 val retryable = isRetryableError(t)
@@ -234,6 +252,88 @@ class OutboxPusher @Inject constructor(
             }
         }
 
+        // -------- Удаление проекта (PROJECT_DELETE) имеет приоритет --------
+        val deleteItem = remainingItems.firstOrNull { it.op_type == OutboxOpType.PROJECT_DELETE }
+        if (deleteItem != null) {
+            val idForDelete = effectiveProjectId // после публикации драфта уже серверный ID
+
+            try {
+                if (idForDelete.startsWith("draft-")) {
+                    Log.i("Outbox", "delete local draft project=$idForDelete")
+                    projectDao.softDelete(
+                        id = idForDelete,
+                        updatedAt = TimeUtils.formatIso(TimeUtils.now()),
+                        version = project.version
+                    )
+                } else {
+                    Log.i("Outbox", "delete remote project=$idForDelete via API")
+                    projectsApi.deleteProject(idForDelete)
+                    projectDao.softDelete(
+                        id = idForDelete,
+                        updatedAt = TimeUtils.formatIso(TimeUtils.now()),
+                        version = project.version
+                    )
+                }
+
+                outboxDao.markState(listOf(deleteItem.id), OutboxState.DONE)
+                val rest = remainingItems.filter { it.id != deleteItem.id }
+                if (rest.isNotEmpty()) outboxDao.markState(rest.map { it.id }, OutboxState.DONE)
+
+                return PushStats(total = items.size, done = items.size, failed = 0)
+            } catch (t: Throwable) {
+                Log.w("Outbox", "project delete failed: ${t.message}", t)
+                val retryable = isRetryableError(t)
+                if (retryable) {
+                    outboxDao.markAttempt(deleteItem.id, OutboxState.FAILED_RETRYABLE, t.message)
+                } else {
+                    outboxDao.markState(listOf(deleteItem.id), OutboxState.FAILED_FATAL)
+                }
+                return PushStats(total = items.size, done = 0, failed = 1)
+            }
+        }
+
+        // -------- Применяем все PROJECT_UPDATE для серверного проекта (до batch) --------
+        val updates = remainingItems.filter { it.op_type == OutboxOpType.PROJECT_UPDATE }
+        if (updates.isNotEmpty()) {
+            try {
+                // last-write-wins: берём последний апдейт
+                val last = updates.last()
+                val up = gson.fromJson(last.payload_json, ProjectUpdatePayload::class.java)
+
+                val updated = updateProjectMetaWithFallback(
+                    projectId = effectiveProjectId,
+                    name = up.name,
+                    note = up.note
+                )
+
+                // синхронизируем локально
+                projectDao.upsert(
+                    ru.mugalimov.volthome.data.local.entity.ProjectEntity(
+                        id = updated.id,
+                        name = updated.name,
+                        note = updated.note,
+                        version = updated.version,
+                        updated_at = updated.updated_at,
+                        is_deleted = updated.is_deleted
+                    )
+                )
+
+                // все PROJECT_UPDATE считаем применёнными
+                outboxDao.markState(updates.map { it.id }, OutboxState.DONE)
+                remainingItems = remainingItems.filter { it.op_type != OutboxOpType.PROJECT_UPDATE }
+            } catch (t: Throwable) {
+                Log.w("Outbox", "project update failed: ${t.message}", t)
+                val retryable = isRetryableError(t)
+                if (retryable) {
+                    updates.forEach { outboxDao.markAttempt(it.id, OutboxState.FAILED_RETRYABLE, t.message) }
+                } else {
+                    outboxDao.markState(updates.map { it.id }, OutboxState.FAILED_FATAL)
+                }
+                // продолжим к batch с остальными типами операций
+            }
+        }
+
+        // -------- Оставшиеся операции → batch --------
         if (remainingItems.isEmpty()) {
             return PushStats(total = 0, done = 0, failed = 0)
         }
@@ -259,6 +359,39 @@ class OutboxPusher @Inject constructor(
             }
             PushStats(total = remainingItems.size, done = 0, failed = remainingItems.size)
         }
+    }
+
+    /**
+     * Три последовательные попытки обновить метаданные проекта:
+     *  1) PATCH /v1/projects/{id}/meta
+     *  2) PUT   /v1/projects/{id}/meta
+     *  3) PUT   /v1/projects/{id}
+     */
+    private suspend fun updateProjectMetaWithFallback(
+        projectId: String,
+        name: String?,
+        note: String?
+    ) = run {
+        val body = UpdateProjectRequest(name = name, note = note)
+
+        // 1) PATCH /meta
+        try {
+            return@run projectsApi.updateProjectMetaPatch(projectId, body)
+        } catch (e: HttpException) {
+            if (e.code() != 404 && e.code() != 405 && e.code() != 501) throw e
+            Log.d("Outbox", "PATCH /meta unsupported (${e.code()}), trying PUT /meta…")
+        }
+
+        // 2) PUT /meta
+        try {
+            return@run projectsApi.updateProjectMetaPutLegacy(projectId, body)
+        } catch (e: HttpException) {
+            if (e.code() != 404 && e.code() != 405 && e.code() != 501) throw e
+            Log.d("Outbox", "PUT /meta unsupported (${e.code()}), trying PUT /{id}…")
+        }
+
+        // 3) PUT /{id}
+        projectsApi.updateProjectPutRootLegacy(projectId, body)
     }
 
     /** Собираем batch из группы outbox-записей одного проекта (с дедупликацией) */
@@ -424,7 +557,7 @@ class OutboxPusher @Inject constructor(
                     }
                 }
 
-                // Projects/Groups — не формируем batch; PROJECT_CREATE уже обработали выше.
+                // Projects/Groups — не формируем batch; PROJECT_CREATE/UPDATE/DELETE обрабатываются вне batch.
                 OutboxOpType.PROJECT_CREATE,
                 OutboxOpType.PROJECT_UPDATE,
                 OutboxOpType.PROJECT_DELETE,

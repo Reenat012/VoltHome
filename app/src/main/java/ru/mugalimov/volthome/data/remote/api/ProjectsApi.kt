@@ -38,14 +38,15 @@ interface ProjectsApi {
         @Body body: CreateProjectRequest
     ): ProjectShortDto
 
+    /**
+     * Частичное обновление метаданных проекта (имя/заметка).
+     * Используем как основной вариант.
+     */
     data class UpdateProjectRequest(
         val name: String? = null,
         val note: String? = null
     )
 
-    /**
-     * Основной актуальный эндпоинт: частичное обновление метаданных.
-     */
     @PATCH("/v1/projects/{id}/meta")
     suspend fun updateProjectMetaPatch(
         @Path("id") id: String,
@@ -53,7 +54,7 @@ interface ProjectsApi {
     ): ProjectShortDto
 
     /**
-     * Фолбэк №1: если сервер ожидает PUT на /meta.
+     * Фолбэк №1: PUT на /meta (некоторые реализации поддерживают только PUT).
      */
     @PUT("/v1/projects/{id}/meta")
     suspend fun updateProjectMetaPutLegacy(
@@ -62,7 +63,7 @@ interface ProjectsApi {
     ): ProjectShortDto
 
     /**
-     * Фолбэк №2: если сервер принимает обновление по корню /v1/projects/{id}.
+     * Фолбэк №2: PUT по корню /v1/projects/{id}.
      */
     @PUT("/v1/projects/{id}")
     suspend fun updateProjectPutRootLegacy(

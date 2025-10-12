@@ -42,7 +42,10 @@ class ProjectsViewModel @Inject constructor(
 
     fun createNewProject(name: String? = null) {
         viewModelScope.launch {
-            val title = name?.takeIf { it.isNotBlank() } ?: defaultProjectName()
+            val title = name?.takeIf { it.isNotBlank() } ?: run {
+                val existing = repo.listProjects().first()
+                nextSequentialProjectName(existing)
+            }
             repo.createProject(title, note = null)
 
             // Активным делаем "самый новый"
@@ -81,8 +84,13 @@ class ProjectsViewModel @Inject constructor(
         }
     }
 
-    private fun defaultProjectName(): String {
-        val now = java.time.OffsetDateTime.now()
-        return "Проект ${now.toLocalDate()} ${now.toLocalTime().withNano(0)}"
+    // ---- Локальный helper: «Проект №N» по списку доменных проектов ----
+    private fun nextSequentialProjectName(existing: List<Project>): String {
+        val re = Regex("""^Проект №(\d+)$""")
+        val max = existing
+            .asSequence()
+            .mapNotNull { p -> re.find(p.name)?.groupValues?.getOrNull(1)?.toIntOrNull() }
+            .maxOrNull() ?: 0
+        return "Проект №${max + 1}"
     }
 }

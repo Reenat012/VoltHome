@@ -37,6 +37,7 @@ import ru.mugalimov.volthome.data.sync.outbox.ProjectCreatePayload
 import ru.mugalimov.volthome.data.sync.outbox.ProjectUpdatePayload
 import ru.mugalimov.volthome.data.sync.outbox.ProjectDeletePayload
 import ru.mugalimov.volthome.data.sync.outbox.toJson
+import ru.mugalimov.volthome.data.sync.outbox.OutboxPusher
 
 @Singleton
 class ProjectsRepositoryImpl @Inject constructor(
@@ -46,6 +47,7 @@ class ProjectsRepositoryImpl @Inject constructor(
     private val activeProjectDataStore: ActiveProjectDataStore,
     private val outboxDao: OutboxDao,
     private val tombstoneDao: TombstoneDao,
+    private val outboxPusher: OutboxPusher, // <-- sync-пушер, чтобы пушить перед bootstrap
     @ApplicationContext private val appContext: Context
 ) : ProjectsRepository {
 
@@ -70,12 +72,14 @@ class ProjectsRepositoryImpl @Inject constructor(
             return@withContext latest.id
         }
 
+        // ---- создаём самый первый локальный проект с лаконичным именем «Проект №1» ----
         val id = "draft-" + UUID.randomUUID().toString()
         val nowIso = TimeUtils.formatIso(TimeUtils.now())
+        val defaultName = nextSequentialProjectName(all) // -> «Проект №1»
         db.projectDao().upsert(
             ProjectEntity(
                 id = id,
-                name = "Новый проект",
+                name = defaultName,
                 note = null,
                 version = 0,
                 updated_at = nowIso,
@@ -100,7 +104,7 @@ class ProjectsRepositoryImpl @Inject constructor(
                 op_type = OutboxOpType.PROJECT_CREATE,
                 payload_json = ProjectCreatePayload(
                     localId = id,
-                    name = "Новый проект",
+                    name = defaultName,
                     note = null
                 ).toJson(),
                 group_key = "project:create:$id"
@@ -114,12 +118,16 @@ class ProjectsRepositoryImpl @Inject constructor(
         try {
             bootstrapMutex.withLock {
                 var imported = 0
+
+                // Сначала пушим локальные изменения (включая PROJECT_DELETE)
+                runCatching { outboxPusher.pushAll() }.onFailure {
+                    android.util.Log.w("Bootstrap", "pushAll failed: ${it.message}", it)
+                }
+
                 var cursor: String? = null
                 val stateDao = db.projectLocalStateDao()
 
                 do {
-                    // NOTE: если сервер действительно поддерживает курсор в "since",
-                    // то это корректно; если нет — заменить на однократный вызов.
                     val page = api.listProjects(since = cursor, limit = 100)
                     for (p in page.items) {
                         db.projectDao().upsert(
@@ -273,7 +281,7 @@ class ProjectsRepositoryImpl @Inject constructor(
                 )).copy(has_local_changes = true)
             )
 
-            // tombstone — чтобы pull не вернул
+            // tombstone — чтобы pull не вернул (если учитываешь при импорте)
             tombstoneDao.insert(
                 TombstoneEntity(
                     project_id = id,
@@ -283,7 +291,7 @@ class ProjectsRepositoryImpl @Inject constructor(
                 )
             )
 
-            // outbox PROJECT_DELETE
+            // outbox PROJECT_DELETE — теперь реально обрабатывается пusher'ом
             outboxDao.insert(
                 OutboxEntity(
                     project_id = id,
@@ -308,5 +316,15 @@ class ProjectsRepositoryImpl @Inject constructor(
         // офлайн-first: syncManager сам сделает push→pull, когда сеть доступна
         runCatching { syncManager.syncProject(id) }
         OutboxPushWorker.enqueueAll(appContext)
+    }
+
+    // ---- ВСПОМОГАТЕЛЬНОЕ: вычисление «Проект №N» по локальным данным ----
+    private fun nextSequentialProjectName(existing: List<ProjectEntity>): String {
+        val re = Regex("""^Проект №(\d+)$""")
+        val max = existing
+            .asSequence()
+            .mapNotNull { e -> re.find(e.name)?.groupValues?.getOrNull(1)?.toIntOrNull() }
+            .maxOrNull() ?: 0
+        return "Проект №${max + 1}"
     }
 }

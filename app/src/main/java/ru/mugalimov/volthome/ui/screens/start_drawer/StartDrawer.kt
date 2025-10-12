@@ -3,15 +3,15 @@ package ru.mugalimov.volthome.ui.screens.start_drawer
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Divider
 import androidx.compose.material3.DrawerState
@@ -86,136 +86,151 @@ fun StartDrawer(
             ModalDrawerSheet(
                 modifier = Modifier.widthIn(min = 280.dp, max = 320.dp)
             ) {
-                // --- Шапка аккаунта ---
-                DrawerHeader(
-                    profile = profile,
-                    onLogout = {
-                        scope.launch {
-                            drawerState.close()
-                            onLogout()
-                        }
-                    }
-                )
-
-                // --- Мои проекты ---
-                DrawerSectionTitle("Мои проекты")
-
-                projects.forEach { p ->
-                    // сам айтем проекта
-                    NavigationDrawerItem(
-                        label = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                // Название
-                                Text(
-                                    text = p.name,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    fontWeight = if (p.isActive) FontWeight.SemiBold else null,
-                                    modifier = Modifier.weight(1f)
-                                )
-
-                                // Кнопка меню + якорь для выпадашки
-                                Box { // <-- ВАЖНО: локальный контейнер-ЯКОРЬ
-                                    IconButton(
-                                        onClick = { menuForProjectId = p.id },
-                                        modifier = Modifier.size(36.dp)
-                                    ) {
-                                        Icon(Icons.Default.MoreVert, contentDescription = "Меню проекта")
-                                    }
-
-                                    DropdownMenu(
-                                        expanded = menuForProjectId == p.id,
-                                        onDismissRequest = { menuForProjectId = null },
-                                        // Чуть подвинем, чтобы не прилипало к правому краю кнопки
-                                        offset = DpOffset(x = (-8).dp, y = (-4).dp)
-                                    ) {
-                                        DropdownMenuItem(
-                                            text = { Text("Переименовать") },
-                                            onClick = {
-                                                menuForProjectId = null
-                                                renameDialog = p.id to p.name
-                                            }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Удалить") },
-                                            onClick = {
-                                                menuForProjectId = null
-                                                deleteConfirmForId = p.id
-                                            }
-                                        )
-                                    }
-                                }
-                            }
-                        },
-                        selected = p.isActive,
-                        onClick = {
+                // Шапка фиксируется, ниже — скролл
+                Column(modifier = Modifier.fillMaxHeight()) {
+                    DrawerHeader(
+                        profile = profile,
+                        onLogout = {
                             scope.launch {
                                 drawerState.close()
-                                onSelectProject(p.id)
+                                onLogout()
                             }
-                        },
-                        icon = {},
-                        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                        }
                     )
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        contentPadding = PaddingValues(bottom = 12.dp)
+                    ) {
+                        // --- Мои проекты ---
+                        item { DrawerSectionTitle("Мои проекты") }
+
+                        items(projects, key = { it.id }) { p ->
+                            NavigationDrawerItem(
+                                label = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = p.name,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            fontWeight = if (p.isActive) FontWeight.SemiBold else null,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        // Якорь для выпадашки
+                                        Box {
+                                            IconButton(
+                                                onClick = { menuForProjectId = p.id },
+                                                modifier = Modifier.size(36.dp)
+                                            ) {
+                                                Icon(Icons.Default.MoreVert, contentDescription = "Меню проекта")
+                                            }
+                                            DropdownMenu(
+                                                expanded = menuForProjectId == p.id,
+                                                onDismissRequest = { menuForProjectId = null },
+                                                offset = DpOffset(x = (-8).dp, y = (-4).dp)
+                                            ) {
+                                                DropdownMenuItem(
+                                                    text = { Text("Переименовать") },
+                                                    onClick = {
+                                                        menuForProjectId = null
+                                                        renameDialog = p.id to p.name
+                                                    }
+                                                )
+                                                DropdownMenuItem(
+                                                    text = { Text("Удалить") },
+                                                    onClick = {
+                                                        menuForProjectId = null
+                                                        deleteConfirmForId = p.id
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                },
+                                selected = p.isActive,
+                                onClick = {
+                                    scope.launch {
+                                        drawerState.close()
+                                        onSelectProject(p.id)
+                                    }
+                                },
+                                icon = {},
+                                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                            )
+                        }
+
+                        item {
+                            NavigationDrawerItem(
+                                label = { Text("+ Добавить проект") },
+                                selected = false,
+                                onClick = {
+                                    scope.launch {
+                                        drawerState.close()
+                                        onCreateProject()
+                                    }
+                                },
+                                icon = { Icon(Icons.Default.Shield, contentDescription = null) },
+                                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                            )
+                        }
+
+                        item { Divider(modifier = Modifier.padding(vertical = 8.dp)) }
+
+                        // --- Нижние разделы ---
+                        item { DrawerSectionTitle("Разделы") }
+
+                        item {
+                            NavigationDrawerItem(
+                                label = { Text("Профиль") },
+                                selected = false,
+                                onClick = {
+                                    scope.launch {
+                                        drawerState.close()
+                                        onOpenProfile()
+                                    }
+                                },
+                                icon = { Icon(Icons.Default.Person, contentDescription = null) },
+                                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                            )
+                        }
+
+                        item {
+                            NavigationDrawerItem(
+                                label = { Text("Информация") },
+                                selected = false,
+                                onClick = {
+                                    scope.launch {
+                                        drawerState.close()
+                                        onOpenSettings()
+                                    }
+                                },
+                                icon = { Icon(Icons.Default.Info, contentDescription = null) },
+                                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                            )
+                        }
+
+                        // Если вернёшь PRO/О приложении — добавь сюда item { ... }
+                        // item {
+                        //     NavigationDrawerItem(
+                        //         label = { Text("Подписка PRO") },
+                        //         selected = false,
+                        //         onClick = {
+                        //             scope.launch {
+                        //                 drawerState.close()
+                        //                 onOpenSubscription()
+                        //             }
+                        //         },
+                        //         icon = { Icon(Icons.Default.WorkspacePremium, contentDescription = null) },
+                        //         modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                        //     )
+                        // }
+                    }
                 }
-
-                NavigationDrawerItem(
-                    label = { Text("+ Добавить проект") },
-                    selected = false,
-                    onClick = {
-                        scope.launch {
-                            drawerState.close()
-                            onCreateProject()
-                        }
-                    },
-                    icon = { Icon(Icons.Default.Shield, contentDescription = null) },
-                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-                )
-
-                Divider(modifier = Modifier.padding(vertical = 8.dp))
-
-                // --- Нижние разделы ---
-                DrawerSectionTitle("Разделы")
-                NavigationDrawerItem(
-                    label = { Text("Профиль") },
-                    selected = false,
-                    onClick = {
-                        scope.launch {
-                            drawerState.close()
-                            onOpenProfile()
-                        }
-                    },
-                    icon = { Icon(Icons.Default.Person, contentDescription = null) },
-                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-                )
-                NavigationDrawerItem(
-                    label = { Text("Информация") },
-                    selected = false,
-                    onClick = {
-                        scope.launch {
-                            drawerState.close()
-                            onOpenSettings()
-                        }
-                    },
-                    icon = { Icon(Icons.Default.Info, contentDescription = null) },
-                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-                )
-
-//                NavigationDrawerItem(
-//                    label = { Text("Подписка PRO") },
-//                    selected = false,
-//                    onClick = {
-//                        scope.launch {
-//                            drawerState.close()
-//                            onOpenSubscription()
-//                        }
-//                    },
-//                    icon = { Icon(Icons.Default.WorkspacePremium, contentDescription = null) },
-//                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-//                )
             }
         }
     ) {
