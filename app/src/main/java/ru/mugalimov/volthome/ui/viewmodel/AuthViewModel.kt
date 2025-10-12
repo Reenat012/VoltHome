@@ -10,12 +10,14 @@ import kotlinx.coroutines.flow.StateFlow
 import ru.mugalimov.volthome.data.remote.auth.AuthSession
 import ru.mugalimov.volthome.data.repository.AuthRepository
 import ru.mugalimov.volthome.data.repository.ProjectsRepository
+import ru.mugalimov.volthome.data.remote.yandex.YandexTokenStore // ← NEW
 import javax.inject.Inject
 
 @HiltViewModel
 class AuthViewModel @Inject constructor(
     private val authRepo: AuthRepository,
-    private val projectsRepo: ProjectsRepository
+    private val projectsRepo: ProjectsRepository,
+    private val yaTokenStore: YandexTokenStore // ← NEW
 ) : ViewModel() {
 
     sealed interface State {
@@ -32,11 +34,7 @@ class AuthViewModel @Inject constructor(
         viewModelScope.launch {
             val session = authRepo.currentSession()
             if (session != null && !session.isExpired) {
-                // 1) даём UI зелёный свет
                 _state.value = State.Success(session)
-
-                // 2) фоновый бутстрап проектов с сервера (ИДЕМПОТЕНТНО)
-                // ВАЖНО: тут НЕ создаём локальный черновик.
                 launch { runCatching { projectsRepo.bootstrapFromRemote() } }
             } else {
                 _state.value = State.Idle
@@ -48,11 +46,17 @@ class AuthViewModel @Inject constructor(
 
     fun handleResult(result: YandexAuthResult) {
         viewModelScope.launch {
+            // 1) Сохраним access_token из результата SDK (если есть)
+            if (result is YandexAuthResult.Success) {
+                // SDK v2: result.token.value; на старых может отличаться — защищаемся
+                val yaAccess = runCatching { result.token.value }.getOrNull()
+                yaTokenStore.save(yaAccess)
+            }
+
+            // 2) Дальше — как было
             val res = authRepo.handleAuthResult(result)
             _state.value = res.fold(
                 onSuccess = { session ->
-                    // Успех авторизации: НЕ создаём проект автоматически.
-                    // Фоново подтянем проекты (если есть).
                     launch { runCatching { projectsRepo.bootstrapFromRemote() } }
                     State.Success(session)
                 },
@@ -64,6 +68,7 @@ class AuthViewModel @Inject constructor(
     fun signOut() {
         viewModelScope.launch {
             authRepo.signOut()
+            yaTokenStore.clear() // ← NEW: чистим Я-токен
             _state.value = State.Idle
         }
     }

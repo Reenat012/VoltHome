@@ -5,7 +5,8 @@ package ru.mugalimov.volthome.ui.model
  * чтобы не тянуть domain в Drawer.
  */
 data class UserProfileUi(
-    val name: String?,
+    val name: String,
     val email: String?,
-    val avatarUrl: String? = null
+    val avatarUrl: String? = null,
+    val subscriptionStatus: String? = null
 )
