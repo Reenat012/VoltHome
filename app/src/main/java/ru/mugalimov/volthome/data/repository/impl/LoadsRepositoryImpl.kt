@@ -37,16 +37,19 @@ class LoadsRepositoryImpl @Inject constructor(
 
     override fun observeGroupsWithDevices(): Flow<List<CircuitGroupWithDevices>> {
         val groupsFlow  = groupDao.observeAllGroups()
-        val devicesFlow = deviceDao.observeDevices()
+        val devicesFlow = deviceDao.observeAllDevices()   // 🔁 было observeDevices()
         val joinsFlow   = joinDao.observeJoins()
 
-        return combine(groupsFlow, devicesFlow, joinsFlow) { groups, devices, joins ->
-            // строим devices для каждой группы через join-таблицу
+        return combine(groupsFlow, devicesFlow, joinsFlow) {
+                groups: List<ru.mugalimov.volthome.data.local.entity.CircuitGroupEntity>,
+                devices: List<DeviceEntity>,
+                joins: List<ru.mugalimov.volthome.data.local.entity.GroupDeviceJoin> ->
+
             val devicesByGroup: Map<Long, List<DeviceEntity>> =
                 joins.groupBy({ it.groupId }, { it.deviceId })
                     .mapValues { (_, deviceIds) ->
                         val idSet = deviceIds.toHashSet()
-                        devices.filter { it.deviceId in idSet }
+                        devices.filter { d -> d.deviceId in idSet }
                     }
 
             groups.map { g ->

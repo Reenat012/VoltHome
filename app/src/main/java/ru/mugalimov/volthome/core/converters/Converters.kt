@@ -52,4 +52,24 @@ class Converters {
         val type = object : TypeToken<List<Device>>() {}.type
         return Gson().fromJson(value, type)
     }
+
+    @TypeConverter
+    fun fromOutboxState(value: String?): ru.mugalimov.volthome.data.local.entity.OutboxState? {
+        return value?.let { runCatching { ru.mugalimov.volthome.data.local.entity.OutboxState.valueOf(it) }.getOrNull() }
+    }
+
+    @TypeConverter
+    fun toOutboxState(value: ru.mugalimov.volthome.data.local.entity.OutboxState?): String? {
+        return value?.name
+    }
+
+    @TypeConverter
+    fun fromTombstoneEntityType(value: String?): ru.mugalimov.volthome.data.local.entity.TombstoneEntityType? {
+        return value?.let { runCatching { ru.mugalimov.volthome.data.local.entity.TombstoneEntityType.valueOf(it) }.getOrNull() }
+    }
+
+    @TypeConverter
+    fun toTombstoneEntityType(value: ru.mugalimov.volthome.data.local.entity.TombstoneEntityType?): String? {
+        return value?.name
+    }
 }

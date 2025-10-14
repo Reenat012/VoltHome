@@ -7,7 +7,7 @@ sealed class Screens(val route: String) {
     // Основные разделы нижнего меню
     data object RoomsList : Screens("rooms")
     data object LoadsScreen : Screens("loads")
-    data object ExploitationScreen : Screens("exploitations")
+    data object ExplicationScreen : Screens("explication")
 
     // Вложенные экраны
     data object AddRoom : Screens("add_room")
@@ -27,6 +27,7 @@ sealed class Screens(val route: String) {
     data object MainApp : Screens("main_app")
     data object SettingsScreen : Screens("settings")
     data object AboutScreen : Screens("about")
+    data object ProfileScreen : Screens("profile")
 
     data object OnBoardingScreen : Screens("onBoardingScreen")
     data object AlgorithmExplanationScreen : Screens("algorithm_explanation")

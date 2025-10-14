@@ -3,17 +3,24 @@ package ru.mugalimov.volthome.data.local.entity
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import java.util.Date
 
 @Entity(
     tableName = "loads",
-    foreignKeys = [ForeignKey(
-        entity = RoomEntity::class,
-        parentColumns = ["id"],
-        childColumns = ["room_id"],
-        onDelete = ForeignKey.CASCADE
-    )]
+    foreignKeys = [
+        ForeignKey(
+            entity = RoomEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["room_id"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [
+        Index(name = "idx_loads_room_id", value = ["room_id"]),
+        Index(name = "idx_loads_project_id", value = ["project_id"])
+    ]
 )
 data class LoadEntity(
     @PrimaryKey(autoGenerate = true)
@@ -35,5 +42,9 @@ data class LoadEntity(
     val createdAt: Date,
 
     @ColumnInfo(name = "room_id")
-    val roomId: Long
+    val roomId: Long,
+
+    // 🔹 Привязка к проекту
+    @ColumnInfo(name = "project_id")
+    val projectId: String? = null
 )

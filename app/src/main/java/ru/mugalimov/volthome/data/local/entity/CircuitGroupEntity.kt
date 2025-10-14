@@ -3,60 +3,68 @@ package ru.mugalimov.volthome.data.local.entity
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
+import androidx.room.Index
 import androidx.room.PrimaryKey
-import ru.mugalimov.volthome.domain.model.Device
-import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.Phase
 import java.util.Date
 
 @Entity(
     tableName = "groups",
-    foreignKeys = [ForeignKey(
-        entity = RoomEntity::class,
-        parentColumns = ["id"],
-        childColumns = ["room_id"],
-        onDelete = ForeignKey.CASCADE
-    )])
+    foreignKeys = [
+        ForeignKey(
+            entity = RoomEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["room_id"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [
+        Index(name = "idx_groups_room_id", value = ["room_id"]),
+        Index(name = "idx_groups_project_id", value = ["project_id"])
+    ]
+)
 data class CircuitGroupEntity(
     @PrimaryKey(autoGenerate = true)
     @ColumnInfo(name = "group_id")
     val groupId: Long = 0,
 
     @ColumnInfo(name = "group_number")
-    val groupNumber: Int,        // Уникальный номер группы
+    val groupNumber: Int,
 
-    @ColumnInfo(name = "room_id", index = true)
-    val roomId: Long,            // ID комнаты
+    @ColumnInfo(name = "room_id")
+    val roomId: Long,
 
     @ColumnInfo(name = "room_name")
-    val roomName: String,        // Название комнаты
+    val roomName: String,
 
     @ColumnInfo(name = "group_type")
-    val groupType: String,       // Тип группы (LIGHTING, SOCKET и т.д.)
+    val groupType: String,
 
-    // Расчетные параметры
     @ColumnInfo(name = "nominal_current")
-    val nominalCurrent: Double,  // Суммарный расчетный ток группы (А)
+    val nominalCurrent: Double,
 
     @ColumnInfo(name = "circuit_breaker")
-    val circuitBreaker: Int,     // Номинал автомата (А)
+    val circuitBreaker: Int,
 
     @ColumnInfo(name = "cable_section")
-    val cableSection: Double,    // Сечение кабеля (мм²)
+    val cableSection: Double,
 
     @ColumnInfo(name = "breaker_type")
-    val breakerType: String,     // Тип автомата ("B", "C", "D")
+    val breakerType: String,
 
-    // Параметры безопасности
     @ColumnInfo(name = "rcd_required")
-    val rcdRequired: Boolean,    // Требуется ли УЗО
+    val rcdRequired: Boolean,
 
     @ColumnInfo(name = "rcd_current")
-    val rcdCurrent: Int = 30,    // Ток утечки для УЗО (мА)
+    val rcdCurrent: Int = 30,
 
     @ColumnInfo(name = "created_at")
-    val createdAt: Date = Date(), // Дата создания группы
+    val createdAt: Date = Date(),
 
     @ColumnInfo(name = "phase")
-    val phase: String = Phase.A.name
+    val phase: String = Phase.A.name,
+
+    // 🔹 Привязка к проекту (может быть null для мигрированных старых данных)
+    @ColumnInfo(name = "project_id")
+    val projectId: String? = null
 )

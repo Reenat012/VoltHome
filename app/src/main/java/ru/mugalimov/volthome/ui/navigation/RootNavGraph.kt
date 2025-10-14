@@ -1,77 +1,97 @@
 package ru.mugalimov.volthome.ui.navigation
 
 import AboutScreen
-import MainApp
-import SettingsScreen
-import WelcomeScreen
-import android.content.SharedPreferences
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.ui.Modifier
+import androidx.compose.runtime.LaunchedEffect
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import ru.mugalimov.volthome.ui.screens.onboarding.OnboardingScreen
+import com.yandex.authsdk.YandexAuthSdk
+import kotlinx.coroutines.flow.collectLatest
+import ru.mugalimov.volthome.ui.screens.MainApp
+import ru.mugalimov.volthome.ui.screens.auth.AuthScreen
+import ru.mugalimov.volthome.ui.viewmodel.AuthViewModel
 
-
-// RootNavGraph.kt
+/**
+ * Корневой NavHost. Drawer здесь больше НЕ рендерится, чтобы
+ * исключить попытки навигации в app-дестинейшны на экране welcome.
+ */
 @Composable
 fun RootNavGraph(
-    startDestination: String,
-    onFirstLaunchCompleted: () -> Unit
+    sdk: YandexAuthSdk,
+    onLogout: () -> Unit = {},
 ) {
     val rootNavController = rememberNavController()
+    val authVm: AuthViewModel = hiltViewModel()
+
+    LaunchedEffect(Unit) { authVm.bootstrap() }
+
+    LaunchedEffect(Unit) {
+        authVm.state.collectLatest { state ->
+            when (state) {
+                is AuthViewModel.State.Success -> {
+                    // Переходим в App-граф. Чистим стек до старта root-графа корректно.
+                    rootNavController.navigate(Screens.MainApp.route) {
+                        popUpTo(rootNavController.graph.findStartDestination().id) {
+                            inclusive = true
+                        }
+                        launchSingleTop = true
+                    }
+                }
+                is AuthViewModel.State.Idle,
+                is AuthViewModel.State.Error -> {
+                    // Возвращаемся на welcome. Без popUpTo(0) — только через findStartDestination().
+                    rootNavController.navigate(Screens.WelcomeScreen.route) {
+                        popUpTo(rootNavController.graph.findStartDestination().id) {
+                            inclusive = true
+                        }
+                        launchSingleTop = true
+                    }
+                }
+                is AuthViewModel.State.Loading -> Unit
+            }
+        }
+    }
 
     NavHost(
         navController = rootNavController,
-        startDestination = startDestination
+        startDestination = Screens.WelcomeScreen.route
     ) {
-        composable(Screens.WelcomeScreen.route) {
-            WelcomeScreen(
-                onContinue = {
-                    onFirstLaunchCompleted()
-//                    rootNavController.navigate(Screens.OnBoardingScreen.route) {
-//                        popUpTo(0)
-//                    }
-                }
-            )
-        }
-
-        // Запуск анимации
-//        composable(Screens.OnBoardingScreen.route) {
-//            OnboardingScreen(
-//                onComplete = {
-//                    // Всегда переходим на главный экран
-//                    rootNavController.navigate(Screens.MainApp.route) {
-//                        popUpTo(0)
-//                    }
-//
-//                    // Вызываем завершение ТОЛЬКО при первом запуске
-//                    if (rootNavController.previousBackStackEntry?.destination?.route != Screens.MainApp.route) {
-//                        onOnboardingCompleted()
-//                    }
-//                },
-//                animationResources = listOf(
-//                    "lottie/1.json",
-//                    "lottie/2.json",
-//                    "lottie/3.json",
-//                    "lottie/4.json",
-//                    "lottie/5.json"
-//                )
-//            )
-//        }
-
-        composable(Screens.MainApp.route) {
-            MainApp(rootNavController = rootNavController)
-        }
-
-        composable(Screens.AboutScreen.route) {
-            AboutScreen(onBack = { rootNavController.popBackStack() })
-        }
+        authGraph(sdk, authVm)
+        mainGraph(rootNavController, authVm)
+        aboutGraph(rootNavController)
     }
 }
 
+private fun androidx.navigation.NavGraphBuilder.authGraph(
+    sdk: YandexAuthSdk,
+    authVm: AuthViewModel
+) {
+    composable(Screens.WelcomeScreen.route) {
+        AuthScreen(sdk = sdk) { authVm.bootstrap() }
+    }
+}
+
+private fun androidx.navigation.NavGraphBuilder.mainGraph(
+    rootNavController: NavHostController,
+    authVm: AuthViewModel
+) {
+    composable(Screens.MainApp.route) {
+        // Внутри MainApp находится Drawer + app-NavHost (NavGraphApp)
+        MainApp(
+            rootNavController = rootNavController,
+            authVm = authVm
+        )
+    }
+}
+
+private fun androidx.navigation.NavGraphBuilder.aboutGraph(
+    rootNavController: NavHostController
+) {
+    composable(Screens.AboutScreen.route) {
+        AboutScreen(onBack = { rootNavController.popBackStack() })
+    }
+}

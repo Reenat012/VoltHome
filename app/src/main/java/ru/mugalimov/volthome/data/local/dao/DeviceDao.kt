@@ -10,54 +10,124 @@ import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 
 @Dao
 interface DeviceDao {
-    //получение потока данных со списком устройств и сортировкой по дате создания
-    //возвращает flow для автоматического обновления при изменениях в БД
-    @Query("SELECT * FROM devices WHERE room_id = :roomId")
-    fun observeDevicesByIdRoom(roomId: Long): Flow<List<DeviceEntity>>
 
-    @Query("SELECT * FROM devices")
-    fun observeDevices(): Flow<List<DeviceEntity>>
-
-    //добавить устройство в комнату
-    //onConflict = OnConflictStrategy.ABORT - если запись с таким же PrimeryKey существует
-    //то запись прервывается
-    @Insert(onConflict = OnConflictStrategy.ABORT)
-    suspend fun addDevice(deviceEntity: DeviceEntity)
-
-    //удаление устройства по id
-    //возращает количество удаленных строк 0 или 1
-    @Query("DELETE FROM devices WHERE device_id = :deviceId")
-    suspend fun deleteDeviceById(deviceId: Long): Int
-
-    //получить устройство по deviceId
-    @Query("SELECT * FROM devices WHERE device_id = :deviceId")
-    suspend fun getDeviceById(deviceId: Int): DeviceEntity?
-
-    // Получить все устройства с определенной комнаты по id комнаты
-    @Query("SELECT * FROM devices WHERE room_id = :roomId")
-    suspend fun getAllDevicesByRoomId(roomId: Long): List<DeviceEntity>
-
-    @Query("SELECT * FROM devices")
-    suspend fun getAllDevices() : List<DeviceEntity>
+    /* ------------ OBSERVE / READ (tombstones filtered) ------------ */
 
     @Query("""
-    SELECT * FROM devices 
-    WHERE device_id IN (
-        SELECT device_id FROM group_device_join 
-        WHERE group_id = :groupId
-    )
-""")
-    suspend fun getDevicesForGroup(groupId: Long): List<DeviceEntity>
+        SELECT d.* FROM devices d
+        WHERE NOT EXISTS (
+            SELECT 1 FROM tombstones t
+            WHERE t.entity_type = 'DEVICE'
+              AND t.local_id = d.device_id
+        )
+        ORDER BY d.created_at ASC, d.device_id ASC
+    """)
+    fun observeAllDevices(): Flow<List<DeviceEntity>>
 
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    @Query("""
+        SELECT d.* FROM devices d
+        WHERE d.room_id = :roomId
+          AND NOT EXISTS (
+              SELECT 1 FROM tombstones t
+              WHERE t.entity_type = 'DEVICE'
+                AND t.local_id = d.device_id
+          )
+        ORDER BY d.created_at ASC, d.device_id ASC
+    """)
+    fun observeDevicesByIdRoom(roomId: Long): Flow<List<DeviceEntity>>
+
+    @Query("""
+        SELECT d.* FROM devices d
+        WHERE d.device_id = :deviceId
+          AND NOT EXISTS (
+              SELECT 1 FROM tombstones t
+              WHERE t.entity_type = 'DEVICE'
+                AND t.local_id = d.device_id
+          )
+        LIMIT 1
+    """)
+    suspend fun getDeviceById(deviceId: Int): DeviceEntity?
+
+    @Query("""
+        SELECT d.* FROM devices d
+        WHERE d.room_id = :roomId
+          AND NOT EXISTS (
+              SELECT 1 FROM tombstones t
+              WHERE t.entity_type = 'DEVICE'
+                AND t.local_id = d.device_id
+          )
+        ORDER BY d.created_at ASC, d.device_id ASC
+    """)
+    suspend fun getAllDevicesByRoomId(roomId: Long): List<DeviceEntity>
+
+    @Query("""
+        SELECT d.* FROM devices d
+        WHERE NOT EXISTS (
+            SELECT 1 FROM tombstones t
+            WHERE t.entity_type = 'DEVICE'
+              AND t.local_id = d.device_id
+        )
+        ORDER BY d.created_at ASC, d.device_id ASC
+    """)
+    suspend fun getAllDevices(): List<DeviceEntity>
+
+    /* ------------ LOOKUPS ------------ */
+
+    @Query("""
+        SELECT * FROM devices d
+        WHERE d.room_id = :roomId
+          AND d.name = :name
+          AND NOT EXISTS (
+              SELECT 1 FROM tombstones t
+              WHERE t.entity_type = 'DEVICE'
+                AND t.local_id = d.device_id
+          )
+        LIMIT 1
+    """)
+    suspend fun findByRoomAndName(roomId: Long, name: String): DeviceEntity?
+
+    /* ------------ WRITE ------------ */
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(entity: DeviceEntity): Long
 
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insertAll(entities: List<DeviceEntity>): List<Long>
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun addDevice(entity: DeviceEntity): Long
 
     @Update
     suspend fun update(entity: DeviceEntity)
 
-    @Query("SELECT * FROM devices WHERE room_id = :roomId AND name = :name LIMIT 1")
-    suspend fun findByRoomAndName(roomId: Long, name: String): DeviceEntity?
+    @Query("DELETE FROM devices WHERE device_id IN (:ids)")
+    suspend fun deleteDevicesByIds(ids: List<Long>)
+
+    @Query("DELETE FROM devices WHERE device_id = :deviceId")
+    suspend fun deleteDeviceById(deviceId: Long): Int
+
+    /* ------------ Bulk ops for project ------------ */
+
+    @Query("UPDATE devices SET project_id = :newProjectId WHERE project_id = :oldProjectId")
+    suspend fun rebindProjectDevices(oldProjectId: String, newProjectId: String): Int
+
+    @Query("DELETE FROM devices WHERE project_id = :projectId")
+    suspend fun deleteDevicesByProject(projectId: String)
+
+    /* ------------ Project-scoped fetch ------------ */
+
+    @Query("""
+        SELECT d.* FROM devices d
+        WHERE d.project_id = :projectId
+          AND NOT EXISTS (
+              SELECT 1 FROM tombstones t
+              WHERE t.entity_type = 'DEVICE'
+                AND t.local_id = d.device_id
+          )
+        ORDER BY d.created_at ASC, d.device_id ASC
+    """)
+    suspend fun getAllDevicesByProject(projectId: String): List<DeviceEntity>
+
+    @Query("""
+    SELECT COUNT(*) FROM devices d
+    WHERE d.project_id = :projectId
+""")
+    suspend fun countByProjectId(projectId: String): Int
 }

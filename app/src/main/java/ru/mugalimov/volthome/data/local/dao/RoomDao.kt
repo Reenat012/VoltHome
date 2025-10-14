@@ -8,56 +8,118 @@ import androidx.room.Transaction
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 import ru.mugalimov.volthome.data.local.entity.RoomEntity
-import ru.mugalimov.volthome.domain.model.RoomWithDevicesEntity
 
 @Dao
 interface RoomDao {
-    //получение потока данных со списком комнат и сортировкой по дате создания
-    //возвращает flow для автоматического обновления при изменениях в БД
-    @Query("SELECT * FROM rooms ORDER BY created_at DESC")
-    fun observeAllRooms(): Flow<List<RoomEntity>>
 
-    //добавление новой комнаты
-    //onConflict = OnConflictStrategy.ABORT - если запись с таким же PrimeryKey существует
-    //то запись прервывается
-    @Insert(onConflict = OnConflictStrategy.ABORT)
-    suspend fun addRoom(room: RoomEntity) : Long // Возвращаем ID новой комнаты
+    /* ------------ OBSERVE / READ (tombstones filtered) ------------ */
 
-    /**
-     * Обновляет существующую комнату в базе данных.
-     * @param room Обновленная версия комнаты (должна иметь существующий ID)
-     * @return Количество обновленных строк (должно быть 1 при успешном обновлении)
-     */
-    @Update(onConflict = OnConflictStrategy.ABORT)
-    suspend fun updateRoom(room: RoomEntity): Int
+    @Query("""
+        SELECT * FROM rooms r
+        WHERE r.project_id = :projectId
+          AND NOT EXISTS (
+              SELECT 1 FROM tombstones t
+              WHERE t.entity_type = 'ROOM'
+                AND t.local_id = r.id
+          )
+        ORDER BY r.created_at ASC, r.id ASC
+    """)
+    fun observeAllRoomsByProject(projectId: String): Flow<List<RoomEntity>>
 
-    //удаление комнаты по id
-    //возращает количество удаленных строк 0 или 1
-    @Query("DELETE FROM rooms WHERE id = :roomId")
-    suspend fun deleteRoomById(roomId: Long) : Int
-
-    //проверить существует ли комната с таким именем
-    @Query("SELECT EXISTS(SELECT 1 FROM rooms WHERE name = :name LIMIT 1)")
-    suspend fun existsByName(name: String): Boolean
-
-    //получить комнату по roomId
-    @Query("SELECT * FROM rooms WHERE id = :roomId")
+    @Query("""
+        SELECT * FROM rooms r
+        WHERE r.id = :roomId
+          AND NOT EXISTS (
+              SELECT 1 FROM tombstones t
+              WHERE t.entity_type = 'ROOM'
+                AND t.local_id = r.id
+          )
+        LIMIT 1
+    """)
     suspend fun getRoomById(roomId: Long): RoomEntity?
 
-    @Transaction
-    @Query("SELECT * FROM rooms WHERE id=:roomId")
-    suspend fun getRoomWithDevicesById(roomId: Long) : RoomWithDevicesEntity?
+    @Query("""
+    SELECT r.* FROM rooms r
+    WHERE NOT EXISTS (
+        SELECT 1 FROM tombstones t
+        WHERE t.entity_type = 'ROOM'
+          AND t.local_id = r.id
+    )
+    ORDER BY r.created_at ASC, r.id ASC
+""")
+    suspend fun getAllRooms(): List<RoomEntity>
 
-    @Transaction
-    @Query("SELECT * FROM rooms ORDER BY created_at DESC")
-    fun observeAllRoomsWithDevices(): List<RoomWithDevicesEntity>
+    @Query("""
+        SELECT r.* FROM rooms r
+        WHERE r.project_id = :projectId
+          AND NOT EXISTS (
+              SELECT 1 FROM tombstones t
+              WHERE t.entity_type = 'ROOM'
+                AND t.local_id = r.id
+          )
+        ORDER BY r.created_at ASC, r.id ASC
+    """)
+    suspend fun getAllRoomsByProject(projectId: String): List<RoomEntity>
 
-    @Query("SELECT * FROM rooms")
-    suspend fun getAllRooms() : List<RoomEntity>
+    /* ------------ LOOKUPS ------------ */
 
-    @Query("SELECT COUNT(*) FROM rooms")
-    suspend fun countAll(): Int
+    @Query("""
+        SELECT id FROM rooms r
+        WHERE r.project_id = :projectId
+          AND r.name = :name
+          AND NOT EXISTS (
+              SELECT 1 FROM tombstones t
+              WHERE t.entity_type = 'ROOM'
+                AND t.local_id = r.id
+          )
+        LIMIT 1
+    """)
+    suspend fun findIdByProjectAndName(projectId: String, name: String): Long?
 
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insertAll(entities: List<RoomEntity>): List<Long>
+    @Query("""
+        SELECT EXISTS(
+            SELECT 1 FROM rooms r
+            WHERE r.project_id = :projectId
+              AND r.name = :name
+              AND NOT EXISTS (
+                  SELECT 1 FROM tombstones t
+                  WHERE t.entity_type = 'ROOM'
+                    AND t.local_id = r.id
+              )
+        )
+    """)
+    suspend fun existsByNameInProject(name: String, projectId: String): Boolean
+
+    /* ------------ WRITE ------------ */
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(list: List<RoomEntity>): List<Long>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun addRoom(entity: RoomEntity): Long
+
+    @Update
+    suspend fun updateRoom(entity: RoomEntity)
+
+    @Query("DELETE FROM rooms WHERE id = :roomId")
+    suspend fun deleteRoomById(roomId: Long): Int
+
+    /* ------------ Bulk ops for project ------------ */
+
+    @Query("UPDATE rooms SET project_id = :newProjectId WHERE project_id = :oldProjectId")
+    suspend fun rebindProjectRooms(oldProjectId: String, newProjectId: String): Int
+
+    @Query("DELETE FROM rooms WHERE project_id = :projectId")
+    suspend fun deleteRoomsByProject(projectId: String)
+
+    @Query("""
+    SELECT COUNT(*) FROM rooms r
+    WHERE r.project_id = :projectId
+      AND NOT EXISTS (
+          SELECT 1 FROM tombstones t
+          WHERE t.entity_type = 'ROOM'
+            AND t.local_id = r.id
+      )
+""")
+    suspend fun countByProjectId(projectId: String): Int
 }

@@ -17,24 +17,46 @@ android {
         minSdk = 24
         //noinspection EditedTargetSdkVersion
         targetSdk = 35
-        versionCode = 7
-        versionName = "1.7"
+        versionCode = 8
+        versionName = "1.8"
+
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField(
+            "String",
+            "YANDEX_CLIENT_ID",
+            "\"${project.findProperty("YANDEX_CLIENT_ID") ?: ""}\""
+        )
+        manifestPlaceholders["YANDEX_CLIENT_ID"] =
+            project.findProperty("YANDEX_CLIENT_ID") as String? ?: ""
+
+        buildConfigField(
+            "String",
+            "API_BASE_URL",
+            "\"${project.findProperty("API_BASE_URL") ?: ""}\""
+        )
+
+//        addManifestPlaceholders(
+//            mapOf(
+//                "VKIDClientID" to providers.gradleProperty("VKIDClientID").get(),
+//                "VKIDClientSecret" to providers.gradleProperty("VKIDClientSecret").get(),
+//                "VKIDRedirectHost" to "vk.com",
+//                "VKIDRedirectScheme" to "vk${providers.gradleProperty("VKIDClientID").get()}"
+//            )
+//        )
     }
 
     signingConfigs {
         val properties = Properties()
         val file = rootProject.file("keystore.properties")
-        if (file.exists()) {
-            properties.load(file.inputStream())
-        }
+        if (file.exists()) properties.load(file.inputStream())
 
         create("release") {
             storeFile = file("/Users/mugalimovrinat/Documents/VoltHome/Публикация/Key/upload_key")
-            storePassword = "\"${properties.getProperty("storePassword", "")}\""
+            storePassword = properties.getProperty("storePassword", "")
             keyAlias = "upload_key"
-            keyPassword = "\"${properties.getProperty("keyPassword", "")}\""
+            keyPassword = properties.getProperty("keyPassword", "")
             enableV1Signing = true
             enableV2Signing = true
         }
@@ -52,18 +74,23 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
     }
     kotlinOptions {
-        jvmTarget = "11"
+        jvmTarget = "17"
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
 dependencies {
+    implementation(libs.androidx.hilt.common)
+    implementation(libs.androidx.work.runtime.ktx)
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -79,6 +106,7 @@ dependencies {
     implementation(libs.androidx.storage)
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.androidx.browser)
 //    implementation(libs.androidx.foundation.desktop)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
@@ -89,62 +117,101 @@ dependencies {
     debugImplementation(libs.androidx.ui.test.manifest)
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.material3)
-    implementation (libs.androidx.core.ktx.v1120)
-    implementation (libs.androidx.activity.compose.v182)
-    implementation (platform(libs.androidx.compose.bom.v20240200))
-    implementation( libs.androidx.compose.material3.material3)
-    implementation (libs.material.icons.extended)
-    implementation (libs.androidx.navigation.compose)
+    implementation(libs.androidx.core.ktx.v1120)
+    implementation(libs.androidx.activity.compose.v182)
+    implementation(platform(libs.androidx.compose.bom.v20240200))
+    implementation(libs.androidx.compose.material3.material3)
+    implementation(libs.material.icons.extended)
+    implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
 
     // Room
-    implementation (libs.androidx.room.runtime)
+    implementation(libs.androidx.room.runtime)
     debugImplementation(libs.androidx.compose.ui.tooling)
-    kapt ("androidx.room:room-compiler:2.7.2")
-    implementation (libs.androidx.room.ktx)
+    kapt("androidx.room:room-compiler:2.7.2")
+    implementation(libs.androidx.room.ktx)
 
     // Hilt (опционально, но рекомендуется)
-    implementation (libs.hilt.android)
-    kapt (libs.hilt.compiler)
-    implementation (libs.androidx.hilt.navigation.compose)
+    implementation(libs.hilt.android)
+    kapt(libs.hilt.compiler)
+    implementation(libs.androidx.hilt.navigation.compose)
 
-    implementation (libs.androidx.runtime)
-    implementation (libs.ui)
-    implementation (libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.runtime)
+    implementation(libs.ui)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(platform(libs.androidx.compose.bom))
 
-    implementation ("androidx.compose.runtime:runtime:$1.6.1")
-    implementation ("androidx.compose.runtime:runtime-livedata:$1.6.1")
+    implementation("androidx.compose.runtime:runtime:1.6.1")
+    implementation("androidx.compose.runtime:runtime-livedata:1.6.1")
 
-    implementation (libs.kotlinx.coroutines.core)
+    implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
 
     implementation(libs.androidx.ui.v154)
     implementation(libs.androidx.material3.v112)
 
-    implementation (libs.gson)
+    implementation(libs.gson)
 
     implementation(libs.coil.compose)
     implementation(libs.coil.svg) // Для поддержки SVG
 
     // Lottie для векторных анимаций
-    implementation ("com.airbnb.android:lottie-compose:6.3.0")
+    implementation("com.airbnb.android:lottie-compose:6.3.0")
 
     // Карусель
-    implementation ("com.google.accompanist:accompanist-pager:0.34.0")
-    implementation ("com.google.accompanist:accompanist-pager-indicators:0.34.0")
+    implementation("com.google.accompanist:accompanist-pager:0.34.0")
+    implementation("com.google.accompanist:accompanist-pager-indicators:0.34.0")
 
     // DataStore
-    implementation ("androidx.datastore:datastore-preferences:1.0.0")
+    implementation("androidx.datastore:datastore-preferences:1.0.0")
 
     // WebView для Compose
-    implementation ("androidx.webkit:webkit:1.14.0")
+    implementation("androidx.webkit:webkit:1.14.0")
 
-    implementation ("com.google.accompanist:accompanist-flowlayout:0.32.0")
+    implementation("com.google.accompanist:accompanist-flowlayout:0.32.0")
     implementation("androidx.compose.foundation:foundation:1.5.0") // для FlowRow
 
-    implementation (libs.blurview)
+//    implementation (libs.blurview)
 
     implementation("com.yandex.android:mobmetricalib:5.3.7")
 
+//    implementation("com.vk.id:vkid:2.3.2")
+    implementation("androidx.security:security-crypto:1.1.0")
+
+    implementation("androidx.browser:browser:1.8.0")
+
+//    implementation("com.yandex.android:mobmetricalib:5.3.7") {
+//        exclude(group = "com.yandex.android", module = "authsdk")
+//    }
+    implementation("com.yandex.android:authsdk:3.1.3")
+
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+
+    // DataStore (Proto/Custom Serializer)
+    implementation("androidx.datastore:datastore-core:1.1.1")
+
+// Шифрование (Tink + Android Keystore)
+    implementation("com.google.crypto.tink:tink-android:1.12.0")
+
+    implementation("com.squareup.retrofit2:retrofit:2.11.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.11.0")
+
+    implementation("androidx.hilt:hilt-work:1.2.0")
+    kapt ("androidx.hilt:hilt-compiler:1.2.0")
+
+    // Если снова не найдёт капчу — ВРЕМЕННО добавь явные зависимости:
+//     implementation("com.vk.id.captcha:okhttp-interceptors:0.0.4")
+//     implementation("com.vk.id.captcha:vkid-captcha:0.0.4")
+}
+
+configurations.all {
+    resolutionStrategy.force("androidx.browser:browser:1.8.0")
+}
+
+configurations.all {
+    resolutionStrategy {
+        force("com.squareup.okhttp3:okhttp:4.12.0")
+        force("com.squareup.okhttp3:logging-interceptor:4.12.0")
+    }
 }

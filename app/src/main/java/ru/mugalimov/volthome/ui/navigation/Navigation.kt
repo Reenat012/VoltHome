@@ -1,79 +1,70 @@
 package ru.mugalimov.volthome.ui.navigation
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Payment
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material3.Divider
+import androidx.compose.material3.DrawerState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
-import ru.mugalimov.volthome.ui.screens.algoritm_about.AlgorithmInfoButton
+import kotlinx.coroutines.launch
 
+// ---------- Bottom bar модели (как у тебя было) ----------
 
-/**
- * Модель для элементов нижней навигационной панели.
- * @param title Отображаемое название пункта меню
- * @param icon Иконка из Material Icons
- */
 sealed class BottomNavItem(
     val title: String,
     val icon: ImageVector,
-    val route: String // У каждого пункта меню свой адрес, уникальный идентификатор экрана (как URL)
+    val route: String
 ) {
     data object Rooms : BottomNavItem("Комнаты", Icons.Default.Home, "rooms")
     data object Loads : BottomNavItem("Нагрузки", Icons.Default.Speed, "loads")
-    data object Exploitation : BottomNavItem("Экспликация", Icons.Default.List, "exploitation")
+    data object Explication : BottomNavItem("Экспликация", Icons.Default.List, "explication")
 }
 
+// ---------- Drawer state через CompositionLocal ----------
 
-/**
- * Верхняя панель приложения (AppBar).
- * Использует Material Design 3 стили и цветовую схему.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun MainTopAppBar(
-    rootNavController: NavHostController,
-    mainNavController: NavHostController
-) {
-    TopAppBar(
-        title = { Text("VoltHome") },
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-        ),
-        actions = {
-            IconButton(onClick = {
-                // Используем mainNavController для внутренних экранов
-                mainNavController.navigate(Screens.SettingsScreen.route)
-            }) {
-                Icon(Icons.Default.Settings, "Настройки")
-            }
-//            IconButton(onClick = { rootNavController.navigate(Screens.AboutScreen.route) }) {
-//                Icon(Icons.Default.Info, "О программе")
-//            }
-        }
-    )
-}
+val LocalDrawerState = staticCompositionLocalOf<DrawerState?> { null }
 
-/**
- * Нижняя навигационная панель.
- * @param selectedItem Выбранный в данный момент пункт меню
- * @param onItemSelected Обработчик выбора пункта меню
- */
+// ---------- Bottom bar (как у тебя было) ----------
 
 @Composable
 fun MainBottomNavBar(navController: NavHostController) {
@@ -83,7 +74,7 @@ fun MainBottomNavBar(navController: NavHostController) {
         listOf(
             BottomNavItem.Rooms,
             BottomNavItem.Loads,
-            BottomNavItem.Exploitation
+            BottomNavItem.Explication
         ).forEach { item ->
             NavigationBarItem(
                 icon = { Icon(item.icon, item.title) },
@@ -108,4 +99,3 @@ fun MainBottomNavBar(navController: NavHostController) {
         }
     }
 }
-

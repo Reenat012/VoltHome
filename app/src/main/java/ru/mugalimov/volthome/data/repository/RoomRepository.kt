@@ -36,5 +36,5 @@ interface RoomRepository {
 
     suspend fun addRoomWithDevices(req: RoomCreateRequest): CreatedRoomResult
     suspend fun addDevicesToRoom(roomId: Long, devices: List<DeviceCreateRequest>): List<Long>
-    suspend fun deleteDevices(deviceIds: List<Long>)
+    suspend fun deleteDevices(deviceIds: List<Long>) : Unit?
 }

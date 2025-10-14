@@ -238,3 +238,4 @@ private fun DefaultDevice.toCreateRequest(qty: Int): DeviceCreateRequest =
         demandRatio = this.demandRatio,
         voltage = this.voltage
     )
+
