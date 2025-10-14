@@ -32,8 +32,14 @@ object NetworkModule {
     @Provides @Singleton @Named("logging")
     fun provideLoggingInterceptor(): HttpLoggingInterceptor =
         HttpLoggingInterceptor { msg ->
-            android.util.Log.d("HTTP", msg)
-        }.apply { level = HttpLoggingInterceptor.Level.BODY }
+            // пишем в лог только в debug
+            if (BuildConfig.DEBUG) android.util.Log.d("HTTP", msg)
+        }.apply {
+            level = if (BuildConfig.DEBUG)
+                HttpLoggingInterceptor.Level.BODY
+            else
+                HttpLoggingInterceptor.Level.NONE
+        }
 
     // --- AUTHLESS --- //
     @Provides @Singleton @Named("authless")

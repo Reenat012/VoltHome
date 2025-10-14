@@ -186,7 +186,7 @@ dependencies {
     implementation("com.yandex.android:authsdk:3.1.3")
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    debugImplementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
 
     // DataStore (Proto/Custom Serializer)
     implementation("androidx.datastore:datastore-core:1.1.1")
