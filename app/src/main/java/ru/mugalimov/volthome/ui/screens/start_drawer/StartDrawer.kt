@@ -2,6 +2,7 @@ package ru.mugalimov.volthome.ui.screens.start_drawer
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -12,7 +13,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.outlined.SupportAgent
 import androidx.compose.material3.Divider
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -45,10 +46,9 @@ import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.ui.model.ProjectUi
 import ru.mugalimov.volthome.ui.model.UserProfileUi
 
-/**
- * Левый Start Drawer + AppBar.
- * Секция проектов: с меню у каждой карточки: переименовать / удалить.
- */
+// Диалог консультации из utilities
+import ru.mugalimov.volthome.ui.utilities.TelegramConsultationDialog
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StartDrawer(
@@ -63,21 +63,16 @@ fun StartDrawer(
     onOpenProfile: () -> Unit,
     onOpenSubscription: () -> Unit,
     onOpenAbout: () -> Unit,
-    // ↓↓↓ новое
     onRenameProject: (id: String, newName: String) -> Unit = { _, _ -> },
     onDeleteProject: (id: String) -> Unit = {},
-    // ↑↑↑ новое
     bottomBar: @Composable () -> Unit = {},
     content: @Composable (openDrawer: () -> Unit) -> Unit
 ) {
     val scope = rememberCoroutineScope()
-
-    // ------------ локальное UI-состояние меню и диалогов ------------
     var menuForProjectId by remember { mutableStateOf<String?>(null) }
-    var renameDialog by remember { mutableStateOf<Pair<String, String>?>(null) } // (id, currentName)
+    var renameDialog by remember { mutableStateOf<Pair<String, String>?>(null) }
     var deleteConfirmForId by remember { mutableStateOf<String?>(null) }
-
-    val limitReached = projects.count() >= 3
+    var showConsultDialog by remember { mutableStateOf(false) } // <-- состояние диалога
 
     BackHandler(enabled = drawerState.isOpen) {
         scope.launch { drawerState.close() }
@@ -89,7 +84,6 @@ fun StartDrawer(
             ModalDrawerSheet(
                 modifier = Modifier.widthIn(min = 280.dp, max = 320.dp)
             ) {
-                // Шапка фиксируется, ниже — скролл
                 Column(modifier = Modifier.fillMaxHeight()) {
                     DrawerHeader(
                         profile = profile,
@@ -124,7 +118,6 @@ fun StartDrawer(
                                             fontWeight = if (p.isActive) FontWeight.SemiBold else null,
                                             modifier = Modifier.weight(1f)
                                         )
-                                        // Якорь для выпадашки
                                         Box {
                                             IconButton(
                                                 onClick = { menuForProjectId = p.id },
@@ -168,25 +161,19 @@ fun StartDrawer(
                         }
 
                         // --- Добавить проект ---
-                        // --- Добавить проект ---
                         item {
                             val disabled = projects.size >= 3
-
                             NavigationDrawerItem(
-                                label = {
-                                    Text(if (!disabled) "+ Добавить проект" else "Лимит: 3 проекта")
-                                },
+                                label = { Text(if (!disabled) "+ Добавить проект" else "Лимит: 3 проекта") },
                                 selected = false,
                                 onClick = {
                                     if (!disabled) {
                                         scope.launch {
-                                            drawerState.close()
-                                            onCreateProject()
+                                            drawerState.close(); onCreateProject()
                                         }
                                     }
                                 },
                                 icon = { Icon(Icons.Default.Shield, contentDescription = null) },
-                                // визуально приглушаем пункт, когда лимит достигнут
                                 colors = NavigationDrawerItemDefaults.colors(
                                     selectedTextColor = if (disabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                                     else MaterialTheme.colorScheme.onSurface,
@@ -203,7 +190,7 @@ fun StartDrawer(
 
                         item { Divider(modifier = Modifier.padding(vertical = 8.dp)) }
 
-                        // --- Нижние разделы ---
+                        // --- Разделы ---
                         item { DrawerSectionTitle("Разделы") }
 
                         item {
@@ -211,12 +198,42 @@ fun StartDrawer(
                                 label = { Text("Профиль") },
                                 selected = false,
                                 onClick = {
-                                    scope.launch {
-                                        drawerState.close()
-                                        onOpenProfile()
-                                    }
+                                    scope.launch { drawerState.close(); onOpenProfile() }
                                 },
                                 icon = { Icon(Icons.Default.Person, contentDescription = null) },
+                                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                            )
+                        }
+
+                        // --- Консультация: ВНЕШНИЙ ВИД КАК РАНЬШЕ, логика — из utilities ---
+                        item {
+                            NavigationDrawerItem(
+                                label = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("Консультация")
+                                        Spacer(Modifier.width(6.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(MaterialTheme.shapes.small)
+                                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = "Бета",
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                            )
+                                        }
+                                    }
+                                },
+                                selected = false,
+                                onClick = {
+                                    scope.launch { drawerState.close() }
+                                    showConsultDialog = true
+                                },
+                                icon = { Icon(Icons.Outlined.SupportAgent, contentDescription = null) },
                                 modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                             )
                         }
@@ -226,10 +243,7 @@ fun StartDrawer(
                                 label = { Text("Информация") },
                                 selected = false,
                                 onClick = {
-                                    scope.launch {
-                                        drawerState.close()
-                                        onOpenSettings()
-                                    }
+                                    scope.launch { drawerState.close(); onOpenSettings() }
                                 },
                                 icon = { Icon(Icons.Default.Info, contentDescription = null) },
                                 modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
@@ -259,11 +273,20 @@ fun StartDrawer(
         }
     }
 
-    // ---------------- Диалог «Переименовать» ----------------
+    // --- Диалог консультации из utilities (никакого локального AlertDialog) ---
+    if (showConsultDialog) {
+        TelegramConsultationDialog(
+            botName = "VoltHomeBot",
+            startPayloadBase64 = null,       // MVP: ничего не передаём
+            onDismiss = { showConsultDialog = false }
+        )
+    }
+
+    // --- Диалоги rename/delete оставляем как были ---
     val renameData = renameDialog
     if (renameData != null) {
         var text by remember(renameData.first) { mutableStateOf(renameData.second) }
-        AlertDialog(
+        androidx.compose.material3.AlertDialog(
             onDismissRequest = { renameDialog = null },
             title = { Text("Переименовать проект") },
             text = {
@@ -278,36 +301,26 @@ fun StartDrawer(
                 TextButton(
                     enabled = text.isNotBlank(),
                     onClick = {
-                        onRenameProject(renameData.first, text.trim())
-                        renameDialog = null
+                        onRenameProject(renameData.first, text.trim()); renameDialog = null
                     }
                 ) { Text("Сохранить") }
             },
-            dismissButton = {
-                TextButton(onClick = { renameDialog = null }) { Text("Отмена") }
-            }
+            dismissButton = { TextButton(onClick = { renameDialog = null }) { Text("Отмена") } }
         )
     }
 
-    // ---------------- Диалог подтверждения удаления ----------------
     val toDelete = deleteConfirmForId
     if (toDelete != null) {
-        AlertDialog(
+        androidx.compose.material3.AlertDialog(
             onDismissRequest = { deleteConfirmForId = null },
             title = { Text("Удалить проект?") },
             text = { Text("Проект и связанные данные будут удалены. Это действие нельзя отменить.") },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        onDeleteProject(toDelete)
-                        deleteConfirmForId = null
-                        scope.launch { drawerState.close() }
-                    }
-                ) { Text("Удалить") }
+                TextButton(onClick = {
+                    onDeleteProject(toDelete); deleteConfirmForId = null; scope.launch { drawerState.close() }
+                }) { Text("Удалить") }
             },
-            dismissButton = {
-                TextButton(onClick = { deleteConfirmForId = null }) { Text("Отмена") }
-            }
+            dismissButton = { TextButton(onClick = { deleteConfirmForId = null }) { Text("Отмена") } }
         )
     }
 }
@@ -329,8 +342,6 @@ private fun DrawerHeader(
                 .clip(MaterialTheme.shapes.medium)
 
             if (profile?.avatarUrl.isNullOrBlank()) {
-                // Логотип VoltHome из assets вместо заглушки-иконки
-                // Путь: app/src/main/assets/report_pdf/img/logo.png
                 AsyncImage(
                     model = "file:///android_asset/report_pdf/img/logo.png",
                     contentDescription = "VoltHome",
@@ -356,21 +367,12 @@ private fun DrawerHeader(
                 )
                 val mail = profile?.email ?: ""
                 if (mail.isNotBlank()) {
-                    Text(
-                        text = mail,
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Text(text = mail, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            IconButton(onClick = onLogout) {
-                Icon(Icons.Default.ExitToApp, contentDescription = "Выйти")
-            }
+            IconButton(onClick = onLogout) { Icon(Icons.Default.ExitToApp, contentDescription = "Выйти") }
         }
-        Spacer(Modifier.height(8.dp))
-        Divider()
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(8.dp)); Divider(); Spacer(Modifier.height(4.dp))
     }
 }
 
