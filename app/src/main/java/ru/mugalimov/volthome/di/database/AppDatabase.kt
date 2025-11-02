@@ -14,7 +14,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
-import kotlin.synchronized
 
 @TypeConverters(Converters::class)
 @Database(
@@ -35,11 +34,11 @@ import kotlin.synchronized
         UuidMapGroup::class,
         UuidMapDevice::class,
 
-        // 🔹 новые:
+        // новые:
         OutboxEntity::class,
         TombstoneEntity::class
     ],
-    version = 21,
+    version = 22,              // ⬅️ подняли версию схемы
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -50,13 +49,13 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun groupDeviceJoinDao(): GroupDeviceJoinDao
     abstract fun roomsTxDao(): RoomsTxDao
 
-    // новые DAO
+    // проекты / синк
     abstract fun projectDao(): ProjectDao
     abstract fun projectLocalStateDao(): ProjectLocalStateDao
 
     abstract fun uuidMapDao(): UuidMapDao
 
-    // 🔹 новые DAO:
+    // outbox / tombstones
     abstract fun outboxDao(): OutboxDao
     abstract fun tombstoneDao(): TombstoneDao
 
@@ -68,7 +67,8 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        // Оставляем ваши прежние миграции
+        // ======== существующие миграции ========
+
         val MIGRATION_16_17 = object : Migration(16, 17) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 // no-op
@@ -158,17 +158,17 @@ abstract class AppDatabase : RoomDatabase() {
                 }
 
                 db.execSQL("""
-            CREATE TABLE IF NOT EXISTS uuid_map_rooms_tmp (
-                room_uuid TEXT NOT NULL PRIMARY KEY,
-                local_id  INTEGER NOT NULL
-            )
-        """.trimIndent())
+                    CREATE TABLE IF NOT EXISTS uuid_map_rooms_tmp (
+                        room_uuid TEXT NOT NULL PRIMARY KEY,
+                        local_id  INTEGER NOT NULL
+                    )
+                """.trimIndent())
                 if (hasTable("uuid_map_rooms")) {
                     db.execSQL("""
-                INSERT OR IGNORE INTO uuid_map_rooms_tmp(room_uuid, local_id)
-                SELECT room_uuid, local_id FROM uuid_map_rooms
-                WHERE room_uuid IS NOT NULL
-            """.trimIndent())
+                        INSERT OR IGNORE INTO uuid_map_rooms_tmp(room_uuid, local_id)
+                        SELECT room_uuid, local_id FROM uuid_map_rooms
+                        WHERE room_uuid IS NOT NULL
+                    """.trimIndent())
                     try { db.execSQL("DROP INDEX IF EXISTS idx_uuid_map_rooms_local") } catch (_: Throwable) {}
                     try { db.execSQL("DROP TABLE IF EXISTS uuid_map_rooms") } catch (_: Throwable) {}
                 }
@@ -176,17 +176,17 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_uuid_map_rooms_local_id ON uuid_map_rooms(local_id)")
 
                 db.execSQL("""
-            CREATE TABLE IF NOT EXISTS uuid_map_groups_tmp (
-                group_uuid TEXT NOT NULL PRIMARY KEY,
-                local_id   INTEGER NOT NULL
-            )
-        """.trimIndent())
+                    CREATE TABLE IF NOT EXISTS uuid_map_groups_tmp (
+                        group_uuid TEXT NOT NULL PRIMARY KEY,
+                        local_id   INTEGER NOT NULL
+                    )
+                """.trimIndent())
                 if (hasTable("uuid_map_groups")) {
                     db.execSQL("""
-                INSERT OR IGNORE INTO uuid_map_groups_tmp(group_uuid, local_id)
-                SELECT group_uuid, local_id FROM uuid_map_groups
-                WHERE group_uuid IS NOT NULL
-            """.trimIndent())
+                        INSERT OR IGNORE INTO uuid_map_groups_tmp(group_uuid, local_id)
+                        SELECT group_uuid, local_id FROM uuid_map_groups
+                        WHERE group_uuid IS NOT NULL
+                    """.trimIndent())
                     try { db.execSQL("DROP INDEX IF EXISTS idx_uuid_map_groups_local") } catch (_: Throwable) {}
                     try { db.execSQL("DROP TABLE IF EXISTS uuid_map_groups") } catch (_: Throwable) {}
                 }
@@ -194,17 +194,17 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_uuid_map_groups_local_id ON uuid_map_groups(local_id)")
 
                 db.execSQL("""
-            CREATE TABLE IF NOT EXISTS uuid_map_devices_tmp (
-                device_uuid TEXT NOT NULL PRIMARY KEY,
-                local_id    INTEGER NOT NULL
-            )
-        """.trimIndent())
+                    CREATE TABLE IF NOT EXISTS uuid_map_devices_tmp (
+                        device_uuid TEXT NOT NULL PRIMARY KEY,
+                        local_id    INTEGER NOT NULL
+                    )
+                """.trimIndent())
                 if (hasTable("uuid_map_devices")) {
                     db.execSQL("""
-                INSERT OR IGNORE INTO uuid_map_devices_tmp(device_uuid, local_id)
-                SELECT device_uuid, local_id FROM uuid_map_devices
-                WHERE device_uuid IS NOT NULL
-            """.trimIndent())
+                        INSERT OR IGNORE INTO uuid_map_devices_tmp(device_uuid, local_id)
+                        SELECT device_uuid, local_id FROM uuid_map_devices
+                        WHERE device_uuid IS NOT NULL
+                    """.trimIndent())
                     try { db.execSQL("DROP INDEX IF EXISTS idx_uuid_map_devices_local") } catch (_: Throwable) {}
                     try { db.execSQL("DROP TABLE IF EXISTS uuid_map_devices") } catch (_: Throwable) {}
                 }
@@ -219,38 +219,38 @@ abstract class AppDatabase : RoomDatabase() {
 
                 db.execSQL(
                     """
-            CREATE TABLE IF NOT EXISTS devices_tmp (
-                device_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                name TEXT NOT NULL,
-                power INTEGER NOT NULL,
-                voltage TEXT NOT NULL,
-                demand_ratio REAL NOT NULL,
-                created_at INTEGER NOT NULL,
-                room_id INTEGER NULL,
-                device_type TEXT NOT NULL,
-                power_factor REAL NOT NULL,
-                has_motor INTEGER NOT NULL DEFAULT 0,
-                requires_dedicated INTEGER NOT NULL DEFAULT 0,
-                requires_socket INTEGER NOT NULL DEFAULT 1,
-                project_id TEXT NULL,
-                FOREIGN KEY(room_id) REFERENCES rooms(id) ON UPDATE NO ACTION ON DELETE SET NULL
-            )
-            """.trimIndent()
+                    CREATE TABLE IF NOT EXISTS devices_tmp (
+                        device_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        name TEXT NOT NULL,
+                        power INTEGER NOT NULL,
+                        voltage TEXT NOT NULL,
+                        demand_ratio REAL NOT NULL,
+                        created_at INTEGER NOT NULL,
+                        room_id INTEGER NULL,
+                        device_type TEXT NOT NULL,
+                        power_factor REAL NOT NULL,
+                        has_motor INTEGER NOT NULL DEFAULT 0,
+                        requires_dedicated INTEGER NOT NULL DEFAULT 0,
+                        requires_socket INTEGER NOT NULL DEFAULT 1,
+                        project_id TEXT NULL,
+                        FOREIGN KEY(room_id) REFERENCES rooms(id) ON UPDATE NO ACTION ON DELETE SET NULL
+                    )
+                    """.trimIndent()
                 )
 
                 db.execSQL(
                     """
-            INSERT INTO devices_tmp (
-                device_id, name, power, voltage, demand_ratio, created_at,
-                room_id, device_type, power_factor, has_motor,
-                requires_dedicated, requires_socket, project_id
-            )
-            SELECT
-                device_id, name, power, voltage, demand_ratio, created_at,
-                room_id, device_type, power_factor, has_motor,
-                requires_dedicated, requires_socket, project_id
-            FROM devices
-            """.trimIndent()
+                    INSERT INTO devices_tmp (
+                        device_id, name, power, voltage, demand_ratio, created_at,
+                        room_id, device_type, power_factor, has_motor,
+                        requires_dedicated, requires_socket, project_id
+                    )
+                    SELECT
+                        device_id, name, power, voltage, demand_ratio, created_at,
+                        room_id, device_type, power_factor, has_motor,
+                        requires_dedicated, requires_socket, project_id
+                    FROM devices
+                    """.trimIndent()
                 )
 
                 try { db.execSQL("DROP INDEX IF EXISTS idx_devices_room_id") } catch (_: Throwable) {}
@@ -266,7 +266,7 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        // 🔹 новая миграция: 20 → 21 (создаём outbox и tombstones)
+        // 20 → 21: создаём outbox и tombstones
         val MIGRATION_20_21 = object : Migration(20, 21) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 // Outbox
@@ -303,6 +303,104 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_tombstones_type_project ON tombstones(entity_type, project_id)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_tombstones_type_local ON tombstones(entity_type, local_id)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_tombstones_type_uuid ON tombstones(entity_type, server_uuid)")
+            }
+        }
+
+        // ======== новая миграция: 21 → 22 ========
+        // Снимаем любую уникальность по devices.name (и составные UNIQUE, где фигурирует name),
+        // затем создаём НЕуникальные индексы для скорости.
+        val MIGRATION_21_22 = object : Migration(21, 22) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                fun dropIndexIfExists(name: String) {
+                    try { db.execSQL("DROP INDEX IF EXISTS $name") } catch (_: Throwable) {}
+                }
+
+                // 1) Снести известные уникальные индексы (разные исторические варианты имён)
+                listOf(
+                    "ux_devices_room_name",
+                    "ux_devices_room_name_alive",
+                    "ux_devices_project_room_name",
+                    "ux_devices_project_room_name_alive",
+                    "ux_devices_name_unique",
+                    "devices_name_unique"
+                ).forEach { dropIndexIfExists(it) }
+
+                // 2) Найти и снести все явные UNIQUE-индексы, где фигурирует name
+                val explicitUnique = db.query(
+                    """
+                    SELECT name FROM sqlite_master
+                    WHERE type='index'
+                      AND tbl_name='devices'
+                      AND sql LIKE '%UNIQUE%'
+                      AND sql LIKE '%name%'
+                    """.trimIndent()
+                ).use { c ->
+                    buildList {
+                        while (c.moveToNext()) add(c.getString(0) ?: "")
+                    }
+                }
+                explicitUnique.filter { it.isNotBlank() }.forEach { dropIndexIfExists(it) }
+
+                // 3) Если остался UNIQUE (например, autoindex без явного имени) — пересоздадим таблицу.
+                val stillUnique = db.query(
+                    """
+                    SELECT 1 FROM sqlite_master
+                    WHERE type='index'
+                      AND tbl_name='devices'
+                      AND sql LIKE '%UNIQUE%'
+                      AND sql LIKE '%name%'
+                    """.trimIndent()
+                ).use { it.moveToFirst() }
+
+                if (stillUnique) {
+                    db.execSQL("PRAGMA foreign_keys=OFF")
+
+                    db.execSQL(
+                        """
+                        CREATE TABLE IF NOT EXISTS devices_new (
+                            device_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                            name TEXT NOT NULL,
+                            power INTEGER NOT NULL,
+                            voltage TEXT NOT NULL,
+                            demand_ratio REAL NOT NULL,
+                            created_at INTEGER NOT NULL,
+                            room_id INTEGER NULL,
+                            device_type TEXT NOT NULL,
+                            power_factor REAL NOT NULL,
+                            has_motor INTEGER NOT NULL DEFAULT 0,
+                            requires_dedicated INTEGER NOT NULL DEFAULT 0,
+                            requires_socket INTEGER NOT NULL DEFAULT 1,
+                            project_id TEXT NULL,
+                            FOREIGN KEY(room_id) REFERENCES rooms(id) ON UPDATE NO ACTION ON DELETE SET NULL
+                        )
+                        """.trimIndent()
+                    )
+
+                    db.execSQL(
+                        """
+                        INSERT INTO devices_new (
+                            device_id, name, power, voltage, demand_ratio, created_at,
+                            room_id, device_type, power_factor, has_motor,
+                            requires_dedicated, requires_socket, project_id
+                        )
+                        SELECT
+                            device_id, name, power, voltage, demand_ratio, created_at,
+                            room_id, device_type, power_factor, has_motor,
+                            requires_dedicated, requires_socket, project_id
+                        FROM devices
+                        """.trimIndent()
+                    )
+
+                    try { db.execSQL("DROP TABLE devices") } catch (_: Throwable) {}
+                    db.execSQL("ALTER TABLE devices_new RENAME TO devices")
+
+                    db.execSQL("PRAGMA foreign_keys=ON")
+                }
+
+                // 4) НЕуникальные индексы
+                try { db.execSQL("CREATE INDEX IF NOT EXISTS idx_devices_name ON devices(name)") } catch (_: Throwable) {}
+                try { db.execSQL("CREATE INDEX IF NOT EXISTS idx_devices_room_id ON devices(room_id)") } catch (_: Throwable) {}
+                try { db.execSQL("CREATE INDEX IF NOT EXISTS idx_devices_project_id ON devices(project_id)") } catch (_: Throwable) {}
             }
         }
     }

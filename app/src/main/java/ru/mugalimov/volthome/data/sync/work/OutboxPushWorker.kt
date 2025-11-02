@@ -15,8 +15,10 @@ import androidx.work.WorkerParameters
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Воркер для пуша outbox. Умеет:
@@ -26,7 +28,15 @@ import java.util.concurrent.TimeUnit
  * Констрейнты:
  *  - требуется валидное сетевое соединение (CONNECTED)
  *  - экспоненциальный бэкофф
+ *
+ * Дополнительно:
+ *  - single-flight на процесс: одновременно пушит только один воркер
+ *  - небольшой debounce на старте, чтобы схлопывать всплески запуска
  */
+private object OutboxSingleFlight {
+    val busy = AtomicBoolean(false)
+}
+
 @HiltWorker
 class OutboxPushWorker @AssistedInject constructor(
     @Assisted context: Context,
@@ -35,21 +45,42 @@ class OutboxPushWorker @AssistedInject constructor(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        // Мягкий debounce: схлопнуть пачку почти одновременных запусков
+        delay(600)
+
         val projectId = inputData.getString(KEY_PROJECT_ID)
+        val isAll = projectId.isNullOrBlank()
+
+        // Single-flight: если уже кто-то пушит — текущую работу тихо пропускаем
+        if (!OutboxSingleFlight.busy.compareAndSet(false, true)) {
+            if (isAll) {
+                Log.i(TAG, "another push in-flight; skip ALL")
+            } else {
+                Log.i(TAG, "another push in-flight; skip project=$projectId")
+            }
+            return@withContext Result.success()
+        }
+
         try {
-            if (projectId.isNullOrBlank()) {
+            val stats = if (isAll) {
                 Log.i(TAG, "push ALL outbox")
                 pusher.pushAll()
-                Result.success()
             } else {
-                // Пушим и для draft-* — OutboxPusher сам опубликует драфт и допушит изменения.
                 Log.i(TAG, "push outbox for project=$projectId")
-                pusher.pushProject(projectId)
+                pusher.pushProject(projectId!!)
+            }
+
+            if (stats.failed > 0) {
+                Log.w(TAG, "Outbox push completed with failed=${stats.failed}, scheduling retry…")
+                Result.retry()
+            } else {
                 Result.success()
             }
         } catch (t: Throwable) {
             Log.w(TAG, "Outbox push failed: ${t.message}", t)
             Result.retry()
+        } finally {
+            OutboxSingleFlight.busy.set(false)
         }
     }
 
@@ -72,6 +103,8 @@ class OutboxPushWorker @AssistedInject constructor(
             OneTimeWorkRequest.Builder(OutboxPushWorker::class.java)
                 .setConstraints(NET_CONSTRAINTS)
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+                // Лёгкий начальный джиттер, чтобы Greedy/System не стартовали кучу работ в один тик
+                .setInitialDelay(500, TimeUnit.MILLISECONDS)
 
         /** Пушить всё */
         fun enqueueAll(context: Context) {

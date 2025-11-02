@@ -219,8 +219,8 @@ class ProjectsRepositoryImpl @Inject constructor(
         // Активируем этот проект — UI сразу работает
         activeProjectDataStore.setActiveProjectId(id)
 
-        // фоновая попытка пуша (если сеть уже есть)
-        OutboxPushWorker.enqueueAll(appContext)
+        // фоновая попытка пуша именно по этому проекту
+        OutboxPushWorker.enqueueProject(appContext, id)
 
         id
     }
@@ -270,7 +270,8 @@ class ProjectsRepositoryImpl @Inject constructor(
                 )
             )
 
-            OutboxPushWorker.enqueueAll(appContext)
+            // Точное таргетирование пуша
+            OutboxPushWorker.enqueueProject(appContext, id)
         }
     }
 
@@ -311,13 +312,14 @@ class ProjectsRepositoryImpl @Inject constructor(
                 )
             )
 
-            // если удаляем активный — ProjectsViewModel переключит; на всякий случай обнулим
-            val active = activeProjectDataStore.activeProjectId.firstOrNull()
+            // Если удаляем активный — ProjectsViewModel переключит; на всякий случай обнулим
+           val active = activeProjectDataStore.activeProjectId.firstOrNull()
             if (active == id) {
                 activeProjectDataStore.setActiveProjectId(null)
             }
 
-            OutboxPushWorker.enqueueAll(appContext)
+            OutboxPushWorker.enqueueProject(appContext, id)
+
         }
     }
 
@@ -325,7 +327,7 @@ class ProjectsRepositoryImpl @Inject constructor(
         activeProjectDataStore.setActiveProjectId(id)
         // офлайн-first: syncManager сам сделает push→pull, когда сеть доступна
         runCatching { syncManager.syncProject(id) }
-        OutboxPushWorker.enqueueAll(appContext)
+        OutboxPushWorker.enqueueProject(appContext, id)
     }
 
     // ---- ВСПОМОГАТЕЛЬНОЕ: вычисление «Проект №N» по локальным данным ----

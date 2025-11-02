@@ -64,7 +64,7 @@ fun AboutScreen(onBack: () -> Unit) {
             )
             Spacer(Modifier.height(16.dp))
             Text(
-                "Версия 1.6",
+                "Версия 1.9",
                 style = MaterialTheme.typography.titleLarge
             )
             Text(
