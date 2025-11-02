@@ -10,11 +10,16 @@ class TokenRefreshScheduler @Inject constructor(
     private val workManager: WorkManager
 ) {
     /**
-     * Запланировать тихий refresh за leewayMs до истечения.
-     * Если время уже прошло — ставим на ближайшее будущее (delay=0).
+     * Двухступенчатое планирование:
+     *  - primary за 10 минут
+     *  - secondary за 2 минуты (expedited)
      */
-    fun scheduleFromExpiry(expiresAtMillis: Long, leewayMs: Long = 120_000L) {
-        val delayMs = max(0L, (expiresAtMillis - System.currentTimeMillis()) - leewayMs)
-        TokenRefreshWorker.scheduleOneTime(workManager, delayMs)
+    fun scheduleDual(expiresAtMillis: Long) {
+        val now = System.currentTimeMillis()
+        val primaryDelay = (expiresAtMillis - now) - (10 * 60 * 1000L)
+        val secondaryDelay = (expiresAtMillis - now) - (2 * 60 * 1000L)
+
+        TokenRefreshWorker.schedulePrimary(workManager, primaryDelay.coerceAtLeast(0L))
+        TokenRefreshWorker.scheduleSecondary(workManager, secondaryDelay) // логика внутри самa решит expedited/обычный
     }
 }

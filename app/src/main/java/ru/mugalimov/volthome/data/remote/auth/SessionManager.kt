@@ -22,18 +22,24 @@ class SessionManager @Inject constructor(
 
     private val io = Dispatchers.IO
 
+    data class AuthSession(
+        val accessToken: String,
+        val tokenType: String = "Bearer",
+        val expiresAtMillis: Long,
+        val refreshId: String?
+    )
+
     suspend fun save(
         sessionJwt: String,
         expiresAtEpochSeconds: Long,
         refreshId: String?
     ) = withContext(io) {
-        prefs.edit()
+        // ОДИН editor и синхронный commit() — чтобы не было гонки при немедленном чтении
+        val editor = prefs.edit()
             .putString(K_TOKEN, sessionJwt)
             .putLong(K_EXPIRES_MS, expiresAtEpochSeconds * 1000L)
-            .apply()
-        if (refreshId != null) {
-            prefs.edit().putString(K_REFRESH_ID, refreshId).apply()
-        }
+        if (refreshId != null) editor.putString(K_REFRESH_ID, refreshId)
+        editor.commit() // важна синхронность
     }
 
     suspend fun clear() = withContext(io) {
@@ -41,7 +47,7 @@ class SessionManager @Inject constructor(
             .remove(K_TOKEN)
             .remove(K_EXPIRES_MS)
             .remove(K_REFRESH_ID)
-            .apply()
+            .commit() // чтобы состояние гарантированно обновилось до возврата
     }
 
     suspend fun load(): AuthSession? = withContext(io) {
@@ -74,7 +80,7 @@ class SessionManager @Inject constructor(
 
     suspend fun currentBearerOrNull(): String? = load()?.let { "${it.tokenType} ${it.accessToken}" }
 
-    suspend fun refreshIdOrNull(): String? = withContext(io) {
+    suspend fun refreshTokenOrNull(): String? = withContext(io) {
         prefs.getString(K_REFRESH_ID, null)
     }
 }

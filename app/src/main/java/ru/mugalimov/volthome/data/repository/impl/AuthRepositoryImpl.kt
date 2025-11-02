@@ -13,6 +13,7 @@ import ru.mugalimov.volthome.data.remote.api.LogoutRequest
 import ru.mugalimov.volthome.data.remote.auth.AuthError
 import ru.mugalimov.volthome.data.remote.auth.AuthSession
 import ru.mugalimov.volthome.data.remote.auth.SessionManager
+import ru.mugalimov.volthome.data.remote.auth.toAuthSession
 import ru.mugalimov.volthome.data.repository.AuthRepository
 import ru.mugalimov.volthome.data.sync.work.TokenRefreshScheduler
 import javax.inject.Inject
@@ -53,7 +54,7 @@ class AuthRepositoryImpl @Inject constructor(
                         )
 
                         // ⏰ Сразу планируем фоновое продление
-                        tokenRefreshScheduler.scheduleFromExpiry(resp.expiresAtEpochSeconds * 1000L)
+                        tokenRefreshScheduler.scheduleDual(resp.expiresAtEpochSeconds * 1000L)
 
                         Result.success(
                             AuthSession(
@@ -79,7 +80,7 @@ class AuthRepositoryImpl @Inject constructor(
         }
 
     /** Текущая сессия (или null). */
-    override suspend fun currentSession(): AuthSession? = session.load()
+    override suspend fun currentSession(): AuthSession? = session.load()?.toAuthSession()
 
     /** Полный выход: чистим локальное хранилище и отзываем refresh на сервере (best-effort). */
     override suspend fun signOut() {

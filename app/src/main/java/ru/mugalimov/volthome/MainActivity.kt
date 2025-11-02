@@ -57,7 +57,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             val s = sessionManager.load()
             if (s != null) {
-                tokenRefreshScheduler.scheduleFromExpiry(s.expiresAtMillis)
+                tokenRefreshScheduler.scheduleDual(s.expiresAtMillis)
             }
         }
 

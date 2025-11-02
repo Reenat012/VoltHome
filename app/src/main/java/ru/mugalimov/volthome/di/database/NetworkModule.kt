@@ -15,6 +15,7 @@ import ru.mugalimov.volthome.data.remote.api.AuthApi
 import ru.mugalimov.volthome.data.remote.api.ProfileApi
 import ru.mugalimov.volthome.data.remote.api.ProjectsApi
 import ru.mugalimov.volthome.data.remote.auth.AuthInterceptor
+import ru.mugalimov.volthome.data.remote.auth.SessionAuthenticator
 import java.util.concurrent.TimeUnit
 import javax.inject.Named
 import javax.inject.Singleton
@@ -32,7 +33,6 @@ object NetworkModule {
     @Provides @Singleton @Named("logging")
     fun provideLoggingInterceptor(): HttpLoggingInterceptor =
         HttpLoggingInterceptor { msg ->
-            // пишем в лог только в debug
             if (BuildConfig.DEBUG) android.util.Log.d("HTTP", msg)
         }.apply {
             level = if (BuildConfig.DEBUG)
@@ -69,17 +69,18 @@ object NetworkModule {
         retrofit.create(AuthApi::class.java)
 
     // --- AUTHED --- //
-    // ВАЖНО: НЕ делаем явный провайдер AuthInterceptor, Hilt сконструирует его сам по @Inject-конструктору
     @Provides @Singleton @Named("authed")
     fun provideAuthedOkHttp(
         @Named("logging") logging: HttpLoggingInterceptor,
-        authInterceptor: AuthInterceptor
+        authInterceptor: AuthInterceptor,
+        sessionAuthenticator: SessionAuthenticator
     ): OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .writeTimeout(15, TimeUnit.SECONDS)
         .addInterceptor(logging)
         .addInterceptor(authInterceptor)
+        .authenticator(sessionAuthenticator)
         .build()
 
     @Provides @Singleton
@@ -103,7 +104,6 @@ object NetworkModule {
     @Provides @Singleton
     fun provideProjectsApi(retrofit: Retrofit): ProjectsApi = retrofit.create(ProjectsApi::class.java)
 
-    // 🔁 Вернём «дефолтный» OkHttpClient для мест, где инжектится без @Named
     @Provides @Singleton
     fun provideDefaultOkHttp(@Named("authless") client: OkHttpClient): OkHttpClient = client
 }
