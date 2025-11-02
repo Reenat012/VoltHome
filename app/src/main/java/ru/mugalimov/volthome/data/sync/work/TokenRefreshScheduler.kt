@@ -1,6 +1,7 @@
 package ru.mugalimov.volthome.data.sync.work
 
 import androidx.work.WorkManager
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.max
@@ -10,16 +11,13 @@ class TokenRefreshScheduler @Inject constructor(
     private val workManager: WorkManager
 ) {
     /**
-     * Двухступенчатое планирование:
-     *  - primary за 10 минут
-     *  - secondary за 2 минуты (expedited)
+     * Единое планирование обновления токена.
+     * По умолчанию запускаем воркер за ~8 минут до истечения access-токена.
+     * Без expedited, только обычный OneTimeWorkRequest с backoff.
      */
-    fun scheduleDual(expiresAtMillis: Long) {
+    fun schedule(expiresAtMillis: Long, leewayMs: Long = TimeUnit.MINUTES.toMillis(8)) {
         val now = System.currentTimeMillis()
-        val primaryDelay = (expiresAtMillis - now) - (10 * 60 * 1000L)
-        val secondaryDelay = (expiresAtMillis - now) - (2 * 60 * 1000L)
-
-        TokenRefreshWorker.schedulePrimary(workManager, primaryDelay.coerceAtLeast(0L))
-        TokenRefreshWorker.scheduleSecondary(workManager, secondaryDelay) // логика внутри самa решит expedited/обычный
+        val delayMs = max(0L, (expiresAtMillis - now) - leewayMs)
+        TokenRefreshWorker.scheduleUnique(workManager, delayMs)
     }
 }
