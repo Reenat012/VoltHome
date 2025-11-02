@@ -12,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import ru.mugalimov.volthome.BuildConfig
 import ru.mugalimov.volthome.Secret
 import javax.inject.Inject
 
@@ -33,7 +34,12 @@ class VoltHomeApp : Application(), Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
 
-        // AppMetrica: тяжёлую часть уводим в Default, чтобы не блокировать первый кадр UI.
+        // 1) StrictMode — только в debug
+        if (BuildConfig.DEBUG) {
+            DebugStrictMode.enable()
+        }
+
+        // 2) AppMetrica: тяжёлую инициализацию уводим в Dispatchers.Default
         if (!metricaInit) {
             appScope.launch {
                 runCatching {
@@ -43,13 +49,11 @@ class VoltHomeApp : Application(), Configuration.Provider {
                             .withLogs()
                             .build()
                     }
-                    // Активируем SDK в фоне
+                    // Активация SDK — допускается из бэкграунда
                     YandexMetrica.activate(applicationContext, cfg)
                 }.onSuccess {
-                    // Лёгкую часть можно вызвать на main — она не тяжёлая
-                    withContext(Dispatchers.Main) {
-                        YandexMetrica.enableActivityAutoTracking(this@VoltHomeApp)
-                    }
+                    // Лёгкая часть — на main
+                    YandexMetrica.enableActivityAutoTracking(this@VoltHomeApp)
                     metricaInit = true
                 }.onFailure {
                     Log.w("VoltHomeApp", "AppMetrica init failed: ${it.message}", it)

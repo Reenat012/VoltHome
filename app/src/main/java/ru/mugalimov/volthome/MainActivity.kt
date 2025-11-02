@@ -40,11 +40,14 @@ class MainActivity : ComponentActivity() {
         val cid = BuildConfig.YANDEX_CLIENT_ID
         Log.d("YA_AUTH", "client_id set: ${cid.isNotBlank()}, tail=***${cid.takeLast(3)}")
 
+        // Фиксируем светлую тему, чтобы исключить дорогие пересчёты на старте
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
 
-        // Подстраховочно планируем refresh токена (без expedited)
+        // Подстраховочно планируем refresh токена (в фоне)
         lifecycleScope.launch(Dispatchers.Default) {
             sessionManager.load()?.let { s ->
+                // Используй тот метод, который есть в твоём TokenRefreshScheduler:
+                // schedule(...) или scheduleDual(...). Если у тебя только scheduleDual — замени вызов.
                 tokenRefreshScheduler.schedule(s.expiresAtMillis)
             }
         }
@@ -54,8 +57,10 @@ class MainActivity : ComponentActivity() {
                 var showApp by remember { mutableStateOf(false) }
 
                 LaunchedEffect(Unit) {
+                    // Дожидаемся первого кадра, затем рендерим основную иерархию
                     awaitFrame()
                     showApp = true
+                    // Здесь раньше вызывали отложенный «репортёр» — он не нужен без второго ключа.
                 }
 
                 if (!showApp) {
