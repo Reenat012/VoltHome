@@ -16,6 +16,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -46,7 +47,7 @@ fun AuthScreen(
         when (result) {
             is YandexAuthResult.Success -> Log.d(tag, "Auth result = Success")
             is YandexAuthResult.Failure -> Log.d(tag, "Auth result = Failure: ${result.exception.javaClass.simpleName}")
-            YandexAuthResult.Cancelled   -> Log.d(tag, "Auth result = Cancelled")
+            YandexAuthResult.Cancelled -> Log.d(tag, "Auth result = Cancelled")
         }
         vm.handleResult(result)
     }
@@ -54,133 +55,125 @@ fun AuthScreen(
     LaunchedEffect(Unit) { vm.bootstrap() }
     LaunchedEffect(state) { if (state is AuthViewModel.State.Success) onSuccess() }
 
-    // Локальное согласие
     var accepted by remember { mutableStateOf(false) }
     val isLoading = state is AuthViewModel.State.Loading
 
-    Box(
+    // ---------- ОДНОЦВЕТНЫЙ ФОН ----------
+    Surface(
         modifier = Modifier
             .fillMaxSize()
             .systemBarsPadding(),
-        contentAlignment = Alignment.Center
+        color = Color.White // 🔹 Совпадает с фоном логотипа
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp)
-                .verticalScroll(rememberScrollState()),
-            horizontalAlignment = Alignment.CenterHorizontally
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
         ) {
-            Spacer(Modifier.height(24.dp))
-
-            // Логотип (желательно PNG с прозрачным фоном)
-            Image(
-                painter = rememberAsyncImagePainter("file:///android_asset/report_pdf/img/logo.png"),
-                contentDescription = "Логотип VoltHome",
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth(0.36f)
-                    .aspectRatio(1f)
-                    .padding(top = 24.dp, bottom = 0.dp)
-            )
-
-            // Подзаголовок
-            Text(
-                text = "Вход в VoltHome",
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onBackground,
-                textAlign = TextAlign.Center
-            )
-
-            Spacer(Modifier.height(12.dp))
-
-            // Карточка согласия — «легкая» иерархия
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                ),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)),
-                shape = MaterialTheme.shapes.large
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                Spacer(Modifier.height(24.dp))
+
+                // ---------- ЛОГОТИП ----------
+                Image(
+                    painter = rememberAsyncImagePainter("file:///android_asset/report_pdf/img/logo.png"),
+                    contentDescription = "Логотип VoltHome",
+                    modifier = Modifier
+                        .fillMaxWidth(0.36f)
+                        .aspectRatio(1f)
+                        .padding(top = 24.dp, bottom = 0.dp)
+                )
+
+                // ---------- ПОДЗАГОЛОВОК ----------
+                Text(
+                    text = "Вход в VoltHome",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                // ---------- КАРТОЧКА СОГЛАСИЯ ----------
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)),
+                    shape = MaterialTheme.shapes.large
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Checkbox(
-                            checked = accepted,
-                            onCheckedChange = { accepted = it },
-                            modifier = Modifier.padding(end = 8.dp)
-                        )
-                        Text(
-                            text = "Я принимаю условия использования",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Checkbox(
+                                checked = accepted,
+                                onCheckedChange = { accepted = it },
+                                modifier = Modifier.padding(end = 8.dp)
+                            )
+                            Text(
+                                text = "Я принимаю условия использования",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
 
-                    DocumentLink(
-                        icon = Icons.Default.Description,
-                        text = "Пользовательское соглашение"
-                    ) {
-                        context.openDocument(
-                            webUrl = LegalUrls.AGREEMENT,
-                            localAssetPath = "documents/user_agreement.html"
-                        )
-                    }
+                        DocumentLink(
+                            icon = Icons.Default.Description,
+                            text = "Пользовательское соглашение"
+                        ) {
+                            context.openDocument(
+                                webUrl = LegalUrls.AGREEMENT,
+                                localAssetPath = "documents/user_agreement.html"
+                            )
+                        }
 
-                    DocumentLink(
-                        icon = Icons.Default.PrivacyTip,
-                        text = "Политика конфиденциальности"
-                    ) {
-                        context.openDocument(
-                            webUrl = LegalUrls.PRIVACY,
-                            localAssetPath = "documents/privacy_policy.html"
-                        )
+                        DocumentLink(
+                            icon = Icons.Default.PrivacyTip,
+                            text = "Политика конфиденциальности"
+                        ) {
+                            context.openDocument(
+                                webUrl = LegalUrls.PRIVACY,
+                                localAssetPath = "documents/privacy_policy.html"
+                            )
+                        }
                     }
                 }
-            }
 
-            Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(16.dp))
 
-            // Кнопка входа (активна только при согласии)
-            YandexSignInButton(
-                enabled = accepted && !isLoading,
-                loading = isLoading
-            ) {
-                vm.startLogin()
-                launcher.launch(YandexAuthLoginOptions())
-            }
+                // ---------- КНОПКА ВХОДА ----------
+                YandexSignInButton(
+                    enabled = accepted && !isLoading,
+                    loading = isLoading
+                ) {
+                    vm.startLogin()
+                    launcher.launch(YandexAuthLoginOptions())
+                }
 
-            // Сообщение об ошибке
-            (state as? AuthViewModel.State.Error)?.let { err ->
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = err.message,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                // ---------- ОШИБКА ----------
+                (state as? AuthViewModel.State.Error)?.let { err ->
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = err.message,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
-//
-//            Spacer(Modifier.height(12.dp))
-//
-//            // Дисклеймер
-//            Text(
-//                text = "Мы не публикуем ничего без вашего согласия.",
-//                style = MaterialTheme.typography.bodySmall,
-//                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.9f),
-//                textAlign = TextAlign.Center,
-//                modifier = Modifier
-//                    .fillMaxWidth(0.92f)
-//                    .padding(bottom = 16.dp)
-//            )
         }
     }
 }
@@ -227,7 +220,6 @@ private fun YandexSignInButton(
             modifier = Modifier.fillMaxWidth()
         ) {
             if (loading) {
-                // увеличенный индикатор — того же размера, что и логотип
                 CircularProgressIndicator(
                     color = content,
                     strokeWidth = 3.dp,

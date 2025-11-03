@@ -164,16 +164,36 @@ class RoomRepositoryImpl @Inject constructor(
         }
     }
 
+    /**
+     * ФАЗА 3: мягкое каскадное удаление комнаты без изменения схемы Room.
+     * Порядок:
+     *  1) Удаляем устройства комнаты через существующий deleteDevices(...) — это ставит tombstones и DEVICE_DELETE в outbox.
+     *  2) Чистим группы/связи комнаты (ExplicationRepository.handleRoomDeletion).
+     *  3) Ставим tombstone на комнату и пишем ROOM_DELETE в outbox.
+     *  4) Физически удаляем комнату локально.
+     *  5) Тригерим OutboxPush.
+     *
+     * Такой порядок гарантирует, что сначала в outbox уйдут device.delete, затем room.delete.
+     */
     override suspend fun deleteRoom(roomId: Long) {
         withContext(dispatchers) {
             val current = roomDao.getRoomById(roomId)
                 ?: throw RoomNotFoundException("Комната $roomId не найдена")
-            val projectId = current.projectId ?: throw RoomNotFoundException("У комнаты нет projectId")
+            val projectId = current.projectId
+                ?: throw RoomNotFoundException("У комнаты нет projectId")
 
-            // Список девайсов комнаты
+            // 1) Собираем устройства комнаты и удаляем их через уже существующую реализацию
             val devicesInRoom: List<DeviceEntity> = deviceDao.getAllDevicesByRoomId(roomId)
+            if (devicesInRoom.isNotEmpty()) {
+                val deviceIds = devicesInRoom.map { it.deviceId }
+                // reuse готовую логику: она ставит tombstones + outbox DEVICE_DELETE и удаляет локально
+                deleteDevices(deviceIds)
+            }
 
-            // tombstone на комнату
+            // 2) Чистим группы и зависимости комнаты (локально). Сервер удалит каскадно при ROOM_DELETE.
+            explicationRepository.handleRoomDeletion(roomId)
+
+            // 3) Tombstone + outbox для комнаты (после девайсов)
             tombstoneDao.insert(
                 TombstoneEntity(
                     project_id = projectId,
@@ -182,19 +202,6 @@ class RoomRepositoryImpl @Inject constructor(
                     server_uuid = uuidDao.getRoomUuidByLocal(roomId)
                 )
             )
-            // (опционально) tombstones на девайсы
-            devicesInRoom.forEach { dev ->
-                tombstoneDao.insert(
-                    TombstoneEntity(
-                        project_id = projectId,
-                        entity_type = TombstoneEntityType.DEVICE,
-                        local_id = dev.deviceId,
-                        server_uuid = uuidDao.getDeviceUuidByLocal(dev.deviceId)
-                    )
-                )
-            }
-
-            // outbox ROOM_DELETE
             outboxDao.insert(
                 OutboxEntity(
                     project_id = projectId,
@@ -208,11 +215,11 @@ class RoomRepositoryImpl @Inject constructor(
                 )
             )
 
-            // локальная чистка
+            // 4) Физически удаляем комнату
             val rowsDeleted = roomDao.deleteRoomById(roomId)
             if (rowsDeleted == 0) throw RoomNotFoundException("Комната $roomId не найдена")
-            explicationRepository.handleRoomDeletion(roomId)
 
+            // 5) Пуш
             OutboxPushWorker.enqueueProject(context, projectId)
         }
     }

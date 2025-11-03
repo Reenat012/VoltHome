@@ -91,6 +91,7 @@ dependencies {
     implementation(libs.androidx.hilt.common)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.ui.graphics)
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 
     implementation(libs.androidx.core.ktx)
