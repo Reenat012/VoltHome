@@ -2,9 +2,14 @@ package ru.mugalimov.volthome.domain.use_case
 
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
-import ru.mugalimov.volthome.data.repository.ExplicationRepository
+import javax.inject.Inject
+import ru.mugalimov.volthome.data.local.dao.GroupDao
+import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.mapper.mapToDomainGroupsFromRelations
 import ru.mugalimov.volthome.domain.model.CircuitGroup
@@ -12,15 +17,21 @@ import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseDeviceItem
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseGroupItem
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
-import javax.inject.Inject
 
 class GetPhaseLoadUiUseCase @Inject constructor(
-    private val repo: ExplicationRepository,
+    private val groupDao: GroupDao,
+    private val activeDs: ActiveProjectDataStore,
     @IoDispatcher private val dispatcher: CoroutineDispatcher
 ) {
     operator fun invoke(): Flow<List<PhaseLoadItem>> {
-        return repo.observeGroupsWithDevices() // Flow<List<CircuitGroupWithDevices>>
-            .map { relations -> relations.mapToDomainGroupsFromRelations() } // → List<CircuitGroup>
+        return activeDs.activeProjectId
+            .distinctUntilChanged()
+            .filterNotNull()
+            .flatMapLatest { projectId ->
+                // Берём строго по активному проекту
+                groupDao.observeGroupsWithDevicesByProject(projectId)
+            }
+            .map { relations -> relations.mapToDomainGroupsFromRelations() } // -> List<CircuitGroup>
             .map { groups -> buildPhaseItems(groups) }
             .flowOn(dispatcher)
     }
