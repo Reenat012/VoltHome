@@ -134,6 +134,37 @@ class OutboxPusher @Inject constructor(
                 return@withLock PushStats(total = items.size, done = 0, failed = 0)
             }
 
+            // 🔒 NEW: не пушим в проект, помеченный на удаление
+            val p = projectDao.getById(projectId)
+            if (p == null) {
+                outboxDao.markState(items.map { it.id }, OutboxState.FAILED_FATAL)
+                return@withLock PushStats(total = items.size, done = 0, failed = items.size)
+            }
+            if (p.is_deleted) {
+                val deleteOnly = items.filter { it.op_type == OutboxOpType.PROJECT_DELETE }
+                val others     = items.filter { it.op_type != OutboxOpType.PROJECT_DELETE }
+
+                if (deleteOnly.isEmpty()) {
+                    Log.w("Outbox", "skip push (deleted project, no PROJECT_DELETE): id=$projectId")
+                    outboxDao.markState(others.map { it.id }, OutboxState.FAILED_FATAL)
+                    return@withLock PushStats(total = items.size, done = 0, failed = others.size)
+                }
+
+                // Пушим только удаление; остальное — фатально
+                outboxDao.markState(others.map { it.id }, OutboxState.FAILED_FATAL)
+                return@withLock try {
+                    pushOneProjectGroup(projectId, deleteOnly)
+                } catch (t: Throwable) {
+                    val retryable = isRetryableError(t)
+                    if (retryable) {
+                        deleteOnly.forEach { outboxDao.markAttempt(it.id, OutboxState.FAILED_RETRYABLE, t.message) }
+                    } else {
+                        outboxDao.markState(deleteOnly.map { it.id }, OutboxState.FAILED_FATAL)
+                    }
+                    PushStats(total = deleteOnly.size, done = 0, failed = deleteOnly.size)
+                }
+            }
+
             return@withLock try {
                 pushOneProjectGroup(projectId, items)
             } catch (t: Throwable) {
@@ -159,6 +190,21 @@ class OutboxPusher @Inject constructor(
         if (project == null) {
             outboxDao.markState(items.map { it.id }, OutboxState.FAILED_FATAL)
             return PushStats(total = items.size, done = 0, failed = items.size)
+        }
+
+        if (project.is_deleted) {
+            val deleteOnly = items.filter { it.op_type == OutboxOpType.PROJECT_DELETE }
+            val others     = items.filter { it.op_type != OutboxOpType.PROJECT_DELETE }
+
+            if (deleteOnly.isEmpty()) {
+                Log.w("Outbox", "skip push: project is deleted (id=${project.id})")
+                outboxDao.markState(others.map { it.id }, OutboxState.FAILED_FATAL)
+                return PushStats(total = items.size, done = 0, failed = others.size)
+            }
+
+            // Пропускаем дальше только ветку удаления проекта
+            if (others.isNotEmpty()) outboxDao.markState(others.map { it.id }, OutboxState.FAILED_FATAL)
+            // и продолжаем обычный сценарий — в нём PROJECT_DELETE имеет приоритет, удаление отработает.
         }
 
         var effectiveProjectId = rawProjectId
@@ -408,6 +454,12 @@ class OutboxPusher @Inject constructor(
         includeRooms: Boolean,
         includeDevices: Boolean
     ): ProjectBatchRequest {
+        val hasProjectDelete = items.any { it.op_type == OutboxOpType.PROJECT_DELETE }
+        if (hasProjectDelete) {
+            // при удалении проекта мы ничего другого не отправляем
+            return ProjectBatchRequest(baseVersion = null, ops = null)
+        }
+
         // --- ROOMS: last-write-wins на уровне uuid ---
         val roomUpById = LinkedHashMap<String, RoomUpsert>()    // uuid -> upsert
         val roomDelIds = LinkedHashSet<String>()                 // set(uuid)
@@ -608,6 +660,10 @@ class OutboxPusher @Inject constructor(
             val roomUuid = (d.meta?.get("room_id") as? String) ?: continue
             val roomLocal = uuidDao.getRoomLocal(roomUuid) ?: continue
             val local = deviceDao.findByRoomAndName(roomLocal, d.name) ?: continue
+
+        // если в комнате несколько девайсов с таким именем — лучше пропустить авто-маппинг,
+        // чтобы не назначить UUID "не тому". Для этого метод findByRoomAndName должен возвращать
+        // либо ровно один, либо null. Если сейчас он гарантирует ровно один — оставь как было.
             if (uuidDao.getDeviceUuidByLocal(local.deviceId) == null) {
                 toDevices += UuidMapDevice(deviceUuid = d.id, localId = local.deviceId)
             }
