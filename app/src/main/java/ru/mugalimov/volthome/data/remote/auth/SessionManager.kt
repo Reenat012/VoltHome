@@ -1,22 +1,21 @@
 package ru.mugalimov.volthome.data.remote.auth
 
 import android.content.SharedPreferences
+import javax.inject.Inject
+import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
-import javax.inject.Inject
-import javax.inject.Singleton
+import ru.mugalimov.volthome.data.local.prefs.EncryptedPrefsProvider
 
 @Singleton
 class SessionManager @Inject constructor(
-    private val prefs: SharedPreferences
+    private val prefsProvider: EncryptedPrefsProvider
 ) {
     companion object {
         private const val K_TOKEN = "session_jwt"
         private const val K_EXPIRES_MS = "expires_at_ms"
         private const val K_REFRESH_ID = "refresh_id"
-
-        /** Запас времени перед истечением токена, при котором начинаем обновление. */
         const val DEFAULT_LEEWAY_SECONDS: Long = 120
     }
 
@@ -29,31 +28,35 @@ class SessionManager @Inject constructor(
         val refreshId: String?
     )
 
+    private suspend fun prefs(): SharedPreferences = prefsProvider.get()
+
     suspend fun save(
         sessionJwt: String,
         expiresAtEpochSeconds: Long,
         refreshId: String?
     ) = withContext(io) {
-        // ОДИН editor и синхронный commit() — чтобы не было гонки при немедленном чтении
-        val editor = prefs.edit()
+        val p = prefs()
+        val editor = p.edit()
             .putString(K_TOKEN, sessionJwt)
             .putLong(K_EXPIRES_MS, expiresAtEpochSeconds * 1000L)
         if (refreshId != null) editor.putString(K_REFRESH_ID, refreshId)
-        editor.commit() // важна синхронность
+        editor.commit() // синхронно — чтобы немедленно было видно после возврата
     }
 
     suspend fun clear() = withContext(io) {
-        prefs.edit()
+        val p = prefs()
+        p.edit()
             .remove(K_TOKEN)
             .remove(K_EXPIRES_MS)
             .remove(K_REFRESH_ID)
-            .commit() // чтобы состояние гарантированно обновилось до возврата
+            .commit()
     }
 
     suspend fun load(): AuthSession? = withContext(io) {
-        val token = prefs.getString(K_TOKEN, null) ?: return@withContext null
-        val expMs = prefs.getLong(K_EXPIRES_MS, 0L)
-        val rid = prefs.getString(K_REFRESH_ID, null)
+        val p = prefs()
+        val token = p.getString(K_TOKEN, null) ?: return@withContext null
+        val expMs = p.getLong(K_EXPIRES_MS, 0L)
+        val rid = p.getString(K_REFRESH_ID, null)
         AuthSession(
             accessToken = token,
             expiresAtMillis = expMs,
@@ -80,7 +83,5 @@ class SessionManager @Inject constructor(
 
     suspend fun currentBearerOrNull(): String? = load()?.let { "${it.tokenType} ${it.accessToken}" }
 
-    suspend fun refreshTokenOrNull(): String? = withContext(io) {
-        prefs.getString(K_REFRESH_ID, null)
-    }
+    suspend fun refreshTokenOrNull(): String? = withContext(io) { prefs().getString(K_REFRESH_ID, null) }
 }

@@ -1,5 +1,7 @@
 package ru.mugalimov.volthome.ui.screens.start_drawer
 
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -14,28 +16,14 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.outlined.SupportAgent
-import androidx.compose.material3.Divider
-import androidx.compose.material3.DrawerState
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalDrawerSheet
-import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.NavigationDrawerItem
-import androidx.compose.material3.NavigationDrawerItemDefaults
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpOffset
@@ -43,10 +31,9 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.compose.rememberAsyncImagePainter
 import kotlinx.coroutines.launch
+import ru.mugalimov.volthome.R
 import ru.mugalimov.volthome.ui.model.ProjectUi
 import ru.mugalimov.volthome.ui.model.UserProfileUi
-
-// Диалог консультации из utilities
 import ru.mugalimov.volthome.ui.utilities.TelegramConsultationDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -72,7 +59,13 @@ fun StartDrawer(
     var menuForProjectId by remember { mutableStateOf<String?>(null) }
     var renameDialog by remember { mutableStateOf<Pair<String, String>?>(null) }
     var deleteConfirmForId by remember { mutableStateOf<String?>(null) }
-    var showConsultDialog by remember { mutableStateOf(false) } // <-- состояние диалога
+    var showConsultDialog by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+    fun openUrl(url: String) {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        context.startActivity(intent)
+    }
 
     BackHandler(enabled = drawerState.isOpen) {
         scope.launch { drawerState.close() }
@@ -101,7 +94,6 @@ fun StartDrawer(
                             .fillMaxWidth(),
                         contentPadding = PaddingValues(bottom = 12.dp)
                     ) {
-                        // --- Мои проекты ---
                         item { DrawerSectionTitle("Мои проекты") }
 
                         items(projects, key = { it.id }) { p ->
@@ -160,7 +152,6 @@ fun StartDrawer(
                             )
                         }
 
-                        // --- Добавить проект ---
                         item {
                             val disabled = projects.size >= 3
                             NavigationDrawerItem(
@@ -189,8 +180,6 @@ fun StartDrawer(
                         }
 
                         item { Divider(modifier = Modifier.padding(vertical = 8.dp)) }
-
-                        // --- Разделы ---
                         item { DrawerSectionTitle("Разделы") }
 
                         item {
@@ -205,7 +194,6 @@ fun StartDrawer(
                             )
                         }
 
-                        // --- Консультация: ВНЕШНИЙ ВИД КАК РАНЬШЕ, логика — из utilities ---
                         item {
                             NavigationDrawerItem(
                                 label = {
@@ -249,6 +237,44 @@ fun StartDrawer(
                                 modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                             )
                         }
+
+// --- Соцсети ---
+                        item {
+                            Divider(modifier = Modifier.padding(vertical = 8.dp))
+                            DrawerSectionTitle("Соцсети")
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceEvenly
+                            ) {
+                                IconButton(onClick = { openUrl("https://t.me/volthomeapp") }) {
+                                    Icon(
+                                        painter = painterResource(R.drawable.telegram),
+                                        contentDescription = "Telegram"
+                                    )
+                                }
+                                IconButton(onClick = { openUrl("https://www.youtube.com/@volthomeapp") }) {
+                                    Icon(
+                                        painter = painterResource(R.drawable.youtube),
+                                        contentDescription = "YouTube"
+                                    )
+                                }
+                                IconButton(onClick = { openUrl("https://www.instagram.com/volthomeapp?igsh=bWd2aWNwaHY3eGtm") }) {
+                                    Icon(
+                                        painter = painterResource(R.drawable.instagram_svgrepo_com),
+                                        contentDescription = "Instagram"
+                                    )
+                                }
+                                IconButton(onClick = { openUrl("https://www.tiktok.com/@volthome6?_r=1&_t=ZS-91CmJqED9sa") }) {
+                                    Icon(
+                                        painter = painterResource(R.drawable.tiktok),
+                                        contentDescription = "TikTok"
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -273,20 +299,18 @@ fun StartDrawer(
         }
     }
 
-    // --- Диалог консультации из utilities (никакого локального AlertDialog) ---
     if (showConsultDialog) {
         TelegramConsultationDialog(
             botName = "VoltHomeBot",
-            startPayloadBase64 = null,       // MVP: ничего не передаём
+            startPayloadBase64 = null,
             onDismiss = { showConsultDialog = false }
         )
     }
 
-    // --- Диалоги rename/delete оставляем как были ---
     val renameData = renameDialog
     if (renameData != null) {
         var text by remember(renameData.first) { mutableStateOf(renameData.second) }
-        androidx.compose.material3.AlertDialog(
+        AlertDialog(
             onDismissRequest = { renameDialog = null },
             title = { Text("Переименовать проект") },
             text = {
@@ -311,7 +335,7 @@ fun StartDrawer(
 
     val toDelete = deleteConfirmForId
     if (toDelete != null) {
-        androidx.compose.material3.AlertDialog(
+        AlertDialog(
             onDismissRequest = { deleteConfirmForId = null },
             title = { Text("Удалить проект?") },
             text = { Text("Проект и связанные данные будут удалены. Это действие нельзя отменить.") },
@@ -367,12 +391,21 @@ private fun DrawerHeader(
                 )
                 val mail = profile?.email ?: ""
                 if (mail.isNotBlank()) {
-                    Text(text = mail, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        text = mail,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
-            IconButton(onClick = onLogout) { Icon(Icons.Default.ExitToApp, contentDescription = "Выйти") }
+            IconButton(onClick = onLogout) {
+                Icon(Icons.Default.ExitToApp, contentDescription = "Выйти")
+            }
         }
-        Spacer(Modifier.height(8.dp)); Divider(); Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(8.dp))
+        Divider()
+        Spacer(Modifier.height(4.dp))
     }
 }
 
