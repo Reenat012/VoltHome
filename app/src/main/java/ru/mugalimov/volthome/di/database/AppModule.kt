@@ -64,15 +64,7 @@ object DatabaseModule {
     @Provides @Singleton fun provideUuidMapDao(db: AppDatabase): UuidMapDao = db.uuidMapDao()
 }
 
-// di/RepositoryModule.kt — бинды без изменений
-@Module
-@InstallIn(SingletonComponent::class)
-abstract class RepositoryModule {
-    @Binds @Singleton abstract fun bindRoomRepository(impl: RoomRepositoryImpl): RoomRepository
-    @Binds @Singleton abstract fun bindDeviceRepository(impl: DeviceRepositoryImpl): DeviceRepository
-    @Binds @Singleton abstract fun bindExplicationRepository(impl: ExplicationRepositoryImpl): ExplicationRepository
-    @Binds @Singleton abstract fun bindProjectsRepository(impl: ProjectsRepositoryImpl): ProjectsRepository
-}
+
 
 @Module
 @InstallIn(SingletonComponent::class)

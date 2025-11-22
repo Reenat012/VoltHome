@@ -3,16 +3,19 @@ package ru.mugalimov.volthome.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.remote.api.ProfileMeDto
 import ru.mugalimov.volthome.data.repository.UserRepository
-import javax.inject.Inject
+import ru.mugalimov.volthome.data.repository.UserPlanRepository
+import ru.mugalimov.volthome.domain.model.UserPlan
 
 @HiltViewModel
 class ProfileViewModel @Inject constructor(
-    private val repo: UserRepository
+    private val repo: UserRepository,
+    private val userPlanRepository: UserPlanRepository
 ) : ViewModel() {
 
     sealed interface UiState {
@@ -29,7 +32,20 @@ class ProfileViewModel @Inject constructor(
             _state.value = UiState.Loading
             val res = repo.loadMe()
             _state.value = res.fold(
-                onSuccess = { UiState.Data(it) },
+                onSuccess = { profile ->
+                    // --- БЕЗОПАСНЫЙ Fallback для плана ---
+                    val rawPlan: String? = profile.plan
+                    val safePlan: String =
+                        rawPlan?.takeIf { it.isNotBlank() } ?: "free"
+
+                    val userPlan = UserPlan(
+                        plan = safePlan,
+                        planUntilEpochSeconds = profile.planUntilEpochSeconds
+                    )
+                    userPlanRepository.setPlan(userPlan)
+
+                    UiState.Data(profile)
+                },
                 onFailure = {
                     val msg = when (it.message) {
                         "no_token" -> "Не выполнен вход."
