@@ -11,6 +11,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.yandex.authsdk.YandexAuthSdk
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.yield
 import ru.mugalimov.volthome.ui.screens.MainApp
 import ru.mugalimov.volthome.ui.screens.auth.AuthScreen
 import ru.mugalimov.volthome.ui.viewmodel.AuthViewModel
@@ -27,7 +28,11 @@ fun RootNavGraph(
     val rootNavController = rememberNavController()
     val authVm: AuthViewModel = hiltViewModel()
 
-    LaunchedEffect(Unit) { authVm.bootstrap() }
+    // Не мешаем первому кадру: переносим bootstrap на следующий тик
+    LaunchedEffect(Unit) {
+        yield()
+        authVm.bootstrap()
+    }
 
     LaunchedEffect(Unit) {
         authVm.state.collectLatest { state ->
@@ -43,7 +48,7 @@ fun RootNavGraph(
                 }
                 is AuthViewModel.State.Idle,
                 is AuthViewModel.State.Error -> {
-                    // Возвращаемся на welcome. Без popUpTo(0) — только через findStartDestination().
+                    // Возвращаемся на welcome.
                     rootNavController.navigate(Screens.WelcomeScreen.route) {
                         popUpTo(rootNavController.graph.findStartDestination().id) {
                             inclusive = true

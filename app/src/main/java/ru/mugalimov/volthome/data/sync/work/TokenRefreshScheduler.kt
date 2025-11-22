@@ -1,6 +1,7 @@
 package ru.mugalimov.volthome.data.sync.work
 
 import androidx.work.WorkManager
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.max
@@ -10,11 +11,13 @@ class TokenRefreshScheduler @Inject constructor(
     private val workManager: WorkManager
 ) {
     /**
-     * Запланировать тихий refresh за leewayMs до истечения.
-     * Если время уже прошло — ставим на ближайшее будущее (delay=0).
+     * Единое планирование обновления токена.
+     * По умолчанию запускаем воркер за ~8 минут до истечения access-токена.
+     * Без expedited, только обычный OneTimeWorkRequest с backoff.
      */
-    fun scheduleFromExpiry(expiresAtMillis: Long, leewayMs: Long = 120_000L) {
-        val delayMs = max(0L, (expiresAtMillis - System.currentTimeMillis()) - leewayMs)
-        TokenRefreshWorker.scheduleOneTime(workManager, delayMs)
+    fun schedule(expiresAtMillis: Long, leewayMs: Long = TimeUnit.MINUTES.toMillis(8)) {
+        val now = System.currentTimeMillis()
+        val delayMs = max(0L, (expiresAtMillis - now) - leewayMs)
+        TokenRefreshWorker.scheduleUnique(workManager, delayMs)
     }
 }

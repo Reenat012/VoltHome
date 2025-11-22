@@ -1,11 +1,44 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+<manifest
+    xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Форс-удаляем чувствительные разрешения, если их притащили зависимости -->
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:node="remove" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        tools:node="remove" />
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        tools:node="remove" />
+
+    <!-- Видимость пакетов/интентов для открытия ссылок и приоритета клиентов -->
+    <queries>
+        <!-- Открытие любых http/https ссылок -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="http"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
+
+        <!-- Точечные клиенты (если задаёшь setPackage(...)) -->
+        <package android:name="org.telegram.messenger"/>
+        <package android:name="com.google.android.youtube"/>
+        <package android:name="com.instagram.android"/>
+        <package android:name="com.zhiliaoapp.musically"/> <!-- TikTok -->
+    </queries>
+
+    <!-- БАЗОВЫЕ разрешения приложения -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <!-- УДАЛИ, если нет своего FG-сервиса синка -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
 
     <application
         android:name=".application.VoltHomeApp"
@@ -37,8 +70,7 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-
-            <!-- ВАЖНО: deeplink callback для 3.1.3 не нужен, поэтому intent-filter VIEW удалён -->
+            <!-- Deeplink callback для Yandex Auth 3.1.3 не нужен -->
         </activity>
 
         <activity
@@ -46,18 +78,23 @@
             android:exported="false"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
 
+        <!-- Отключаем авто-инициализацию WorkManager через App Startup -->
         <provider
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"
             android:exported="false"
             tools:node="merge">
-
-            <!-- Отключаем авто-инициализацию WorkManager через App Startup -->
             <meta-data
                 android:name="androidx.work.WorkManagerInitializer"
                 android:value="androidx.startup"
                 tools:node="remove" />
         </provider>
 
+        <!-- Если у тебя есть собственный FG-сервис синка, он должен быть объявлен так:
+        <service
+            android:name=".sync.SyncService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+        -->
     </application>
 </manifest>

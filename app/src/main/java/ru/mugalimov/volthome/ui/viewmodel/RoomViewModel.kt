@@ -157,7 +157,7 @@ class RoomViewModel @Inject constructor( // @Inject constructor помечает
         viewModelScope.launch {
             try {
                 _defaultRooms.value = roomRepository.getDefaultRooms().first()
-                Log.d(TAG, "${defaultRooms.value}")
+                Log.d(TAG, "defaultRooms.size=${defaultRooms.value.size}")
             } catch (e: Exception) {
                 Log.e("LOAD_ERROR", "Error loading rooms", e)
             }

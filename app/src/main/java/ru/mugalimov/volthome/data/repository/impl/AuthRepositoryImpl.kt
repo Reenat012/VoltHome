@@ -13,6 +13,7 @@ import ru.mugalimov.volthome.data.remote.api.LogoutRequest
 import ru.mugalimov.volthome.data.remote.auth.AuthError
 import ru.mugalimov.volthome.data.remote.auth.AuthSession
 import ru.mugalimov.volthome.data.remote.auth.SessionManager
+import ru.mugalimov.volthome.data.remote.auth.toAuthSession
 import ru.mugalimov.volthome.data.repository.AuthRepository
 import ru.mugalimov.volthome.data.sync.work.TokenRefreshScheduler
 import javax.inject.Inject
@@ -29,31 +30,24 @@ class AuthRepositoryImpl @Inject constructor(
     private val tokenRefreshScheduler: TokenRefreshScheduler
 ) : AuthRepository {
 
-    /** Опции логина, которые следует передавать в launcher.launch(...) */
     override fun loginOptions(): YandexAuthLoginOptions = YandexAuthLoginOptions()
 
-    /**
-     * Обработка результата контракта sdk.contract.
-     * На успех — обмениваем код на серверную сессию, сохраняем и планируем фоновый refresh.
-     */
     override suspend fun handleAuthResult(result: YandexAuthResult): Result<AuthSession> =
         withContext(Dispatchers.IO) {
             when (result) {
                 is YandexAuthResult.Success -> {
                     val ya: YandexAuthToken = result.token
                     return@withContext try {
-                        // Обмен на серверную сессию
                         val resp = authApi.exchange(ExchangeRequest(code = ya.value))
 
-                        // Сохраняем локально
                         session.save(
                             sessionJwt = resp.sessionJwt,
                             expiresAtEpochSeconds = resp.expiresAtEpochSeconds,
                             refreshId = resp.refreshId
                         )
 
-                        // ⏰ Сразу планируем фоновое продление
-                        tokenRefreshScheduler.scheduleFromExpiry(resp.expiresAtEpochSeconds * 1000L)
+                        // Единое планирование без expedited
+                        tokenRefreshScheduler.schedule(resp.expiresAtEpochSeconds * 1000L)
 
                         Result.success(
                             AuthSession(
@@ -68,20 +62,13 @@ class AuthRepositoryImpl @Inject constructor(
                     }
                 }
 
-                is YandexAuthResult.Failure -> {
-                    Result.failure(RuntimeException("oauth_invalid"))
-                }
-
-                is YandexAuthResult.Cancelled -> {
-                    Result.failure(RuntimeException("cancelled"))
-                }
+                is YandexAuthResult.Failure   -> Result.failure(RuntimeException("oauth_invalid"))
+                is YandexAuthResult.Cancelled -> Result.failure(RuntimeException("cancelled"))
             }
         }
 
-    /** Текущая сессия (или null). */
-    override suspend fun currentSession(): AuthSession? = session.load()
+    override suspend fun currentSession(): AuthSession? = session.load()?.toAuthSession()
 
-    /** Полный выход: чистим локальное хранилище и отзываем refresh на сервере (best-effort). */
     override suspend fun signOut() {
         val s = session.load()
         try {
@@ -90,11 +77,10 @@ class AuthRepositoryImpl @Inject constructor(
             // server logout best-effort
         } finally {
             session.clear()
-            // Отдельно ничего отменять не надо: новый work REPLACE-нит старый при следующем логине
+            // Ничего отдельно отменять не требуется: при новом логине будет REPLACE
         }
     }
 
-    /** Маппинг исключений SDK на доменные ошибки (оставлено без изменений). */
     private fun mapException(e: YandexAuthException): AuthError {
         val msg = (e.message ?: "").lowercase()
         return when {
@@ -107,7 +93,6 @@ class AuthRepositoryImpl @Inject constructor(
         }
     }
 
-    /** Превращаем доменную ошибку в Throwable для Result.failure, с коротким техническим кодом. */
     private fun mapError(err: AuthError): Throwable = when (err) {
         AuthError.Cancelled -> RuntimeException("cancelled")
         AuthError.Connection -> RuntimeException("connection")

@@ -1,6 +1,5 @@
 package ru.mugalimov.volthome.ui.navigation
 
-import SettingsScreen
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.*
@@ -12,6 +11,7 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import ru.mugalimov.volthome.ui.screens.about.SettingsScreen
 import ru.mugalimov.volthome.ui.screens.algoritm_about.AlgorithmExplanationScreen
 import ru.mugalimov.volthome.ui.screens.explication.ExplicationScreen
 import ru.mugalimov.volthome.ui.screens.loads.PhaseLoadScreen

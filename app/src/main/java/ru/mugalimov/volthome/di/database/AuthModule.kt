@@ -1,9 +1,6 @@
 package ru.mugalimov.volthome.di.database
 
-
 import android.content.Context
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKeys
 import com.yandex.authsdk.YandexAuthOptions
 import com.yandex.authsdk.YandexAuthSdk
 import dagger.Module
@@ -12,6 +9,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
+import ru.mugalimov.volthome.data.local.prefs.EncryptedPrefsProvider
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -29,14 +27,13 @@ object AuthModule {
         options: YandexAuthOptions
     ): YandexAuthSdk = YandexAuthSdk.create(options)
 
+    /**
+     * ВАЖНО: Не создаём EncryptedSharedPreferences синхронно.
+     * Отдаём ленивый провайдер, который инициализируется на IO.
+     */
     @Provides
     @Singleton
-    fun provideEncryptedPrefs(@ApplicationContext ctx: Context) =
-        EncryptedSharedPreferences.create(
-            "auth_prefs",
-            MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC),
-            ctx,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
+    fun provideEncryptedPrefsProvider(
+        @ApplicationContext ctx: Context
+    ): EncryptedPrefsProvider = EncryptedPrefsProvider(ctx)
 }

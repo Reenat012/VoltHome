@@ -81,17 +81,17 @@ fun CircuitGroupEntity.toUpsert(): GroupUpsert = GroupUpsert(
     )
 )
 
-fun DeviceEntity.toUpsert(): DeviceUpsert = DeviceUpsert(
-    id = null,
-    name = name,
-    meta = mapOf(
-        "power" to power,
-        "voltage" to voltage.value,
-        "deviceType" to deviceType.name,
-        "powerFactor" to powerFactor,
-        "hasMotor" to hasMotor
-    )
-)
+//fun DeviceEntity.toUpsert(): DeviceUpsert = DeviceUpsert(
+//    id = null,
+//    name = name,
+//    meta = mapOf(
+//        "power" to power,
+//        "voltage" to voltage.value,
+//        "deviceType" to deviceType.name,
+//        "powerFactor" to powerFactor,
+//        "hasMotor" to hasMotor
+//    )
+//)
 
 // -------- утилиты --------
 

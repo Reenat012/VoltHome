@@ -63,7 +63,7 @@ data class DeltaBucket<T>(
 
 // ---------------------------------------------------------
 // Batch (POST /v1/projects/{id}/batch)
-// Совместимо с твоими мапперами: id — nullable,
+// ВНИМАНИЕ: для devices.upsert id — ОБЯЗАТЕЛЬНО (String)
 // room_id/group_id — nullable и опциональны
 // ---------------------------------------------------------
 data class ProjectBatchRequest(
@@ -84,7 +84,7 @@ data class OpBucket<T>(
 
 // Upsert-пэйлоады
 data class RoomUpsert(
-    val id: String? = null,                 // твои мапперы передают null → сервер сгенерит UUID
+    val id: String? = null,                 // допускаем null — сервер может сгенерировать UUID
     val name: String,
     val meta: Map<String, Any?>? = null
 )
@@ -96,8 +96,11 @@ data class GroupUpsert(
     val meta: Map<String, Any?>? = null
 )
 
+/**
+ * ВАЖНО: id обязателен — клиент генерирует UUID заранее и сохраняет в uuid_map.
+ */
 data class DeviceUpsert(
-    val id: String? = null,
+    val id: String,
     val group_id: String? = null,
     val name: String,
     val meta: Map<String, Any?>? = null

@@ -1,3 +1,12 @@
+package ru.mugalimov.volthome.ui.screens.about
+
+import androidx.compose.ui.res.painterResource
+import ru.mugalimov.volthome.R
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -9,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoStories
@@ -16,6 +26,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -36,12 +47,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.shape.RoundedCornerShape
 import ru.mugalimov.volthome.legal.LegalUrls
 import ru.mugalimov.volthome.ui.screens.algoritm_about.AlgorithmExplanationContent
 import ru.mugalimov.volthome.ui.screens.welcome.openDocument
+
+/* ───────────── Константы ───────────── */
+private const val TELEGRAM_URL = "https://t.me/volthomeapp"
+
+/* ───────────────────── Экран ───────────────────── */
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -62,7 +79,7 @@ fun SettingsScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Назад",
                             tint = MaterialTheme.colorScheme.onSurface
                         )
@@ -91,6 +108,7 @@ private fun SettingsContent(
 ) {
     var showAlgoSheet by remember { mutableStateOf(false) }
     val context = LocalContext.current
+
     val legalItems = listOf(
         LegalItem(
             icon = Icons.Filled.Description,
@@ -114,12 +132,9 @@ private fun SettingsContent(
     ) {
         item { Spacer(modifier = Modifier.height(16.dp)) }
 
-        // Заголовок раздела
-        item {
-            SectionTitle("Правовая информация")
-        }
+        /* ── Правовая информация ── */
+        item { SectionHeader("Правовая информация") }
 
-        // Пользовательское соглашение
         item {
             SettingsTile(
                 icon = legalItems[0].icon,
@@ -133,8 +148,6 @@ private fun SettingsContent(
                 }
             )
         }
-
-        // Политика конфиденциальности
         item {
             SettingsTile(
                 icon = legalItems[1].icon,
@@ -149,26 +162,11 @@ private fun SettingsContent(
             )
         }
 
-        item { Spacer(modifier = Modifier.height(24.dp)) }
+        item { Spacer(modifier = Modifier.height(20.dp)) }
 
-        // Заголовок раздела
-        item {
-            SectionTitle("Информация о приложении")
-        }
+        /* ── Информация о приложении ── */
+        item { SectionHeader("Информация о приложении") }
 
-//        // О приложении
-//        item {
-//            SettingsTile(
-//                icon = Icons.Filled.Info,
-//                title = "О приложении",
-//                subtitle = "Версия 1.8\nРазработчик: Команда VoltHome",
-//                onClick = {
-//                    // поведение не меняем — оставь пустым или добавь свой обработчик позже
-//                }
-//            )
-//        }
-
-        // Как работает алгоритм
         item {
             SettingsTile(
                 icon = Icons.Filled.AutoStories,
@@ -178,10 +176,27 @@ private fun SettingsContent(
             )
         }
 
-        item { Spacer(modifier = Modifier.height(12.dp)) }
+        // Выделенная (фиолетовая) CTA-плитка Telegram
+        item {
+            SettingsTile(
+                iconPainter = painterResource(R.drawable.telegram_communication_chat_interaction_network_connection), // можно заменить на Campaign при наличии icons-extended
+                title = "Telegram-канал VoltHome",
+                subtitle = "Новости, обновления и советы по электрике",
+                onClick = { context.openExternalUrl(TELEGRAM_URL) },
+                prominent = true
+            )
+        }
+
+        item { Spacer(modifier = Modifier.height(8.dp)) }
+
+        /* ── Футер ── */
+        item {
+            FooterVersion()
+            Spacer(modifier = Modifier.height(12.dp))
+        }
     }
 
-    // Лист с описанием алгоритма
+    /* ── BottomSheet: «Как работает алгоритм» ── */
     if (showAlgoSheet) {
         ModalBottomSheet(
             onDismissRequest = { showAlgoSheet = false },
@@ -208,45 +223,81 @@ private fun SettingsContent(
 /* ───────────────────── UI-компоненты ───────────────────── */
 
 @Composable
-private fun SectionTitle(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleLarge,
-        fontWeight = FontWeight.Medium,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(vertical = 8.dp)
-    )
+private fun SectionHeader(title: String) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Spacer(Modifier.height(8.dp))
+        Divider(
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+            thickness = 1.5.dp
+        )
+        Spacer(Modifier.height(8.dp))
+    }
 }
 
-/** Унифицированная «плитка» без ListItem — никаких внутренних линий/теней */
+/** Универсальная плитка настроек. Для CTA используйте prominent = true. */
 @Composable
 private fun SettingsTile(
-    icon: ImageVector,
+    icon: ImageVector? = null,        // ← теперь необязательно
+    iconPainter: androidx.compose.ui.graphics.painter.Painter? = null,
     title: String,
     subtitle: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    prominent: Boolean = false
 ) {
+    val bg = if (prominent) MaterialTheme.colorScheme.primary
+    else MaterialTheme.colorScheme.surfaceContainerHigh
+
+    val titleColor = if (prominent) MaterialTheme.colorScheme.onPrimary
+    else MaterialTheme.colorScheme.onSurface
+
+    val subtitleColor = if (prominent) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.9f)
+    else MaterialTheme.colorScheme.onSurfaceVariant
+
+    val iconTint = if (prominent) MaterialTheme.colorScheme.onPrimary
+    else MaterialTheme.colorScheme.primary
+
+    val shape = if (prominent) RoundedCornerShape(20.dp) else RoundedCornerShape(16.dp)
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = RoundedCornerShape(16.dp),
+        color = bg,
+        shape = shape,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+                .padding(horizontal = 16.dp, vertical = if (prominent) 16.dp else 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(40.dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
+            when {
+                iconPainter != null -> {
+                    Icon(
+                        painter = iconPainter,
+                        contentDescription = null,
+                        modifier = Modifier.size(if (prominent) 28.dp else 40.dp),
+                        tint = iconTint
+                    )
+                }
+                icon != null -> {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        modifier = Modifier.size(if (prominent) 28.dp else 40.dp),
+                        tint = iconTint
+                    )
+                }
+            }
+
             Column(
                 modifier = Modifier
                     .padding(start = 16.dp)
@@ -254,17 +305,47 @@ private fun SettingsTile(
             ) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium
+                    style = if (prominent) MaterialTheme.typography.titleMedium
+                    else MaterialTheme.typography.bodyLarge,
+                    fontWeight = if (prominent) FontWeight.SemiBold else FontWeight.Medium,
+                    color = titleColor
                 )
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = subtitleColor
                 )
             }
         }
     }
+}
+
+@Composable
+private fun FooterVersion() {
+    val context = LocalContext.current
+    val version = remember {
+        runCatching {
+            val pm: PackageManager = context.packageManager
+            val pInfo = pm.getPackageInfo(context.packageName, 0)
+            val name = pInfo.versionName ?: "—"
+            val build = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                pInfo.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                pInfo.versionCode.toLong()
+            }
+            "v$name • build $build"
+        }.getOrElse { "v—" }
+    }
+    Text(
+        text = "VoltHome © 2025 • $version",
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
+        textAlign = TextAlign.Center
+    )
 }
 
 /* ───────────────────── Модель данных ───────────────────── */
@@ -275,3 +356,11 @@ private data class LegalItem(
     val subtitle: String,
     val url: String
 )
+
+/* ───────────────────── Утилита открытия URL ───────────────────── */
+
+private fun Context.openExternalUrl(url: String) {
+    runCatching {
+        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    }
+}

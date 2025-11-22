@@ -10,14 +10,14 @@ import kotlinx.coroutines.flow.StateFlow
 import ru.mugalimov.volthome.data.remote.auth.AuthSession
 import ru.mugalimov.volthome.data.repository.AuthRepository
 import ru.mugalimov.volthome.data.repository.ProjectsRepository
-import ru.mugalimov.volthome.data.remote.yandex.YandexTokenStore // ← NEW
+import ru.mugalimov.volthome.data.remote.yandex.YandexTokenStore
 import javax.inject.Inject
 
 @HiltViewModel
 class AuthViewModel @Inject constructor(
     private val authRepo: AuthRepository,
     private val projectsRepo: ProjectsRepository,
-    private val yaTokenStore: YandexTokenStore // ← NEW
+    private val yaTokenStore: YandexTokenStore
 ) : ViewModel() {
 
     sealed interface State {
@@ -46,14 +46,14 @@ class AuthViewModel @Inject constructor(
 
     fun handleResult(result: YandexAuthResult) {
         viewModelScope.launch {
-            // 1) Сохраним access_token из результата SDK (если есть)
+            // 1) аккуратно сохраним Я-токен (если SDK его выдаёт)
             if (result is YandexAuthResult.Success) {
-                // SDK v2: result.token.value; на старых может отличаться — защищаемся
                 val yaAccess = runCatching { result.token.value }.getOrNull()
+                // сохраняем или очищаем — всё на IO, без фризов
                 yaTokenStore.save(yaAccess)
             }
 
-            // 2) Дальше — как было
+            // 2) обмен/логин на сервере как раньше
             val res = authRepo.handleAuthResult(result)
             _state.value = res.fold(
                 onSuccess = { session ->
@@ -68,7 +68,7 @@ class AuthViewModel @Inject constructor(
     fun signOut() {
         viewModelScope.launch {
             authRepo.signOut()
-            yaTokenStore.clear() // ← NEW: чистим Я-токен
+            yaTokenStore.clear() // чищаем Я-токен
             _state.value = State.Idle
         }
     }

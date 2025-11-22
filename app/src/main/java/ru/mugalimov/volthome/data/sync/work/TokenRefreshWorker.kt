@@ -2,10 +2,15 @@ package ru.mugalimov.volthome.data.sync.work
 
 import android.content.Context
 import androidx.hilt.work.HiltWorker
-import androidx.work.*
+import androidx.work.BackoffPolicy
+import androidx.work.CoroutineWorker
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.WorkerParameters
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
-import ru.mugalimov.volthome.data.remote.auth.RefreshCoordinator
+import ru.mugalimov.volthome.data.remote.auth.RefreshGate
 import ru.mugalimov.volthome.data.remote.auth.SessionManager
 import java.util.concurrent.TimeUnit
 
@@ -14,31 +19,37 @@ class TokenRefreshWorker @AssistedInject constructor(
     @Assisted appContext: Context,
     @Assisted workerParams: WorkerParameters,
     private val sessionManager: SessionManager,
-    private val refreshCoordinator: RefreshCoordinator
+    private val refreshGate: RefreshGate
 ) : CoroutineWorker(appContext, workerParams) {
 
     override suspend fun doWork(): Result {
-        // Если ничего не надо — успешно выходим
-        if (!sessionManager.needsRefresh()) return Result.success()
-
-        val refreshed = refreshCoordinator.tryRefresh()
-        return if (refreshed != null) Result.success() else Result.retry()
+        // Минимальный TTL, при котором считаем нужным обновиться: 5 минут
+        val minTtlSec = 5 * 60
+        return when (val res = refreshGate.refreshIfNeeded(minTtlSec)) {
+            is RefreshGate.Result.Succeeded -> Result.success()
+            is RefreshGate.Result.Idle      -> Result.success()
+            is RefreshGate.Result.Failed    -> {
+                // UNAUTHORIZED — не ретраим; сеть/unknown — пробуем ещё с экспоненциальным бэкофом
+                if (res.kind == RefreshGate.FailureKind.UNAUTHORIZED) Result.failure() else Result.retry()
+            }
+        }
     }
 
     companion object {
-        private const val UNIQUE_NAME = "token_refresh_once"
+        private const val UNIQUE = "token_refresh_unique"
 
-        fun scheduleOneTime(workManager: WorkManager, delayMs: Long) {
+        /**
+         * Единое уникальное планирование без expedited.
+         * Если будет запланировано повторно — REPLACE заменит предыдущий work.
+         */
+        fun scheduleUnique(workManager: WorkManager, delayMs: Long) {
             val req = OneTimeWorkRequestBuilder<TokenRefreshWorker>()
                 .setInitialDelay(delayMs.coerceAtLeast(0L), TimeUnit.MILLISECONDS)
-                .setBackoffCriteria(
-                    BackoffPolicy.EXPONENTIAL,
-                    10, TimeUnit.SECONDS
-                )
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
                 .build()
 
             workManager.enqueueUniqueWork(
-                UNIQUE_NAME,
+                UNIQUE,
                 ExistingWorkPolicy.REPLACE,
                 req
             )

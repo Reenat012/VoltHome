@@ -10,25 +10,10 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
-import ru.mugalimov.volthome.data.local.dao.DeviceDao
-import ru.mugalimov.volthome.data.local.dao.GroupDao
-import ru.mugalimov.volthome.data.local.dao.GroupDeviceJoinDao
-import ru.mugalimov.volthome.data.local.dao.LoadDao
-import ru.mugalimov.volthome.data.local.dao.OutboxDao
-import ru.mugalimov.volthome.data.local.dao.ProjectDao
-import ru.mugalimov.volthome.data.local.dao.RoomDao
-import ru.mugalimov.volthome.data.local.dao.RoomsTxDao
-import ru.mugalimov.volthome.data.local.dao.TombstoneDao
-import ru.mugalimov.volthome.data.local.dao.UuidMapDao
+import ru.mugalimov.volthome.data.local.dao.*
 import ru.mugalimov.volthome.data.local.datastore.AppPreferences
-import ru.mugalimov.volthome.data.repository.DeviceRepository
-import ru.mugalimov.volthome.data.repository.ExplicationRepository
-import ru.mugalimov.volthome.data.repository.ProjectsRepository
-import ru.mugalimov.volthome.data.repository.RoomRepository
-import ru.mugalimov.volthome.data.repository.impl.DeviceRepositoryImpl
-import ru.mugalimov.volthome.data.repository.impl.ExplicationRepositoryImpl
-import ru.mugalimov.volthome.data.repository.impl.ProjectsRepositoryImpl
-import ru.mugalimov.volthome.data.repository.impl.RoomRepositoryImpl
+import ru.mugalimov.volthome.data.repository.*
+import ru.mugalimov.volthome.data.repository.impl.*
 import ru.mugalimov.volthome.domain.model.provider.DeviceDefaultsProvider
 import ru.mugalimov.volthome.domain.model.provider.StaticDeviceDefaultsProvider
 import javax.inject.Singleton
@@ -53,15 +38,17 @@ object DatabaseModule {
                 AppDatabase.MIGRATION_17_18,
                 AppDatabase.MIGRATION_18_19,
                 AppDatabase.MIGRATION_19_20,
-                AppDatabase.MIGRATION_20_21   // 🔹 новая миграция
+                AppDatabase.MIGRATION_20_21,
+                AppDatabase.MIGRATION_21_22    // ⬅️ добавили новую миграцию
             )
+            // если у тебя есть совсем древние клиенты (<16), можно раскомментировать:
+            // .fallbackToDestructiveMigrationFrom(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)
             .addCallback(object : RoomDatabase.Callback() {
                 override fun onCreate(db: SupportSQLiteDatabase) {
                     super.onCreate(db)
                     // init if needed
                 }
             })
-            // .fallbackToDestructiveMigration()
             .build()
     }
 
@@ -72,32 +59,19 @@ object DatabaseModule {
     @Provides fun provideGroupDeviceJoinDao(database: AppDatabase): GroupDeviceJoinDao = database.groupDeviceJoinDao()
     @Provides fun provideRoomsTxDao(database: AppDatabase): RoomsTxDao = database.roomsTxDao()
     @Provides @Singleton fun provideProjectDao(db: AppDatabase): ProjectDao = db.projectDao()
-
-    // 🔹 новые DAO
     @Provides fun provideOutboxDao(db: AppDatabase): OutboxDao = db.outboxDao()
     @Provides fun provideTombstoneDao(db: AppDatabase): TombstoneDao = db.tombstoneDao()
-
-    @Provides
-    @Singleton
-    fun provideUuidMapDao(db: AppDatabase): UuidMapDao = db.uuidMapDao()
+    @Provides @Singleton fun provideUuidMapDao(db: AppDatabase): UuidMapDao = db.uuidMapDao()
 }
 
-// di/RepositoryModule.kt — без изменений по части биндов (оставляю как у тебя)
+// di/RepositoryModule.kt — бинды без изменений
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class RepositoryModule {
-
-    @Binds @Singleton
-    abstract fun bindRoomRepository(impl: RoomRepositoryImpl): RoomRepository
-
-    @Binds @Singleton
-    abstract fun bindDeviceRepository(impl: DeviceRepositoryImpl): DeviceRepository
-
-    @Binds @Singleton
-    abstract fun bindExplicationRepository(impl: ExplicationRepositoryImpl): ExplicationRepository
-
-    @Binds @Singleton
-    abstract fun bindProjectsRepository(impl: ProjectsRepositoryImpl): ProjectsRepository
+    @Binds @Singleton abstract fun bindRoomRepository(impl: RoomRepositoryImpl): RoomRepository
+    @Binds @Singleton abstract fun bindDeviceRepository(impl: DeviceRepositoryImpl): DeviceRepository
+    @Binds @Singleton abstract fun bindExplicationRepository(impl: ExplicationRepositoryImpl): ExplicationRepository
+    @Binds @Singleton abstract fun bindProjectsRepository(impl: ProjectsRepositoryImpl): ProjectsRepository
 }
 
 @Module
