@@ -17,19 +17,21 @@ class JwtStoreSerializer(
         val ciphertext = input.readBytes()
         if (ciphertext.isEmpty()) return defaultValue
 
-        val plaintext = aead.decrypt(ciphertext, /*associatedData=*/null)
-        val json = plaintext.decodeToString()
         return try {
+            val plaintext = aead.decrypt(ciphertext, /*associatedData=*/ null)
+            val json = plaintext.decodeToString()
             gson.fromJson(json, JwtStore::class.java) ?: defaultValue
-        } catch (_: Exception) {
-            defaultValue // на случай порчи файла
+        } catch (t: Throwable) {
+            // Любой сбой (битый файл, неправильный ключ, KeyStoreException и т.д.)
+            // трактуем как "нет сессии", чтобы не падать.
+            defaultValue
         }
     }
 
     override suspend fun writeTo(t: JwtStore, output: OutputStream) {
         val json = gson.toJson(t)
         val plaintext = json.encodeToByteArray()
-        val ciphertext = aead.encrypt(plaintext, /*associatedData=*/null)
+        val ciphertext = aead.encrypt(plaintext, /*associatedData=*/ null)
         output.write(ciphertext)
     }
 }
