@@ -13,14 +13,16 @@ import java.util.Date
     tableName = "devices",
     indices = [
         Index(name = "idx_devices_room_id", value = ["room_id"]),
-        Index(name = "idx_devices_project_id", value = ["project_id"])
+        Index(name = "idx_devices_project_id", value = ["project_id"]),
+        // ⬇️ НОВОЕ: индекс по name, чтобы совпасть с миграцией MIGRATION_21_22
+        Index(name = "idx_devices_name", value = ["name"])
     ],
     foreignKeys = [
         ForeignKey(
             entity = RoomEntity::class,
             parentColumns = ["id"],
             childColumns = ["room_id"],
-            onDelete = ForeignKey.SET_NULL   // <= база уже так, приводим Entity к ней
+            onDelete = ForeignKey.SET_NULL
         )
     ]
 )
@@ -44,7 +46,6 @@ data class DeviceEntity(
     @ColumnInfo(name = "created_at")
     val createdAt: Date,
 
-    // 🔹 теперь nullable, чтобы совпасть с БД (Found: notNull=false)
     @ColumnInfo(name = "room_id")
     val roomId: Long?,
 
@@ -54,7 +55,6 @@ data class DeviceEntity(
     @ColumnInfo(name = "power_factor")
     val powerFactor: Double,
 
-    // 🔹 проставляем defaultValue, чтобы совпасть с БД (Found: 0/1)
     @ColumnInfo(name = "has_motor", defaultValue = "0")
     val hasMotor: Boolean = false,
 
@@ -64,7 +64,6 @@ data class DeviceEntity(
     @ColumnInfo(name = "requires_socket", defaultValue = "1")
     val requiresSocketConnection: Boolean = true,
 
-    // 🔹 привязка к проекту (nullable)
     @ColumnInfo(name = "project_id")
     val projectId: String? = null
 )

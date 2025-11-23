@@ -38,7 +38,7 @@ import java.util.UUID
         OutboxEntity::class,
         TombstoneEntity::class
     ],
-    version = 22,              // ⬅️ подняли версию схемы
+    version = 23,              // ⬅️ подняли версию схемы
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -133,7 +133,10 @@ abstract class AppDatabase : RoomDatabase() {
                 cursor.use {
                     val nameIdx = it.getColumnIndex("name")
                     while (it.moveToNext()) {
-                        if (it.getString(nameIdx) == col) { exists = true; break }
+                        if (it.getString(nameIdx) == col) {
+                            exists = true
+                            break
+                        }
                     }
                 }
                 if (!exists) db.execSQL("ALTER TABLE $table ADD COLUMN $col $type")
@@ -145,68 +148,104 @@ abstract class AppDatabase : RoomDatabase() {
                 table: String,
                 col: String
             ) {
-                try { db.execSQL("CREATE INDEX IF NOT EXISTS $indexName ON $table($col)") }
-                catch (_: Throwable) { /* ignore */ }
+                try {
+                    db.execSQL("CREATE INDEX IF NOT EXISTS $indexName ON $table($col)")
+                } catch (_: Throwable) {
+                    /* ignore */
+                }
             }
         }
 
         val MIGRATION_18_19 = object : Migration(18, 19) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 fun hasTable(name: String): Boolean {
-                    val c = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name=?", arrayOf(name))
+                    val c = db.query(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                        arrayOf(name)
+                    )
                     c.use { return it.moveToFirst() }
                 }
 
-                db.execSQL("""
+                db.execSQL(
+                    """
                     CREATE TABLE IF NOT EXISTS uuid_map_rooms_tmp (
                         room_uuid TEXT NOT NULL PRIMARY KEY,
                         local_id  INTEGER NOT NULL
                     )
-                """.trimIndent())
+                """.trimIndent()
+                )
                 if (hasTable("uuid_map_rooms")) {
-                    db.execSQL("""
+                    db.execSQL(
+                        """
                         INSERT OR IGNORE INTO uuid_map_rooms_tmp(room_uuid, local_id)
                         SELECT room_uuid, local_id FROM uuid_map_rooms
                         WHERE room_uuid IS NOT NULL
-                    """.trimIndent())
-                    try { db.execSQL("DROP INDEX IF EXISTS idx_uuid_map_rooms_local") } catch (_: Throwable) {}
-                    try { db.execSQL("DROP TABLE IF EXISTS uuid_map_rooms") } catch (_: Throwable) {}
+                    """.trimIndent()
+                    )
+                    try {
+                        db.execSQL("DROP INDEX IF EXISTS idx_uuid_map_rooms_local")
+                    } catch (_: Throwable) {
+                    }
+                    try {
+                        db.execSQL("DROP TABLE IF EXISTS uuid_map_rooms")
+                    } catch (_: Throwable) {
+                    }
                 }
                 db.execSQL("ALTER TABLE uuid_map_rooms_tmp RENAME TO uuid_map_rooms")
                 db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_uuid_map_rooms_local_id ON uuid_map_rooms(local_id)")
 
-                db.execSQL("""
+                db.execSQL(
+                    """
                     CREATE TABLE IF NOT EXISTS uuid_map_groups_tmp (
                         group_uuid TEXT NOT NULL PRIMARY KEY,
                         local_id   INTEGER NOT NULL
                     )
-                """.trimIndent())
+                """.trimIndent()
+                )
                 if (hasTable("uuid_map_groups")) {
-                    db.execSQL("""
+                    db.execSQL(
+                        """
                         INSERT OR IGNORE INTO uuid_map_groups_tmp(group_uuid, local_id)
                         SELECT group_uuid, local_id FROM uuid_map_groups
                         WHERE group_uuid IS NOT NULL
-                    """.trimIndent())
-                    try { db.execSQL("DROP INDEX IF EXISTS idx_uuid_map_groups_local") } catch (_: Throwable) {}
-                    try { db.execSQL("DROP TABLE IF EXISTS uuid_map_groups") } catch (_: Throwable) {}
+                    """.trimIndent()
+                    )
+                    try {
+                        db.execSQL("DROP INDEX IF EXISTS idx_uuid_map_groups_local")
+                    } catch (_: Throwable) {
+                    }
+                    try {
+                        db.execSQL("DROP TABLE IF EXISTS uuid_map_groups")
+                    } catch (_: Throwable) {
+                    }
                 }
                 db.execSQL("ALTER TABLE uuid_map_groups_tmp RENAME TO uuid_map_groups")
                 db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_uuid_map_groups_local_id ON uuid_map_groups(local_id)")
 
-                db.execSQL("""
+                db.execSQL(
+                    """
                     CREATE TABLE IF NOT EXISTS uuid_map_devices_tmp (
                         device_uuid TEXT NOT NULL PRIMARY KEY,
                         local_id    INTEGER NOT NULL
                     )
-                """.trimIndent())
+                """.trimIndent()
+                )
                 if (hasTable("uuid_map_devices")) {
-                    db.execSQL("""
+                    db.execSQL(
+                        """
                         INSERT OR IGNORE INTO uuid_map_devices_tmp(device_uuid, local_id)
                         SELECT device_uuid, local_id FROM uuid_map_devices
                         WHERE device_uuid IS NOT NULL
-                    """.trimIndent())
-                    try { db.execSQL("DROP INDEX IF EXISTS idx_uuid_map_devices_local") } catch (_: Throwable) {}
-                    try { db.execSQL("DROP TABLE IF EXISTS uuid_map_devices") } catch (_: Throwable) {}
+                    """.trimIndent()
+                    )
+                    try {
+                        db.execSQL("DROP INDEX IF EXISTS idx_uuid_map_devices_local")
+                    } catch (_: Throwable) {
+                    }
+                    try {
+                        db.execSQL("DROP TABLE IF EXISTS uuid_map_devices")
+                    } catch (_: Throwable) {
+                    }
                 }
                 db.execSQL("ALTER TABLE uuid_map_devices_tmp RENAME TO uuid_map_devices")
                 db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_uuid_map_devices_local_id ON uuid_map_devices(local_id)")
@@ -253,8 +292,14 @@ abstract class AppDatabase : RoomDatabase() {
                     """.trimIndent()
                 )
 
-                try { db.execSQL("DROP INDEX IF EXISTS idx_devices_room_id") } catch (_: Throwable) {}
-                try { db.execSQL("DROP INDEX IF EXISTS idx_devices_project_id") } catch (_: Throwable) {}
+                try {
+                    db.execSQL("DROP INDEX IF EXISTS idx_devices_room_id")
+                } catch (_: Throwable) {
+                }
+                try {
+                    db.execSQL("DROP INDEX IF EXISTS idx_devices_project_id")
+                } catch (_: Throwable) {
+                }
 
                 db.execSQL("DROP TABLE devices")
                 db.execSQL("ALTER TABLE devices_tmp RENAME TO devices")
@@ -270,7 +315,8 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_20_21 = object : Migration(20, 21) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 // Outbox
-                db.execSQL("""
+                db.execSQL(
+                    """
                     CREATE TABLE IF NOT EXISTS outbox (
                         id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                         project_id TEXT NULL,
@@ -284,13 +330,15 @@ abstract class AppDatabase : RoomDatabase() {
                         created_at INTEGER NOT NULL,
                         updated_at INTEGER NOT NULL
                     )
-                """.trimIndent())
+                """.trimIndent()
+                )
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_outbox_state_created_at ON outbox(state, created_at)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_outbox_project_state ON outbox(project_id, state)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_outbox_group_key ON outbox(group_key)")
 
                 // Tombstones
-                db.execSQL("""
+                db.execSQL(
+                    """
                     CREATE TABLE IF NOT EXISTS tombstones (
                         id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                         project_id TEXT NULL,
@@ -299,20 +347,24 @@ abstract class AppDatabase : RoomDatabase() {
                         server_uuid TEXT NULL,
                         created_at INTEGER NOT NULL
                     )
-                """.trimIndent())
+                """.trimIndent()
+                )
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_tombstones_type_project ON tombstones(entity_type, project_id)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_tombstones_type_local ON tombstones(entity_type, local_id)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_tombstones_type_uuid ON tombstones(entity_type, server_uuid)")
             }
         }
 
-        // ======== новая миграция: 21 → 22 ========
+        // ======== 21 → 22: индексы устройств ========
         // Снимаем любую уникальность по devices.name (и составные UNIQUE, где фигурирует name),
         // затем создаём НЕуникальные индексы для скорости.
         val MIGRATION_21_22 = object : Migration(21, 22) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 fun dropIndexIfExists(name: String) {
-                    try { db.execSQL("DROP INDEX IF EXISTS $name") } catch (_: Throwable) {}
+                    try {
+                        db.execSQL("DROP INDEX IF EXISTS $name")
+                    } catch (_: Throwable) {
+                    }
                 }
 
                 // 1) Снести известные уникальные индексы (разные исторические варианты имён)
@@ -391,16 +443,47 @@ abstract class AppDatabase : RoomDatabase() {
                         """.trimIndent()
                     )
 
-                    try { db.execSQL("DROP TABLE devices") } catch (_: Throwable) {}
+                    try {
+                        db.execSQL("DROP TABLE devices")
+                    } catch (_: Throwable) {
+                    }
                     db.execSQL("ALTER TABLE devices_new RENAME TO devices")
 
                     db.execSQL("PRAGMA foreign_keys=ON")
                 }
 
                 // 4) НЕуникальные индексы
-                try { db.execSQL("CREATE INDEX IF NOT EXISTS idx_devices_name ON devices(name)") } catch (_: Throwable) {}
-                try { db.execSQL("CREATE INDEX IF NOT EXISTS idx_devices_room_id ON devices(room_id)") } catch (_: Throwable) {}
-                try { db.execSQL("CREATE INDEX IF NOT EXISTS idx_devices_project_id ON devices(project_id)") } catch (_: Throwable) {}
+                try {
+                    db.execSQL("CREATE INDEX IF NOT EXISTS idx_devices_name ON devices(name)")
+                } catch (_: Throwable) {
+                }
+                try {
+                    db.execSQL("CREATE INDEX IF NOT EXISTS idx_devices_room_id ON devices(room_id)")
+                } catch (_: Throwable) {
+                }
+                try {
+                    db.execSQL("CREATE INDEX IF NOT EXISTS idx_devices_project_id ON devices(project_id)")
+                } catch (_: Throwable) {
+                }
+            }
+        }
+
+        // ======== 22 → 23: фиксация нового identity hash ========
+        val MIGRATION_22_23 = object : Migration(22, 23) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // На версиях до 23 могла не быть создана idx_devices_name,
+                // поэтому здесь гарантируем, что все три индекса есть.
+                fun createIndexSafe(sql: String) {
+                    try {
+                        db.execSQL(sql)
+                    } catch (_: Throwable) {
+                        // игнорируем, если индекс уже есть или что-то не так с DDL
+                    }
+                }
+
+                createIndexSafe("CREATE INDEX IF NOT EXISTS idx_devices_name ON devices(name)")
+                createIndexSafe("CREATE INDEX IF NOT EXISTS idx_devices_room_id ON devices(room_id)")
+                createIndexSafe("CREATE INDEX IF NOT EXISTS idx_devices_project_id ON devices(project_id)")
             }
         }
     }

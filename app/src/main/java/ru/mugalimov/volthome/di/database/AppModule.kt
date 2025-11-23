@@ -39,10 +39,11 @@ object DatabaseModule {
                 AppDatabase.MIGRATION_18_19,
                 AppDatabase.MIGRATION_19_20,
                 AppDatabase.MIGRATION_20_21,
-                AppDatabase.MIGRATION_21_22    // ⬅️ добавили новую миграцию
+                AppDatabase.MIGRATION_21_22,
+                AppDatabase.MIGRATION_22_23// ⬅️ добавили новую миграцию
             )
             // если у тебя есть совсем древние клиенты (<16), можно раскомментировать:
-            // .fallbackToDestructiveMigrationFrom(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)
+//             .fallbackToDestructiveMigrationFrom(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)
             .addCallback(object : RoomDatabase.Callback() {
                 override fun onCreate(db: SupportSQLiteDatabase) {
                     super.onCreate(db)
