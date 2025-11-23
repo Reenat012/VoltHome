@@ -7,6 +7,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import ru.mugalimov.volthome.data.remote.api.AuthApi
 import ru.mugalimov.volthome.data.remote.api.RefreshRequest
+import ru.mugalimov.volthome.data.sync.work.TokenRefreshScheduler
 import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Named
@@ -15,11 +16,16 @@ import javax.inject.Singleton
 /**
  * Единая точка refresh (single-flight) с защитой от гонок rotation.
  * Только здесь выполняется вызов /auth/refresh.
+ *
+ * ВАЖНО:
+ * - после любого успешного /auth/refresh мы не только сохраняем сессию в SessionManager,
+ *   но и перепланируем TokenRefreshWorker через TokenRefreshScheduler.
  */
 @Singleton
 class RefreshGate @Inject constructor(
     @Named("refreshApi") private val authApi: AuthApi,
-    private val sessionManager: SessionManager
+    private val sessionManager: SessionManager,
+    private val tokenRefreshScheduler: TokenRefreshScheduler
 ) {
 
     private val io = Dispatchers.IO
@@ -43,28 +49,27 @@ class RefreshGate @Inject constructor(
      */
     suspend fun awaitIfRunning() {
         mutex.withLock {
-            // Ничего не делаем: просто даем завершиться текущему циклу
-            // Выйдем из скоупа — refresh уже либо закончился, либо не шел.
+            // Ничего не делаем: просто даем завершиться текущему циклу.
         }
     }
 
     /**
      * Инициировать refresh, если он нужен. Если уже запущен — дождаться результата.
-     * @param minTtlSec если до истечения меньше, чем столькo секунд — пробуем обновить
+     * @param minTtlSec если до истечения меньше, чем столькo секунд — пробуем обновить.
      */
     suspend fun refreshIfNeeded(minTtlSec: Int): Result = withContext(io) {
         val needs = sessionManager.needsRefresh(leewaySeconds = minTtlSec.toLong())
         if (!needs) return@withContext Result.Idle
 
         mutex.withLock {
-            // Если пока мы ждали, кто-то уже выполнил успешный refresh — выходим
+            // Пока ждали лок, ситуация могла измениться — перепроверяем.
             if (!sessionManager.needsRefresh(leewaySeconds = minTtlSec.toLong())) {
                 lastResult = Result.Idle
                 return@withLock lastResult
             }
 
             if (running) {
-                // Теоретически не зайдем сюда — мы держим mutex — но оставим на случай будущих доработок
+                // Теоретически сюда не попадём (держим mutex), но оставляем на будущее.
                 return@withLock lastResult
             }
 
@@ -83,23 +88,24 @@ class RefreshGate @Inject constructor(
                     lastResult = Result.Failed(FailureKind.UNKNOWN)
                     return@withLock lastResult
                 } catch (e: Throwable) {
-                    // Отличаем сетевые ошибки от 401/403 на уровне клиента сложно,
-                    // поэтому семантика такая: сетевые исключения — NETWORK (без логаута).
+                    // Сетевые исключения — NETWORK (без логаута).
                     lastResult = Result.Failed(FailureKind.NETWORK)
                     return@withLock lastResult
                 }
 
-                // Успех — сохраняем новую сессию (access + новый refresh), перепланируем ворк
+                // Успех — сохраняем новую сессию (access + новый refresh),
+                // и сразу же планируем следующий refresh.
                 sessionManager.save(
                     sessionJwt = response.sessionJwt,
                     expiresAtEpochSeconds = response.expiresAtEpochSeconds,
                     refreshId = response.refreshId
                 )
+
+                tokenRefreshScheduler.schedule(response.expiresAtEpochSeconds * 1000L)
+
                 lastResult = Result.Succeeded(response.expiresAtEpochSeconds)
                 return@withLock lastResult
             } catch (t: Throwable) {
-                // Возможные 401 с сервера мы различим вне: проверим актуальность refresh в сторе.
-                // Здесь считаем «неизвестной» ошибкой.
                 lastResult = Result.Failed(FailureKind.UNKNOWN)
                 return@withLock lastResult
             } finally {
@@ -129,15 +135,14 @@ class RefreshGate @Inject constructor(
                 val response = try {
                     authApi.refresh(RefreshRequest(refreshId = refreshToken))
                 } catch (e: Throwable) {
-                    // Сначала проверим гонку rotation:
-                    // Если в сторе уже лежит ДРУГОЙ refresh-токен (значит, где-то параллельно всё уже обновилось),
-                    // не делаем logout — позволим следующему запросу повториться с актуальным access.
+                    // Проверяем гонку rotation:
+                    // если в сторе уже лежит другой refresh-токен — значит, где-то параллельно всё уже обновилось.
                     val currentRefreshNow = sessionManager.refreshTokenOrNull()
                     return@withLock if (currentRefreshNow != null && sha256(currentRefreshNow) != usedSha) {
                         lastResult = Result.Failed(FailureKind.UNKNOWN)
                         lastResult
                     } else {
-                        // Это реальный фатал по актуальному токену
+                        // Это реальный фатал по актуальному refresh.
                         lastResult = Result.Failed(FailureKind.UNAUTHORIZED)
                         lastResult
                     }
@@ -148,6 +153,10 @@ class RefreshGate @Inject constructor(
                     expiresAtEpochSeconds = response.expiresAtEpochSeconds,
                     refreshId = response.refreshId
                 )
+
+                // Планируем следующий refresh по новому exp.
+                tokenRefreshScheduler.schedule(response.expiresAtEpochSeconds * 1000L)
+
                 lastResult = Result.Succeeded(response.expiresAtEpochSeconds)
                 return@withLock lastResult
             } finally {

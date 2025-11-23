@@ -12,10 +12,14 @@ class TokenRefreshScheduler @Inject constructor(
 ) {
     /**
      * Единое планирование обновления токена.
-     * По умолчанию запускаем воркер за ~8 минут до истечения access-токена.
+     *
+     * По умолчанию запускаем воркер за ~5 минут до истечения access-токена.
      * Без expedited, только обычный OneTimeWorkRequest с backoff.
      */
-    fun schedule(expiresAtMillis: Long, leewayMs: Long = TimeUnit.MINUTES.toMillis(8)) {
+    fun schedule(
+        expiresAtMillis: Long,
+        leewayMs: Long = TimeUnit.MINUTES.toMillis(5) // было 8 минут, теперь 5
+    ) {
         val now = System.currentTimeMillis()
         val delayMs = max(0L, (expiresAtMillis - now) - leewayMs)
         TokenRefreshWorker.scheduleUnique(workManager, delayMs)

@@ -30,10 +30,16 @@ class AuthViewModel @Inject constructor(
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state
 
+    /**
+     * Стартовая инициализация:
+     * - если в SessionManager есть сессия — считаем пользователя залогиненным
+     *   (даже если access формально протух: refreshGate/SessionAuthenticator это разрулят),
+     * - иначе показываем экран входа.
+     */
     fun bootstrap() {
         viewModelScope.launch {
             val session = authRepo.currentSession()
-            if (session != null && !session.isExpired) {
+            if (session != null) {
                 _state.value = State.Success(session)
                 launch { runCatching { projectsRepo.bootstrapFromRemote() } }
             } else {
@@ -42,7 +48,9 @@ class AuthViewModel @Inject constructor(
         }
     }
 
-    fun startLogin() { _state.value = State.Loading }
+    fun startLogin() {
+        _state.value = State.Loading
+    }
 
     fun handleResult(result: YandexAuthResult) {
         viewModelScope.launch {
@@ -68,7 +76,7 @@ class AuthViewModel @Inject constructor(
     fun signOut() {
         viewModelScope.launch {
             authRepo.signOut()
-            yaTokenStore.clear() // чищаем Я-токен
+            yaTokenStore.clear() // чистим Я-токен
             _state.value = State.Idle
         }
     }
@@ -76,12 +84,12 @@ class AuthViewModel @Inject constructor(
     private fun mapThrowableToUi(t: Throwable): String {
         val code = t.message?.lowercase().orEmpty()
         return when (code) {
-            "cancelled" -> "Авторизация отменена."
-            "connection" -> "Нет сети. Проверь подключение и повтори."
-            "security" -> "Ошибка конфигурации OAuth. Проверь redirect URI и client_id."
+            "cancelled"   -> "Авторизация отменена."
+            "connection"  -> "Нет сети. Проверь подключение и повтори."
+            "security"    -> "Ошибка конфигурации OAuth. Проверь redirect URI и client_id."
             "oauth_invalid" -> "Неверный/просроченный токен Яндекса. Попробуй снова."
-            "jwt_auth" -> "Не удалось получить серверную сессию. Повтори вход."
-            else -> "Ошибка входа. ${t.message ?: ""}".trim()
+            "jwt_auth"    -> "Не удалось получить серверную сессию. Повтори вход."
+            else          -> "Ошибка входа. ${t.message ?: ""}".trim()
         }
     }
 }
