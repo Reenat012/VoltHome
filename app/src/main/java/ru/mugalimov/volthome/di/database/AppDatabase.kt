@@ -38,7 +38,7 @@ import java.util.UUID
         OutboxEntity::class,
         TombstoneEntity::class
     ],
-    version = 23,              // ⬅️ подняли версию схемы
+    version = 23,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -90,8 +90,27 @@ abstract class AppDatabase : RoomDatabase() {
                 safeCreateIndex(db, "idx_loads_project_id", "loads", "project_id")
 
                 val defaultProjectId = UUID.randomUUID().toString()
-                val nowIso =
-                    SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).format(Date())
+                val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).format(Date())
+
+                // === Safety: создать таблицу projects, если её нет (устраняет 'no such table: projects') ===
+                try {
+                    db.execSQL(
+                        """
+                        CREATE TABLE IF NOT EXISTS projects (
+                            id TEXT NOT NULL PRIMARY KEY,
+                            name TEXT NOT NULL,
+                            note TEXT,
+                            version INTEGER NOT NULL,
+                            updated_at TEXT NOT NULL,
+                            is_deleted INTEGER NOT NULL DEFAULT 0
+                        )
+                        """.trimIndent()
+                    )
+                    // индекс на is_deleted ускорит выборки, безопасно создать
+                    db.execSQL("CREATE INDEX IF NOT EXISTS idx_projects_is_deleted ON projects(is_deleted)")
+                } catch (_: Throwable) {
+                    // игнорируем — в редких случаях DDL может провалиться, но INSERT ниже тоже обработаем естественно
+                }
 
                 db.execSQL(
                     """
@@ -356,8 +375,6 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         // ======== 21 → 22: индексы устройств ========
-        // Снимаем любую уникальность по devices.name (и составные UNIQUE, где фигурирует name),
-        // затем создаём НЕуникальные индексы для скорости.
         val MIGRATION_21_22 = object : Migration(21, 22) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 fun dropIndexIfExists(name: String) {
@@ -367,7 +384,6 @@ abstract class AppDatabase : RoomDatabase() {
                     }
                 }
 
-                // 1) Снести известные уникальные индексы (разные исторические варианты имён)
                 listOf(
                     "ux_devices_room_name",
                     "ux_devices_room_name_alive",
@@ -377,7 +393,6 @@ abstract class AppDatabase : RoomDatabase() {
                     "devices_name_unique"
                 ).forEach { dropIndexIfExists(it) }
 
-                // 2) Найти и снести все явные UNIQUE-индексы, где фигурирует name
                 val explicitUnique = db.query(
                     """
                     SELECT name FROM sqlite_master
@@ -393,7 +408,6 @@ abstract class AppDatabase : RoomDatabase() {
                 }
                 explicitUnique.filter { it.isNotBlank() }.forEach { dropIndexIfExists(it) }
 
-                // 3) Если остался UNIQUE (например, autoindex без явного имени) — пересоздадим таблицу.
                 val stillUnique = db.query(
                     """
                     SELECT 1 FROM sqlite_master
@@ -452,7 +466,6 @@ abstract class AppDatabase : RoomDatabase() {
                     db.execSQL("PRAGMA foreign_keys=ON")
                 }
 
-                // 4) НЕуникальные индексы
                 try {
                     db.execSQL("CREATE INDEX IF NOT EXISTS idx_devices_name ON devices(name)")
                 } catch (_: Throwable) {
@@ -471,13 +484,11 @@ abstract class AppDatabase : RoomDatabase() {
         // ======== 22 → 23: фиксация нового identity hash ========
         val MIGRATION_22_23 = object : Migration(22, 23) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // На версиях до 23 могла не быть создана idx_devices_name,
-                // поэтому здесь гарантируем, что все три индекса есть.
                 fun createIndexSafe(sql: String) {
                     try {
                         db.execSQL(sql)
                     } catch (_: Throwable) {
-                        // игнорируем, если индекс уже есть или что-то не так с DDL
+                        // игнорируем
                     }
                 }
 
