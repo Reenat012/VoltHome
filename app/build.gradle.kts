@@ -205,6 +205,10 @@ dependencies {
     // Если снова не найдёт капчу — ВРЕМЕННО добавь явные зависимости:
 //     implementation("com.vk.id.captcha:okhttp-interceptors:0.0.4")
 //     implementation("com.vk.id.captcha:vkid-captcha:0.0.4")
+
+    // RuStore Pay SDK
+    implementation(platform(libs.rustore.sdk.bom))
+    implementation(libs.rustore.sdk.pay)
 }
 
 configurations.all {

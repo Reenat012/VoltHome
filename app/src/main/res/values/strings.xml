@@ -3,4 +3,6 @@
     <string name="notification_channel_sync_name">Синхронизация</string>
     <string name="notification_sync_title">Синхронизация проекта</string>
     <string name="notification_sync_text">Отправка изменений…</string>
+    <string name="rustore_console_app_id">123456</string>
+    <string name="rustore_pay_deeplink_scheme">volthome-pay</string>
 </resources>

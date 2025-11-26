@@ -12,6 +12,7 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import ru.mugalimov.volthome.BuildConfig
 import ru.mugalimov.volthome.data.remote.api.AuthApi
+import ru.mugalimov.volthome.data.remote.api.BillingApi
 import ru.mugalimov.volthome.data.remote.api.ProfileApi
 import ru.mugalimov.volthome.data.remote.api.ProjectsApi
 import ru.mugalimov.volthome.data.remote.auth.AuthInterceptor
@@ -106,4 +107,8 @@ object NetworkModule {
 
     @Provides @Singleton
     fun provideDefaultOkHttp(@Named("authless") client: OkHttpClient): OkHttpClient = client
+
+    @Provides @Singleton
+    fun provideBillingApi(retrofit: Retrofit): BillingApi =
+        retrofit.create(BillingApi::class.java)
 }
