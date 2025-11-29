@@ -1,14 +1,34 @@
 package ru.mugalimov.volthome.di.database
 
-import android.content.Context
 import androidx.room.Database
-import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
-import ru.mugalimov.volthome.data.local.dao.*
-import ru.mugalimov.volthome.data.local.entity.*
+import ru.mugalimov.volthome.data.local.dao.DeviceDao
+import ru.mugalimov.volthome.data.local.dao.GroupDao
+import ru.mugalimov.volthome.data.local.dao.GroupDeviceJoinDao
+import ru.mugalimov.volthome.data.local.dao.LoadDao
+import ru.mugalimov.volthome.data.local.dao.OutboxDao
+import ru.mugalimov.volthome.data.local.dao.ProjectDao
+import ru.mugalimov.volthome.data.local.dao.ProjectLocalStateDao
+import ru.mugalimov.volthome.data.local.dao.RoomDao
+import ru.mugalimov.volthome.data.local.dao.RoomsTxDao
+import ru.mugalimov.volthome.data.local.dao.TombstoneDao
+import ru.mugalimov.volthome.data.local.dao.UuidMapDao
+import ru.mugalimov.volthome.data.local.entity.CircuitGroupEntity
+import ru.mugalimov.volthome.data.local.entity.DeviceEntity
+import ru.mugalimov.volthome.data.local.entity.GroupDeviceJoin
+import ru.mugalimov.volthome.data.local.entity.LoadEntity
+import ru.mugalimov.volthome.data.local.entity.OutboxEntity
+import ru.mugalimov.volthome.data.local.entity.ProjectEntity
+import ru.mugalimov.volthome.data.local.entity.ProjectLocalStateEntity
+import ru.mugalimov.volthome.data.local.entity.RoomEntity
+import ru.mugalimov.volthome.data.local.entity.SyncConflictEntity
+import ru.mugalimov.volthome.data.local.entity.TombstoneEntity
+import ru.mugalimov.volthome.data.local.entity.UuidMapDevice
+import ru.mugalimov.volthome.data.local.entity.UuidMapGroup
+import ru.mugalimov.volthome.data.local.entity.UuidMapRoom
 import ru.netology.nework.converters.Converters
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -38,10 +58,11 @@ import java.util.UUID
         OutboxEntity::class,
         TombstoneEntity::class
     ],
-    version = 23,
+    version = 25, // подняли под «санитарную» миграцию 24 → 25
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
+
     abstract fun roomDao(): RoomDao
     abstract fun deviceDao(): DeviceDao
     abstract fun loadDao(): LoadDao
@@ -60,12 +81,6 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun tombstoneDao(): TombstoneDao
 
     companion object {
-        private val callback = object : Callback() {
-            override fun onCreate(db: SupportSQLiteDatabase) {
-                super.onCreate(db)
-                db.execSQL("PRAGMA foreign_keys = ON")
-            }
-        }
 
         // ======== существующие миграции ========
 
@@ -88,11 +103,14 @@ abstract class AppDatabase : RoomDatabase() {
                 safeCreateIndex(db, "idx_devices_project_id", "devices", "project_id")
                 safeCreateIndex(db, "idx_groups_project_id", "groups", "project_id")
                 safeCreateIndex(db, "idx_loads_project_id", "loads", "project_id")
+                // добавляем индекс, которого не хватало в старой схеме
+                safeCreateIndex(db, "idx_loads_room_id", "loads", "room_id")
 
                 val defaultProjectId = UUID.randomUUID().toString()
-                val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).format(Date())
+                val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
+                    .format(Date())
 
-                // === Safety: создать таблицу projects, если её нет (устраняет 'no such table: projects') ===
+                // Safety: создать таблицу projects, если её нет
                 try {
                     db.execSQL(
                         """
@@ -106,10 +124,12 @@ abstract class AppDatabase : RoomDatabase() {
                         )
                         """.trimIndent()
                     )
-                    // индекс на is_deleted ускорит выборки, безопасно создать
-                    db.execSQL("CREATE INDEX IF NOT EXISTS idx_projects_is_deleted ON projects(is_deleted)")
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS idx_projects_is_deleted " +
+                                "ON projects(is_deleted)"
+                    )
                 } catch (_: Throwable) {
-                    // игнорируем — в редких случаях DDL может провалиться, но INSERT ниже тоже обработаем естественно
+                    // игнорируем
                 }
 
                 db.execSQL(
@@ -170,7 +190,7 @@ abstract class AppDatabase : RoomDatabase() {
                 try {
                     db.execSQL("CREATE INDEX IF NOT EXISTS $indexName ON $table($col)")
                 } catch (_: Throwable) {
-                    /* ignore */
+                    // ignore
                 }
             }
         }
@@ -191,7 +211,7 @@ abstract class AppDatabase : RoomDatabase() {
                         room_uuid TEXT NOT NULL PRIMARY KEY,
                         local_id  INTEGER NOT NULL
                     )
-                """.trimIndent()
+                    """.trimIndent()
                 )
                 if (hasTable("uuid_map_rooms")) {
                     db.execSQL(
@@ -199,7 +219,7 @@ abstract class AppDatabase : RoomDatabase() {
                         INSERT OR IGNORE INTO uuid_map_rooms_tmp(room_uuid, local_id)
                         SELECT room_uuid, local_id FROM uuid_map_rooms
                         WHERE room_uuid IS NOT NULL
-                    """.trimIndent()
+                        """.trimIndent()
                     )
                     try {
                         db.execSQL("DROP INDEX IF EXISTS idx_uuid_map_rooms_local")
@@ -211,7 +231,10 @@ abstract class AppDatabase : RoomDatabase() {
                     }
                 }
                 db.execSQL("ALTER TABLE uuid_map_rooms_tmp RENAME TO uuid_map_rooms")
-                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_uuid_map_rooms_local_id ON uuid_map_rooms(local_id)")
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_uuid_map_rooms_local_id " +
+                            "ON uuid_map_rooms(local_id)"
+                )
 
                 db.execSQL(
                     """
@@ -219,7 +242,7 @@ abstract class AppDatabase : RoomDatabase() {
                         group_uuid TEXT NOT NULL PRIMARY KEY,
                         local_id   INTEGER NOT NULL
                     )
-                """.trimIndent()
+                    """.trimIndent()
                 )
                 if (hasTable("uuid_map_groups")) {
                     db.execSQL(
@@ -227,7 +250,7 @@ abstract class AppDatabase : RoomDatabase() {
                         INSERT OR IGNORE INTO uuid_map_groups_tmp(group_uuid, local_id)
                         SELECT group_uuid, local_id FROM uuid_map_groups
                         WHERE group_uuid IS NOT NULL
-                    """.trimIndent()
+                        """.trimIndent()
                     )
                     try {
                         db.execSQL("DROP INDEX IF EXISTS idx_uuid_map_groups_local")
@@ -239,7 +262,10 @@ abstract class AppDatabase : RoomDatabase() {
                     }
                 }
                 db.execSQL("ALTER TABLE uuid_map_groups_tmp RENAME TO uuid_map_groups")
-                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_uuid_map_groups_local_id ON uuid_map_groups(local_id)")
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_uuid_map_groups_local_id " +
+                            "ON uuid_map_groups(local_id)"
+                )
 
                 db.execSQL(
                     """
@@ -247,7 +273,7 @@ abstract class AppDatabase : RoomDatabase() {
                         device_uuid TEXT NOT NULL PRIMARY KEY,
                         local_id    INTEGER NOT NULL
                     )
-                """.trimIndent()
+                    """.trimIndent()
                 )
                 if (hasTable("uuid_map_devices")) {
                     db.execSQL(
@@ -255,7 +281,7 @@ abstract class AppDatabase : RoomDatabase() {
                         INSERT OR IGNORE INTO uuid_map_devices_tmp(device_uuid, local_id)
                         SELECT device_uuid, local_id FROM uuid_map_devices
                         WHERE device_uuid IS NOT NULL
-                    """.trimIndent()
+                        """.trimIndent()
                     )
                     try {
                         db.execSQL("DROP INDEX IF EXISTS idx_uuid_map_devices_local")
@@ -267,7 +293,10 @@ abstract class AppDatabase : RoomDatabase() {
                     }
                 }
                 db.execSQL("ALTER TABLE uuid_map_devices_tmp RENAME TO uuid_map_devices")
-                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_uuid_map_devices_local_id ON uuid_map_devices(local_id)")
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_uuid_map_devices_local_id " +
+                            "ON uuid_map_devices(local_id)"
+                )
             }
         }
 
@@ -349,11 +378,19 @@ abstract class AppDatabase : RoomDatabase() {
                         created_at INTEGER NOT NULL,
                         updated_at INTEGER NOT NULL
                     )
-                """.trimIndent()
+                    """.trimIndent()
                 )
-                db.execSQL("CREATE INDEX IF NOT EXISTS index_outbox_state_created_at ON outbox(state, created_at)")
-                db.execSQL("CREATE INDEX IF NOT EXISTS index_outbox_project_state ON outbox(project_id, state)")
-                db.execSQL("CREATE INDEX IF NOT EXISTS index_outbox_group_key ON outbox(group_key)")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_outbox_state_created_at " +
+                            "ON outbox(state, created_at)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_outbox_project_state " +
+                            "ON outbox(project_id, state)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_outbox_group_key ON outbox(group_key)"
+                )
 
                 // Tombstones
                 db.execSQL(
@@ -366,15 +403,24 @@ abstract class AppDatabase : RoomDatabase() {
                         server_uuid TEXT NULL,
                         created_at INTEGER NOT NULL
                     )
-                """.trimIndent()
+                    """.trimIndent()
                 )
-                db.execSQL("CREATE INDEX IF NOT EXISTS index_tombstones_type_project ON tombstones(entity_type, project_id)")
-                db.execSQL("CREATE INDEX IF NOT EXISTS index_tombstones_type_local ON tombstones(entity_type, local_id)")
-                db.execSQL("CREATE INDEX IF NOT EXISTS index_tombstones_type_uuid ON tombstones(entity_type, server_uuid)")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_tombstones_type_project " +
+                            "ON tombstones(entity_type, project_id)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_tombstones_type_local " +
+                            "ON tombstones(entity_type, local_id)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_tombstones_type_uuid " +
+                            "ON tombstones(entity_type, server_uuid)"
+                )
             }
         }
 
-        // ======== 21 → 22: индексы устройств ========
+        // 21 → 22: индексы устройств
         val MIGRATION_21_22 = object : Migration(21, 22) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 fun dropIndexIfExists(name: String) {
@@ -406,7 +452,9 @@ abstract class AppDatabase : RoomDatabase() {
                         while (c.moveToNext()) add(c.getString(0) ?: "")
                     }
                 }
-                explicitUnique.filter { it.isNotBlank() }.forEach { dropIndexIfExists(it) }
+                explicitUnique
+                    .filter { it.isNotBlank() }
+                    .forEach { dropIndexIfExists(it) }
 
                 val stillUnique = db.query(
                     """
@@ -481,7 +529,7 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        // ======== 22 → 23: фиксация нового identity hash ========
+        // 22 → 23: фиксация identity hash через индексы устройств
         val MIGRATION_22_23 = object : Migration(22, 23) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 fun createIndexSafe(sql: String) {
@@ -495,6 +543,229 @@ abstract class AppDatabase : RoomDatabase() {
                 createIndexSafe("CREATE INDEX IF NOT EXISTS idx_devices_name ON devices(name)")
                 createIndexSafe("CREATE INDEX IF NOT EXISTS idx_devices_room_id ON devices(room_id)")
                 createIndexSafe("CREATE INDEX IF NOT EXISTS idx_devices_project_id ON devices(project_id)")
+            }
+        }
+
+        // 23 → 24: фиксим индексы rooms под RoomEntity
+        val MIGRATION_23_24 = object : Migration(23, 24) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Сносим старый уникальный индекс по name, если он есть
+                try {
+                    db.execSQL("DROP INDEX IF EXISTS `index_rooms_name`")
+                } catch (_: Throwable) {
+                }
+
+                // На всякий случай — дропаем возможный кривой uq_rooms_name_project
+                try {
+                    db.execSQL("DROP INDEX IF EXISTS `uq_rooms_name_project`")
+                } catch (_: Throwable) {
+                }
+
+                // Создаём тот индекс, который ожидает RoomEntity: UNIQUE(name, project_id)
+                db.execSQL(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS `uq_rooms_name_project`
+                    ON `rooms`(`name`, `project_id`)
+                    """.trimIndent()
+                )
+            }
+        }
+
+        // 24 → 25: «санитарная» миграция — приводим индексы под актуальные Entity
+        val MIGRATION_24_25 = object : Migration(24, 25) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+
+                fun dropIndexIfExists(name: String) {
+                    try {
+                        db.execSQL("DROP INDEX IF EXISTS `$name`")
+                    } catch (_: Throwable) {
+                        // нам важен итоговый результат, а не статус старых индексов
+                    }
+                }
+
+                fun createIndexSafe(sql: String) {
+                    try {
+                        db.execSQL(sql)
+                    } catch (_: Throwable) {
+                        // если индекс уже есть / что-то помешало — не роняем миграцию
+                    }
+                }
+
+                // ===== ROOMS =====
+                // RoomEntity ожидает:
+                //  - UNIQUE uq_rooms_name_project(name, project_id)
+                //  - обычный idx_rooms_project_id(project_id)
+
+                dropIndexIfExists("index_rooms_name")
+                dropIndexIfExists("uq_rooms_name_project")
+
+                createIndexSafe(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS `uq_rooms_name_project`
+                    ON `rooms`(`name`, `project_id`)
+                    """.trimIndent()
+                )
+                createIndexSafe(
+                    """
+                    CREATE INDEX IF NOT EXISTS `idx_rooms_project_id`
+                    ON `rooms`(`project_id`)
+                    """.trimIndent()
+                )
+
+                // ===== LOADS =====
+                // LoadEntity ожидает:
+                //  - idx_loads_room_id(room_id)
+                //  - idx_loads_project_id(project_id)
+
+                dropIndexIfExists("index_loads_room_id")
+                dropIndexIfExists("idx_loads_room_id")
+                dropIndexIfExists("index_loads_project_id")
+                dropIndexIfExists("idx_loads_project_id")
+
+                createIndexSafe(
+                    """
+                    CREATE INDEX IF NOT EXISTS `idx_loads_room_id`
+                    ON `loads`(`room_id`)
+                    """.trimIndent()
+                )
+                createIndexSafe(
+                    """
+                    CREATE INDEX IF NOT EXISTS `idx_loads_project_id`
+                    ON `loads`(`project_id`)
+                    """.trimIndent()
+                )
+
+                // ===== GROUPS =====
+                // CircuitGroupEntity ожидает:
+                //  - idx_groups_room_id(room_id)
+                //  - idx_groups_project_id(project_id)
+
+                dropIndexIfExists("index_groups_room_id")
+                dropIndexIfExists("idx_groups_room_id")
+                dropIndexIfExists("index_groups_project_id")
+                dropIndexIfExists("idx_groups_project_id")
+
+                createIndexSafe(
+                    """
+                    CREATE INDEX IF NOT EXISTS `idx_groups_room_id`
+                    ON `groups`(`room_id`)
+                    """.trimIndent()
+                )
+                createIndexSafe(
+                    """
+                    CREATE INDEX IF NOT EXISTS `idx_groups_project_id`
+                    ON `groups`(`project_id`)
+                    """.trimIndent()
+                )
+
+                // ===== DEVICES =====
+                // DeviceEntity ожидает:
+                //  - idx_devices_name(name)
+                //  - idx_devices_room_id(room_id)
+                //  - idx_devices_project_id(project_id)
+
+                listOf(
+                    "ux_devices_room_name",
+                    "ux_devices_room_name_alive",
+                    "ux_devices_project_room_name",
+                    "ux_devices_project_room_name_alive",
+                    "ux_devices_name_unique",
+                    "devices_name_unique"
+                ).forEach { dropIndexIfExists(it) }
+
+                dropIndexIfExists("idx_devices_name")
+                dropIndexIfExists("idx_devices_room_id")
+                dropIndexIfExists("idx_devices_project_id")
+                dropIndexIfExists("index_devices_name")
+                dropIndexIfExists("index_devices_room_id")
+                dropIndexIfExists("index_devices_project_id")
+
+                createIndexSafe(
+                    """
+                    CREATE INDEX IF NOT EXISTS `idx_devices_name`
+                    ON `devices`(`name`)
+                    """.trimIndent()
+                )
+                createIndexSafe(
+                    """
+                    CREATE INDEX IF NOT EXISTS `idx_devices_room_id`
+                    ON `devices`(`room_id`)
+                    """.trimIndent()
+                )
+                createIndexSafe(
+                    """
+                    CREATE INDEX IF NOT EXISTS `idx_devices_project_id`
+                    ON `devices`(`project_id`)
+                    """.trimIndent()
+                )
+
+                // ===== PROJECTS =====
+                // ProjectEntity индексов не объявляет → убираем лишний idx_projects_is_deleted
+
+                dropIndexIfExists("idx_projects_is_deleted")
+
+                // ===== OUTBOX =====
+                // OutboxEntity ожидает (автоимена Room):
+                //  - index_outbox_state_created_at(state, created_at)
+                //  - index_outbox_project_id_state(project_id, state)
+                //  - index_outbox_group_key(group_key)
+
+                dropIndexIfExists("index_outbox_state_created_at")
+                dropIndexIfExists("index_outbox_project_state")      // старое имя
+                dropIndexIfExists("index_outbox_project_id_state")   // на всякий случай
+                dropIndexIfExists("index_outbox_group_key")
+
+                createIndexSafe(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_outbox_state_created_at`
+                    ON `outbox`(`state`, `created_at`)
+                    """.trimIndent()
+                )
+                createIndexSafe(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_outbox_project_id_state`
+                    ON `outbox`(`project_id`, `state`)
+                    """.trimIndent()
+                )
+                createIndexSafe(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_outbox_group_key`
+                    ON `outbox`(`group_key`)
+                    """.trimIndent()
+                )
+
+                // ===== TOMBSTONES =====
+                // TombstoneEntity ожидает:
+                //  - index_tombstones_entity_type_project_id(entity_type, project_id)
+                //  - index_tombstones_entity_type_local_id(entity_type, local_id)
+                //  - index_tombstones_entity_type_server_uuid(entity_type, server_uuid)
+
+                dropIndexIfExists("index_tombstones_type_project")
+                dropIndexIfExists("index_tombstones_type_local")
+                dropIndexIfExists("index_tombstones_type_uuid")
+
+                dropIndexIfExists("index_tombstones_entity_type_project_id")
+                dropIndexIfExists("index_tombstones_entity_type_local_id")
+                dropIndexIfExists("index_tombstones_entity_type_server_uuid")
+
+                createIndexSafe(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_tombstones_entity_type_project_id`
+                    ON `tombstones`(`entity_type`, `project_id`)
+                    """.trimIndent()
+                )
+                createIndexSafe(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_tombstones_entity_type_local_id`
+                    ON `tombstones`(`entity_type`, `local_id`)
+                    """.trimIndent()
+                )
+                createIndexSafe(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_tombstones_entity_type_server_uuid`
+                    ON `tombstones`(`entity_type`, `server_uuid`)
+                    """.trimIndent()
+                )
             }
         }
     }

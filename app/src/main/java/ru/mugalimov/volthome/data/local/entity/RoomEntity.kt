@@ -10,9 +10,17 @@ import java.util.Date
 @Entity(
     tableName = "rooms",
     indices = [
-        // имя комнаты может повторяться в разных проектах
-        Index(name = "uq_rooms_name_project", value = ["name", "project_id"], unique = true),
-        Index(name = "idx_rooms_project_id", value = ["project_id"])
+        // Имя комнаты может повторяться в разных проектах,
+        // поэтому уникальность по (name, project_id)
+        Index(
+            name = "uq_rooms_name_project",
+            value = ["name", "project_id"],
+            unique = true
+        ),
+        Index(
+            name = "idx_rooms_project_id",
+            value = ["project_id"]
+        )
     ]
 )
 data class RoomEntity(
@@ -28,7 +36,7 @@ data class RoomEntity(
     @ColumnInfo(name = "room_type")
     val roomType: RoomType,
 
-    // 🔹 Привязка к проекту
+    // Привязка к проекту
     @ColumnInfo(name = "project_id")
     val projectId: String? = null
 )

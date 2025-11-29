@@ -10,10 +10,17 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
-import ru.mugalimov.volthome.data.local.dao.*
+import ru.mugalimov.volthome.data.local.dao.DeviceDao
+import ru.mugalimov.volthome.data.local.dao.GroupDao
+import ru.mugalimov.volthome.data.local.dao.GroupDeviceJoinDao
+import ru.mugalimov.volthome.data.local.dao.LoadDao
+import ru.mugalimov.volthome.data.local.dao.OutboxDao
+import ru.mugalimov.volthome.data.local.dao.ProjectDao
+import ru.mugalimov.volthome.data.local.dao.RoomDao
+import ru.mugalimov.volthome.data.local.dao.RoomsTxDao
+import ru.mugalimov.volthome.data.local.dao.TombstoneDao
+import ru.mugalimov.volthome.data.local.dao.UuidMapDao
 import ru.mugalimov.volthome.data.local.datastore.AppPreferences
-import ru.mugalimov.volthome.data.repository.*
-import ru.mugalimov.volthome.data.repository.impl.*
 import ru.mugalimov.volthome.domain.model.provider.DeviceDefaultsProvider
 import ru.mugalimov.volthome.domain.model.provider.StaticDeviceDefaultsProvider
 import javax.inject.Singleton
@@ -40,10 +47,14 @@ object DatabaseModule {
                 AppDatabase.MIGRATION_19_20,
                 AppDatabase.MIGRATION_20_21,
                 AppDatabase.MIGRATION_21_22,
-                AppDatabase.MIGRATION_22_23// ⬅️ добавили новую миграцию
+                AppDatabase.MIGRATION_22_23,
+                AppDatabase.MIGRATION_23_24,
+                AppDatabase.MIGRATION_24_25, // «санитарная» миграция: выравнивание индексов под Entity
             )
-            // если у тебя есть совсем древние клиенты (<16), можно раскомментировать:
-//             .fallbackToDestructiveMigrationFrom(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)
+            // Для клиентов с очень старыми версиями (<16) просто пересоздаём БД
+            .fallbackToDestructiveMigrationFrom(
+                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+            )
             .addCallback(object : RoomDatabase.Callback() {
                 override fun onCreate(db: SupportSQLiteDatabase) {
                     super.onCreate(db)
@@ -53,24 +64,46 @@ object DatabaseModule {
             .build()
     }
 
-    @Provides fun provideRoomDao(database: AppDatabase): RoomDao = database.roomDao()
-    @Provides fun provideDeviceDao(database: AppDatabase): DeviceDao = database.deviceDao()
-    @Provides fun provideLoadDao(database: AppDatabase): LoadDao = database.loadDao()
-    @Provides fun provideGroupDao(database: AppDatabase): GroupDao = database.groupDao()
-    @Provides fun provideGroupDeviceJoinDao(database: AppDatabase): GroupDeviceJoinDao = database.groupDeviceJoinDao()
-    @Provides fun provideRoomsTxDao(database: AppDatabase): RoomsTxDao = database.roomsTxDao()
-    @Provides @Singleton fun provideProjectDao(db: AppDatabase): ProjectDao = db.projectDao()
-    @Provides fun provideOutboxDao(db: AppDatabase): OutboxDao = db.outboxDao()
-    @Provides fun provideTombstoneDao(db: AppDatabase): TombstoneDao = db.tombstoneDao()
-    @Provides @Singleton fun provideUuidMapDao(db: AppDatabase): UuidMapDao = db.uuidMapDao()
+    @Provides
+    fun provideRoomDao(database: AppDatabase): RoomDao = database.roomDao()
+
+    @Provides
+    fun provideDeviceDao(database: AppDatabase): DeviceDao = database.deviceDao()
+
+    @Provides
+    fun provideLoadDao(database: AppDatabase): LoadDao = database.loadDao()
+
+    @Provides
+    fun provideGroupDao(database: AppDatabase): GroupDao = database.groupDao()
+
+    @Provides
+    fun provideGroupDeviceJoinDao(database: AppDatabase): GroupDeviceJoinDao =
+        database.groupDeviceJoinDao()
+
+    @Provides
+    fun provideRoomsTxDao(database: AppDatabase): RoomsTxDao = database.roomsTxDao()
+
+    @Provides
+    @Singleton
+    fun provideProjectDao(db: AppDatabase): ProjectDao = db.projectDao()
+
+    @Provides
+    fun provideOutboxDao(db: AppDatabase): OutboxDao = db.outboxDao()
+
+    @Provides
+    fun provideTombstoneDao(db: AppDatabase): TombstoneDao = db.tombstoneDao()
+
+    @Provides
+    @Singleton
+    fun provideUuidMapDao(db: AppDatabase): UuidMapDao = db.uuidMapDao()
 }
-
-
 
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class DefaultsModule {
-    @Binds @Singleton
+
+    @Binds
+    @Singleton
     abstract fun bindDeviceDefaultsProvider(
         impl: StaticDeviceDefaultsProvider
     ): DeviceDefaultsProvider
@@ -79,8 +112,10 @@ abstract class DefaultsModule {
 @Module
 @InstallIn(SingletonComponent::class)
 object PrefsModule {
+
     @Provides
     @Singleton
-    fun provideAppPreferences(@ApplicationContext context: Context): AppPreferences =
-        AppPreferences(context)
+    fun provideAppPreferences(
+        @ApplicationContext context: Context
+    ): AppPreferences = AppPreferences(context)
 }
