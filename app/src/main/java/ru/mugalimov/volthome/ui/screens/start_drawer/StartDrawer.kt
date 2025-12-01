@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Payment
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.outlined.SupportAgent
@@ -193,6 +194,22 @@ fun StartDrawer(
                                 modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                             )
                         }
+
+//                        item {
+//                            NavigationDrawerItem(
+//                                label = { Text("VoltHome PRO") },
+//                                selected = false,
+//                                onClick = {
+//                                    scope.launch {
+//                                        drawerState.close()
+//                                        onOpenSubscription()
+//                                    }
+//                                },
+//                                icon = { Icon(Icons.Default.Payment, contentDescription = null) },
+//                                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+//                            )
+//                        }
+
 
                         item {
                             NavigationDrawerItem(

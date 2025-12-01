@@ -18,6 +18,7 @@ import ru.mugalimov.volthome.ui.screens.loads.PhaseLoadScreen
 import ru.mugalimov.volthome.ui.screens.profile.ProfileScreen
 import ru.mugalimov.volthome.ui.screens.room.RoomDetailScreen
 import ru.mugalimov.volthome.ui.screens.rooms.RoomsScreen
+import ru.mugalimov.volthome.ui.screens.subscription.VoltHomeProScreen
 import ru.mugalimov.volthome.ui.viewmodel.AuthViewModel
 import ru.mugalimov.volthome.ui.viewmodel.ProjectsViewModel
 import ru.mugalimov.volthome.ui.viewmodel.RoomDetailViewModel
@@ -127,6 +128,10 @@ fun NavGraphApp(
 
         composable(Screens.ProfileScreen.route) {
             ProfileScreen(authVm = authVm, onBack = { navController.popBackStack() })
+        }
+
+        composable(Screens.SubscriptionScreen.route) {
+            VoltHomeProScreen()
         }
     }
 }

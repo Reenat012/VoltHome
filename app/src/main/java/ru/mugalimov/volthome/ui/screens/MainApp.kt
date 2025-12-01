@@ -123,7 +123,11 @@ fun MainApp(
             onOpenProfile = {
                 appNavController.navigate(Screens.ProfileScreen.route) { launchSingleTop = true }
             },
-            onOpenSubscription = { /* TODO: экран подписки */ },
+            onOpenSubscription = {
+//                appNavController.navigate(Screens.SubscriptionScreen.route) {
+//                    launchSingleTop = true
+//                }
+            },
             onOpenAbout = {
                 rootNavController.navigate(Screens.AboutScreen.route) { launchSingleTop = true }
             },

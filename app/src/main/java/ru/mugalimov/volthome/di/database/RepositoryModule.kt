@@ -8,11 +8,13 @@ import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.data.repository.ProjectsRepository
 import ru.mugalimov.volthome.data.repository.RoomRepository
+import ru.mugalimov.volthome.data.repository.SubscriptionRepository
 import ru.mugalimov.volthome.data.repository.UserPlanRepository
 import ru.mugalimov.volthome.data.repository.impl.DeviceRepositoryImpl
 import ru.mugalimov.volthome.data.repository.impl.ExplicationRepositoryImpl
 import ru.mugalimov.volthome.data.repository.impl.ProjectsRepositoryImpl
 import ru.mugalimov.volthome.data.repository.impl.RoomRepositoryImpl
+import ru.mugalimov.volthome.data.repository.impl.SubscriptionRepositoryImpl
 import ru.mugalimov.volthome.data.repository.impl.UserPlanRepositoryImpl
 import javax.inject.Singleton
 
@@ -41,4 +43,10 @@ abstract class RepositoryModule {
     abstract fun bindUserPlanRepository(
         impl: UserPlanRepositoryImpl
     ): UserPlanRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindSubscriptionRepository(
+        impl: SubscriptionRepositoryImpl
+    ): SubscriptionRepository
 }

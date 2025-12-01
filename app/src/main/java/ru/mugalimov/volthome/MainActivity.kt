@@ -75,6 +75,10 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         Log.d("YA_AUTH", "onNewIntent data=${intent.data}")
+
+        // TODO: сюда нужно будет прокинуть интент в RuStore Pay SDK
+        // согласно гайду по deep links/payments, чтобы SDK завершил покупку.
+        // Примерно: payClient.proceedDeeplinkIntent(intent) — см. официальную документацию.
     }
 }
 

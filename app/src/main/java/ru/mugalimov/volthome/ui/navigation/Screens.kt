@@ -33,4 +33,6 @@ sealed class Screens(val route: String) {
     data object AlgorithmExplanationScreen : Screens("algorithm_explanation")
 
     data object PhaseLoadScreen : Screens ("phase_load")
+
+    data object SubscriptionScreen : Screens("subscription")
 }
