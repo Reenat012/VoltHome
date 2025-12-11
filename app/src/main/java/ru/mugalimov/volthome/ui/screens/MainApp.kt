@@ -124,9 +124,9 @@ fun MainApp(
                 appNavController.navigate(Screens.ProfileScreen.route) { launchSingleTop = true }
             },
             onOpenSubscription = {
-//                appNavController.navigate(Screens.SubscriptionScreen.route) {
-//                    launchSingleTop = true
-//                }
+                appNavController.navigate(Screens.SubscriptionScreen.route) {
+                    launchSingleTop = true
+                }
             },
             onOpenAbout = {
                 rootNavController.navigate(Screens.AboutScreen.route) { launchSingleTop = true }

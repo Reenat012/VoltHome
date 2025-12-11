@@ -17,7 +17,7 @@ android {
         minSdk = 24
         //noinspection EditedTargetSdkVersion
         targetSdk = 35
-        versionCode = 19
+        versionCode = 20
         versionName = "2.2.7"
 
 

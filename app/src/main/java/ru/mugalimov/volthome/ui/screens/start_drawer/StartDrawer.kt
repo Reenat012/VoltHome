@@ -195,20 +195,20 @@ fun StartDrawer(
                             )
                         }
 
-//                        item {
-//                            NavigationDrawerItem(
-//                                label = { Text("VoltHome PRO") },
-//                                selected = false,
-//                                onClick = {
-//                                    scope.launch {
-//                                        drawerState.close()
-//                                        onOpenSubscription()
-//                                    }
-//                                },
-//                                icon = { Icon(Icons.Default.Payment, contentDescription = null) },
-//                                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-//                            )
-//                        }
+                        item {
+                            NavigationDrawerItem(
+                                label = { Text("VoltHome PRO") },
+                                selected = false,
+                                onClick = {
+                                    scope.launch {
+                                        drawerState.close()
+                                        onOpenSubscription()
+                                    }
+                                },
+                                icon = { Icon(Icons.Default.Payment, contentDescription = null) },
+                                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                            )
+                        }
 
 
                         item {

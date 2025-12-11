@@ -4,6 +4,7 @@ import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import javax.inject.Singleton
 import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.data.repository.ProjectsRepository
@@ -16,12 +17,11 @@ import ru.mugalimov.volthome.data.repository.impl.ProjectsRepositoryImpl
 import ru.mugalimov.volthome.data.repository.impl.RoomRepositoryImpl
 import ru.mugalimov.volthome.data.repository.impl.SubscriptionRepositoryImpl
 import ru.mugalimov.volthome.data.repository.impl.UserPlanRepositoryImpl
-import javax.inject.Singleton
-
 
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class RepositoryModule {
+
     @Binds
     @Singleton
     abstract fun bindRoomRepository(impl: RoomRepositoryImpl): RoomRepository

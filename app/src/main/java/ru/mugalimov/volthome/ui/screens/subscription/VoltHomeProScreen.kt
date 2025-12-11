@@ -1,6 +1,6 @@
 package ru.mugalimov.volthome.ui.screens.subscription
 
-import android.app.Activity
+import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -22,7 +22,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -39,10 +38,9 @@ fun VoltHomeProScreen(
 ) {
     val uiState by viewModel.state.collectAsStateWithLifecycle()
     val userPlan: UserPlan = LocalUserPlan.current
-    val context = LocalContext.current
-    val activity = context as? Activity
 
     LaunchedEffect(Unit) {
+        Log.d("VoltHomeProScreen", "LaunchedEffect → refreshStatus()")
         viewModel.refreshStatus()
     }
 
@@ -97,17 +95,17 @@ fun VoltHomeProScreen(
 
             Spacer(modifier = Modifier.padding(top = 8.dp))
 
-            if (uiState.errorMessage != null) {
+            uiState.errorMessage?.let { msg ->
                 Text(
-                    text = uiState.errorMessage ?: "",
+                    text = msg,
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
 
-            if (uiState.infoMessage != null) {
+            uiState.infoMessage?.let { msg ->
                 Text(
-                    text = uiState.infoMessage ?: "",
+                    text = msg,
                     color = MaterialTheme.colorScheme.primary,
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -115,27 +113,32 @@ fun VoltHomeProScreen(
 
             Spacer(modifier = Modifier.padding(top = 8.dp))
 
-            if (activity == null) {
-                Text(
-                    text = "Оплата недоступна: нет ссылки на Activity.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
-                )
-            } else {
-                Button(
-                    onClick = { if (!userPlan.isPro) viewModel.buyPro(activity) },
-                    enabled = !userPlan.isPro && !uiState.isLoading,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = if (userPlan.isPro) "Подписка уже активна"
-                        else "Купить VoltHome PRO"
+            val buttonEnabled = !userPlan.isPro && !uiState.isLoading
+
+            Button(
+                onClick = {
+                    Log.d(
+                        "VoltHomeProScreen",
+                        "Buy button clicked, userPlan.isPro=${userPlan.isPro}, isLoading=${uiState.isLoading}"
                     )
-                }
+                    if (!userPlan.isPro) {
+                        viewModel.buyPro()
+                    }
+                },
+                enabled = buttonEnabled,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = if (userPlan.isPro) "Подписка уже активна"
+                    else "Купить VoltHome PRO"
+                )
             }
 
             TextButton(
-                onClick = { viewModel.refreshStatus() },
+                onClick = {
+                    Log.d("VoltHomeProScreen", "Refresh status clicked")
+                    viewModel.refreshStatus()
+                },
                 enabled = !uiState.isLoading,
                 modifier = Modifier.align(Alignment.CenterHorizontally)
             ) {

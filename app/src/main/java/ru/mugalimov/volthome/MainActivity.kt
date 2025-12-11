@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome
 
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -18,14 +19,16 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
 import com.yandex.authsdk.YandexAuthSdk
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.android.awaitFrame
 import kotlinx.coroutines.launch
+import ru.mugalimov.volthome.data.billing.RustoreBillingManager
+
 import ru.mugalimov.volthome.data.remote.auth.SessionManager
 import ru.mugalimov.volthome.data.sync.work.TokenRefreshScheduler
 import ru.mugalimov.volthome.ui.navigation.RootNavGraph
 import ru.mugalimov.volthome.ui.screens.welcome.AppTheme
-import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -33,6 +36,7 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var yandexSdk: YandexAuthSdk
     @Inject lateinit var sessionManager: SessionManager
     @Inject lateinit var tokenRefreshScheduler: TokenRefreshScheduler
+    @Inject lateinit var rustoreBillingManager: RustoreBillingManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -40,14 +44,10 @@ class MainActivity : ComponentActivity() {
         val cid = BuildConfig.YANDEX_CLIENT_ID
         Log.d("YA_AUTH", "client_id set: ${cid.isNotBlank()}, tail=***${cid.takeLast(3)}")
 
-        // Фиксируем светлую тему, чтобы исключить дорогие пересчёты на старте
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
 
-        // Подстраховочно планируем refresh токена (в фоне)
         lifecycleScope.launch(Dispatchers.Default) {
             sessionManager.load()?.let { s ->
-                // Используй тот метод, который есть в твоём TokenRefreshScheduler:
-                // schedule(...) или scheduleDual(...). Если у тебя только scheduleDual — замени вызов.
                 tokenRefreshScheduler.schedule(s.expiresAtMillis)
             }
         }
@@ -57,10 +57,8 @@ class MainActivity : ComponentActivity() {
                 var showApp by remember { mutableStateOf(false) }
 
                 LaunchedEffect(Unit) {
-                    // Дожидаемся первого кадра, затем рендерим основную иерархию
                     awaitFrame()
                     showApp = true
-                    // Здесь раньше вызывали отложенный «репортёр» — он не нужен без второго ключа.
                 }
 
                 if (!showApp) {
@@ -72,13 +70,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onNewIntent(intent: android.content.Intent) {
+    override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         Log.d("YA_AUTH", "onNewIntent data=${intent.data}")
 
-        // TODO: сюда нужно будет прокинуть интент в RuStore Pay SDK
-        // согласно гайду по deep links/payments, чтобы SDK завершил покупку.
-        // Примерно: payClient.proceedDeeplinkIntent(intent) — см. официальную документацию.
+        // Пробрасываем интент в RuStore Pay SDK через менеджер
+        rustoreBillingManager.handleDeeplinkIntent(intent)
     }
 }
 
