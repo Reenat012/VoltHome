@@ -35,6 +35,9 @@ import ru.mugalimov.volthome.domain.util.PowerCurrentNormalizer
 import java.text.SimpleDateFormat
 import java.util.Locale
 import javax.inject.Inject
+import ru.mugalimov.volthome.data.repository.UserPlanRepository
+import ru.mugalimov.volthome.ui.paywall.PaywallBus
+import ru.mugalimov.volthome.domain.model.ProFeature
 
 @HiltViewModel
 class ExplicationViewModel @Inject constructor(
@@ -42,8 +45,10 @@ class ExplicationViewModel @Inject constructor(
     private val groupCalculatorFactory: GroupCalculatorFactory,
     private val preferencesRepository: PreferencesRepository,
     private val deviceRepository: DeviceRepository,
-    @IoDispatcher private val dispatchers: CoroutineDispatcher
-) : ViewModel() {
+    @IoDispatcher private val dispatchers: CoroutineDispatcher,
+    private val userPlanRepository: UserPlanRepository,
+    private val paywallBus: PaywallBus,
+    ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<GroupScreenState>(GroupScreenState.Loading)
     val uiState: StateFlow<GroupScreenState> = _uiState
@@ -59,6 +64,14 @@ class ExplicationViewModel @Inject constructor(
     private val _selectedDevice = MutableStateFlow<Device?>(null)
     val selectedDevice: StateFlow<Device?> = _selectedDevice.asStateFlow()
 
+    // --- UI events (one-shot) ---
+    sealed class UiEvent {
+        object ExportPdfRequested : UiEvent()
+    }
+
+    private val _events = MutableStateFlow<UiEvent?>(null)
+    val events: StateFlow<UiEvent?> = _events.asStateFlow()
+
     // Необязательное авто-пересчитывание при смене режима:
     init {
         viewModelScope.launch(dispatchers) {
@@ -68,6 +81,19 @@ class ExplicationViewModel @Inject constructor(
                 recalcAndSaveGroups()
             }
         }
+    }
+
+    fun onExportPdfClick() {
+        val plan = userPlanRepository.planFlow.value
+        if (!plan.isPro) {
+            paywallBus.request(ProFeature.PDF_EXPORT)
+            return
+        }
+        _events.value = UiEvent.ExportPdfRequested
+    }
+
+    fun consumeEvent() {
+        _events.value = null
     }
 
     /** ВАЖНО: берём ИНСТАНС устройства по id из репозитория, без дефолтов. */

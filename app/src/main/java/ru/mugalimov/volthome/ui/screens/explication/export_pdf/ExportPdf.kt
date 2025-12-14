@@ -13,14 +13,14 @@ import ru.mugalimov.volthome.ui.viewmodel.buildReportData
  * Экспорт отчёта экспликации в PDF.
  * HTML формируется с учётом режима сети (1/3 фазы).
  */
-fun exportExplicationPdf(activity: Activity, vm: ExplicationViewModel) {
+fun exportExplicationPdf(activity: Activity, vm: ExplicationViewModel, isPro: Boolean) {
     val data = vm.buildReportData() ?: return
     val (meta, phases) = data
 
     val html = HtmlReportBuilder(activity).build(
         meta = meta,
         phases = phases,
-        isPro = false // при появлении реального флага — подставим сюда
+        isPro = isPro
     )
 
     when (activity) {
