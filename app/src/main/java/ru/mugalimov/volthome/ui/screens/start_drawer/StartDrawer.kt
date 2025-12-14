@@ -36,6 +36,12 @@ import ru.mugalimov.volthome.R
 import ru.mugalimov.volthome.ui.model.ProjectUi
 import ru.mugalimov.volthome.ui.model.UserProfileUi
 import ru.mugalimov.volthome.ui.utilities.TelegramConsultationDialog
+import dagger.hilt.android.EntryPointAccessors
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.ui.platform.LocalContext
+import ru.mugalimov.volthome.domain.model.ProFeature
+import ru.mugalimov.volthome.ui.model.LocalUserPlan
+import ru.mugalimov.volthome.ui.paywall.PaywallEntryPoint
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,6 +69,19 @@ fun StartDrawer(
     var showConsultDialog by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
+
+    val plan = LocalUserPlan.current
+
+    val paywallBus = remember {
+        EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            PaywallEntryPoint::class.java
+        ).paywallBus()
+    }
+
+    val aliveProjects = remember(projects) { projects.filter { !it.isDeleted } }
+
+
     fun openUrl(url: String) {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
         context.startActivity(intent)
@@ -97,8 +116,8 @@ fun StartDrawer(
                     ) {
                         item { DrawerSectionTitle("Мои проекты") }
 
-                        items(projects, key = { it.id }) { p ->
-                            NavigationDrawerItem(
+                        items(aliveProjects, key = { it.id }) { p ->
+                        NavigationDrawerItem(
                                 label = {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
@@ -154,26 +173,47 @@ fun StartDrawer(
                         }
 
                         item {
-                            val disabled = projects.size >= 3
+                            val reachedFreeLimit = !plan.isPro && aliveProjects.size >= 3
+
                             NavigationDrawerItem(
-                                label = { Text(if (!disabled) "+ Добавить проект" else "Лимит: 3 проекта") },
+                                label = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = if (!reachedFreeLimit) "+ Добавить проект" else "Лимит: 3 проекта",
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        if (reachedFreeLimit) {
+                                            Icon(
+                                                imageVector = Icons.Default.Lock,
+                                                contentDescription = "Доступно в PRO",
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                },
                                 selected = false,
                                 onClick = {
-                                    if (!disabled) {
+                                    if (reachedFreeLimit) {
+                                        paywallBus.request(ProFeature.PROJECTS_LIMIT)
+                                    } else {
                                         scope.launch {
-                                            drawerState.close(); onCreateProject()
+                                            drawerState.close()
+                                            onCreateProject()
                                         }
                                     }
                                 },
                                 icon = { Icon(Icons.Default.Shield, contentDescription = null) },
                                 colors = NavigationDrawerItemDefaults.colors(
-                                    selectedTextColor = if (disabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    selectedTextColor = if (reachedFreeLimit) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                                     else MaterialTheme.colorScheme.onSurface,
-                                    unselectedTextColor = if (disabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    unselectedTextColor = if (reachedFreeLimit) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                                     else MaterialTheme.colorScheme.onSurface,
-                                    selectedIconColor = if (disabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    selectedIconColor = if (reachedFreeLimit) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                                     else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    unselectedIconColor = if (disabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    unselectedIconColor = if (reachedFreeLimit) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                                     else MaterialTheme.colorScheme.onSurfaceVariant,
                                 ),
                                 modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)

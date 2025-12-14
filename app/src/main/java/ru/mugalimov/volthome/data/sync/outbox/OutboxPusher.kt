@@ -69,7 +69,26 @@ class OutboxPusher @Inject constructor(
 
     private val pushMutex = Mutex()
     private val gson by lazy { Gson() }
+    private companion object {
+        const val ERR_PRO_REQUIRED_PROJECTS_LIMIT = "pro_required_projects_limit"
+    }
     private fun jitterMs(base: Long = 100L): Long = base + Random.nextLong(50L, 150L)
+    private data class ErrorBodyDto(
+        val error: String? = null
+    )
+
+    private fun extract402ErrorCode(t: Throwable): String? {
+        val e = t as? HttpException ?: return null
+        if (e.code() != 402) return null
+
+        return try {
+            val raw = e.response()?.errorBody()?.string().orEmpty()
+            if (raw.isBlank()) return null
+            gson.fromJson(raw, ErrorBodyDto::class.java)?.error
+        } catch (_: Throwable) {
+            null
+        }
+    }
 
     /** Простая проверка онлайна, чтобы не дёргать сеть оффлайн. */
     private fun isOnline(): Boolean {
@@ -279,11 +298,19 @@ class OutboxPusher @Inject constructor(
                 remainingItems = items.filter { it.id !in toSkipIds }
             } catch (t: Throwable) {
                 Log.w("Outbox", "draft publish failed: ${t.message}", t)
+
+                // ✅ Шаг 1.3: 402 + {error:"pro_required_projects_limit"} => FAILED_FATAL + last_error=код
+                val code = extract402ErrorCode(t)
+                if (code == ERR_PRO_REQUIRED_PROJECTS_LIMIT) {
+                    outboxDao.markAttempt(createItem.id, OutboxState.FAILED_FATAL, code)
+                    return PushStats(total = remainingItems.size + 1, done = 0, failed = 1)
+                }
+
                 val retryable = isRetryableError(t)
                 if (retryable) {
                     outboxDao.markAttempt(createItem.id, OutboxState.FAILED_RETRYABLE, t.message)
                 } else {
-                    outboxDao.markState(listOf(createItem.id), OutboxState.FAILED_FATAL)
+                    outboxDao.markAttempt(createItem.id, OutboxState.FAILED_FATAL, t.message)
                 }
                 return PushStats(total = remainingItems.size + 1, done = 0, failed = if (retryable) 0 else 1)
             }

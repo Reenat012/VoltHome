@@ -9,23 +9,36 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import ru.mugalimov.volthome.data.local.dao.OutboxDao
 import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
+import ru.mugalimov.volthome.data.local.entity.OutboxOpType
+import ru.mugalimov.volthome.data.local.entity.OutboxState
 import ru.mugalimov.volthome.data.repository.ProjectsRepository
+import ru.mugalimov.volthome.data.repository.UserPlanRepository
+import ru.mugalimov.volthome.domain.model.ProFeature
 import ru.mugalimov.volthome.domain.model.Project
 import ru.mugalimov.volthome.ui.model.ProjectUi
+import ru.mugalimov.volthome.ui.paywall.PaywallBus
+
+private const val FREE_PROJECTS_LIMIT = 3
+private const val ERR_PRO_REQUIRED_PROJECTS_LIMIT = "pro_required_projects_limit"
 
 @HiltViewModel
 class ProjectsViewModel @Inject constructor(
     private val repo: ProjectsRepository,
-    private val activeDs: ActiveProjectDataStore
+    private val activeDs: ActiveProjectDataStore,
+    private val userPlanRepository: UserPlanRepository,
+    private val paywallBus: PaywallBus,
+    private val outboxDao: OutboxDao
 ) : ViewModel() {
 
     // Публичный поток активного проекта (важно для навигации из любых экранов)
     val activeProjectId: Flow<String?> = activeDs.activeProjectId.distinctUntilChanged()
 
-    // НОВОЕ: заголовок для AppBar — имя активного проекта или "Проект не задан"
+    // Заголовок для AppBar — имя активного проекта или "Проект не задан"
     val activeProjectTitle =
         combine(repo.listProjects(), activeProjectId) { list, activeId ->
             list.firstOrNull { it.id == activeId }?.name ?: "Проект не задан"
@@ -41,17 +54,50 @@ class ProjectsViewModel @Inject constructor(
                 ProjectUi(
                     id = p.id,
                     name = p.name,
-                    isActive = p.id == activeId
+                    isActive = p.id == activeId,
+                    isDeleted = p.isDeleted
                 )
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    init {
+        // 1.3: слушаем outbox на FAILED_FATAL + PROJECT_CREATE + last_error == "pro_required_projects_limit"
+        // и показываем paywall (один раз на каждую запись).
+        val seenIds = HashSet<Long>()
+        viewModelScope.launch {
+            outboxDao.observeAll()
+                .map { list ->
+                    list.filter { e ->
+                        e.state == OutboxState.FAILED_FATAL &&
+                                e.op_type == OutboxOpType.PROJECT_CREATE &&
+                                e.last_error == ERR_PRO_REQUIRED_PROJECTS_LIMIT
+                    }.map { it.id }
+                }
+                .distinctUntilChanged()
+                .collect { ids ->
+                    // показываем paywall только для новых id, чтобы не спамить диалогом
+                    var triggered = false
+                    for (id in ids) {
+                        if (seenIds.add(id)) {
+                            triggered = true
+                        }
+                    }
+                    if (triggered) {
+                        paywallBus.request(ProFeature.PROJECTS_LIMIT)
+                    }
+                }
+        }
+    }
+
     fun createNewProject(name: String? = null) {
         viewModelScope.launch {
-            // --- ЛИМИТ 3 ПРОЕКТА (ранняя проверка для UI) ---
+            val plan = userPlanRepository.planFlow.value
             val existing = repo.listProjects().first()
-            if (existing.count { !it.isDeleted } >= 3) {
-                // тут можно эмитить событие для тоста/snackbar, если у вас есть механизм
+            val aliveCount = existing.count { !it.isDeleted }
+
+            // 1.1: ранняя проверка ДО создания (никаких draft, никаких запросов)
+            if (!plan.isPro && aliveCount >= FREE_PROJECTS_LIMIT) {
+                paywallBus.request(ProFeature.PROJECTS_LIMIT)
                 return@launch
             }
 
