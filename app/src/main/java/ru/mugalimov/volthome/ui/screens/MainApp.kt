@@ -2,27 +2,37 @@ package ru.mugalimov.volthome.ui.screens
 
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import ru.mugalimov.volthome.domain.model.ProFeature
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.model.ProjectUi
 import ru.mugalimov.volthome.ui.model.UserProfileUi
 import ru.mugalimov.volthome.ui.navigation.MainBottomNavBar
 import ru.mugalimov.volthome.ui.navigation.NavGraphApp
 import ru.mugalimov.volthome.ui.navigation.Screens
+import ru.mugalimov.volthome.ui.paywall.PaywallEntryPoint
 import ru.mugalimov.volthome.ui.screens.start_drawer.AppScaffoldWithDrawer
 import ru.mugalimov.volthome.ui.viewmodel.AuthViewModel
 import ru.mugalimov.volthome.ui.viewmodel.ProfileViewModel
@@ -48,6 +58,51 @@ fun MainApp(
     // --- тариф (free/pro)
     val userPlanVm: UserPlanViewModel = hiltViewModel()
     val userPlan = userPlanVm.plan.collectAsState().value
+
+    // -----------------------------
+    // ✅ ШАГ 0: Глобальный paywall
+    // -----------------------------
+    val context = LocalContext.current
+    val paywallBus = remember {
+        EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            PaywallEntryPoint::class.java
+        ).paywallBus()
+    }
+
+    var paywallFeature by remember { mutableStateOf<ProFeature?>(null) }
+
+    // Слушаем глобальные paywall-события и открываем диалог
+    LaunchedEffect(paywallBus) {
+        paywallBus.events.collect { feature ->
+            paywallFeature = feature
+        }
+    }
+
+    if (paywallFeature != null) {
+        AlertDialog(
+            onDismissRequest = { paywallFeature = null },
+            title = { Text("Купить PRO?") },
+            text = { Text("Эта функция доступна только в VoltHome PRO.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        paywallFeature = null
+                        appNavController.navigate(Screens.SubscriptionScreen.route) {
+                            launchSingleTop = true
+                        }
+                    }
+                ) {
+                    Text("Да")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { paywallFeature = null }) {
+                    Text("Нет")
+                }
+            }
+        )
+    }
 
     // Подтягиваем профиль, когда авторизация успешна
     LaunchedEffect(authVm.state.collectAsState().value) {
