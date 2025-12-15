@@ -1,6 +1,7 @@
 package ru.mugalimov.volthome.domain.model.phase_load
 
 data class PhaseGroupItem(
+    val groupId: Long,
     val groupNumber: Int,
     val roomName: String,
     val roomId: Long,

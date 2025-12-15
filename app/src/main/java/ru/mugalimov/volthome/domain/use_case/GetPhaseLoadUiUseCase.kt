@@ -1,7 +1,9 @@
+// ru/mugalimov/volthome/domain/use_case/GetPhaseLoadUiUseCase.kt
 package ru.mugalimov.volthome.domain.use_case
 
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
@@ -9,6 +11,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import ru.mugalimov.volthome.data.local.dao.GroupDao
+import ru.mugalimov.volthome.data.local.dao.GroupPhaseOverrideDao
 import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.mapper.mapToDomainGroupsFromRelations
@@ -20,6 +23,7 @@ import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
 
 class GetPhaseLoadUiUseCase @Inject constructor(
     private val groupDao: GroupDao,
+    private val overrideDao: GroupPhaseOverrideDao, // ✅ добавили
     private val activeDs: ActiveProjectDataStore,
     @IoDispatcher private val dispatcher: CoroutineDispatcher
 ) {
@@ -28,10 +32,22 @@ class GetPhaseLoadUiUseCase @Inject constructor(
             .distinctUntilChanged()
             .filterNotNull()
             .flatMapLatest { projectId ->
-                // Берём строго по активному проекту
-                groupDao.observeGroupsWithDevicesByProject(projectId)
+                combine(
+                    groupDao.observeGroupsWithDevicesByProject(projectId),
+                    overrideDao.observeByProject(projectId)
+                ) { relations, overrides ->
+                    val groups = relations.mapToDomainGroupsFromRelations() // -> List<CircuitGroup>
+
+                    // groupId -> Phase (override)
+                    val overrideMap = overrides.associate { it.groupId to it.phase }
+
+                    // ✅ применяем override ДО сборки PhaseLoadItem
+                    groups.map { g ->
+                        val forced = overrideMap[g.groupId]
+                        if (forced != null && forced != g.phase) g.copy(phase = forced) else g
+                    }
+                }
             }
-            .map { relations -> relations.mapToDomainGroupsFromRelations() } // -> List<CircuitGroup>
             .map { groups -> buildPhaseItems(groups) }
             .flowOn(dispatcher)
     }
@@ -50,6 +66,7 @@ class GetPhaseLoadUiUseCase @Inject constructor(
                 }
 
                 PhaseGroupItem(
+                    groupId = g.groupId,                 // ✅ добавили
                     groupNumber = g.groupNumber,
                     roomName = g.roomName,
                     devices = deviceRows,

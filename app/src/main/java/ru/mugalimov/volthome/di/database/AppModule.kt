@@ -13,6 +13,7 @@ import dagger.hilt.components.SingletonComponent
 import ru.mugalimov.volthome.data.local.dao.DeviceDao
 import ru.mugalimov.volthome.data.local.dao.GroupDao
 import ru.mugalimov.volthome.data.local.dao.GroupDeviceJoinDao
+import ru.mugalimov.volthome.data.local.dao.GroupPhaseOverrideDao
 import ru.mugalimov.volthome.data.local.dao.LoadDao
 import ru.mugalimov.volthome.data.local.dao.OutboxDao
 import ru.mugalimov.volthome.data.local.dao.ProjectDao
@@ -97,6 +98,10 @@ object DatabaseModule {
     @Provides
     @Singleton
     fun provideUuidMapDao(db: AppDatabase): UuidMapDao = db.uuidMapDao()
+
+    @Provides
+    fun provideGroupPhaseOverrideDao(db: AppDatabase): GroupPhaseOverrideDao =
+        db.groupPhaseOverrideDao()
 }
 
 @Module
