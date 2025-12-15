@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.ui.screens.loads
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -8,26 +9,38 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.PieChart
 import androidx.compose.material.icons.outlined.TipsAndUpdates
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
+import kotlin.math.roundToInt
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.phase_load.LoadThresholds
@@ -45,8 +58,17 @@ fun PhaseLoadContent(
     mode: PhaseMode = PhaseMode.THREE,
     incomerRating: Int? = null,
     thresholds: LoadThresholds = LoadThresholds(),
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    canDrag: Boolean,
+    onPaywall: () -> Unit,
+    onGroupDropped: (groupId: Long, target: Phase) -> Unit,
+    onReset: () -> Unit
 ) {
+
+    val dropZones = remember { mutableStateMapOf<Phase, Rect>() }
+    var dragging by remember { mutableStateOf<PhaseLoadContentKt_DragPayload?>(null) }
+    var dragPos by remember { mutableStateOf(Offset.Zero) }
+
     // В 1-ф режиме показываем только фазу A; в 3-ф — все как есть
     val shown = remember(phaseLoads, mode) {
         if (mode == PhaseMode.SINGLE) phaseLoads.filter { it.phase == Phase.A } else phaseLoads
@@ -64,7 +86,6 @@ fun PhaseLoadContent(
     // Локальное состояние разворота секций по фазам
     val expandedMap = remember(mode) {
         mutableStateMapOf<Phase, Boolean>().apply {
-            // По умолчанию: в 1-ф A раскрыта, в 3-ф — все свернуты
             this[Phase.A] = (mode == PhaseMode.SINGLE)
             this[Phase.B] = false
             this[Phase.C] = false
@@ -73,115 +94,203 @@ fun PhaseLoadContent(
     fun isExpanded(phase: Phase) = expandedMap[phase] == true
     fun togglePhase(phase: Phase) { expandedMap[phase] = !(expandedMap[phase] ?: false) }
 
-    LazyColumn(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        item { Spacer(Modifier.height(8.dp)) }
+    Box(modifier = modifier.fillMaxSize()) {
 
-        // Донат / Индикатор вводного (PhaseLoadDonutChart внутри сам решает, что рисовать по mode)
-        item {
-            PhaseLoadDonutChart(
-                perPhase = perPhase,
-                mode = mode,
-                incomerRating = incomerRating,
-                warnPct = thresholds.warnPct,
-                alertPct = thresholds.alertPct
-            )
-        }
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item { Spacer(Modifier.height(8.dp)) }
 
-        if (mode == PhaseMode.SINGLE) {
-            val aItem = shown.firstOrNull { it.phase == Phase.A }
+            // Донат / Индикатор вводного + маркетинговый замок для FREE
+            item {
+                Box(Modifier.fillMaxWidth()) {
+                    PhaseLoadDonutChart(
+                        perPhase = perPhase,
+                        mode = mode,
+                        incomerRating = incomerRating,
+                        warnPct = thresholds.warnPct,
+                        alertPct = thresholds.alertPct
+                    )
 
-            // Sticky-заголовок аналитики
-            stickyHeader {
-                SectionHeader(title = "Куда уходит ток", icon = {
-                    Icon(imageVector = Icons.Outlined.PieChart, contentDescription = null)
-                })
-            }
-
-            // Карточка: «Куда уходит ток» (по помещениям)
-            if (aItem != null && aItem.groups.isNotEmpty()) {
-                item {
-                    val totalA = aItem.totalCurrent.coerceAtLeast(0.0)
-                    val byRoom = aItem.groups
-                        .groupBy { it.roomName }
-                        .mapValues { entry -> entry.value.sumOf { it.totalCurrent } }
-                        .toList()
-                        .sortedByDescending { it.second }
-
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = MaterialTheme.shapes.extraLarge,
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                        ),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                    ) {
-                        Column(
-                            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                    if (!canDrag) {
+                        IconButton(
+                            onClick = onPaywall,
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(6.dp)
                         ) {
-                            val top = byRoom.take(5)
-                            val restSum = (byRoom.drop(5).sumOf { it.second }).coerceAtLeast(0.0)
-
-                            top.forEach { (room, amps) ->
-                                val pct = if (totalA > 0) amps / totalA * 100.0 else 0.0
-                                RoomShareRow(
-                                    title = room,
-                                    amps = amps,
-                                    pct = pct,
-                                    warnPct = thresholds.warnPct,
-                                    alertPct = thresholds.alertPct
-                                )
-                            }
-                            if (restSum > 0.0) {
-                                val restPct = if (totalA > 0) restSum / totalA * 100.0 else 0.0
-                                RoomShareRow(
-                                    title = "Остальное",
-                                    amps = restSum,
-                                    pct = restPct,
-                                    warnPct = thresholds.warnPct,
-                                    alertPct = thresholds.alertPct
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Outlined.Lock,
+                                contentDescription = "PRO"
+                            )
                         }
                     }
                 }
             }
 
-            // Карточка: «Что можно улучшить»
+            // Reset (PRO) / Paywall (FREE)
             item {
-                val totalA = aItem?.totalCurrent ?: 0.0
-                val roomShares = if (aItem == null) emptyList() else {
-                    aItem.groups.groupBy { it.roomName }
-                        .mapValues { entry -> entry.value.sumOf { it.totalCurrent } }
-                        .toList()
-                        .sortedByDescending { it.second }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    Text(
+                        text = "Сбросить ручные изменения фаз",
+                        modifier = Modifier
+                            .clickable { if (canDrag) onReset() else onPaywall() }
+                            .padding(vertical = 6.dp),
+                        color = if (canDrag) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (mode == PhaseMode.SINGLE) {
+                val aItem = shown.firstOrNull { it.phase == Phase.A }
+
+                stickyHeader {
+                    SectionHeader(title = "Куда уходит ток", icon = {
+                        Icon(imageVector = Icons.Outlined.PieChart, contentDescription = null)
+                    })
                 }
 
-                AdviceCardSinglePhase(
-                    totalA = totalA,
-                    incomer = incomerRating ?: 0,
-                    roomShares = roomShares,
-                    warnPct = thresholds.warnPct,
-                    alertPct = thresholds.alertPct
+                if (aItem != null && aItem.groups.isNotEmpty()) {
+                    item {
+                        val totalA = aItem.totalCurrent.coerceAtLeast(0.0)
+                        val byRoom = aItem.groups
+                            .groupBy { it.roomName }
+                            .mapValues { entry -> entry.value.sumOf { it.totalCurrent } }
+                            .toList()
+                            .sortedByDescending { it.second }
+
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = MaterialTheme.shapes.extraLarge,
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                            ),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                        ) {
+                            Column(
+                                Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                val top = byRoom.take(5)
+                                val restSum = (byRoom.drop(5).sumOf { it.second }).coerceAtLeast(0.0)
+
+                                top.forEach { (room, amps) ->
+                                    val pct = if (totalA > 0) amps / totalA * 100.0 else 0.0
+                                    RoomShareRow(
+                                        title = room,
+                                        amps = amps,
+                                        pct = pct,
+                                        warnPct = thresholds.warnPct,
+                                        alertPct = thresholds.alertPct
+                                    )
+                                }
+                                if (restSum > 0.0) {
+                                    val restPct = if (totalA > 0) restSum / totalA * 100.0 else 0.0
+                                    RoomShareRow(
+                                        title = "Остальное",
+                                        amps = restSum,
+                                        pct = restPct,
+                                        warnPct = thresholds.warnPct,
+                                        alertPct = thresholds.alertPct
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    val totalA = aItem?.totalCurrent ?: 0.0
+                    val roomShares = if (aItem == null) emptyList() else {
+                        aItem.groups.groupBy { it.roomName }
+                            .mapValues { entry -> entry.value.sumOf { it.totalCurrent } }
+                            .toList()
+                            .sortedByDescending { it.second }
+                    }
+
+                    AdviceCardSinglePhase(
+                        totalA = totalA,
+                        incomer = incomerRating ?: 0,
+                        roomShares = roomShares,
+                        warnPct = thresholds.warnPct,
+                        alertPct = thresholds.alertPct
+                    )
+                }
+            }
+
+            // Таблица фаз/групп — со сворачиванием по клику + DnD drop-zones
+            items(shown, key = { it.phase }) { item ->
+                PhaseGroupTableItem(
+                    item = item,
+                    expanded = isExpanded(item.phase),
+                    onToggle = { togglePhase(item.phase) },
+
+                    canDrag = canDrag,
+                    onPaywall = onPaywall,
+
+                    onRegisterDropZone = { phase, rect ->
+                        dropZones[phase] = rect
+                    },
+
+                    onDragStart = { payload ->
+                        if (!canDrag) {
+                            onPaywall()
+                        } else {
+                            dragging = payload
+                        }
+                    },
+
+                    onDragMove = { rootPos ->
+                        dragPos = rootPos
+                    },
+
+                    onDragEnd = { payload ->
+                        dragging = null
+                        if (!canDrag) return@PhaseGroupTableItem
+
+                        val target = dropZones.entries.firstOrNull { (_, rect) ->
+                            rect.contains(dragPos)
+                        }?.key
+
+                        if (target != null && target != payload.fromPhase) {
+                            onGroupDropped(payload.groupId, target)
+                        }
+                    }
+                )
+            }
+
+            item { Spacer(Modifier.height(8.dp)) }
+        }
+
+        // Drag overlay
+        val p = dragging
+        if (p != null) {
+            Card(
+                modifier = Modifier
+                    .zIndex(1000f)
+                    .offset { IntOffset(dragPos.x.roundToInt(), dragPos.y.roundToInt()) }
+                    .widthIn(max = 280.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+                shape = MaterialTheme.shapes.large
+            ) {
+                Text(
+                    text = p.title,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
-
-        // Таблица фаз/групп — со сворачиванием по клику
-        items(shown, key = { it.phase }) { item ->
-            PhaseGroupTableItem(
-                item = item,
-                expanded = isExpanded(item.phase),
-                onToggle = { togglePhase(item.phase) }
-            )
-        }
-
-        item { Spacer(Modifier.height(8.dp)) }
     }
 }
 
@@ -267,7 +376,6 @@ private fun AdviceCardSinglePhase(
         val nominalRow = listOf(6, 10, 16, 20, 25, 32, 40, 50, 63, 80, 100, 125, 160)
         val nextUpNominal = nominalRow.firstOrNull { it > incomer }
 
-        // 1) Общая загрузка вводного + запас
         if (incomer > 0) {
             when {
                 loadPct >= alertPct -> {
@@ -287,7 +395,6 @@ private fun AdviceCardSinglePhase(
             }
         }
 
-        // 2) Доминирующие помещения
         if (roomShares.isNotEmpty()) {
             val totalRoomsA = roomShares.sumOf { it.second }.coerceAtLeast(0.0001)
             val top1 = roomShares[0]
@@ -309,7 +416,6 @@ private fun AdviceCardSinglePhase(
             }
         }
 
-        // 3) Критически малый запас
         if (reserveA in 0.0..10.0 && incomer > 0) {
             add("Запас менее 10 A — пиковые включения (чайник+духовка/бойлер) могут вызывать срабатывания.")
         }
@@ -347,6 +453,5 @@ private fun AdviceCardSinglePhase(
     }
 }
 
-// форматтеры
 private fun fmt1(v: Double) = String.format("%.1f", v)
 private fun fmt0(v: Double) = String.format("%.0f", v)

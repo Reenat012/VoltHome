@@ -45,8 +45,15 @@ fun PhaseLoadScreen(
         explicationViewModel.recalcAndSaveGroups()
     }
 
+    val isPro = viewModel.isPro.collectAsStateWithLifecycle().value
     val uiState = viewModel.uiState.collectAsStateWithLifecycle().value
     val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(Unit) {
+        viewModel.events.collect { msg ->
+            snackbarHostState.showSnackbar(msg)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -59,8 +66,7 @@ fun PhaseLoadScreen(
         when {
             uiState.isLoading -> {
                 Box(
-                    modifier = Modifier
-                        .fillMaxSize(),
+                    modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
                     CircularProgressIndicator()
@@ -69,8 +75,7 @@ fun PhaseLoadScreen(
 
             uiState.error != null -> {
                 Box(
-                    modifier = Modifier
-                        .fillMaxSize(),
+                    modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
@@ -88,8 +93,11 @@ fun PhaseLoadScreen(
                     thresholds = uiState.thresholds,
                     modifier = Modifier
                         .fillMaxSize()
-                        .then(Modifier) // паддинги со Scaffold не обязательны — контент сам задаёт отступы
-                        .padding(padding)
+                        .padding(padding),
+                    canDrag = isPro,
+                    onPaywall = { viewModel.onDnDLockedTapped() },
+                    onGroupDropped = { groupId, phase -> viewModel.onGroupDragged(groupId, phase) },
+                    onReset = { viewModel.onResetOverrides() }
                 )
             }
         }

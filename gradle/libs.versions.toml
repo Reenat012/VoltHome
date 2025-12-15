@@ -46,6 +46,7 @@ workRuntimeKtx = "2.10.4"
 androidxMaterial3 = "1.4.0"
 uiGraphics = "1.9.4"
 rustoreSdkBom = "2025.08.01"
+foundationLayout = "1.10.0"
 
 [libraries]
 androidx-activity-compose-v182 = { module = "androidx.activity:activity-compose", version.ref = "activityComposeVersion" }
@@ -102,6 +103,7 @@ androidx-compose-material3 = { group = "androidx.compose.material3", name = "mat
 androidx-compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics", version.ref = "uiGraphics" }
 rustore-sdk-bom = { module = "ru.rustore.sdk:bom", version.ref = "rustoreSdkBom" }
 rustore-sdk-pay = { module = "ru.rustore.sdk:pay" }
+androidx-compose-foundation-layout = { group = "androidx.compose.foundation", name = "foundation-layout", version.ref = "foundationLayout" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
