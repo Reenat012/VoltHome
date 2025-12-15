@@ -8,6 +8,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import ru.mugalimov.volthome.data.local.dao.DeviceDao
 import ru.mugalimov.volthome.data.local.dao.GroupDao
 import ru.mugalimov.volthome.data.local.dao.GroupDeviceJoinDao
+import ru.mugalimov.volthome.data.local.dao.GroupPhaseOverrideDao
 import ru.mugalimov.volthome.data.local.dao.LoadDao
 import ru.mugalimov.volthome.data.local.dao.OutboxDao
 import ru.mugalimov.volthome.data.local.dao.ProjectDao
@@ -19,6 +20,7 @@ import ru.mugalimov.volthome.data.local.dao.UuidMapDao
 import ru.mugalimov.volthome.data.local.entity.CircuitGroupEntity
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.data.local.entity.GroupDeviceJoin
+import ru.mugalimov.volthome.data.local.entity.GroupPhaseOverrideEntity
 import ru.mugalimov.volthome.data.local.entity.LoadEntity
 import ru.mugalimov.volthome.data.local.entity.OutboxEntity
 import ru.mugalimov.volthome.data.local.entity.ProjectEntity
@@ -56,9 +58,10 @@ import java.util.UUID
 
         // новые:
         OutboxEntity::class,
-        TombstoneEntity::class
+        TombstoneEntity::class,
+        GroupPhaseOverrideEntity::class
     ],
-    version = 25, // подняли под «санитарную» миграцию 24 → 25
+    version = 26, // подняли под «санитарную» миграцию 24 → 25
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -79,6 +82,8 @@ abstract class AppDatabase : RoomDatabase() {
     // outbox / tombstones
     abstract fun outboxDao(): OutboxDao
     abstract fun tombstoneDao(): TombstoneDao
+
+    abstract fun groupPhaseOverrideDao(): GroupPhaseOverrideDao
 
     companion object {
 
@@ -810,6 +815,40 @@ abstract class AppDatabase : RoomDatabase() {
                         `created_at` TEXT NOT NULL
                     )
                     """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_25_26 = object : Migration(25, 26) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+
+                // Таблица новая, но если уже успели создать "кривую" — гасим её.
+                db.execSQL("DROP TABLE IF EXISTS group_phase_overrides")
+
+                // Важно: phase = TEXT (Room через TypeConverter будет писать Phase.name)
+                // updated_at = INTEGER (epoch millis)
+                db.execSQL(
+                    """
+            CREATE TABLE IF NOT EXISTS group_phase_overrides (
+                id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                project_id TEXT NOT NULL,
+                group_id INTEGER NOT NULL,
+                phase TEXT NOT NULL,
+                updated_at INTEGER NOT NULL,
+                FOREIGN KEY(group_id) REFERENCES groups(group_id) ON DELETE CASCADE
+            )
+            """.trimIndent()
+                )
+
+                // Индексы: имена и состав должны совпасть с тем, что ожидает Room по @Entity(indices=...)
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_group_phase_overrides_group_id ON group_phase_overrides(group_id)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_group_phase_overrides_project_id ON group_phase_overrides(project_id)"
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_group_phase_overrides_project_id_group_id ON group_phase_overrides(project_id, group_id)"
                 )
             }
         }
