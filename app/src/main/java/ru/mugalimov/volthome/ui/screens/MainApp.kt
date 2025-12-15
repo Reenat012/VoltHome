@@ -1,7 +1,10 @@
 package ru.mugalimov.volthome.ui.screens
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Text
@@ -15,8 +18,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
@@ -33,6 +38,7 @@ import ru.mugalimov.volthome.ui.navigation.MainBottomNavBar
 import ru.mugalimov.volthome.ui.navigation.NavGraphApp
 import ru.mugalimov.volthome.ui.navigation.Screens
 import ru.mugalimov.volthome.ui.paywall.PaywallEntryPoint
+import ru.mugalimov.volthome.ui.screens.debug.DebugProPanel
 import ru.mugalimov.volthome.ui.screens.start_drawer.AppScaffoldWithDrawer
 import ru.mugalimov.volthome.ui.viewmodel.AuthViewModel
 import ru.mugalimov.volthome.ui.viewmodel.ProfileViewModel
@@ -60,7 +66,7 @@ fun MainApp(
     val userPlan = userPlanVm.plan.collectAsState().value
 
     // -----------------------------
-    // ✅ ШАГ 0: Глобальный paywall
+    // ✅ Глобальный paywall
     // -----------------------------
     val context = LocalContext.current
     val paywallBus = remember {
@@ -72,7 +78,6 @@ fun MainApp(
 
     var paywallFeature by remember { mutableStateOf<ProFeature?>(null) }
 
-    // Слушаем глобальные paywall-события и открываем диалог
     LaunchedEffect(paywallBus) {
         paywallBus.events.collect { feature ->
             paywallFeature = feature
@@ -92,14 +97,10 @@ fun MainApp(
                             launchSingleTop = true
                         }
                     }
-                ) {
-                    Text("Да")
-                }
+                ) { Text("Да") }
             },
             dismissButton = {
-                TextButton(onClick = { paywallFeature = null }) {
-                    Text("Нет")
-                }
+                TextButton(onClick = { paywallFeature = null }) { Text("Нет") }
             }
         )
     }
@@ -107,9 +108,7 @@ fun MainApp(
     // Подтягиваем профиль, когда авторизация успешна
     LaunchedEffect(authVm.state.collectAsState().value) {
         val s = authVm.state.value
-        if (s is AuthViewModel.State.Success) {
-            profileVm.refresh()
-        }
+        if (s is AuthViewModel.State.Success) profileVm.refresh()
     }
 
     val profileFlow: Flow<UserProfileUi?> =
@@ -118,18 +117,16 @@ fun MainApp(
                 is ProfileViewModel.UiState.Data -> {
                     val me = st.me
                     UserProfileUi(
-                        name = me.displayName.ifBlank { "Пользователь" }, // safety
+                        name = me.displayName.ifBlank { "Пользователь" },
                         email = me.email,
                         avatarUrl = me.avatarUrl,
                         subscriptionStatus = me.plan
                     )
                 }
-
                 else -> null
             }
         }
 
-    // --- экраны, где показываем нижнюю панель ---
     val bottomRoutes = remember {
         setOf(
             Screens.RoomsList.route,
@@ -141,65 +138,72 @@ fun MainApp(
     val currentRoute = navBackStackEntry?.destination?.route
 
     // Пробрасываем тариф в UI через CompositionLocal
-    CompositionLocalProvider(
-        LocalUserPlan provides userPlan
-    ) {
-        AppScaffoldWithDrawer(
-            title = appBarTitle, // ← было "VoltHome"
-            profileFlow = profileFlow,
-            projectsFlow = projectsFlow,
-            drawerState = drawerState,
-            onLogout = { authVm.signOut() },
-            onSelectProject = { id ->
-                // 1) меняем активный проект (данные/синк)
-                projectsVm.selectProject(id)
-                // 2) гарантированно уходим в RoomsList
-                appNavController.navigate(Screens.RoomsList.route) {
-                    popUpTo(appNavController.graph.findStartDestination().id) {
-                        saveState = true
+    CompositionLocalProvider(LocalUserPlan provides userPlan) {
+        // ✅ КЛЮЧ: DebugProPanel должен быть внутри BoxScope, иначе align не существует
+        Box(Modifier.fillMaxSize()) {
+
+            AppScaffoldWithDrawer(
+                title = appBarTitle,
+                profileFlow = profileFlow,
+                projectsFlow = projectsFlow,
+                drawerState = drawerState,
+                onLogout = { authVm.signOut() },
+                onSelectProject = { id ->
+                    projectsVm.selectProject(id)
+                    appNavController.navigate(Screens.RoomsList.route) {
+                        popUpTo(appNavController.graph.findStartDestination().id) {
+                            saveState = true
+                        }
+                        launchSingleTop = true
+                        restoreState = true
                     }
-                    launchSingleTop = true
-                    restoreState = true
-                }
-            },
-            onCreateProject = {
-                projectsVm.createNewProject()
-                appNavController.navigate(Screens.RoomsList.route) {
-                    popUpTo(appNavController.graph.findStartDestination().id) {
-                        saveState = true
+                },
+                onCreateProject = {
+                    projectsVm.createNewProject()
+                    appNavController.navigate(Screens.RoomsList.route) {
+                        popUpTo(appNavController.graph.findStartDestination().id) {
+                            saveState = true
+                        }
+                        launchSingleTop = true
+                        restoreState = true
                     }
-                    launchSingleTop = true
-                    restoreState = true
+                },
+                onOpenSettings = {
+                    appNavController.navigate(Screens.SettingsScreen.route) { launchSingleTop = true }
+                },
+                onOpenProfile = {
+                    appNavController.navigate(Screens.ProfileScreen.route) { launchSingleTop = true }
+                },
+                onOpenSubscription = {
+                    appNavController.navigate(Screens.SubscriptionScreen.route) { launchSingleTop = true }
+                },
+                onOpenAbout = {
+                    rootNavController.navigate(Screens.AboutScreen.route) { launchSingleTop = true }
+                },
+                onRenameProject = { id, newName -> projectsVm.renameProject(id, newName) },
+                onDeleteProject = { id -> projectsVm.deleteProject(id) },
+                bottomBar = {
+                    if (currentRoute in bottomRoutes) {
+                        MainBottomNavBar(navController = appNavController)
+                    }
                 }
-            },
-            onOpenSettings = {
-                appNavController.navigate(Screens.SettingsScreen.route) { launchSingleTop = true }
-            },
-            onOpenProfile = {
-                appNavController.navigate(Screens.ProfileScreen.route) { launchSingleTop = true }
-            },
-            onOpenSubscription = {
-                appNavController.navigate(Screens.SubscriptionScreen.route) {
-                    launchSingleTop = true
-                }
-            },
-            onOpenAbout = {
-                rootNavController.navigate(Screens.AboutScreen.route) { launchSingleTop = true }
-            },
-            onRenameProject = { id, newName -> projectsVm.renameProject(id, newName) },
-            onDeleteProject = { id -> projectsVm.deleteProject(id) },
-            bottomBar = {
-                if (currentRoute in bottomRoutes) {
-                    MainBottomNavBar(navController = appNavController)
-                }
+            ) {
+                NavGraphApp(
+                    navController = appNavController,
+                    modifier = Modifier.fillMaxSize(),
+                    padding = PaddingValues(),
+                    showOnboarding = { /* no-op */ },
+                    authVm = authVm
+                )
             }
-        ) {
-            NavGraphApp(
-                navController = appNavController,
-                modifier = Modifier.fillMaxSize(),
-                padding = PaddingValues(),
-                showOnboarding = { /* no-op */ },
-                authVm = authVm
+
+            // ✅ Debug-only PRO switch (поверх UI)
+            // В релизе его быть не должно: сам DebugProPanel обязан быть обёрнут в if (BuildConfig.DEBUG)
+            DebugProPanel(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(top = 8.dp, end = 8.dp)
             )
         }
     }
