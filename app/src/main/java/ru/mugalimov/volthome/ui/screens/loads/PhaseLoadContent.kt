@@ -26,6 +26,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -35,6 +36,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -64,10 +69,33 @@ fun PhaseLoadContent(
     onGroupDropped: (groupId: Long, target: Phase) -> Unit,
     onReset: () -> Unit
 ) {
-
+    // Drop-zones в координатах ROOT (boundsInRoot)
     val dropZones = remember { mutableStateMapOf<Phase, Rect>() }
+
+    // Drag state
     var dragging by remember { mutableStateOf<PhaseLoadContentKt_DragPayload?>(null) }
-    var dragPos by remember { mutableStateOf(Offset.Zero) }
+
+    // ✅ ВАЖНО: разделяем координаты
+    // - dragPosRoot: координаты ROOT — для попадания в drop-zones
+    // - dragPosLocal: координаты контейнера overlay — для рисования overlay
+    var dragPosRoot by remember { mutableStateOf(Offset.Zero) }
+    var dragPosLocal by remember { mutableStateOf(Offset.Zero) }
+
+    // Top-left контейнера, в котором рисуем overlay (в координатах ROOT)
+    var overlayContainerTopLeft by remember { mutableStateOf(Offset.Zero) }
+
+    val haptic = LocalHapticFeedback.current
+
+    // ✅ Подсветка drop-зоны должна считаться в тех же координатах, что и Rect (ROOT)
+    val hoveredPhase by remember {
+        derivedStateOf {
+            val p = dragging ?: return@derivedStateOf null
+            dropZones.entries
+                .firstOrNull { (_, rect) -> rect.contains(dragPosRoot) }
+                ?.key
+                ?.takeIf { it != p.fromPhase } // подсвечиваем только “чужую” фазу
+        }
+    }
 
     // В 1-ф режиме показываем только фазу A; в 3-ф — все как есть
     val shown = remember(phaseLoads, mode) {
@@ -92,10 +120,18 @@ fun PhaseLoadContent(
         }
     }
     fun isExpanded(phase: Phase) = expandedMap[phase] == true
-    fun togglePhase(phase: Phase) { expandedMap[phase] = !(expandedMap[phase] ?: false) }
+    fun togglePhase(phase: Phase) {
+        expandedMap[phase] = !(expandedMap[phase] ?: false)
+    }
 
-    Box(modifier = modifier.fillMaxSize()) {
-
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .onGloballyPositioned { coords ->
+                // ✅ координаты контейнера overlay в ROOT
+                overlayContainerTopLeft = coords.positionInRoot()
+            }
+    ) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -152,9 +188,10 @@ fun PhaseLoadContent(
                 val aItem = shown.firstOrNull { it.phase == Phase.A }
 
                 stickyHeader {
-                    SectionHeader(title = "Куда уходит ток", icon = {
-                        Icon(imageVector = Icons.Outlined.PieChart, contentDescription = null)
-                    })
+                    SectionHeader(
+                        title = "Куда уходит ток",
+                        icon = { Icon(imageVector = Icons.Outlined.PieChart, contentDescription = null) }
+                    )
                 }
 
                 if (aItem != null && aItem.groups.isNotEmpty()) {
@@ -235,33 +272,43 @@ fun PhaseLoadContent(
                     canDrag = canDrag,
                     onPaywall = onPaywall,
 
-                    onRegisterDropZone = { phase, rect ->
-                        dropZones[phase] = rect
-                    },
+                    isDropTargetHighlighted = (dragging != null && hoveredPhase == item.phase),
+
+                    onRegisterDropZone = { phase, rect -> dropZones[phase] = rect },
 
                     onDragStart = { payload ->
-                        if (!canDrag) {
-                            onPaywall()
-                        } else {
-                            dragging = payload
-                        }
+                        if (!canDrag) onPaywall() else dragging = payload
                     },
 
+                    // ✅ rootPos приходит в ROOT координатах (см. PhaseGroupTableItem: localToRoot)
                     onDragMove = { rootPos ->
-                        dragPos = rootPos
+                        dragPosRoot = rootPos
+                        dragPosLocal = rootPos - overlayContainerTopLeft
+                    },
+
+                    onDragCancel = {
+                        dragging = null
                     },
 
                     onDragEnd = { payload ->
-                        dragging = null
-                        if (!canDrag) return@PhaseGroupTableItem
+                        if (!canDrag) {
+                            dragging = null
+                            return@PhaseGroupTableItem
+                        }
 
+                        // ✅ проверка drop-а в ROOT координатах
                         val target = dropZones.entries.firstOrNull { (_, rect) ->
-                            rect.contains(dragPos)
+                            rect.contains(dragPosRoot)
                         }?.key
 
-                        if (target != null && target != payload.fromPhase) {
-                            onGroupDropped(payload.groupId, target)
+                        val success = (target != null && target != payload.fromPhase)
+
+                        if (success) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onGroupDropped(payload.groupId, target!!)
                         }
+
+                        dragging = null
                     }
                 )
             }
@@ -275,7 +322,8 @@ fun PhaseLoadContent(
             Card(
                 modifier = Modifier
                     .zIndex(1000f)
-                    .offset { IntOffset(dragPos.x.roundToInt(), dragPos.y.roundToInt()) }
+                    // ✅ overlay рисуем в ЛОКАЛЬНЫХ координатах контейнера
+                    .offset { IntOffset(dragPosLocal.x.roundToInt(), dragPosLocal.y.roundToInt()) }
                     .widthIn(max = 280.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
@@ -354,8 +402,8 @@ private fun RoomShareRow(
             trackColor = MaterialTheme.colorScheme.surfaceVariant,
             color = when {
                 pct >= alertPct -> MaterialTheme.colorScheme.error
-                pct >= warnPct  -> MaterialTheme.colorScheme.tertiary
-                else            -> MaterialTheme.colorScheme.primary
+                pct >= warnPct -> MaterialTheme.colorScheme.tertiary
+                else -> MaterialTheme.colorScheme.primary
             }
         )
     }
@@ -381,14 +429,16 @@ private fun AdviceCardSinglePhase(
                 loadPct >= alertPct -> {
                     add("Высокая загрузка вводного (${fmt0(loadPct)}%). Запас всего ${fmt1(reserveA)} A.")
                     if (nextUpNominal != null) {
-                        add("Если высокие пики регулярны — рассмотрите вводной на ${nextUpNominal} A (проверьте сечение и Icu).")
+                        add("Если высокие пики регулярны — рассмотрите вводной на $nextUpNominal A (проверьте сечение и Icu).")
                     } else {
                         add("Следующего номинала нет — контролируйте одновременную работу мощных приборов.")
                     }
                 }
+
                 loadPct >= warnPct -> {
                     add("Умеренная загрузка вводного (${fmt0(loadPct)}%). Запас ${fmt1(reserveA)} A — следите за пиковыми сценариями.")
                 }
+
                 else -> {
                     add("Запас по току достаточный: ${fmt1(reserveA)} A (${fmt0(100 - loadPct)}%).")
                 }

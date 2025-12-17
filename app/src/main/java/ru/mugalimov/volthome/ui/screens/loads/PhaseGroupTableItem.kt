@@ -47,6 +47,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Shape
 
 @Composable
 fun PhaseGroupTableItem(
@@ -61,7 +64,9 @@ fun PhaseGroupTableItem(
 
     onDragStart: (payload: PhaseLoadContentKt_DragPayload) -> Unit,
     onDragMove: (rootPos: Offset) -> Unit,
-    onDragEnd: (payload: PhaseLoadContentKt_DragPayload) -> Unit
+    onDragEnd: (payload: PhaseLoadContentKt_DragPayload) -> Unit,
+    isDropTargetHighlighted: Boolean,
+    onDragCancel: () -> Unit,
 ) {
     // ⚠️ Хак: нельзя сослаться на локальный data class из другого файла напрямую.
     // Поэтому ниже я использую "typealias" через внутреннюю обёртку:
@@ -74,15 +79,24 @@ fun PhaseGroupTableItem(
         Phase.C -> Color(0xFFFF8A80).copy(alpha = 0.25f)
     }
 
+    val highlightAlpha = if (isDropTargetHighlighted) 0.55f else 0.25f
+    val borderColor = if (isDropTargetHighlighted)
+        MaterialTheme.colorScheme.primary
+    else
+        MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+
+    val borderWidth = if (isDropTargetHighlighted) 2.dp else 1.dp
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .animateContentSize()
+            .border(borderWidth, borderColor, MaterialTheme.shapes.large)
             .onGloballyPositioned { coords ->
                 onRegisterDropZone(item.phase, coords.boundsInRoot())
             },
-        colors = CardDefaults.cardColors(containerColor = phaseAccent),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        colors = CardDefaults.cardColors(containerColor = phaseAccent.copy(alpha = highlightAlpha)),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isDropTargetHighlighted) 4.dp else 0.dp),
         shape = MaterialTheme.shapes.large
     ) {
         Column(Modifier.fillMaxWidth()) {
@@ -129,11 +143,13 @@ fun PhaseGroupTableItem(
                                 .onGloballyPositioned { groupCoords = it }
                                 .pointerInput(canDrag, group.groupId) {
                                     detectDragGestures(
-                                        onDragStart = {
-                                            if (!canDrag) {
-                                                onPaywall()
-                                                return@detectDragGestures
-                                            }
+                                        onDragStart = { startLocal ->
+                                            if (!canDrag) { onPaywall(); return@detectDragGestures }
+
+                                            val c = groupCoords ?: return@detectDragGestures
+                                            val startRoot = c.localToRoot(startLocal)
+                                            onDragMove(startRoot) // ✅ чтобы overlay не “прыгал” с (0,0)
+
                                             onDragStart(
                                                 PhaseLoadContentKt_DragPayload(
                                                     groupId = group.groupId,
@@ -145,15 +161,11 @@ fun PhaseGroupTableItem(
                                         onDrag = { change, _ ->
                                             if (!canDrag) return@detectDragGestures
                                             change.consume()
-
                                             val c = groupCoords ?: return@detectDragGestures
-                                            // позиция в координатах root
-                                            val root = c.localToRoot(change.position)
-                                            onDragMove(root)
+                                            onDragMove(c.localToRoot(change.position))
                                         },
                                         onDragCancel = {
-                                            // просто сбросим drag-состояние через onDragEnd с тем же payload нельзя,
-                                            // поэтому ничего — overlay исчезнет из-за отмены в parent по onDragStart/onDragEnd логике
+                                            onDragCancel() // ✅ обязательно, иначе overlay может “зависнуть”
                                         },
                                         onDragEnd = {
                                             if (!canDrag) return@detectDragGestures
