@@ -9,11 +9,15 @@ import ru.mugalimov.volthome.data.repository.PreferencesRepository
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.PhaseMode
+import ru.mugalimov.volthome.domain.model.VoltageType
 import javax.inject.Inject
 
 /**
- * Обновляет ИМЯ и МОЩНОСТЬ конкретного экземпляра устройства (только запись в инстанс).
- * Каталог дефолтов не меняем. После сохранения вызываем пересчёт.
+ * Обновляет поля экземпляра устройства.
+ * FREE: имя + мощность.
+ * PRO: дополнительно powerFactor / demandRatio / voltage (value+type).
+ *
+ * После сохранения вызываем пересчёт (учитываем текущий режим 1/3 фазы).
  */
 class UpdateDeviceFieldsUseCase @Inject constructor(
     private val deviceRepository: DeviceRepository,
@@ -21,43 +25,67 @@ class UpdateDeviceFieldsUseCase @Inject constructor(
     private val prefs: PreferencesRepository,
     @IoDispatcher private val io: CoroutineDispatcher
 ) {
-    /**
-     * @param deviceId id инстанса (Device.id)
-     * @param newName не пустое имя
-     * @param newPowerW мощность в Вт (>0)
-     */
+
     suspend operator fun invoke(
         deviceId: Long,
         newName: String,
-        newPowerW: Int
+        newPowerW: Int,
+        newPowerFactor: Double? = null,
+        newDemandRatio: Double? = null,
+        newVoltageValue: Int? = null,
+        newVoltageType: VoltageType? = null
     ) = withContext(io) {
+
         val name = newName.trim()
         require(name.isNotEmpty()) { "Имя не может быть пустым" }
+
         val rangeError = PowerValidator.errorMessage(newPowerW)
         require(rangeError == null) { rangeError!! }
+
+        newPowerFactor?.let {
+            require(it in 0.1..1.0) { "PF должен быть в диапазоне 0.1 — 1.0" }
+        }
+        newDemandRatio?.let {
+            require(it in 0.1..1.0) { "Коэфф. спроса должен быть в диапазоне 0.1 — 1.0" }
+        }
+
+        // Напряжение у нас только 220/380 через пресеты, но оставим базовую защиту.
+        newVoltageValue?.let {
+            require(it in 1..1000) { "Напряжение должно быть в диапазоне 1 — 1000 В" }
+        }
+        newVoltageType?.let {
+            require(it != VoltageType.DC) { "DC пока не поддерживается" }
+        }
 
         val current: Device = deviceRepository.getDeviceById(deviceId.toInt())
             ?: error("Устройство не найдено: $deviceId")
 
+        val updatedVoltage = if (newVoltageValue != null || newVoltageType != null) {
+            current.voltage.copy(
+                value = newVoltageValue ?: current.voltage.value,
+                type = newVoltageType ?: current.voltage.type
+            )
+        } else {
+            current.voltage
+        }
+
         val updated = current.copy(
             name = name,
-            power = newPowerW
+            power = newPowerW,
+            powerFactor = newPowerFactor ?: current.powerFactor,
+            demandRatio = newDemandRatio ?: current.demandRatio,
+            voltage = updatedVoltage
         )
+
         deviceRepository.updateDevice(updated)
 
-        // Явный пересчёт (учитываем текущий режим 1/3 фазы)
         val mode: PhaseMode = prefs.phaseMode.first()
         recalc(mode)
     }
 }
 
 /**
- * Унифицированная точка пересчёта всего проекта:
- * — перерасчёт групп и распределение по фазам
- * — подбор вводного
- * — обновление экспликации/индикаторов/диаграмм
- *
- * В реальном проекте это может оборачивать существующий GroupCalculator/Facade.
+ * Унифицированная точка пересчёта всего проекта.
  */
 class RecalculateAllUseCase @Inject constructor(
     private val calculatorFactory: GroupCalculatorFactory,
