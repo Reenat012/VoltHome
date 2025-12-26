@@ -10,5 +10,10 @@ data class DeviceCreateRequest(
     val ratedPowerW: Int? = null,
     val powerFactor: Double? = null,
     val demandRatio: Double? = null,
-    val voltage: Voltage? = null
+    val voltage: Voltage? = null,
+
+    // ✅ новые (чтобы UI реально влияло на создаваемые устройства)
+    val hasMotor: Boolean? = null,
+    val requiresDedicatedCircuit: Boolean? = null,
+    val requiresSocketConnection: Boolean? = null
 )

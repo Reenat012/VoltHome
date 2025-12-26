@@ -21,9 +21,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import ru.mugalimov.volthome.core.validation.InputConstraints
 import ru.mugalimov.volthome.domain.model.DefaultDevice
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.ProFeature
@@ -31,6 +31,9 @@ import ru.mugalimov.volthome.domain.model.Voltage
 import ru.mugalimov.volthome.domain.model.VoltageType
 import ru.mugalimov.volthome.domain.model.create.DeviceCreateRequest as DomainDeviceCreateRequest
 import ru.mugalimov.volthome.domain.use_case.AddDevicesToRoomUseCase
+import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsDraft
+import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsValidator
+import ru.mugalimov.volthome.ui.components.device.adapter.InMemoryDeviceParamsAdapter
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
 import javax.inject.Inject
@@ -50,24 +53,58 @@ fun DevicePickerSheet(
 
     val isPro = LocalUserPlan.current.isPro
 
+    val editorAdapter = remember(isPro) {
+        InMemoryDeviceParamsAdapter<String>(
+            isPro = isPro,
+            paywall = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) }
+        )
+    }
+
     var search by remember { mutableStateOf("") }
-
     val qty = remember { mutableStateMapOf<Long, Int>() }
-    val nameOverride = remember { mutableStateMapOf<Long, String>() }
-    val powerOverride = remember { mutableStateMapOf<Long, String>() }
-    val powerErrors = remember { mutableStateMapOf<Long, String?>() }
 
-    // ✅ Advanced overrides (только PRO применяет)
-    val pfOverride = remember { mutableStateMapOf<Long, String>() }
-    val drOverride = remember { mutableStateMapOf<Long, String>() }
-    val voltageOverride = remember { mutableStateMapOf<Long, Voltage>() }
+    val totalTop by remember { derivedStateOf { qty.values.sum() } }
+
+    // ✅ aggregated validation: без локальных кешей ошибок (только adapter)
+    val byId = remember(defaultDevices) { defaultDevices.associateBy { it.id } }
+
+    val hasErrorsTop by remember {
+        derivedStateOf {
+            val selectedKeys = qty.filterValues { it > 0 }.keys.map { it.toString() }
+
+            editorAdapter.hasAnyErrors(
+                keys = selectedKeys,
+                seedForKey = { key ->
+                    val id = key.toLong()
+                    val def = byId[id] ?: return@hasAnyErrors DeviceParamsDraft(
+                        name = "",
+                        powerText = "0",
+                        deviceType = DeviceType.SOCKET,
+                        powerFactorText = "1.00",
+                        demandRatioText = "1.00",
+                        voltageType = VoltageType.AC_1PHASE,
+                        hasMotor = false,
+                        requiresDedicatedCircuit = false,
+                        requiresSocketConnection = true
+                    )
+
+                    DeviceParamsDraft(
+                        name = def.name,
+                        powerText = def.power.toString(),
+                        deviceType = def.deviceType,
+                        powerFactorText = def.powerFactor.toString(),
+                        demandRatioText = def.demandRatio.toString(),
+                        voltageType = def.voltage.type,
+                        hasMotor = def.hasMotor,
+                        requiresDedicatedCircuit = def.requiresDedicatedCircuit,
+                        requiresSocketConnection = def.requiresSocketConnection
+                    )
+                }
+            )
+        }
+    }
 
     val bringIntoViewRequester = remember { BringIntoViewRequester() }
-
-    // dialogs state
-    var pfDialogFor by remember { mutableStateOf<Long?>(null) }
-    var drDialogFor by remember { mutableStateOf<Long?>(null) }
-    var voltageDialogFor by remember { mutableStateOf<Long?>(null) }
 
     val filtered = remember(search, defaultDevices) {
         val q = search.trim().lowercase()
@@ -93,29 +130,28 @@ fun DevicePickerSheet(
                         .padding(horizontal = 12.dp)
                 ) {
                     Text(text = "Добавить устройства")
-                    val totalTop = qty.values.sum()
-                    val hasErrorsTop = powerErrors.values.any { it != null }
+
                     IconButton(
                         onClick = {
                             scope.launch {
                                 val reqs = buildRequestsForPicker(
                                     defaults = defaultDevices,
                                     qtyMap = qty,
-                                    nameOverride = nameOverride,
-                                    powerOverride = powerOverride,
-                                    isPro = isPro,
-                                    pfOverride = pfOverride,
-                                    drOverride = drOverride,
-                                    voltageOverride = voltageOverride
+                                    editorAdapter = editorAdapter,
+                                    isPro = isPro
                                 )
-                                if (reqs.isEmpty()) { onDismiss(); return@launch }
+                                if (reqs.isEmpty()) {
+                                    onDismiss(); return@launch
+                                }
                                 val ids = helperVm.add(roomId, reqs)
                                 onAdded(ids)
                                 onDismiss()
                             }
                         },
                         enabled = totalTop > 0 && !hasErrorsTop
-                    ) { Icon(Icons.Rounded.Check, contentDescription = "Добавить") }
+                    ) {
+                        Icon(Icons.Rounded.Check, contentDescription = "Добавить")
+                    }
                 }
             }
         }
@@ -132,7 +168,10 @@ fun DevicePickerSheet(
                 modifier = Modifier
                     .fillMaxWidth(0.95f)
                     .onFocusChanged {
-                        if (it.isFocused) scope.launch { delay(150); bringIntoViewRequester.bringIntoView() }
+                        if (it.isFocused) scope.launch {
+                            delay(150)
+                            bringIntoViewRequester.bringIntoView()
+                        }
                     },
                 singleLine = true,
                 placeholder = { Text("Поиск устройства…") }
@@ -145,8 +184,23 @@ fun DevicePickerSheet(
                 contentPadding = PaddingValues(bottom = 96.dp)
             ) {
                 items(filtered, key = { it.id }) { def ->
-                    var expanded by remember { mutableStateOf(false) }
+                    val key = def.id.toString()
                     val count = qty[def.id] ?: 0
+
+                    val st = editorAdapter.state(
+                        key = key,
+                        seed = DeviceParamsDraft(
+                            name = def.name,
+                            powerText = def.power.toString(),
+                            deviceType = def.deviceType,
+                            powerFactorText = def.powerFactor.toString(),
+                            demandRatioText = def.demandRatio.toString(),
+                            voltageType = def.voltage.type,
+                            hasMotor = def.hasMotor,
+                            requiresDedicatedCircuit = def.requiresDedicatedCircuit,
+                            requiresSocketConnection = def.requiresSocketConnection
+                        )
+                    )
 
                     Card {
                         Column(Modifier.padding(12.dp)) {
@@ -159,39 +213,39 @@ fun DevicePickerSheet(
                                     Text(def.name)
                                     Text("${def.power} Вт")
                                 }
+
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    IconButton(onClick = { qty[def.id] = (count - 1).coerceAtLeast(0) }) {
-                                        Icon(Icons.Rounded.Remove, contentDescription = "Уменьшить")
-                                    }
+                                    IconButton(onClick = {
+                                        qty[def.id] = (count - 1).coerceAtLeast(0)
+                                    }) { Icon(Icons.Rounded.Remove, contentDescription = "Уменьшить") }
 
                                     Box(Modifier.width(28.dp), contentAlignment = Alignment.Center) {
                                         Text(text = count.toString(), textAlign = TextAlign.Center)
                                     }
 
-                                    IconButton(onClick = { qty[def.id] = (count + 1).coerceAtMost(99) }) {
-                                        Icon(Icons.Rounded.Add, contentDescription = "Увеличить")
-                                    }
+                                    IconButton(onClick = {
+                                        qty[def.id] = (count + 1).coerceAtMost(99)
+                                    }) { Icon(Icons.Rounded.Add, contentDescription = "Увеличить") }
 
-                                    IconButton(onClick = { expanded = !expanded }) {
+                                    IconButton(onClick = { st.onExpandedChange(!st.isExpanded) }) {
                                         Icon(
-                                            if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                                            if (st.isExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
                                             contentDescription = null
                                         )
                                     }
                                 }
                             }
 
-                            AnimatedVisibility(expanded) {
+                            AnimatedVisibility(st.isExpanded) {
                                 Column {
                                     Spacer(Modifier.height(10.dp))
 
-                                    // FREE: имя редактируется
                                     OutlinedTextField(
-                                        value = nameOverride[def.id] ?: def.name,
-                                        onValueChange = { nameOverride[def.id] = it },
+                                        value = st.draft.name,
+                                        onValueChange = st.onNameChange,
                                         label = { Text("Название") },
                                         singleLine = true,
                                         shape = RoundedCornerShape(12.dp),
@@ -199,7 +253,9 @@ fun DevicePickerSheet(
                                             .fillMaxWidth()
                                             .heightIn(min = 56.dp)
                                             .onFocusChanged {
-                                                if (it.isFocused) scope.launch { delay(150); bringIntoViewRequester.bringIntoView() }
+                                                if (it.isFocused) scope.launch {
+                                                    delay(150); bringIntoViewRequester.bringIntoView()
+                                                }
                                             }
                                     )
 
@@ -209,35 +265,24 @@ fun DevicePickerSheet(
                                         modifier = Modifier.fillMaxWidth(),
                                         verticalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
-                                        // Ряд 1: Мощность | Тип устройства
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                                             verticalAlignment = Alignment.Top
                                         ) {
-                                            val currentPowerText = powerOverride[def.id] ?: def.power.toString()
-                                            val error = powerErrors[def.id]
+                                            val error = st.errors.powerError
 
                                             OutlinedTextField(
-                                                value = currentPowerText,
+                                                value = st.draft.powerText,
                                                 onValueChange = { new ->
-                                                    val norm = new.replace(',', '.')
-                                                    powerOverride[def.id] = norm
-                                                    val v = norm.toDoubleOrNull()
-                                                    powerErrors[def.id] = when {
-                                                        v == null -> "Введите число > 0"
-                                                        v.toInt() < InputConstraints.MIN_POWER_W ->
-                                                            "Минимум ${InputConstraints.MIN_POWER_W} Вт"
-                                                        v.toInt() > InputConstraints.MAX_POWER_W ->
-                                                            "Максимум ${InputConstraints.MAX_POWER_W} Вт"
-                                                        else -> null
-                                                    }
+                                                    val cleaned = DeviceParamsValidator.normalizePowerText(new)
+                                                    st.onPowerTextChange(cleaned)
                                                 },
                                                 label = { Text("Мощность (Вт)") },
                                                 singleLine = true,
                                                 isError = error != null,
                                                 supportingText = {
-                                                    Text(error ?: "Допустимо от ${InputConstraints.MIN_POWER_W} до ${InputConstraints.MAX_POWER_W} Вт")
+                                                    Text(error ?: "Мощность должна быть в допустимых пределах")
                                                 },
                                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                                 shape = RoundedCornerShape(12.dp),
@@ -245,73 +290,107 @@ fun DevicePickerSheet(
                                                     .weight(1f)
                                                     .heightIn(min = 56.dp)
                                                     .onFocusChanged {
-                                                        if (it.isFocused) scope.launch { delay(150); bringIntoViewRequester.bringIntoView() }
+                                                        if (it.isFocused) scope.launch {
+                                                            delay(150); bringIntoViewRequester.bringIntoView()
+                                                        }
                                                     }
                                             )
 
-                                            Box(Modifier.weight(1f)) {
-                                                ReadonlyFieldPro(
-                                                    label = "Тип устройства",
-                                                    value = deviceTypeLabel(def.deviceType),
-                                                    locked = false,
-                                                    hint = null,
-                                                    onClick = null
-                                                )
-                                            }
+                                            EnumDropdownField(
+                                                label = "Тип устройства",
+                                                value = st.draft.deviceType,
+                                                values = DeviceType.values().toList(),
+                                                valueLabel = { it.name },
+                                                locked = !isPro,
+                                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
+                                                onValueChange = st.onDeviceTypeChange,
+                                                modifier = Modifier.weight(1f)
+                                            )
                                         }
 
-                                        // Ряд 2: PF | Кс (Advanced, продаём PRO)
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                                         ) {
-                                            val pfText = pfOverride[def.id] ?: def.powerFactor.toString()
-                                            val drText = drOverride[def.id] ?: def.demandRatio.toString()
+                                            val pfText = st.draft.powerFactorText
+                                            val drText = st.draft.demandRatioText
 
-                                            Box(Modifier.weight(1f)) {
-                                                ReadonlyFieldPro(
-                                                    label = "Коэфф. мощности (PF)",
-                                                    value = pfText,
-                                                    locked = !isPro,
-                                                    hint = "Влияет на расчёт тока",
-                                                    onClick = {
-                                                        if (!isPro) paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR)
-                                                        else pfDialogFor = def.id
-                                                    }
-                                                )
-                                            }
-                                            Box(Modifier.weight(1f)) {
-                                                ReadonlyFieldPro(
-                                                    label = "Коэфф. спроса",
-                                                    value = drText,
-                                                    locked = !isPro,
-                                                    hint = "Учитывает реальную нагрузку",
-                                                    onClick = {
-                                                        if (!isPro) paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR)
-                                                        else drDialogFor = def.id
-                                                    }
-                                                )
-                                            }
+                                            LockedDecimalField(
+                                                label = "Коэфф. мощности (PF)",
+                                                value = pfText,
+                                                locked = !isPro,
+                                                hint = "Влияет на расчёт тока",
+                                                error = validateRatio(pfText),
+                                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
+                                                onValueChange = { st.onPowerFactorTextChange(it.trim().replace(',', '.')) },
+                                                modifier = Modifier.weight(1f),
+                                                bringIntoViewRequester = bringIntoViewRequester,
+                                                scope = scope
+                                            )
+
+                                            LockedDecimalField(
+                                                label = "Коэфф. спроса",
+                                                value = drText,
+                                                locked = !isPro,
+                                                hint = "Учитывает реальную нагрузку",
+                                                error = validateRatio(drText),
+                                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
+                                                onValueChange = { st.onDemandRatioTextChange(it.trim().replace(',', '.')) },
+                                                modifier = Modifier.weight(1f),
+                                                bringIntoViewRequester = bringIntoViewRequester,
+                                                scope = scope
+                                            )
                                         }
 
-                                        // Ряд 3: Напряжение (220/380)
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                                         ) {
-                                            val v = voltageOverride[def.id] ?: def.voltage
-                                            Box(Modifier.weight(1f)) {
-                                                ReadonlyFieldPro(
-                                                    label = "Напряжение",
-                                                    value = voltageHuman(v),
-                                                    locked = !isPro,
-                                                    hint = "Влияет на ток и фазность",
-                                                    onClick = {
-                                                        if (!isPro) paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR)
-                                                        else voltageDialogFor = def.id
-                                                    }
-                                                )
-                                            }
+                                            VoltageTypeDropdownField(
+                                                label = "Напряжение",
+                                                value = st.draft.voltageType,
+                                                locked = !isPro,
+                                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
+                                                onValueChange = st.onVoltageTypeChange,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            Spacer(Modifier.weight(1f))
+                                        }
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                        ) {
+                                            YesNoDropdownField(
+                                                label = "Есть двигатель",
+                                                value = st.draft.hasMotor,
+                                                locked = !isPro,
+                                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
+                                                onValueChange = st.onHasMotorChange,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            YesNoDropdownField(
+                                                label = "Выделенная линия",
+                                                value = st.draft.requiresDedicatedCircuit,
+                                                locked = !isPro,
+                                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
+                                                onValueChange = st.onRequiresDedicatedCircuitChange,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                        ) {
+                                            YesNoDropdownField(
+                                                label = "Подключение розеткой",
+                                                value = st.draft.requiresSocketConnection,
+                                                locked = !isPro,
+                                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
+                                                onValueChange = st.onRequiresSocketConnectionChange,
+                                                modifier = Modifier.weight(1f)
+                                            )
                                             Spacer(Modifier.weight(1f))
                                         }
                                     }
@@ -323,25 +402,20 @@ fun DevicePickerSheet(
             }
 
             Spacer(Modifier.height(8.dp))
-            val total = qty.values.sum()
-            val hasErrorsBottom = powerErrors.values.any { it != null }
-
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(
-                    enabled = total > 0 && !hasErrorsBottom,
+                    enabled = totalTop > 0 && !hasErrorsTop,
                     onClick = {
                         scope.launch {
                             val reqs = buildRequestsForPicker(
                                 defaults = defaultDevices,
                                 qtyMap = qty,
-                                nameOverride = nameOverride,
-                                powerOverride = powerOverride,
-                                isPro = isPro,
-                                pfOverride = pfOverride,
-                                drOverride = drOverride,
-                                voltageOverride = voltageOverride
+                                editorAdapter = editorAdapter,
+                                isPro = isPro
                             )
-                            if (reqs.isEmpty()) { onDismiss(); return@launch }
+                            if (reqs.isEmpty()) {
+                                onDismiss(); return@launch
+                            }
                             val ids = helperVm.add(roomId, reqs)
                             onAdded(ids)
                             onDismiss()
@@ -355,130 +429,169 @@ fun DevicePickerSheet(
             Spacer(Modifier.height(12.dp))
         }
     }
+}
 
-    // ---------------- Dialogs ----------------
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun <T> EnumDropdownField(
+    label: String,
+    value: T,
+    values: List<T>,
+    valueLabel: (T) -> String,
+    locked: Boolean,
+    onLockedClick: () -> Unit,
+    onValueChange: (T) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val open = { if (locked) onLockedClick() else expanded = true }
 
-    // PF
-    pfDialogFor?.let { deviceKey ->
-        val def = defaultDevices.firstOrNull { it.id == deviceKey } ?: run { pfDialogFor = null; return@let }
-        var text by remember { mutableStateOf(pfOverride[deviceKey] ?: def.powerFactor.toString()) }
-        val err = validateRatio(text)
-
-        AlertDialog(
-            onDismissRequest = { pfDialogFor = null },
-            title = { Text("Коэффициент мощности (PF)") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Используется в проектировании и влияет на расчёт тока.")
-                    OutlinedTextField(
-                        value = text,
-                        onValueChange = { text = it },
-                        label = { Text("PF (0.1 — 1.0)") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        isError = err != null
-                    )
-                    if (err != null) Text(err)
-                }
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { open() },
+        modifier = modifier.fillMaxWidth().heightIn(min = 56.dp)
+    ) {
+        OutlinedTextField(
+            value = valueLabel(value),
+            onValueChange = {},
+            readOnly = true,
+            enabled = true,
+            singleLine = true,
+            label = { Text(label) },
+            trailingIcon = {
+                if (locked) Icon(Icons.Rounded.Lock, contentDescription = null)
+                else ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
             },
-            confirmButton = {
-                TextButton(
-                    enabled = err == null,
-                    onClick = {
-                        pfOverride[deviceKey] = text.trim().replace(',', '.')
-                        pfDialogFor = null
-                    }
-                ) { Text("Применить") }
-            },
-            dismissButton = { TextButton(onClick = { pfDialogFor = null }) { Text("Отмена") } }
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.menuAnchor().fillMaxWidth()
         )
+
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            values.forEach { item ->
+                DropdownMenuItem(
+                    text = { Text(valueLabel(item)) },
+                    onClick = { expanded = false; onValueChange(item) }
+                )
+            }
+        }
     }
+}
 
-    // Demand ratio
-    drDialogFor?.let { deviceKey ->
-        val def = defaultDevices.firstOrNull { it.id == deviceKey } ?: run { drDialogFor = null; return@let }
-        var text by remember { mutableStateOf(drOverride[deviceKey] ?: def.demandRatio.toString()) }
-        val err = validateRatio(text)
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun VoltageTypeDropdownField(
+    label: String,
+    value: VoltageType,
+    locked: Boolean,
+    onLockedClick: () -> Unit,
+    onValueChange: (VoltageType) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val open = { if (locked) onLockedClick() else expanded = true }
 
-        AlertDialog(
-            onDismissRequest = { drDialogFor = null },
-            title = { Text("Коэффициент спроса") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Позволяет учитывать реальные условия эксплуатации.")
-                    OutlinedTextField(
-                        value = text,
-                        onValueChange = { text = it },
-                        label = { Text("Кс (0.1 — 1.0)") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        isError = err != null
-                    )
-                    if (err != null) Text(err)
-                }
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { open() },
+        modifier = modifier.fillMaxWidth().heightIn(min = 56.dp)
+    ) {
+        OutlinedTextField(
+            value = when (value) {
+                VoltageType.AC_1PHASE -> "AC 1ф (220 В)"
+                VoltageType.AC_3PHASE -> "AC 3ф (380 В)"
+                VoltageType.DC -> "DC"
             },
-            confirmButton = {
-                TextButton(
-                    enabled = err == null,
-                    onClick = {
-                        drOverride[deviceKey] = text.trim().replace(',', '.')
-                        drDialogFor = null
-                    }
-                ) { Text("Применить") }
+            onValueChange = {},
+            readOnly = true,
+            enabled = true,
+            singleLine = true,
+            label = { Text(label) },
+            supportingText = { Text("DC пока недоступен") },
+            trailingIcon = {
+                if (locked) Icon(Icons.Rounded.Lock, contentDescription = null)
+                else ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
             },
-            dismissButton = { TextButton(onClick = { drDialogFor = null }) { Text("Отмена") } }
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.menuAnchor().fillMaxWidth()
         )
-    }
 
-    // Voltage presets
-    voltageDialogFor?.let { deviceKey ->
-        AlertDialog(
-            onDismissRequest = { voltageDialogFor = null },
-            title = { Text("Напряжение") },
-            text = { Text("Выбери тип сети для устройства:") },
-            confirmButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    TextButton(onClick = {
-                        voltageOverride[deviceKey] = Voltage(value = 220, type = VoltageType.AC_1PHASE)
-                        voltageDialogFor = null
-                    }) { Text("220 В") }
-
-                    TextButton(onClick = {
-                        voltageOverride[deviceKey] = Voltage(value = 380, type = VoltageType.AC_3PHASE)
-                        voltageDialogFor = null
-                    }) { Text("380 В") }
-                }
-            },
-            dismissButton = { TextButton(onClick = { voltageDialogFor = null }) { Text("Отмена") } }
-        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text("AC 1ф (220 В)") },
+                onClick = { expanded = false; onValueChange(VoltageType.AC_1PHASE) }
+            )
+            DropdownMenuItem(
+                text = { Text("AC 3ф (380 В)") },
+                onClick = { expanded = false; onValueChange(VoltageType.AC_3PHASE) }
+            )
+            DropdownMenuItem(enabled = false, text = { Text("DC — скоро") }, onClick = {})
+        }
     }
 }
 
 @Composable
-private fun ReadonlyFieldPro(
+private fun YesNoDropdownField(
+    label: String,
+    value: Boolean,
+    locked: Boolean,
+    onLockedClick: () -> Unit,
+    onValueChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    EnumDropdownField(
+        label = label,
+        value = value,
+        values = listOf(true, false),
+        valueLabel = { if (it) "Да" else "Нет" },
+        locked = locked,
+        onLockedClick = onLockedClick,
+        onValueChange = onValueChange,
+        modifier = modifier
+    )
+}
+
+@Composable
+private fun LockedDecimalField(
     label: String,
     value: String,
     locked: Boolean,
-    hint: String? = null,
-    onClick: (() -> Unit)?
+    hint: String?,
+    error: String?,
+    onLockedClick: () -> Unit,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier,
+    bringIntoViewRequester: BringIntoViewRequester,
+    scope: CoroutineScope
 ) {
-    val clickable = onClick != null
-    val modifier = Modifier
+    val m = modifier
         .fillMaxWidth()
         .heightIn(min = 56.dp)
-        .let { m -> if (clickable) m.clickable { onClick?.invoke() } else m }
+        .let { base -> if (locked) base.clickable { onLockedClick() } else base }
 
     OutlinedTextField(
         value = value,
-        onValueChange = {},
+        onValueChange = { if (!locked) onValueChange(it) },
         label = { Text(label) },
-        readOnly = true,
-        enabled = true, // ✅ важно: иначе не ловим намерение
+        enabled = true,
+        readOnly = locked,
         singleLine = true,
-        supportingText = { if (hint != null) Text(hint) },
+        isError = (error != null && !locked),
+        supportingText = {
+            when {
+                locked && hint != null -> Text(hint)
+                !locked && error != null -> Text(error)
+                hint != null -> Text(hint)
+            }
+        },
         trailingIcon = { if (locked) Icon(Icons.Rounded.Lock, contentDescription = null) },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
         shape = RoundedCornerShape(12.dp),
-        modifier = modifier
+        modifier = m.onFocusChanged {
+            if (it.isFocused) scope.launch {
+                delay(150)
+                bringIntoViewRequester.bringIntoView()
+            }
+        }
     )
 }
 
@@ -499,12 +612,8 @@ class DevicePickerHelperVm @Inject constructor(
 private fun buildRequestsForPicker(
     defaults: List<DefaultDevice>,
     qtyMap: Map<Long, Int>,
-    nameOverride: Map<Long, String>,
-    powerOverride: Map<Long, String>,
-    isPro: Boolean,
-    pfOverride: Map<Long, String>,
-    drOverride: Map<Long, String>,
-    voltageOverride: Map<Long, Voltage>
+    editorAdapter: InMemoryDeviceParamsAdapter<String>,
+    isPro: Boolean
 ): List<DomainDeviceCreateRequest> {
     val byId = defaults.associateBy { it.id }
     val out = mutableListOf<DomainDeviceCreateRequest>()
@@ -513,23 +622,56 @@ private fun buildRequestsForPicker(
         if (count <= 0) continue
         val def = byId[id] ?: continue
 
-        val title = (nameOverride[id] ?: def.name).trim().ifEmpty { def.name }
-        val rawText = (powerOverride[id] ?: def.power.toString()).replace(',', '.')
-        val raw = rawText.toDoubleOrNull()?.takeIf { it > 0.0 } ?: def.power.toDouble()
-        val watts = raw.toInt().coerceIn(InputConstraints.MIN_POWER_W, InputConstraints.MAX_POWER_W)
+        val key = id.toString()
 
-        val pf = if (isPro) pfOverride[id]?.trim()?.replace(',', '.')?.toDoubleOrNull() else null
-        val dr = if (isPro) drOverride[id]?.trim()?.replace(',', '.')?.toDoubleOrNull() else null
-        val volt = if (isPro) voltageOverride[id] else null
+        val seed = DeviceParamsDraft(
+            name = def.name,
+            powerText = def.power.toString(),
+            deviceType = def.deviceType,
+            powerFactorText = def.powerFactor.toString(),
+            demandRatioText = def.demandRatio.toString(),
+            voltageType = def.voltage.type,
+            hasMotor = def.hasMotor,
+            requiresDedicatedCircuit = def.requiresDedicatedCircuit,
+            requiresSocketConnection = def.requiresSocketConnection
+        )
+
+        val draft = editorAdapter.snapshot(key = key, seed = seed)
+
+        val title = draft.name.trim().ifEmpty { def.name }
+
+        val cleaned = DeviceParamsValidator.normalizePowerText(draft.powerText)
+        val raw = cleaned.toDoubleOrNull()?.takeIf { it > 0.0 } ?: def.power.toDouble()
+        val watts = raw.toInt().coerceAtLeast(1)
+
+        val pf = if (isPro) draft.powerFactorText.trim().replace(',', '.').toDoubleOrNull() else null
+        val dr = if (isPro) draft.demandRatioText.trim().replace(',', '.').toDoubleOrNull() else null
+
+        val type = if (isPro) draft.deviceType else def.deviceType
+
+        val volt = if (isPro) {
+            when (draft.voltageType) {
+                VoltageType.AC_1PHASE -> Voltage(220, VoltageType.AC_1PHASE)
+                VoltageType.AC_3PHASE -> Voltage(380, VoltageType.AC_3PHASE)
+                VoltageType.DC -> def.voltage
+            }
+        } else def.voltage
+
+        val hm = if (isPro) draft.hasMotor else def.hasMotor
+        val rd = if (isPro) draft.requiresDedicatedCircuit else def.requiresDedicatedCircuit
+        val rs = if (isPro) draft.requiresSocketConnection else def.requiresSocketConnection
 
         out += DomainDeviceCreateRequest(
             title = title,
-            type = def.deviceType,
+            type = type,
             count = count,
             ratedPowerW = watts,
             powerFactor = pf ?: def.powerFactor,
             demandRatio = dr ?: def.demandRatio,
-            voltage = volt ?: def.voltage
+            voltage = volt,
+            hasMotor = hm,
+            requiresDedicatedCircuit = rd,
+            requiresSocketConnection = rs
         )
     }
     return out
@@ -540,12 +682,4 @@ private fun validateRatio(input: String): String? {
     if (v == null) return "Введите число"
     if (v < 0.1 || v > 1.0) return "Допустимо 0.1 — 1.0"
     return null
-}
-
-private fun deviceTypeLabel(type: DeviceType): String = type.toString()
-
-private fun voltageHuman(v: Voltage): String = when (v.type) {
-    VoltageType.AC_1PHASE -> "${v.value} В (1ф)"
-    VoltageType.AC_3PHASE -> "${v.value} В (3ф)"
-    VoltageType.DC -> "${v.value} В (DC)"
 }

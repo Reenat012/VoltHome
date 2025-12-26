@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.core.validation.PowerValidator
 import ru.mugalimov.volthome.data.repository.DeviceRepository
-import ru.mugalimov.volthome.domain.model.Voltage
+import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.VoltageType
 import ru.mugalimov.volthome.domain.use_case.UpdateDeviceFieldsUseCase
 
@@ -24,23 +24,24 @@ class DeviceEditViewModel @Inject constructor(
         val deviceId: Long? = null,
         val name: String = "",
         val powerText: String = "",
-        val unit: PowerUnit = PowerUnit.W,
         val isSaving: Boolean = false,
         val error: String? = null,
         val powerError: String? = null,
 
-        // readonly / editable in PRO
-        val deviceTypeLabel: String = "",
+        // ✅ теперь реальные значения (не строки)
+        val deviceType: DeviceType = DeviceType.OTHER,
         val powerFactorText: String = "",
         val demandRatioText: String = "",
-        val voltageText: String = "",
+        val voltageType: VoltageType = VoltageType.AC_1PHASE,
 
-        // validation for advanced
+        val hasMotor: Boolean = false,
+        val requiresDedicatedCircuit: Boolean = false,
+        val requiresSocketConnection: Boolean = true,
+
+        // validation
         val powerFactorError: String? = null,
         val demandRatioError: String? = null
     )
-
-    enum class PowerUnit { W }
 
     private val _ui = MutableStateFlow(UiState())
     val ui: StateFlow<UiState> = _ui.asStateFlow()
@@ -57,11 +58,13 @@ class DeviceEditViewModel @Inject constructor(
                 deviceId = device.id,
                 name = device.name,
                 powerText = device.power.toString(),
-                unit = PowerUnit.W,
-                deviceTypeLabel = device.deviceType.toString(),
+                deviceType = device.deviceType,
                 powerFactorText = device.powerFactor.toString(),
                 demandRatioText = device.demandRatio.toString(),
-                voltageText = formatVoltage(device.voltage)
+                voltageType = device.voltage.type,
+                hasMotor = device.hasMotor,
+                requiresDedicatedCircuit = device.requiresDedicatedCircuit,
+                requiresSocketConnection = device.requiresSocketConnection
             )
         }
     }
@@ -94,6 +97,33 @@ class DeviceEditViewModel @Inject constructor(
         _ui.value = _ui.value.copy(powerText = cleaned, powerError = err)
     }
 
+    fun setDeviceType(value: DeviceType) {
+        if (!isPro) return
+        _ui.value = _ui.value.copy(deviceType = value)
+    }
+
+    fun setVoltageType(value: VoltageType) {
+        if (!isPro) return
+        // DC запрещён — UI всё равно не даст выбрать, но на всякий:
+        if (value == VoltageType.DC) return
+        _ui.value = _ui.value.copy(voltageType = value)
+    }
+
+    fun setHasMotor(value: Boolean) {
+        if (!isPro) return
+        _ui.value = _ui.value.copy(hasMotor = value)
+    }
+
+    fun setRequiresDedicatedCircuit(value: Boolean) {
+        if (!isPro) return
+        _ui.value = _ui.value.copy(requiresDedicatedCircuit = value)
+    }
+
+    fun setRequiresSocketConnection(value: Boolean) {
+        if (!isPro) return
+        _ui.value = _ui.value.copy(requiresSocketConnection = value)
+    }
+
     fun setPowerFactorText(value: String) {
         if (!isPro) return
         val normalized = value.trim().replace(',', '.')
@@ -106,17 +136,6 @@ class DeviceEditViewModel @Inject constructor(
         val normalized = value.trim().replace(',', '.')
         val err = validateRatio(normalized)
         _ui.value = _ui.value.copy(demandRatioText = normalized, demandRatioError = err)
-    }
-
-    // ✅ Напряжение — только пресеты 220/380
-    fun setVoltagePreset220() {
-        if (!isPro) return
-        _ui.value = _ui.value.copy(voltageText = "220 В (1ф)")
-    }
-
-    fun setVoltagePreset380() {
-        if (!isPro) return
-        _ui.value = _ui.value.copy(voltageText = "380 В (3ф)")
     }
 
     fun save(onSuccess: () -> Unit, onError: (String) -> Unit) {
@@ -138,7 +157,6 @@ class DeviceEditViewModel @Inject constructor(
             onError(msg); return
         }
 
-        // advanced только для PRO
         val pf = if (isPro) s.powerFactorText.trim().replace(',', '.').toDoubleOrNull() else null
         val dr = if (isPro) s.demandRatioText.trim().replace(',', '.').toDoubleOrNull() else null
 
@@ -146,8 +164,6 @@ class DeviceEditViewModel @Inject constructor(
             validateRatio(pf)?.let { onError(it); return }
             validateRatio(dr)?.let { onError(it); return }
         }
-
-        val voltagePreset = if (isPro) parseVoltagePreset(s.voltageText) else null
 
         viewModelScope.launch {
             try {
@@ -157,10 +173,15 @@ class DeviceEditViewModel @Inject constructor(
                     deviceId = id,
                     newName = name,
                     newPowerW = powerW,
+
+                    // PRO
+                    newDeviceType = if (isPro) s.deviceType else null,
                     newPowerFactor = pf,
                     newDemandRatio = dr,
-                    newVoltageValue = voltagePreset?.value,
-                    newVoltageType = voltagePreset?.type
+                    newVoltageType = if (isPro) s.voltageType else null,
+                    newHasMotor = if (isPro) s.hasMotor else null,
+                    newRequiresDedicatedCircuit = if (isPro) s.requiresDedicatedCircuit else null,
+                    newRequiresSocketConnection = if (isPro) s.requiresSocketConnection else null
                 )
 
                 _ui.value = s.copy(isSaving = false)
@@ -181,23 +202,5 @@ class DeviceEditViewModel @Inject constructor(
         if (v == null) return "Введите число"
         if (v < 0.1 || v > 1.0) return "Допустимо 0.1 — 1.0"
         return null
-    }
-
-    private data class VoltagePreset(val value: Int, val type: VoltageType)
-
-    private fun parseVoltagePreset(text: String): VoltagePreset {
-        // Мы сами генерим эти строки, так что это надёжно.
-        return when {
-            text.contains("380") -> VoltagePreset(380, VoltageType.AC_3PHASE)
-            else -> VoltagePreset(220, VoltageType.AC_1PHASE)
-        }
-    }
-
-    private fun formatVoltage(v: Voltage): String {
-        return when (v.type) {
-            VoltageType.AC_1PHASE -> "${v.value} В (1ф)"
-            VoltageType.AC_3PHASE -> "${v.value} В (3ф)"
-            VoltageType.DC -> "${v.value} В (DC)"
-        }
     }
 }

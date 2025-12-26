@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
@@ -23,23 +24,17 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
-import ru.mugalimov.volthome.core.validation.InputConstraints
 import ru.mugalimov.volthome.domain.model.*
 import ru.mugalimov.volthome.domain.model.create.DeviceCreateRequest
+import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsDraft
+import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsValidator
+import ru.mugalimov.volthome.ui.components.device.adapter.InMemoryDeviceParamsAdapter
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
 import javax.inject.Inject
 
-// ✅ ДОБАВЛЕНО:
-import androidx.compose.runtime.snapshotFlow
-import kotlinx.coroutines.flow.collectLatest
-
-/**
- * Экран добавления комнаты с устройствами.
- * Реализован на BottomSheetScaffold.
- * Контент внутри реагирует на клавиатуру через imePadding().
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddRoomSheet(
@@ -53,25 +48,18 @@ fun AddRoomSheet(
     var selectedType by remember { mutableStateOf(roomTypes.firstOrNull() ?: RoomType.STANDARD) }
 
     val qtyMap = remember { mutableStateMapOf<String, Int>() }
-    val expandedMap = remember { mutableStateMapOf<String, Boolean>() }
-    val nameOverride = remember { mutableStateMapOf<String, String>() }
-    val powerOverride = remember { mutableStateMapOf<String, String>() }
-    val powerErrors = remember { mutableStateMapOf<String, String?>() }
-
-    // ✅ Advanced overrides (применяются только для PRO)
-    val pfOverride = remember { mutableStateMapOf<String, String>() }
-    val drOverride = remember { mutableStateMapOf<String, String>() }
-    val voltageOverride = remember { mutableStateMapOf<String, Voltage>() }
-
-    // dialogs state
-    var pfDialogFor by remember { mutableStateOf<String?>(null) }
-    var drDialogFor by remember { mutableStateOf<String?>(null) }
-    var voltageDialogFor by remember { mutableStateOf<String?>(null) }
 
     val bringIntoViewRequester = remember { BringIntoViewRequester() }
     val scope = rememberCoroutineScope()
 
     val isPro = LocalUserPlan.current.isPro
+
+    val editorAdapter = remember(isPro) {
+        InMemoryDeviceParamsAdapter<String>(
+            isPro = isPro,
+            paywall = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) }
+        )
+    }
 
     val scaffoldState = rememberBottomSheetScaffoldState(
         bottomSheetState = rememberStandardBottomSheetState(
@@ -82,13 +70,44 @@ fun AddRoomSheet(
 
     LaunchedEffect(Unit) { applyPresetFor(selectedType, defaultDevices, qtyMap) }
 
-    // агрегированное состояние валидности:
     val hasAnyQty by remember { derivedStateOf { qtyMap.values.any { it > 0 } } }
+
+    // ✅ aggregated validation: без локальных карт ошибок (только adapter)
+    val byId = remember(defaultDevices) { defaultDevices.associateBy { it.id.toString() } }
     val hasErrors by remember {
-        derivedStateOf { qtyMap.any { (k, v) -> v > 0 && powerErrors[k] != null } }
+        derivedStateOf {
+            val selectedKeys = qtyMap.filterValues { it > 0 }.keys
+            editorAdapter.hasAnyErrors(
+                keys = selectedKeys,
+                seedForKey = { key ->
+                    val def = byId[key] ?: return@hasAnyErrors DeviceParamsDraft(
+                        name = "",
+                        powerText = "0",
+                        deviceType = DeviceType.SOCKET,
+                        powerFactorText = "1.00",
+                        demandRatioText = "1.00",
+                        voltageType = VoltageType.AC_1PHASE,
+                        hasMotor = false,
+                        requiresDedicatedCircuit = false,
+                        requiresSocketConnection = true
+                    )
+
+                    DeviceParamsDraft(
+                        name = def.name,
+                        powerText = def.power.toString(),
+                        deviceType = def.deviceType,
+                        powerFactorText = def.powerFactor.format(2),
+                        demandRatioText = def.demandRatio.format(2),
+                        voltageType = def.voltage.type,
+                        hasMotor = def.hasMotor,
+                        requiresDedicatedCircuit = def.requiresDedicatedCircuit,
+                        requiresSocketConnection = def.requiresSocketConnection
+                    )
+                }
+            )
+        }
     }
 
-    // ✅ при свайпе вниз состояние уходит в Hidden/PartiallyExpanded — закрываем
     LaunchedEffect(scaffoldState.bottomSheetState) {
         snapshotFlow { scaffoldState.bottomSheetState.currentValue }
             .collectLatest { value ->
@@ -132,12 +151,8 @@ fun AddRoomSheet(
                                 val requests = buildRequests(
                                     defaults = defaultDevices,
                                     qtyMap = qtyMap,
-                                    nameOverride = nameOverride,
-                                    powerOverride = powerOverride,
-                                    isPro = isPro,
-                                    pfOverride = pfOverride,
-                                    drOverride = drOverride,
-                                    voltageOverride = voltageOverride
+                                    editorAdapter = editorAdapter,
+                                    isPro = isPro
                                 )
                                 onConfirm(
                                     name.ifBlank { roomTypeLabel(selectedType) },
@@ -179,172 +194,47 @@ fun AddRoomSheet(
                     )
                 }
 
-                item {
-                    Text("Устройства", style = MaterialTheme.typography.titleMedium)
-                }
+                item { Text("Устройства", style = MaterialTheme.typography.titleMedium) }
 
                 items(defaultDevices, key = { it.id }) { device ->
                     val key = device.id.toString()
-                    val expanded = expandedMap[key] == true
                     val qty = qtyMap[key] ?: 0
-                    val err = powerErrors[key]
 
-                    // показываем overrides (если есть), иначе дефолт
-                    val pfText = pfOverride[key] ?: device.powerFactor.format(2)
-                    val drText = drOverride[key] ?: device.demandRatio.format(2)
-                    val voltageText = voltageHuman(voltageOverride[key] ?: device.voltage)
+                    val st = editorAdapter.state(
+                        key = key,
+                        seed = DeviceParamsDraft(
+                            name = device.name,
+                            powerText = device.power.toString(),
+                            deviceType = device.deviceType,
+                            powerFactorText = device.powerFactor.format(2),
+                            demandRatioText = device.demandRatio.format(2),
+                            voltageType = device.voltage.type,
+                            hasMotor = device.hasMotor,
+                            requiresDedicatedCircuit = device.requiresDedicatedCircuit,
+                            requiresSocketConnection = device.requiresSocketConnection
+                        )
+                    )
 
                     DeviceRowEditable(
                         device = device,
-                        expanded = expanded,
                         qty = qty,
-                        title = nameOverride[key] ?: device.name,
-                        powerText = powerOverride[key] ?: device.power.toString(),
-                        onToggle = { expandedMap[key] = !(expandedMap[key] ?: false) },
-                        onInc = { qtyMap[key] = (qtyMap[key] ?: 0).plus(1).coerceAtMost(99) },
-                        onDec = { qtyMap[key] = (qtyMap[key] ?: 0).minus(1).coerceAtLeast(0) },
-                        onTitleChange = { nameOverride[key] = it },
-                        onPowerChange = { newText ->
-                            val norm = newText.replace(',', '.')
-                            powerOverride[key] = norm
-                            val v = norm.toDoubleOrNull()?.toInt()
-                            powerErrors[key] = when {
-                                v == null -> "Введите число > 0"
-                                v < InputConstraints.MIN_POWER_W ->
-                                    "Минимум ${InputConstraints.MIN_POWER_W} Вт"
-                                v > InputConstraints.MAX_POWER_W ->
-                                    "Максимум ${InputConstraints.MAX_POWER_W} Вт"
-                                else -> null
-                            }
-                        },
-                        powerError = err,
+                        stExpanded = st.isExpanded,
+                        onToggle = { st.onExpandedChange(!st.isExpanded) },
+                        onInc = { qtyMap[key] = (qty + 1).coerceAtMost(99) },
+                        onDec = { qtyMap[key] = (qty - 1).coerceAtLeast(0) },
+
+                        st = st,
                         bringIntoViewRequester = bringIntoViewRequester,
                         scope = scope,
 
-                        // ✅ Advanced (PRO gating)
                         isPro = isPro,
-                        pfText = pfText,
-                        drText = drText,
-                        voltageText = voltageText,
-                        onPfClick = {
-                            if (!isPro) paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR)
-                            else pfDialogFor = key
-                        },
-                        onDrClick = {
-                            if (!isPro) paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR)
-                            else drDialogFor = key
-                        },
-                        onVoltageClick = {
-                            if (!isPro) paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR)
-                            else voltageDialogFor = key
-                        }
+                        paywallBus = paywallBus
                     )
                 }
             }
         },
-        content = { /* основной экран здесь пустой */ }
+        content = { /* основной экран пустой */ }
     )
-
-    // -------------------- DIALOGS --------------------
-
-    // PF Dialog
-    pfDialogFor?.let { key ->
-        val def = defaultDevices.firstOrNull { it.id.toString() == key } ?: run { pfDialogFor = null; return@let }
-        var text by remember { mutableStateOf(pfOverride[key] ?: def.powerFactor.toString()) }
-        val err = validateRatio(text)
-
-        AlertDialog(
-            onDismissRequest = { pfDialogFor = null },
-            title = { Text("Коэффициент мощности (PF)") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Используется в проектировании и влияет на расчёт тока.")
-                    OutlinedTextField(
-                        value = text,
-                        onValueChange = { text = it },
-                        label = { Text("PF (0.1 — 1.0)") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        isError = err != null
-                    )
-                    if (err != null) Text(err)
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = err == null,
-                    onClick = {
-                        pfOverride[key] = text.trim().replace(',', '.')
-                        pfDialogFor = null
-                    }
-                ) { Text("Применить") }
-            },
-            dismissButton = { TextButton(onClick = { pfDialogFor = null }) { Text("Отмена") } }
-        )
-    }
-
-    // Demand Dialog
-    drDialogFor?.let { key ->
-        val def = defaultDevices.firstOrNull { it.id.toString() == key } ?: run { drDialogFor = null; return@let }
-        var text by remember { mutableStateOf(drOverride[key] ?: def.demandRatio.toString()) }
-        val err = validateRatio(text)
-
-        AlertDialog(
-            onDismissRequest = { drDialogFor = null },
-            title = { Text("Коэффициент спроса") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Позволяет учитывать реальные условия эксплуатации.")
-                    OutlinedTextField(
-                        value = text,
-                        onValueChange = { text = it },
-                        label = { Text("Кс (0.1 — 1.0)") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        isError = err != null
-                    )
-                    if (err != null) Text(err)
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = err == null,
-                    onClick = {
-                        drOverride[key] = text.trim().replace(',', '.')
-                        drDialogFor = null
-                    }
-                ) { Text("Применить") }
-            },
-            dismissButton = { TextButton(onClick = { drDialogFor = null }) { Text("Отмена") } }
-        )
-    }
-
-    // Voltage Dialog (220/380 presets)
-    voltageDialogFor?.let { key ->
-        AlertDialog(
-            onDismissRequest = { voltageDialogFor = null },
-            title = { Text("Напряжение") },
-            text = { Text("Выбери тип сети для устройства:") },
-            confirmButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    TextButton(
-                        onClick = {
-                            voltageOverride[key] = Voltage(220, VoltageType.AC_1PHASE)
-                            voltageDialogFor = null
-                        }
-                    ) { Text("220 В") }
-
-                    TextButton(
-                        onClick = {
-                            voltageOverride[key] = Voltage(380, VoltageType.AC_3PHASE)
-                            voltageDialogFor = null
-                        }
-                    ) { Text("380 В") }
-                }
-            },
-            dismissButton = { TextButton(onClick = { voltageDialogFor = null }) { Text("Отмена") } }
-        )
-    }
 }
 
 @Composable
@@ -382,30 +272,22 @@ private fun RoomTypeRow(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DeviceRowEditable(
     device: DefaultDevice,
-    expanded: Boolean,
     qty: Int,
-    title: String,
-    powerText: String,
-    powerError: String?,
+    stExpanded: Boolean,
     onToggle: () -> Unit,
     onInc: () -> Unit,
     onDec: () -> Unit,
-    onTitleChange: (String) -> Unit,
-    onPowerChange: (String) -> Unit,
+
+    st: ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsEditorState<String>,
     bringIntoViewRequester: BringIntoViewRequester,
     scope: CoroutineScope,
 
-    // ✅ Advanced gating inputs
     isPro: Boolean,
-    pfText: String,
-    drText: String,
-    voltageText: String,
-    onPfClick: () -> Unit,
-    onDrClick: () -> Unit,
-    onVoltageClick: () -> Unit
+    paywallBus: PaywallBus
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -420,7 +302,7 @@ private fun DeviceRowEditable(
                         .clickable { onToggle() }
                 ) {
                     Text(device.name, style = MaterialTheme.typography.titleMedium)
-                    if (!expanded) {
+                    if (!stExpanded) {
                         Text(
                             "${device.power} Вт",
                             style = MaterialTheme.typography.bodySmall,
@@ -428,35 +310,30 @@ private fun DeviceRowEditable(
                         )
                     }
                 }
+
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    IconButton(onClick = onDec) {
-                        Icon(Icons.Rounded.Remove, contentDescription = "Уменьшить")
-                    }
-                    Box(Modifier.width(28.dp), contentAlignment = Alignment.Center) {
-                        Text(qty.toString())
-                    }
-                    IconButton(onClick = onInc) {
-                        Icon(Icons.Rounded.Add, contentDescription = "Увеличить")
-                    }
+                    IconButton(onClick = onDec) { Icon(Icons.Rounded.Remove, contentDescription = "Уменьшить") }
+                    Box(Modifier.width(28.dp), contentAlignment = Alignment.Center) { Text(qty.toString()) }
+                    IconButton(onClick = onInc) { Icon(Icons.Rounded.Add, contentDescription = "Увеличить") }
                 }
-                IconButton(onClick = { onToggle() }) {
+
+                IconButton(onClick = onToggle) {
                     Icon(
-                        if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                        if (stExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
                         contentDescription = null
                     )
                 }
             }
 
-            AnimatedVisibility(visible = expanded) {
+            AnimatedVisibility(visible = stExpanded) {
                 Column(modifier = Modifier.padding(top = 8.dp)) {
 
-                    // 1) Название — FREE
                     OutlinedTextField(
-                        value = title,
-                        onValueChange = onTitleChange,
+                        value = st.draft.name,
+                        onValueChange = st.onNameChange,
                         label = { Text("Название") },
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
@@ -476,28 +353,25 @@ private fun DeviceRowEditable(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        // Ряд 1: Мощность (FREE) | Тип устройства (readonly)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             verticalAlignment = Alignment.Top
                         ) {
+                            val error = st.errors.powerError
+
                             OutlinedTextField(
-                                value = powerText,
-                                onValueChange = onPowerChange,
+                                value = st.draft.powerText,
+                                onValueChange = { raw ->
+                                    val cleaned = DeviceParamsValidator.normalizePowerText(raw)
+                                    st.onPowerTextChange(cleaned)
+                                },
                                 label = { Text("Мощность (Вт)") },
                                 singleLine = true,
-                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                                    keyboardType = KeyboardType.Decimal
-                                ),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                 trailingIcon = { Icon(Icons.Rounded.ElectricBolt, contentDescription = null) },
-                                isError = powerError != null,
-                                supportingText = {
-                                    Text(
-                                        powerError
-                                            ?: "Допустимо от ${InputConstraints.MIN_POWER_W} до ${InputConstraints.MAX_POWER_W} Вт"
-                                    )
-                                },
+                                isError = error != null,
+                                supportingText = { Text(error ?: "Мощность должна быть в допустимых пределах") },
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier
                                     .weight(1f)
@@ -509,52 +383,103 @@ private fun DeviceRowEditable(
                                     }
                             )
 
-                            ReadonlyFieldPro(
+                            EnumDropdownField(
                                 label = "Тип устройства",
-                                value = deviceTypeLabel(device.deviceType),
-                                locked = false,
-                                hint = null,
-                                onClick = null,
+                                value = st.draft.deviceType,
+                                values = DeviceType.values().toList(),
+                                valueLabel = { it.name },
+                                locked = !isPro,
+                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
+                                onValueChange = st.onDeviceTypeChange,
                                 modifier = Modifier.weight(1f)
                             )
                         }
 
-                        // Ряд 2: PF | Кс (PRO)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             verticalAlignment = Alignment.Top
                         ) {
-                            ReadonlyFieldPro(
+                            val pfText = st.draft.powerFactorText
+                            val drText = st.draft.demandRatioText
+
+                            LockedDecimalField(
                                 label = "Коэфф. мощности (PF)",
                                 value = pfText,
                                 locked = !isPro,
                                 hint = "Влияет на расчёт тока",
-                                onClick = onPfClick,
-                                modifier = Modifier.weight(1f)
+                                error = validateRatio(pfText),
+                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
+                                onValueChange = { st.onPowerFactorTextChange(it.trim().replace(',', '.')) },
+                                modifier = Modifier.weight(1f),
+                                bringIntoViewRequester = bringIntoViewRequester,
+                                scope = scope
                             )
-                            ReadonlyFieldPro(
+
+                            LockedDecimalField(
                                 label = "Коэфф. спроса",
                                 value = drText,
                                 locked = !isPro,
                                 hint = "Учитывает реальную нагрузку",
-                                onClick = onDrClick,
-                                modifier = Modifier.weight(1f)
+                                error = validateRatio(drText),
+                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
+                                onValueChange = { st.onDemandRatioTextChange(it.trim().replace(',', '.')) },
+                                modifier = Modifier.weight(1f),
+                                bringIntoViewRequester = bringIntoViewRequester,
+                                scope = scope
                             )
                         }
 
-                        // Ряд 3: Напряжение (PRO) — пресеты 220/380
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             verticalAlignment = Alignment.Top
                         ) {
-                            ReadonlyFieldPro(
+                            VoltageTypeDropdownField(
                                 label = "Напряжение",
-                                value = voltageText,
+                                value = st.draft.voltageType,
                                 locked = !isPro,
-                                hint = "Влияет на ток и фазность",
-                                onClick = onVoltageClick,
+                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
+                                onValueChange = st.onVoltageTypeChange,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(Modifier.weight(1f))
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            YesNoDropdownField(
+                                label = "Есть двигатель",
+                                value = st.draft.hasMotor,
+                                locked = !isPro,
+                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
+                                onValueChange = st.onHasMotorChange,
+                                modifier = Modifier.weight(1f)
+                            )
+                            YesNoDropdownField(
+                                label = "Выделенная линия",
+                                value = st.draft.requiresDedicatedCircuit,
+                                locked = !isPro,
+                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
+                                onValueChange = st.onRequiresDedicatedCircuitChange,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            YesNoDropdownField(
+                                label = "Подключение розеткой",
+                                value = st.draft.requiresSocketConnection,
+                                locked = !isPro,
+                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
+                                onValueChange = st.onRequiresSocketConnectionChange,
                                 modifier = Modifier.weight(1f)
                             )
                             Spacer(Modifier.weight(1f))
@@ -566,17 +491,11 @@ private fun DeviceRowEditable(
     }
 }
 
-/* ====== Хелперы ====== */
-
 private fun buildRequests(
     defaults: List<DefaultDevice>,
     qtyMap: Map<String, Int>,
-    nameOverride: Map<String, String>,
-    powerOverride: Map<String, String>,
-    isPro: Boolean,
-    pfOverride: Map<String, String>,
-    drOverride: Map<String, String>,
-    voltageOverride: Map<String, Voltage>
+    editorAdapter: InMemoryDeviceParamsAdapter<String>,
+    isPro: Boolean
 ): List<DeviceCreateRequest> {
     val byId = defaults.associateBy { it.id.toString() }
     val out = mutableListOf<DeviceCreateRequest>()
@@ -585,31 +504,54 @@ private fun buildRequests(
         if (count <= 0) continue
         val def = byId[key] ?: continue
 
-        val title = (nameOverride[key] ?: def.name).trim().ifEmpty { def.name }
+        val seed = DeviceParamsDraft(
+            name = def.name,
+            powerText = def.power.toString(),
+            deviceType = def.deviceType,
+            powerFactorText = def.powerFactor.format(2),
+            demandRatioText = def.demandRatio.format(2),
+            voltageType = def.voltage.type,
+            hasMotor = def.hasMotor,
+            requiresDedicatedCircuit = def.requiresDedicatedCircuit,
+            requiresSocketConnection = def.requiresSocketConnection
+        )
 
-        val powerRaw = (powerOverride[key] ?: def.power.toString())
-            .replace(',', '.')
-            .toDoubleOrNull()
-            ?.takeIf { it > 0.0 }
-            ?: def.power.toDouble()
+        val draft = editorAdapter.snapshot(key = key, seed = seed)
 
-        val watts = powerRaw
-            .toInt()
-            .coerceIn(InputConstraints.MIN_POWER_W, InputConstraints.MAX_POWER_W)
+        val title = draft.name.trim().ifEmpty { def.name }
 
-        // ✅ advanced применяем только если PRO (в FREE — игнорим overrides)
-        val pf = if (isPro) pfOverride[key]?.trim()?.replace(',', '.')?.toDoubleOrNull() else null
-        val dr = if (isPro) drOverride[key]?.trim()?.replace(',', '.')?.toDoubleOrNull() else null
-        val v = if (isPro) voltageOverride[key] else null
+        val cleaned = DeviceParamsValidator.normalizePowerText(draft.powerText)
+        val powerRaw = cleaned.toDoubleOrNull()?.takeIf { it > 0.0 } ?: def.power.toDouble()
+        val watts = powerRaw.toInt().coerceAtLeast(1)
+
+        val pf = if (isPro) draft.powerFactorText.trim().replace(',', '.').toDoubleOrNull() else null
+        val dr = if (isPro) draft.demandRatioText.trim().replace(',', '.').toDoubleOrNull() else null
+
+        val type = if (isPro) draft.deviceType else def.deviceType
+
+        val volt = if (isPro) {
+            when (draft.voltageType) {
+                VoltageType.AC_1PHASE -> Voltage(220, VoltageType.AC_1PHASE)
+                VoltageType.AC_3PHASE -> Voltage(380, VoltageType.AC_3PHASE)
+                VoltageType.DC -> def.voltage
+            }
+        } else def.voltage
+
+        val hm = if (isPro) draft.hasMotor else def.hasMotor
+        val rd = if (isPro) draft.requiresDedicatedCircuit else def.requiresDedicatedCircuit
+        val rs = if (isPro) draft.requiresSocketConnection else def.requiresSocketConnection
 
         out += DeviceCreateRequest(
             title = title,
-            type = def.deviceType,
+            type = type,
             count = count,
             ratedPowerW = watts,
             powerFactor = pf ?: def.powerFactor,
             demandRatio = dr ?: def.demandRatio,
-            voltage = v ?: def.voltage
+            voltage = volt,
+            hasMotor = hm,
+            requiresDedicatedCircuit = rd,
+            requiresSocketConnection = rs
         )
     }
     return out
@@ -622,14 +564,7 @@ private fun roomTypeLabel(type: RoomType): String = when (type) {
     RoomType.OUTDOOR -> "Улица (УЗО)"
 }
 
-private fun deviceTypeLabel(type: DeviceType): String = type.name
 private fun Double.format(digits: Int) = "%.${digits}f".format(this).replace(',', '.')
-
-private fun voltageHuman(v: Voltage): String = when (v.type) {
-    VoltageType.AC_1PHASE -> "${v.value} В (1ф)"
-    VoltageType.AC_3PHASE -> "${v.value} В (3ф)"
-    VoltageType.DC -> "${v.value} В (DC)"
-}
 
 private fun applyPresetFor(
     type: RoomType,
@@ -646,50 +581,181 @@ private fun applyPresetFor(
             addFirstOf(DeviceType.LIGHTING, 1)
             addFirstOf(DeviceType.SOCKET, 1)
         }
-
         RoomType.BATHROOM -> {
             addFirstOf(DeviceType.LIGHTING, 1)
             addFirstOf(DeviceType.SOCKET, 1)
             addFirstOf(DeviceType.HEAVY_DUTY, 1)
         }
-
         RoomType.KITCHEN -> {
             addFirstOf(DeviceType.LIGHTING, 1)
             addFirstOf(DeviceType.SOCKET, 2)
             addFirstOf(DeviceType.HEAVY_DUTY, 1)
         }
-
         RoomType.OUTDOOR -> addFirstOf(DeviceType.SOCKET, 1)
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ReadonlyFieldPro(
+private fun <T> EnumDropdownField(
+    label: String,
+    value: T,
+    values: List<T>,
+    valueLabel: (T) -> String,
+    locked: Boolean,
+    onLockedClick: () -> Unit,
+    onValueChange: (T) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val open = { if (locked) onLockedClick() else expanded = true }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { open() },
+        modifier = modifier.fillMaxWidth().heightIn(min = 56.dp)
+    ) {
+        OutlinedTextField(
+            value = valueLabel(value),
+            onValueChange = {},
+            readOnly = true,
+            enabled = true,
+            singleLine = true,
+            label = { Text(label) },
+            trailingIcon = {
+                if (locked) Icon(Icons.Rounded.Lock, contentDescription = null)
+                else ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+            },
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.menuAnchor().fillMaxWidth()
+        )
+
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            values.forEach { item ->
+                DropdownMenuItem(
+                    text = { Text(valueLabel(item)) },
+                    onClick = { expanded = false; onValueChange(item) }
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun VoltageTypeDropdownField(
+    label: String,
+    value: VoltageType,
+    locked: Boolean,
+    onLockedClick: () -> Unit,
+    onValueChange: (VoltageType) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val open = { if (locked) onLockedClick() else expanded = true }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { open() },
+        modifier = modifier.fillMaxWidth().heightIn(min = 56.dp)
+    ) {
+        OutlinedTextField(
+            value = when (value) {
+                VoltageType.AC_1PHASE -> "AC 1ф (220 В)"
+                VoltageType.AC_3PHASE -> "AC 3ф (380 В)"
+                VoltageType.DC -> "DC"
+            },
+            onValueChange = {},
+            readOnly = true,
+            enabled = true,
+            singleLine = true,
+            label = { Text(label) },
+            supportingText = { Text("DC пока недоступен") },
+            trailingIcon = {
+                if (locked) Icon(Icons.Rounded.Lock, contentDescription = null)
+                else ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+            },
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.menuAnchor().fillMaxWidth()
+        )
+
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text("AC 1ф (220 В)") },
+                onClick = { expanded = false; onValueChange(VoltageType.AC_1PHASE) }
+            )
+            DropdownMenuItem(
+                text = { Text("AC 3ф (380 В)") },
+                onClick = { expanded = false; onValueChange(VoltageType.AC_3PHASE) }
+            )
+            DropdownMenuItem(enabled = false, text = { Text("DC — скоро") }, onClick = {})
+        }
+    }
+}
+
+@Composable
+private fun YesNoDropdownField(
+    label: String,
+    value: Boolean,
+    locked: Boolean,
+    onLockedClick: () -> Unit,
+    onValueChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    EnumDropdownField(
+        label = label,
+        value = value,
+        values = listOf(true, false),
+        valueLabel = { if (it) "Да" else "Нет" },
+        locked = locked,
+        onLockedClick = onLockedClick,
+        onValueChange = onValueChange,
+        modifier = modifier
+    )
+}
+
+@Composable
+private fun LockedDecimalField(
     label: String,
     value: String,
     locked: Boolean,
-    hint: String? = null,
-    onClick: (() -> Unit)?,
-    modifier: Modifier = Modifier
+    hint: String?,
+    error: String?,
+    onLockedClick: () -> Unit,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier,
+    bringIntoViewRequester: BringIntoViewRequester,
+    scope: CoroutineScope
 ) {
-    // ✅ ВАЖНО: enabled=true, иначе не поймаешь намерение в FREE
-    val clickable = onClick != null
     val m = modifier
         .fillMaxWidth()
-        .heightIn(min = 52.dp)
-        .let { base -> if (clickable) base.clickable { onClick?.invoke() } else base }
+        .heightIn(min = 56.dp)
+        .let { base -> if (locked) base.clickable { onLockedClick() } else base }
 
     OutlinedTextField(
         value = value,
-        onValueChange = {},
+        onValueChange = { if (!locked) onValueChange(it) },
         label = { Text(label) },
-        readOnly = true,
         enabled = true,
+        readOnly = locked,
         singleLine = true,
-        supportingText = { if (hint != null) Text(hint) },
+        isError = (error != null && !locked),
+        supportingText = {
+            when {
+                locked && hint != null -> Text(hint)
+                !locked && error != null -> Text(error)
+                hint != null -> Text(hint)
+            }
+        },
         trailingIcon = { if (locked) Icon(Icons.Rounded.Lock, contentDescription = null) },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
         shape = RoundedCornerShape(12.dp),
-        modifier = m
+        modifier = m.onFocusChanged {
+            if (it.isFocused) scope.launch {
+                delay(200)
+                bringIntoViewRequester.bringIntoView()
+            }
+        }
     )
 }
 
@@ -700,9 +766,6 @@ private fun validateRatio(input: String): String? {
     return null
 }
 
-/**
- * Хелпер, чтобы получить PaywallBus через Hilt без ручного DI в composable.
- */
 @HiltViewModel
 class AddRoomSheetPaywallHolder @Inject constructor(
     val paywallBus: PaywallBus

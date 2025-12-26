@@ -8,6 +8,7 @@ import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.data.repository.PreferencesRepository
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.model.Device
+import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.VoltageType
 import javax.inject.Inject
@@ -15,7 +16,7 @@ import javax.inject.Inject
 /**
  * Обновляет поля экземпляра устройства.
  * FREE: имя + мощность.
- * PRO: дополнительно powerFactor / demandRatio / voltage (value+type).
+ * PRO: дополнительно deviceType / powerFactor / demandRatio / voltageType (+value если нужно) / flags.
  *
  * После сохранения вызываем пересчёт (учитываем текущий режим 1/3 фазы).
  */
@@ -30,10 +31,16 @@ class UpdateDeviceFieldsUseCase @Inject constructor(
         deviceId: Long,
         newName: String,
         newPowerW: Int,
+
+        // ✅ PRO extras (в FREE передаём null)
+        newDeviceType: DeviceType? = null,
         newPowerFactor: Double? = null,
         newDemandRatio: Double? = null,
         newVoltageValue: Int? = null,
-        newVoltageType: VoltageType? = null
+        newVoltageType: VoltageType? = null,
+        newHasMotor: Boolean? = null,
+        newRequiresDedicatedCircuit: Boolean? = null,
+        newRequiresSocketConnection: Boolean? = null
     ) = withContext(io) {
 
         val name = newName.trim()
@@ -49,7 +56,7 @@ class UpdateDeviceFieldsUseCase @Inject constructor(
             require(it in 0.1..1.0) { "Коэфф. спроса должен быть в диапазоне 0.1 — 1.0" }
         }
 
-        // Напряжение у нас только 220/380 через пресеты, но оставим базовую защиту.
+        // Напряжение: DC не поддерживается
         newVoltageValue?.let {
             require(it in 1..1000) { "Напряжение должно быть в диапазоне 1 — 1000 В" }
         }
@@ -72,9 +79,15 @@ class UpdateDeviceFieldsUseCase @Inject constructor(
         val updated = current.copy(
             name = name,
             power = newPowerW,
+
+            deviceType = newDeviceType ?: current.deviceType,
             powerFactor = newPowerFactor ?: current.powerFactor,
             demandRatio = newDemandRatio ?: current.demandRatio,
-            voltage = updatedVoltage
+            voltage = updatedVoltage,
+
+            hasMotor = newHasMotor ?: current.hasMotor,
+            requiresDedicatedCircuit = newRequiresDedicatedCircuit ?: current.requiresDedicatedCircuit,
+            requiresSocketConnection = newRequiresSocketConnection ?: current.requiresSocketConnection
         )
 
         deviceRepository.updateDevice(updated)

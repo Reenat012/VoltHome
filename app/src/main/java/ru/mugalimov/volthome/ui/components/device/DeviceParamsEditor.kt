@@ -19,23 +19,17 @@ import ru.mugalimov.volthome.core.validation.InputConstraints
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.VoltageType
 
-/**
- * Единый UI-редактор параметров устройства.
- *
- * FREE: имя + мощность.
- * PRO: всё остальное (PF/DR/Voltage/DeviceType/flags).
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DeviceParamsEditor(
-    // базовые (FREE)
+    // FREE
     name: String,
     onNameChange: (String) -> Unit,
     powerText: String,
     onPowerTextChange: (String) -> Unit,
     powerError: String?,
 
-    // advanced (PRO)
+    // PRO
     deviceType: DeviceType,
     onDeviceTypeChange: (DeviceType) -> Unit,
 
@@ -61,7 +55,7 @@ fun DeviceParamsEditor(
     isPro: Boolean,
     onLockedClick: () -> Unit,
 
-    // UX helpers (как у тебя в AddRoomSheet)
+    // UX helpers (как у тебя)
     bringIntoViewRequester: androidx.compose.foundation.relocation.BringIntoViewRequester? = null,
     scope: CoroutineScope? = null,
 ) {
@@ -69,10 +63,9 @@ fun DeviceParamsEditor(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // 1) Название (FREE)
         OutlinedTextField(
             value = name,
-            onValueChange = onNameChange,
+            onValueChange = { onNameChange(it.take(80)) },
             label = { Text("Название") },
             singleLine = true,
             shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
@@ -82,10 +75,9 @@ fun DeviceParamsEditor(
                 .maybeBringIntoView(bringIntoViewRequester, scope)
         )
 
-        // 2) Ряд: Мощность (FREE) | Тип устройства (PRO dropdown)
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             OutlinedTextField(
                 value = powerText,
@@ -97,8 +89,7 @@ fun DeviceParamsEditor(
                 isError = powerError != null,
                 supportingText = {
                     Text(
-                        powerError
-                            ?: "Допустимо от ${InputConstraints.MIN_POWER_W} до ${InputConstraints.MAX_POWER_W} Вт"
+                        powerError ?: "Допустимо от ${InputConstraints.MIN_POWER_W} до ${InputConstraints.MAX_POWER_W} Вт"
                     )
                 },
                 shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
@@ -114,23 +105,21 @@ fun DeviceParamsEditor(
                 values = DeviceType.values().toList(),
                 valueLabel = { it.name },
                 locked = !isPro,
-                hint = null,
                 onLockedClick = onLockedClick,
                 onValueChange = onDeviceTypeChange,
                 modifier = Modifier.weight(1f)
             )
         }
 
-        // 3) Ряд: PF | Кс (PRO — но UI такой же, просто блокируем)
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            LockedTextField(
+            LockedDecimalField(
                 label = "Коэфф. мощности (PF)",
                 value = powerFactorText,
-                hint = "Влияет на расчёт тока",
                 locked = !isPro,
+                hint = "Влияет на расчёт тока",
                 error = powerFactorError,
                 onLockedClick = onLockedClick,
                 onValueChange = onPowerFactorTextChange,
@@ -139,11 +128,11 @@ fun DeviceParamsEditor(
                 scope = scope
             )
 
-            LockedTextField(
+            LockedDecimalField(
                 label = "Коэфф. спроса",
                 value = demandRatioText,
-                hint = "Учитывает реальную нагрузку",
                 locked = !isPro,
+                hint = "Учитывает реальную нагрузку",
                 error = demandRatioError,
                 onLockedClick = onLockedClick,
                 onValueChange = onDemandRatioTextChange,
@@ -153,42 +142,29 @@ fun DeviceParamsEditor(
             )
         }
 
-        // 4) Ряд: Напряжение (PRO dropdown по VoltageType)
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            EnumDropdownField(
+            VoltageTypeDropdownField(
                 label = "Напряжение",
                 value = voltageType,
-                values = VoltageType.values().toList(),
-                valueLabel = { vt ->
-                    when (vt) {
-                        VoltageType.AC_1PHASE -> "AC 1ф"
-                        VoltageType.AC_3PHASE -> "AC 3ф"
-                        VoltageType.DC -> "DC"
-                    }
-                },
                 locked = !isPro,
-                hint = "Влияет на ток и фазность",
                 onLockedClick = onLockedClick,
                 onValueChange = onVoltageTypeChange,
                 modifier = Modifier.weight(1f)
             )
-
             Spacer(Modifier.weight(1f))
         }
 
-        // 5) Остальные флаги (PRO dropdown Да/Нет)
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             YesNoDropdownField(
                 label = "Есть двигатель",
                 value = hasMotor,
                 locked = !isPro,
-                hint = null,
                 onLockedClick = onLockedClick,
                 onValueChange = onHasMotorChange,
                 modifier = Modifier.weight(1f)
@@ -197,7 +173,6 @@ fun DeviceParamsEditor(
                 label = "Выделенная линия",
                 value = requiresDedicatedCircuit,
                 locked = !isPro,
-                hint = null,
                 onLockedClick = onLockedClick,
                 onValueChange = onRequiresDedicatedCircuitChange,
                 modifier = Modifier.weight(1f)
@@ -206,13 +181,12 @@ fun DeviceParamsEditor(
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             YesNoDropdownField(
                 label = "Подключение розеткой",
                 value = requiresSocketConnection,
                 locked = !isPro,
-                hint = null,
                 onLockedClick = onLockedClick,
                 onValueChange = onRequiresSocketConnectionChange,
                 modifier = Modifier.weight(1f)
@@ -222,7 +196,7 @@ fun DeviceParamsEditor(
     }
 }
 
-/* ----------------- building blocks ----------------- */
+/* -------------------- building blocks -------------------- */
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -232,20 +206,19 @@ private fun <T> EnumDropdownField(
     values: List<T>,
     valueLabel: (T) -> String,
     locked: Boolean,
-    hint: String?,
     onLockedClick: () -> Unit,
     onValueChange: (T) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
 
-    val click = {
+    val open = {
         if (locked) onLockedClick() else expanded = true
     }
 
     ExposedDropdownMenuBox(
         expanded = expanded,
-        onExpandedChange = { click() },
+        onExpandedChange = { open() },
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = 56.dp)
@@ -255,8 +228,8 @@ private fun <T> EnumDropdownField(
             onValueChange = {},
             readOnly = true,
             enabled = true,
+            singleLine = true,
             label = { Text(label) },
-            supportingText = { if (hint != null) Text(hint) },
             trailingIcon = {
                 if (locked) Icon(Icons.Rounded.Lock, contentDescription = null)
                 else ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
@@ -284,12 +257,77 @@ private fun <T> EnumDropdownField(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun VoltageTypeDropdownField(
+    label: String,
+    value: VoltageType,
+    locked: Boolean,
+    onLockedClick: () -> Unit,
+    onValueChange: (VoltageType) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    val open = {
+        if (locked) onLockedClick() else expanded = true
+    }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { open() },
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+    ) {
+        OutlinedTextField(
+            value = when (value) {
+                VoltageType.AC_1PHASE -> "AC 1ф"
+                VoltageType.AC_3PHASE -> "AC 3ф"
+                VoltageType.DC -> "DC"
+            },
+            onValueChange = {},
+            readOnly = true,
+            enabled = true,
+            singleLine = true,
+            label = { Text(label) },
+            supportingText = { Text("DC пока недоступен") },
+            trailingIcon = {
+                if (locked) Icon(Icons.Rounded.Lock, contentDescription = null)
+                else ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+            },
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth()
+        )
+
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            DropdownMenuItem(
+                text = { Text("AC 1ф") },
+                onClick = { expanded = false; onValueChange(VoltageType.AC_1PHASE) }
+            )
+            DropdownMenuItem(
+                text = { Text("AC 3ф") },
+                onClick = { expanded = false; onValueChange(VoltageType.AC_3PHASE) }
+            )
+            DropdownMenuItem(
+                enabled = false,
+                text = { Text("DC — скоро") },
+                onClick = {}
+            )
+        }
+    }
+}
+
 @Composable
 private fun YesNoDropdownField(
     label: String,
     value: Boolean,
     locked: Boolean,
-    hint: String?,
     onLockedClick: () -> Unit,
     onValueChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
@@ -300,7 +338,6 @@ private fun YesNoDropdownField(
         values = listOf(true, false),
         valueLabel = { if (it) "Да" else "Нет" },
         locked = locked,
-        hint = hint,
         onLockedClick = onLockedClick,
         onValueChange = onValueChange,
         modifier = modifier
@@ -308,32 +345,30 @@ private fun YesNoDropdownField(
 }
 
 @Composable
-private fun LockedTextField(
+private fun LockedDecimalField(
     label: String,
     value: String,
-    hint: String?,
     locked: Boolean,
+    hint: String?,
     error: String?,
     onLockedClick: () -> Unit,
     onValueChange: (String) -> Unit,
-    modifier: Modifier = Modifier,
-    bringIntoViewRequester: androidx.compose.foundation.relocation.BringIntoViewRequester? = null,
-    scope: CoroutineScope? = null,
+    modifier: Modifier,
+    bringIntoViewRequester: androidx.compose.foundation.relocation.BringIntoViewRequester?,
+    scope: CoroutineScope?
 ) {
     val m = modifier
         .fillMaxWidth()
         .heightIn(min = 56.dp)
-        .let { base ->
-            if (locked) base.clickable { onLockedClick() } else base
-        }
+        .let { base -> if (locked) base.clickable { onLockedClick() } else base }
 
     OutlinedTextField(
         value = value,
         onValueChange = { if (!locked) onValueChange(it) },
         label = { Text(label) },
-        singleLine = true,
         enabled = true,
         readOnly = locked,
+        singleLine = true,
         isError = error != null,
         supportingText = {
             when {
