@@ -55,6 +55,7 @@ fun DevicePickerSheet(
 
     val isPro = LocalUserPlan.current.isPro
 
+    // ✅ paywallBus.request — только здесь (создание адаптера)
     val editorAdapter = remember(isPro) {
         InMemoryDeviceParamsAdapter<String>(
             isPro = isPro,
@@ -102,7 +103,10 @@ fun DevicePickerSheet(
                 )
             },
             predicate = { e ->
-                e.nameError != null || e.powerError != null || e.powerFactorError != null || e.demandRatioError != null
+                e.nameError != null ||
+                        e.powerError != null ||
+                        e.powerFactorError != null ||
+                        e.demandRatioError != null
             }
         )
     }
@@ -111,9 +115,7 @@ fun DevicePickerSheet(
 
     val filtered = remember(search, defaultDevices) {
         val q = search.trim().lowercase()
-        if (q.isEmpty()) defaultDevices else defaultDevices.filter {
-            it.name.lowercase().contains(q)
-        }
+        if (q.isEmpty()) defaultDevices else defaultDevices.filter { it.name.lowercase().contains(q) }
     }
 
     ModalBottomSheet(
@@ -207,209 +209,17 @@ fun DevicePickerSheet(
                         )
                     )
 
-                    Card {
-                        Column(Modifier.padding(12.dp)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(def.name)
-                                    Text("${def.power} Вт")
-                                }
-
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    IconButton(onClick = {
-                                        qty[def.id] = (count - 1).coerceAtLeast(0)
-                                    }) {
-                                        Icon(
-                                            Icons.Rounded.Remove,
-                                            contentDescription = "Уменьшить"
-                                        )
-                                    }
-
-                                    Box(
-                                        Modifier.width(28.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(text = count.toString(), textAlign = TextAlign.Center)
-                                    }
-
-                                    IconButton(onClick = {
-                                        qty[def.id] = (count + 1).coerceAtMost(99)
-                                    }) { Icon(Icons.Rounded.Add, contentDescription = "Увеличить") }
-
-                                    IconButton(onClick = { st.onExpandedChange(!st.isExpanded) }) {
-                                        Icon(
-                                            if (st.isExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                                            contentDescription = null
-                                        )
-                                    }
-                                }
-                            }
-
-                            AnimatedVisibility(st.isExpanded) {
-                                Column {
-                                    Spacer(Modifier.height(10.dp))
-
-                                    OutlinedTextField(
-                                        value = st.draft.name,
-                                        onValueChange = st.onNameChange,
-                                        label = { Text("Название") },
-                                        singleLine = true,
-                                        isError = st.errors.nameError != null,
-                                        supportingText = {
-                                            st.errors.nameError?.let { Text(it) }
-                                        },
-                                        shape = RoundedCornerShape(12.dp),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .heightIn(min = 56.dp)
-                                            .onFocusChanged {
-                                                if (it.isFocused) scope.launch {
-                                                    delay(150); bringIntoViewRequester.bringIntoView()
-                                                }
-                                            }
-                                    )
-
-                                    Spacer(Modifier.height(10.dp))
-
-                                    Column(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                            verticalAlignment = Alignment.Top
-                                        ) {
-                                            val error = st.errors.powerError
-
-                                            OutlinedTextField(
-                                                value = st.draft.powerText,
-                                                onValueChange = st.onPowerTextChange,
-                                                label = { Text("Мощность (Вт)") },
-                                                singleLine = true,
-                                                isError = error != null,
-                                                supportingText = { error?.let { Text(it) } },
-                                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                                shape = RoundedCornerShape(12.dp),
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .heightIn(min = 56.dp)
-                                                    .onFocusChanged {
-                                                        if (it.isFocused) scope.launch {
-                                                            delay(150); bringIntoViewRequester.bringIntoView()
-                                                        }
-                                                    }
-                                            )
-
-                                            EnumDropdownField(
-                                                label = "Тип устройства",
-                                                value = st.draft.deviceType,
-                                                values = DeviceType.values().toList(),
-                                                valueLabel = { it.name },
-                                                locked = !isPro,
-                                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
-                                                onValueChange = st.onDeviceTypeChange,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                        }
-
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                        ) {
-                                            val pfText = st.draft.powerFactorText
-                                            val drText = st.draft.demandRatioText
-
-                                            LockedDecimalField(
-                                                label = "Коэфф. мощности (PF)",
-                                                value = pfText,
-                                                locked = !isPro,
-                                                hint = "Влияет на расчёт тока",
-                                                error = st.errors.powerFactorError,
-                                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
-                                                onValueChange = st.onPowerFactorTextChange,
-                                                modifier = Modifier.weight(1f),
-                                                bringIntoViewRequester = bringIntoViewRequester,
-                                                scope = scope
-                                            )
-
-                                            LockedDecimalField(
-                                                label = "Коэфф. спроса",
-                                                value = drText,
-                                                locked = !isPro,
-                                                hint = "Учитывает реальную нагрузку",
-                                                error = st.errors.demandRatioError,
-                                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
-                                                onValueChange = st.onDemandRatioTextChange,
-                                                modifier = Modifier.weight(1f),
-                                                bringIntoViewRequester = bringIntoViewRequester,
-                                                scope = scope
-                                            )
-                                        }
-
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                        ) {
-                                            VoltageTypeDropdownField(
-                                                label = "Напряжение",
-                                                value = st.draft.voltageType,
-                                                locked = !isPro,
-                                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
-                                                onValueChange = st.onVoltageTypeChange,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            Spacer(Modifier.weight(1f))
-                                        }
-
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                        ) {
-                                            YesNoDropdownField(
-                                                label = "Есть двигатель",
-                                                value = st.draft.hasMotor,
-                                                locked = !isPro,
-                                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
-                                                onValueChange = st.onHasMotorChange,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            YesNoDropdownField(
-                                                label = "Выделенная линия",
-                                                value = st.draft.requiresDedicatedCircuit,
-                                                locked = !isPro,
-                                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
-                                                onValueChange = st.onRequiresDedicatedCircuitChange,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                        }
-
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                        ) {
-                                            YesNoDropdownField(
-                                                label = "Подключение розеткой",
-                                                value = st.draft.requiresSocketConnection,
-                                                locked = !isPro,
-                                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
-                                                onValueChange = st.onRequiresSocketConnectionChange,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            Spacer(Modifier.weight(1f))
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    DevicePickerDeviceCard(
+                        def = def,
+                        count = count,
+                        onDec = { qty[def.id] = (count - 1).coerceAtLeast(0) },
+                        onInc = { qty[def.id] = (count + 1).coerceAtMost(99) },
+                        st = st,
+                        isPro = isPro,
+                        onLockedClick = editorAdapter::onLockedClick,
+                        bringIntoViewRequester = bringIntoViewRequester,
+                        scope = scope
+                    )
                 }
             }
 
@@ -439,6 +249,217 @@ fun DevicePickerSheet(
             }
 
             Spacer(Modifier.height(12.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DevicePickerDeviceCard(
+    def: DefaultDevice,
+    count: Int,
+    onDec: () -> Unit,
+    onInc: () -> Unit,
+    st: ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsEditorState<String>,
+    isPro: Boolean,
+    onLockedClick: () -> Unit,
+    bringIntoViewRequester: BringIntoViewRequester,
+    scope: CoroutineScope
+) {
+    Card {
+        Column(Modifier.padding(12.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(def.name)
+                    Text("${def.power} Вт")
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    IconButton(onClick = onDec) {
+                        Icon(Icons.Rounded.Remove, contentDescription = "Уменьшить")
+                    }
+
+                    Box(
+                        Modifier.width(28.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(text = count.toString(), textAlign = TextAlign.Center)
+                    }
+
+                    IconButton(onClick = onInc) {
+                        Icon(Icons.Rounded.Add, contentDescription = "Увеличить")
+                    }
+
+                    IconButton(onClick = { st.onExpandedChange(!st.isExpanded) }) {
+                        Icon(
+                            if (st.isExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                            contentDescription = null
+                        )
+                    }
+                }
+            }
+
+            AnimatedVisibility(st.isExpanded) {
+                Column {
+                    Spacer(Modifier.height(10.dp))
+
+                    OutlinedTextField(
+                        value = st.draft.name,
+                        onValueChange = st.onNameChange,
+                        label = { Text("Название") },
+                        singleLine = true,
+                        isError = st.errors.nameError != null,
+                        supportingText = { st.errors.nameError?.let { Text(it) } },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 56.dp)
+                            .onFocusChanged {
+                                if (it.isFocused) scope.launch {
+                                    delay(150); bringIntoViewRequester.bringIntoView()
+                                }
+                            }
+                    )
+
+                    Spacer(Modifier.height(10.dp))
+
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            val error = st.errors.powerError
+
+                            OutlinedTextField(
+                                value = st.draft.powerText,
+                                onValueChange = st.onPowerTextChange,
+                                label = { Text("Мощность (Вт)") },
+                                singleLine = true,
+                                isError = error != null,
+                                supportingText = { error?.let { Text(it) } },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 56.dp)
+                                    .onFocusChanged {
+                                        if (it.isFocused) scope.launch {
+                                            delay(150); bringIntoViewRequester.bringIntoView()
+                                        }
+                                    }
+                            )
+
+                            EnumDropdownField(
+                                label = "Тип устройства",
+                                value = st.draft.deviceType,
+                                values = DeviceType.values().toList(),
+                                valueLabel = { it.name },
+                                locked = !isPro,
+                                onLockedClick = onLockedClick,
+                                onValueChange = st.onDeviceTypeChange,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            val pfText = st.draft.powerFactorText
+                            val drText = st.draft.demandRatioText
+
+                            LockedDecimalField(
+                                label = "Коэфф. мощности (PF)",
+                                value = pfText,
+                                locked = !isPro,
+                                hint = "Влияет на расчёт тока",
+                                error = st.errors.powerFactorError,
+                                onLockedClick = onLockedClick,
+                                onValueChange = st.onPowerFactorTextChange,
+                                modifier = Modifier.weight(1f),
+                                bringIntoViewRequester = bringIntoViewRequester,
+                                scope = scope
+                            )
+
+                            LockedDecimalField(
+                                label = "Коэфф. спроса",
+                                value = drText,
+                                locked = !isPro,
+                                hint = "Учитывает реальную нагрузку",
+                                error = st.errors.demandRatioError,
+                                onLockedClick = onLockedClick,
+                                onValueChange = st.onDemandRatioTextChange,
+                                modifier = Modifier.weight(1f),
+                                bringIntoViewRequester = bringIntoViewRequester,
+                                scope = scope
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            VoltageTypeDropdownField(
+                                label = "Напряжение",
+                                value = st.draft.voltageType,
+                                locked = !isPro,
+                                onLockedClick = onLockedClick,
+                                onValueChange = st.onVoltageTypeChange,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(Modifier.weight(1f))
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            YesNoDropdownField(
+                                label = "Есть двигатель",
+                                value = st.draft.hasMotor,
+                                locked = !isPro,
+                                onLockedClick = onLockedClick,
+                                onValueChange = st.onHasMotorChange,
+                                modifier = Modifier.weight(1f)
+                            )
+                            YesNoDropdownField(
+                                label = "Выделенная линия",
+                                value = st.draft.requiresDedicatedCircuit,
+                                locked = !isPro,
+                                onLockedClick = onLockedClick,
+                                onValueChange = st.onRequiresDedicatedCircuitChange,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            YesNoDropdownField(
+                                label = "Подключение розеткой",
+                                value = st.draft.requiresSocketConnection,
+                                locked = !isPro,
+                                onLockedClick = onLockedClick,
+                                onValueChange = st.onRequiresSocketConnectionChange,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
         }
     }
 }

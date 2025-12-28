@@ -232,7 +232,7 @@ fun AddRoomSheet(
                         scope = scope,
 
                         isPro = isPro,
-                        paywallBus = paywallBus
+                        onLockedClick = editorAdapter::onLockedClick
                     )
                 }
             }
@@ -291,7 +291,7 @@ private fun DeviceRowEditable(
     scope: CoroutineScope,
 
     isPro: Boolean,
-    paywallBus: PaywallBus
+    onLockedClick: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -412,7 +412,7 @@ private fun DeviceRowEditable(
                                 values = DeviceType.values().toList(),
                                 valueLabel = { it.name },
                                 locked = !isPro,
-                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
+                                onLockedClick = onLockedClick,
                                 onValueChange = st.onDeviceTypeChange,
                                 modifier = Modifier.weight(1f)
                             )
@@ -432,7 +432,7 @@ private fun DeviceRowEditable(
                                 locked = !isPro,
                                 hint = "Влияет на расчёт тока",
                                 error = st.errors.powerFactorError,
-                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
+                                onLockedClick = onLockedClick,
                                 onValueChange = st.onPowerFactorTextChange,
                                 modifier = Modifier.weight(1f),
                                 bringIntoViewRequester = bringIntoViewRequester,
@@ -445,7 +445,7 @@ private fun DeviceRowEditable(
                                 locked = !isPro,
                                 hint = "Учитывает реальную нагрузку",
                                 error = st.errors.demandRatioError,
-                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
+                                onLockedClick = onLockedClick,
                                 onValueChange = st.onDemandRatioTextChange,
                                 modifier = Modifier.weight(1f),
                                 bringIntoViewRequester = bringIntoViewRequester,
@@ -462,7 +462,7 @@ private fun DeviceRowEditable(
                                 label = "Напряжение",
                                 value = st.draft.voltageType,
                                 locked = !isPro,
-                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
+                                onLockedClick = onLockedClick,
                                 onValueChange = st.onVoltageTypeChange,
                                 modifier = Modifier.weight(1f)
                             )
@@ -478,7 +478,7 @@ private fun DeviceRowEditable(
                                 label = "Есть двигатель",
                                 value = st.draft.hasMotor,
                                 locked = !isPro,
-                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
+                                onLockedClick = onLockedClick,
                                 onValueChange = st.onHasMotorChange,
                                 modifier = Modifier.weight(1f)
                             )
@@ -486,7 +486,7 @@ private fun DeviceRowEditable(
                                 label = "Выделенная линия",
                                 value = st.draft.requiresDedicatedCircuit,
                                 locked = !isPro,
-                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
+                                onLockedClick = onLockedClick,
                                 onValueChange = st.onRequiresDedicatedCircuitChange,
                                 modifier = Modifier.weight(1f)
                             )
@@ -501,7 +501,7 @@ private fun DeviceRowEditable(
                                 label = "Подключение розеткой",
                                 value = st.draft.requiresSocketConnection,
                                 locked = !isPro,
-                                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
+                                onLockedClick = onLockedClick,
                                 onValueChange = st.onRequiresSocketConnectionChange,
                                 modifier = Modifier.weight(1f)
                             )

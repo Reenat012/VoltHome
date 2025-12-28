@@ -97,39 +97,38 @@ class DeviceEditViewModel @Inject constructor(
         _ui.value = recompute(_ui.value.copy(powerText = value))
     }
 
+    /**
+     * Anti-silence:
+     * VM не должна "молча" игнорировать интенты.
+     * Гейтинг PRO делается в UI через gate/adapter (locked tap -> adapter.onLockedClick()).
+     */
     fun setDeviceType(value: DeviceType) {
-        if (!isPro) return
         _ui.value = recompute(_ui.value.copy(deviceType = value))
     }
 
     fun setVoltageType(value: VoltageType) {
-        if (!isPro) return
+        // не PRO, а фича реально выключена
         if (value == VoltageType.DC) return
         _ui.value = recompute(_ui.value.copy(voltageType = value))
     }
 
     fun setHasMotor(value: Boolean) {
-        if (!isPro) return
         _ui.value = recompute(_ui.value.copy(hasMotor = value))
     }
 
     fun setRequiresDedicatedCircuit(value: Boolean) {
-        if (!isPro) return
         _ui.value = recompute(_ui.value.copy(requiresDedicatedCircuit = value))
     }
 
     fun setRequiresSocketConnection(value: Boolean) {
-        if (!isPro) return
         _ui.value = recompute(_ui.value.copy(requiresSocketConnection = value))
     }
 
     fun setPowerFactorText(value: String) {
-        if (!isPro) return
         _ui.value = recompute(_ui.value.copy(powerFactorText = value))
     }
 
     fun setDemandRatioText(value: String) {
-        if (!isPro) return
         _ui.value = recompute(_ui.value.copy(demandRatioText = value))
     }
 
