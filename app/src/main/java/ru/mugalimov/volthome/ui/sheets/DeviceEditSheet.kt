@@ -16,6 +16,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.domain.model.ProFeature
 import ru.mugalimov.volthome.ui.components.device.DeviceParamsEditor
+import ru.mugalimov.volthome.ui.components.device.DeviceParamsEditorGate
+import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsDraft
+import ru.mugalimov.volthome.ui.components.device.adapter.InMemoryDeviceParamsAdapter
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
 import ru.mugalimov.volthome.ui.viewmodel.DeviceEditViewModel
@@ -35,6 +38,14 @@ fun DeviceEditSheet(
     val scope = rememberCoroutineScope()
 
     val isPro = LocalUserPlan.current.isPro
+
+    // ✅ Коммит 5: paywall теперь живёт в adapter.onLockedClick()
+    val adapter = remember(isPro) {
+        InMemoryDeviceParamsAdapter<Long>(
+            isPro = isPro,
+            paywall = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) }
+        )
+    }
 
     LaunchedEffect(deviceId) { vm.load(deviceId) }
     LaunchedEffect(isPro) { vm.setPlan(isPro) }
@@ -85,9 +96,16 @@ fun DeviceEditSheet(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             DeviceParamsEditor(
+                // ✅ Коммит 5: locked click только через adapter.onLockedClick()
+                gate = DeviceParamsEditorGate(
+                    locked = !isPro,
+                    onLockedClick = adapter::onLockedClick
+                ),
+
                 name = ui.name,
                 onNameChange = vm::setName,
                 nameError = ui.nameError,
+
                 powerText = ui.powerText,
                 onPowerTextChange = vm::setPowerText,
                 powerError = ui.powerError,
@@ -112,9 +130,6 @@ fun DeviceEditSheet(
                 onRequiresDedicatedCircuitChange = vm::setRequiresDedicatedCircuit,
                 requiresSocketConnection = ui.requiresSocketConnection,
                 onRequiresSocketConnectionChange = vm::setRequiresSocketConnection,
-
-                isPro = isPro,
-                onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
 
                 bringIntoViewRequester = bringIntoViewRequester,
                 scope = scope
