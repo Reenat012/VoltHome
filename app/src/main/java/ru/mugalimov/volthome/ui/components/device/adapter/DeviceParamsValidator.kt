@@ -1,32 +1,84 @@
 package ru.mugalimov.volthome.ui.components.device.adapter
 
-import ru.mugalimov.volthome.core.validation.PowerValidator
+import ru.mugalimov.volthome.core.validation.InputConstraints
+import ru.mugalimov.volthome.ui.viewmodel.DeviceEditViewModel
 
 object DeviceParamsValidator {
 
+    const val NAME_MAX_LEN = 80
+    private const val MIN_PF = 0.1
+    private const val MAX_PF = 1.0
+    private const val MIN_DR = 0.1
+    private const val MAX_DR = 1.0
+
+    data class ValidationResult(
+        val normalized: DeviceParamsDraft,
+        val errors: DeviceParamsErrors
+    )
+
+    /**
+     * ЕДИНСТВЕННАЯ точка нормализации.
+     * raw -> normalized + errors(на normalized)
+     */
+    fun validated(raw: DeviceParamsDraft): ValidationResult {
+        val normalized = raw.copy(
+            name = normalizeName(raw.name),
+            powerText = normalizePowerText(raw.powerText),
+            powerFactorText = normalizeDecimal(raw.powerFactorText),
+            demandRatioText = normalizeDecimal(raw.demandRatioText)
+        )
+        val errors = validate(normalized)
+        return ValidationResult(normalized, errors)
+    }
+
+    /**
+     * validate() больше НЕ нормализует.
+     * Ожидает уже нормализованный draft.
+     */
     fun validate(draft: DeviceParamsDraft): DeviceParamsErrors {
+        val nameErr = if (draft.name.isBlank()) "Введите имя устройства" else null
+
         val powerErr = validatePowerW(draft.powerText)
-        val pfErr = validateRatio01(draft.powerFactorText)
-        val drErr = validateRatio01(draft.demandRatioText)
+        val pfErr = validateRatio(draft.powerFactorText, MIN_PF, MAX_PF)
+        val drErr = validateRatio(draft.demandRatioText, MIN_DR, MAX_DR)
 
         return DeviceParamsErrors(
+            nameError = nameErr,
             powerError = powerErr,
             powerFactorError = pfErr,
             demandRatioError = drErr
         )
     }
 
-    fun normalizeDecimal(text: String): String =
-        text.trim().replace(',', '.')
+    // ✅ утилита, чтобы VM мог валидировать без дублирования сборки Draft
+    fun toDraft(ui: DeviceEditViewModel.UiState): DeviceParamsDraft =
+        DeviceParamsDraft(
+            name = ui.name,
+            powerText = ui.powerText,
+            deviceType = ui.deviceType,
+            powerFactorText = ui.powerFactorText,
+            demandRatioText = ui.demandRatioText,
+            voltageType = ui.voltageType,
+            hasMotor = ui.hasMotor,
+            requiresDedicatedCircuit = ui.requiresDedicatedCircuit,
+            requiresSocketConnection = ui.requiresSocketConnection
+        )
 
-    fun normalizeName(text: String, maxLen: Int = 80): String =
-        text.take(maxLen)
+    fun normalizeDecimal(text: String): String {
+        val raw = text.trim().replace(',', '.')
+        // убираем обычные пробелы + неразрывные + узкие неразрывные
+        return raw.replace(Regex("[\\s\\u00A0\\u202F]"), "")
+    }
+
+    fun normalizeName(text: String, maxLen: Int = NAME_MAX_LEN): String {
+        val normalized = text
+            .trim()
+            .replace(Regex("[\\s\\u00A0\\u202F]+"), " ")
+        return normalized.take(maxLen)
+    }
 
     /**
-     * Делаем так же, как в DeviceEditViewModel.setPowerText():
-     * - ',' -> '.'
-     * - выкидываем пробелы/nbsp/narrow-nbsp
-     * - оставляем только цифры и одну точку
+     * Нормализация мощности: отдельно, вызывается ТОЛЬКО в validated().
      */
     fun normalizePowerText(text: String): String {
         val raw = text.replace(',', '.')
@@ -46,26 +98,41 @@ object DeviceParamsValidator {
         }
     }
 
+    /**
+     * ВАЖНО: тут НЕТ normalizePowerText().
+     * input уже должен быть нормализован.
+     */
     private fun validatePowerW(input: String): String? {
-        val cleaned = normalizePowerText(input)
-        val asInt = cleaned.toDoubleOrNull()?.toInt()
+        val asInt = input.toDoubleOrNull()?.toInt() ?: return "Введите число"
 
-        return when {
-            cleaned.isEmpty() -> "Введите число > 0"
-            asInt == null || asInt <= 0 -> "Введите число > 0"
-            else -> PowerValidator.errorMessage(asInt) // ✅ единая точка правды
+        if (asInt < InputConstraints.MIN_POWER_W) {
+            return "Минимум ${InputConstraints.MIN_POWER_W} Вт"
         }
+        if (asInt > InputConstraints.MAX_POWER_W) {
+            return "Максимум ${InputConstraints.MAX_POWER_W} Вт"
+        }
+        return null
     }
 
     /**
-     * PF и коэффициент спроса: 0.1 — 1.0, как у тебя уже в VM.
+     * ВАЖНО: тут НЕТ normalizeDecimal().
+     * input уже должен быть нормализован.
      */
-    private fun validateRatio01(input: String): String? {
-        val v = normalizeDecimal(input).toDoubleOrNull()
-            ?: return "Введите число"
-        return when {
-            v < 0.1 || v > 1.0 -> "Допустимо 0.1 — 1.0"
-            else -> null
-        }
+    private fun validateRatio(input: String, min: Double, max: Double): String? {
+        val v = input.toDoubleOrNull() ?: return "Введите число"
+        return if (v < min || v > max) "Допустимо $min — $max" else null
+    }
+
+    /**
+     * Валидация с учётом плана:
+     * - на free НЕ возвращаем ошибки по PF/DR
+     * - на pro — возвращаем всё как есть
+     */
+    fun validateForPlan(draft: DeviceParamsDraft, isPro: Boolean): DeviceParamsErrors {
+        val e = validate(draft)
+        return if (isPro) e else e.copy(
+            powerFactorError = null,
+            demandRatioError = null
+        )
     }
 }

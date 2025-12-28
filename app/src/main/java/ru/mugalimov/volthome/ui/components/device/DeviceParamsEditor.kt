@@ -25,6 +25,8 @@ fun DeviceParamsEditor(
     // FREE
     name: String,
     onNameChange: (String) -> Unit,
+    nameError: String? = null,
+
     powerText: String,
     onPowerTextChange: (String) -> Unit,
     powerError: String?,
@@ -55,7 +57,6 @@ fun DeviceParamsEditor(
     isPro: Boolean,
     onLockedClick: () -> Unit,
 
-    // UX helpers (как у тебя)
     bringIntoViewRequester: androidx.compose.foundation.relocation.BringIntoViewRequester? = null,
     scope: CoroutineScope? = null,
 ) {
@@ -65,9 +66,11 @@ fun DeviceParamsEditor(
     ) {
         OutlinedTextField(
             value = name,
-            onValueChange = { onNameChange(it.take(80)) },
+            onValueChange = onNameChange,
             label = { Text("Название") },
             singleLine = true,
+            isError = nameError != null,
+            supportingText = { nameError?.let { Text(it) } },
             shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
             modifier = Modifier
                 .fillMaxWidth()
@@ -88,9 +91,7 @@ fun DeviceParamsEditor(
                 trailingIcon = { Icon(Icons.Rounded.ElectricBolt, contentDescription = null) },
                 isError = powerError != null,
                 supportingText = {
-                    Text(
-                        powerError ?: "Допустимо от ${InputConstraints.MIN_POWER_W} до ${InputConstraints.MAX_POWER_W} Вт"
-                    )
+                    powerError?.let { Text(it) }
                 },
                 shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
                 modifier = Modifier
@@ -369,10 +370,11 @@ private fun LockedDecimalField(
         enabled = true,
         readOnly = locked,
         singleLine = true,
-        isError = error != null,
+        isError = (error != null && !locked),
         supportingText = {
             when {
-                error != null -> Text(error)
+                locked && hint != null -> Text(hint)
+                !locked && error != null -> Text(error)
                 hint != null -> Text(hint)
             }
         },

@@ -103,6 +103,10 @@ fun AddRoomSheet(
                         requiresDedicatedCircuit = def.requiresDedicatedCircuit,
                         requiresSocketConnection = def.requiresSocketConnection
                     )
+                },
+                predicate = { e ->
+                    e.nameError != null || e.powerError != null ||
+                            e.powerFactorError != null || e.demandRatioError != null
                 }
             )
         }
@@ -315,9 +319,22 @@ private fun DeviceRowEditable(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    IconButton(onClick = onDec) { Icon(Icons.Rounded.Remove, contentDescription = "Уменьшить") }
-                    Box(Modifier.width(28.dp), contentAlignment = Alignment.Center) { Text(qty.toString()) }
-                    IconButton(onClick = onInc) { Icon(Icons.Rounded.Add, contentDescription = "Увеличить") }
+                    IconButton(onClick = onDec) {
+                        Icon(
+                            Icons.Rounded.Remove,
+                            contentDescription = "Уменьшить"
+                        )
+                    }
+                    Box(
+                        Modifier.width(28.dp),
+                        contentAlignment = Alignment.Center
+                    ) { Text(qty.toString()) }
+                    IconButton(onClick = onInc) {
+                        Icon(
+                            Icons.Rounded.Add,
+                            contentDescription = "Увеличить"
+                        )
+                    }
                 }
 
                 IconButton(onClick = onToggle) {
@@ -336,6 +353,10 @@ private fun DeviceRowEditable(
                         onValueChange = st.onNameChange,
                         label = { Text("Название") },
                         singleLine = true,
+                        isError = st.errors.nameError != null,
+                        supportingText = {
+                            st.errors.nameError?.let { Text(it) }
+                        },
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -362,16 +383,18 @@ private fun DeviceRowEditable(
 
                             OutlinedTextField(
                                 value = st.draft.powerText,
-                                onValueChange = { raw ->
-                                    val cleaned = DeviceParamsValidator.normalizePowerText(raw)
-                                    st.onPowerTextChange(cleaned)
-                                },
+                                onValueChange = st.onPowerTextChange,
                                 label = { Text("Мощность (Вт)") },
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                trailingIcon = { Icon(Icons.Rounded.ElectricBolt, contentDescription = null) },
+                                trailingIcon = {
+                                    Icon(
+                                        Icons.Rounded.ElectricBolt,
+                                        contentDescription = null
+                                    )
+                                },
                                 isError = error != null,
-                                supportingText = { Text(error ?: "Мощность должна быть в допустимых пределах") },
+                                supportingText = { error?.let { Text(it) } },
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier
                                     .weight(1f)
@@ -408,9 +431,9 @@ private fun DeviceRowEditable(
                                 value = pfText,
                                 locked = !isPro,
                                 hint = "Влияет на расчёт тока",
-                                error = validateRatio(pfText),
+                                error = st.errors.powerFactorError,
                                 onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
-                                onValueChange = { st.onPowerFactorTextChange(it.trim().replace(',', '.')) },
+                                onValueChange = st.onPowerFactorTextChange,
                                 modifier = Modifier.weight(1f),
                                 bringIntoViewRequester = bringIntoViewRequester,
                                 scope = scope
@@ -421,9 +444,9 @@ private fun DeviceRowEditable(
                                 value = drText,
                                 locked = !isPro,
                                 hint = "Учитывает реальную нагрузку",
-                                error = validateRatio(drText),
+                                error = st.errors.demandRatioError,
                                 onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
-                                onValueChange = { st.onDemandRatioTextChange(it.trim().replace(',', '.')) },
+                                onValueChange = st.onDemandRatioTextChange,
                                 modifier = Modifier.weight(1f),
                                 bringIntoViewRequester = bringIntoViewRequester,
                                 scope = scope
@@ -516,30 +539,37 @@ private fun buildRequests(
             requiresSocketConnection = def.requiresSocketConnection
         )
 
-        val draft = editorAdapter.snapshot(key = key, seed = seed)
+        val rawDraft = editorAdapter.peekDraft(key = key, seed = seed)
 
-        val title = draft.name.trim().ifEmpty { def.name }
+        val res = DeviceParamsValidator.validated(rawDraft)
+        val e = DeviceParamsValidator.validateForPlan(res.normalized, isPro)
 
-        val cleaned = DeviceParamsValidator.normalizePowerText(draft.powerText)
-        val powerRaw = cleaned.toDoubleOrNull()?.takeIf { it > 0.0 } ?: def.power.toDouble()
-        val watts = powerRaw.toInt().coerceAtLeast(1)
+        // Решение "валидно/не валидно" — только по errors
+        if (e.nameError != null) continue
+        if (e.powerError != null) continue
+        if (isPro && (e.powerFactorError != null || e.demandRatioError != null)) continue
 
-        val pf = if (isPro) draft.powerFactorText.trim().replace(',', '.').toDoubleOrNull() else null
-        val dr = if (isPro) draft.demandRatioText.trim().replace(',', '.').toDoubleOrNull() else null
+        val n = res.normalized
 
-        val type = if (isPro) draft.deviceType else def.deviceType
+        // Парсим только из normalized (после того как errors == null)
+        val title = n.name
+        val watts = n.powerText.toDouble().toInt()
+        val pf = if (isPro) n.powerFactorText.toDouble() else null
+        val dr = if (isPro) n.demandRatioText.toDouble() else null
+
+        val type = if (isPro) n.deviceType else def.deviceType
 
         val volt = if (isPro) {
-            when (draft.voltageType) {
+            when (n.voltageType) {
                 VoltageType.AC_1PHASE -> Voltage(220, VoltageType.AC_1PHASE)
                 VoltageType.AC_3PHASE -> Voltage(380, VoltageType.AC_3PHASE)
                 VoltageType.DC -> def.voltage
             }
         } else def.voltage
 
-        val hm = if (isPro) draft.hasMotor else def.hasMotor
-        val rd = if (isPro) draft.requiresDedicatedCircuit else def.requiresDedicatedCircuit
-        val rs = if (isPro) draft.requiresSocketConnection else def.requiresSocketConnection
+        val hm = if (isPro) n.hasMotor else def.hasMotor
+        val rd = if (isPro) n.requiresDedicatedCircuit else def.requiresDedicatedCircuit
+        val rs = if (isPro) n.requiresSocketConnection else def.requiresSocketConnection
 
         out += DeviceCreateRequest(
             title = title,
@@ -581,16 +611,19 @@ private fun applyPresetFor(
             addFirstOf(DeviceType.LIGHTING, 1)
             addFirstOf(DeviceType.SOCKET, 1)
         }
+
         RoomType.BATHROOM -> {
             addFirstOf(DeviceType.LIGHTING, 1)
             addFirstOf(DeviceType.SOCKET, 1)
             addFirstOf(DeviceType.HEAVY_DUTY, 1)
         }
+
         RoomType.KITCHEN -> {
             addFirstOf(DeviceType.LIGHTING, 1)
             addFirstOf(DeviceType.SOCKET, 2)
             addFirstOf(DeviceType.HEAVY_DUTY, 1)
         }
+
         RoomType.OUTDOOR -> addFirstOf(DeviceType.SOCKET, 1)
     }
 }
@@ -613,7 +646,9 @@ private fun <T> EnumDropdownField(
     ExposedDropdownMenuBox(
         expanded = expanded,
         onExpandedChange = { open() },
-        modifier = modifier.fillMaxWidth().heightIn(min = 56.dp)
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
     ) {
         OutlinedTextField(
             value = valueLabel(value),
@@ -627,7 +662,9 @@ private fun <T> EnumDropdownField(
                 else ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
             },
             shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.menuAnchor().fillMaxWidth()
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth()
         )
 
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
@@ -657,7 +694,9 @@ private fun VoltageTypeDropdownField(
     ExposedDropdownMenuBox(
         expanded = expanded,
         onExpandedChange = { open() },
-        modifier = modifier.fillMaxWidth().heightIn(min = 56.dp)
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
     ) {
         OutlinedTextField(
             value = when (value) {
@@ -676,7 +715,9 @@ private fun VoltageTypeDropdownField(
                 else ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
             },
             shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.menuAnchor().fillMaxWidth()
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth()
         )
 
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
@@ -757,13 +798,6 @@ private fun LockedDecimalField(
             }
         }
     )
-}
-
-private fun validateRatio(input: String): String? {
-    val v = input.trim().replace(',', '.').toDoubleOrNull()
-    if (v == null) return "Введите число"
-    if (v < 0.1 || v > 1.0) return "Допустимо 0.1 — 1.0"
-    return null
 }
 
 @HiltViewModel

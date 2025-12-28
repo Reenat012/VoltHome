@@ -5,7 +5,7 @@ import androidx.compose.runtime.collectAsState
 import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsDraft
 import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsEditorAdapter
 import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsEditorState
-import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsErrors // ✅ plural
+import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsErrors
 
 class DeviceEditVmAdapter(
     override val isPro: Boolean,
@@ -32,6 +32,7 @@ class DeviceEditVmAdapter(
         )
 
         val errors = DeviceParamsErrors(
+            nameError = ui.nameError,
             powerError = ui.powerError,
             powerFactorError = ui.powerFactorError,
             demandRatioError = ui.demandRatioError
@@ -45,7 +46,9 @@ class DeviceEditVmAdapter(
             isExpanded = true,
             onExpandedChange = { /* no-op */ },
 
-            onNameChange = vm::setName,
+            onNameChange = { raw ->
+                vm.setName(raw)
+            },
             onPowerTextChange = vm::setPowerText,
 
             onDeviceTypeChange = vm::setDeviceType,

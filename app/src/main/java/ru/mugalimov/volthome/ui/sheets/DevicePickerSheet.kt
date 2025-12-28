@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.ui.sheets
 
+import android.annotation.SuppressLint
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -38,6 +39,7 @@ import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
 import javax.inject.Inject
 
+@SuppressLint("UnrememberedMutableState")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DevicePickerSheet(
@@ -68,47 +70,50 @@ fun DevicePickerSheet(
     // ✅ aggregated validation: без локальных кешей ошибок (только adapter)
     val byId = remember(defaultDevices) { defaultDevices.associateBy { it.id } }
 
-    val hasErrorsTop by remember {
-        derivedStateOf {
-            val selectedKeys = qty.filterValues { it > 0 }.keys.map { it.toString() }
+    val hasErrorsTop by derivedStateOf<Boolean> {
+        val selectedKeys = qty.filterValues { it > 0 }.keys.map { it.toString() }
 
-            editorAdapter.hasAnyErrors(
-                keys = selectedKeys,
-                seedForKey = { key ->
-                    val id = key.toLong()
-                    val def = byId[id] ?: return@hasAnyErrors DeviceParamsDraft(
-                        name = "",
-                        powerText = "0",
-                        deviceType = DeviceType.SOCKET,
-                        powerFactorText = "1.00",
-                        demandRatioText = "1.00",
-                        voltageType = VoltageType.AC_1PHASE,
-                        hasMotor = false,
-                        requiresDedicatedCircuit = false,
-                        requiresSocketConnection = true
-                    )
+        editorAdapter.hasAnyErrors(
+            keys = selectedKeys,
+            seedForKey = { key ->
+                val id = key.toLong()
+                val def = byId[id] ?: return@hasAnyErrors DeviceParamsDraft(
+                    name = "",
+                    powerText = "0",
+                    deviceType = DeviceType.SOCKET,
+                    powerFactorText = "1.00",
+                    demandRatioText = "1.00",
+                    voltageType = VoltageType.AC_1PHASE,
+                    hasMotor = false,
+                    requiresDedicatedCircuit = false,
+                    requiresSocketConnection = true
+                )
 
-                    DeviceParamsDraft(
-                        name = def.name,
-                        powerText = def.power.toString(),
-                        deviceType = def.deviceType,
-                        powerFactorText = def.powerFactor.toString(),
-                        demandRatioText = def.demandRatio.toString(),
-                        voltageType = def.voltage.type,
-                        hasMotor = def.hasMotor,
-                        requiresDedicatedCircuit = def.requiresDedicatedCircuit,
-                        requiresSocketConnection = def.requiresSocketConnection
-                    )
-                }
-            )
-        }
+                DeviceParamsDraft(
+                    name = def.name,
+                    powerText = def.power.toString(),
+                    deviceType = def.deviceType,
+                    powerFactorText = def.powerFactor.format(2),
+                    demandRatioText = def.demandRatio.format(2),
+                    voltageType = def.voltage.type,
+                    hasMotor = def.hasMotor,
+                    requiresDedicatedCircuit = def.requiresDedicatedCircuit,
+                    requiresSocketConnection = def.requiresSocketConnection
+                )
+            },
+            predicate = { e ->
+                e.nameError != null || e.powerError != null || e.powerFactorError != null || e.demandRatioError != null
+            }
+        )
     }
 
     val bringIntoViewRequester = remember { BringIntoViewRequester() }
 
     val filtered = remember(search, defaultDevices) {
         val q = search.trim().lowercase()
-        if (q.isEmpty()) defaultDevices else defaultDevices.filter { it.name.lowercase().contains(q) }
+        if (q.isEmpty()) defaultDevices else defaultDevices.filter {
+            it.name.lowercase().contains(q)
+        }
     }
 
     ModalBottomSheet(
@@ -193,8 +198,8 @@ fun DevicePickerSheet(
                             name = def.name,
                             powerText = def.power.toString(),
                             deviceType = def.deviceType,
-                            powerFactorText = def.powerFactor.toString(),
-                            demandRatioText = def.demandRatio.toString(),
+                            powerFactorText = def.powerFactor.format(2),
+                            demandRatioText = def.demandRatio.format(2),
                             voltageType = def.voltage.type,
                             hasMotor = def.hasMotor,
                             requiresDedicatedCircuit = def.requiresDedicatedCircuit,
@@ -220,9 +225,17 @@ fun DevicePickerSheet(
                                 ) {
                                     IconButton(onClick = {
                                         qty[def.id] = (count - 1).coerceAtLeast(0)
-                                    }) { Icon(Icons.Rounded.Remove, contentDescription = "Уменьшить") }
+                                    }) {
+                                        Icon(
+                                            Icons.Rounded.Remove,
+                                            contentDescription = "Уменьшить"
+                                        )
+                                    }
 
-                                    Box(Modifier.width(28.dp), contentAlignment = Alignment.Center) {
+                                    Box(
+                                        Modifier.width(28.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
                                         Text(text = count.toString(), textAlign = TextAlign.Center)
                                     }
 
@@ -248,6 +261,10 @@ fun DevicePickerSheet(
                                         onValueChange = st.onNameChange,
                                         label = { Text("Название") },
                                         singleLine = true,
+                                        isError = st.errors.nameError != null,
+                                        supportingText = {
+                                            st.errors.nameError?.let { Text(it) }
+                                        },
                                         shape = RoundedCornerShape(12.dp),
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -274,16 +291,11 @@ fun DevicePickerSheet(
 
                                             OutlinedTextField(
                                                 value = st.draft.powerText,
-                                                onValueChange = { new ->
-                                                    val cleaned = DeviceParamsValidator.normalizePowerText(new)
-                                                    st.onPowerTextChange(cleaned)
-                                                },
+                                                onValueChange = st.onPowerTextChange,
                                                 label = { Text("Мощность (Вт)") },
                                                 singleLine = true,
                                                 isError = error != null,
-                                                supportingText = {
-                                                    Text(error ?: "Мощность должна быть в допустимых пределах")
-                                                },
+                                                supportingText = { error?.let { Text(it) } },
                                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                                 shape = RoundedCornerShape(12.dp),
                                                 modifier = Modifier
@@ -320,9 +332,9 @@ fun DevicePickerSheet(
                                                 value = pfText,
                                                 locked = !isPro,
                                                 hint = "Влияет на расчёт тока",
-                                                error = validateRatio(pfText),
+                                                error = st.errors.powerFactorError,
                                                 onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
-                                                onValueChange = { st.onPowerFactorTextChange(it.trim().replace(',', '.')) },
+                                                onValueChange = st.onPowerFactorTextChange,
                                                 modifier = Modifier.weight(1f),
                                                 bringIntoViewRequester = bringIntoViewRequester,
                                                 scope = scope
@@ -333,9 +345,9 @@ fun DevicePickerSheet(
                                                 value = drText,
                                                 locked = !isPro,
                                                 hint = "Учитывает реальную нагрузку",
-                                                error = validateRatio(drText),
+                                                error = st.errors.demandRatioError,
                                                 onLockedClick = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
-                                                onValueChange = { st.onDemandRatioTextChange(it.trim().replace(',', '.')) },
+                                                onValueChange = st.onDemandRatioTextChange,
                                                 modifier = Modifier.weight(1f),
                                                 bringIntoViewRequester = bringIntoViewRequester,
                                                 scope = scope
@@ -449,7 +461,9 @@ private fun <T> EnumDropdownField(
     ExposedDropdownMenuBox(
         expanded = expanded,
         onExpandedChange = { open() },
-        modifier = modifier.fillMaxWidth().heightIn(min = 56.dp)
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
     ) {
         OutlinedTextField(
             value = valueLabel(value),
@@ -463,7 +477,9 @@ private fun <T> EnumDropdownField(
                 else ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
             },
             shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.menuAnchor().fillMaxWidth()
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth()
         )
 
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
@@ -493,7 +509,9 @@ private fun VoltageTypeDropdownField(
     ExposedDropdownMenuBox(
         expanded = expanded,
         onExpandedChange = { open() },
-        modifier = modifier.fillMaxWidth().heightIn(min = 56.dp)
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
     ) {
         OutlinedTextField(
             value = when (value) {
@@ -512,7 +530,9 @@ private fun VoltageTypeDropdownField(
                 else ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
             },
             shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.menuAnchor().fillMaxWidth()
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth()
         )
 
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
@@ -621,45 +641,50 @@ private fun buildRequestsForPicker(
     for ((id, count) in qtyMap) {
         if (count <= 0) continue
         val def = byId[id] ?: continue
-
         val key = id.toString()
 
         val seed = DeviceParamsDraft(
             name = def.name,
             powerText = def.power.toString(),
             deviceType = def.deviceType,
-            powerFactorText = def.powerFactor.toString(),
-            demandRatioText = def.demandRatio.toString(),
+            demandRatioText = def.demandRatio.format(2),
+            powerFactorText = def.powerFactor.format(2),
             voltageType = def.voltage.type,
             hasMotor = def.hasMotor,
             requiresDedicatedCircuit = def.requiresDedicatedCircuit,
             requiresSocketConnection = def.requiresSocketConnection
         )
 
-        val draft = editorAdapter.snapshot(key = key, seed = seed)
+        val rawDraft = editorAdapter.peekDraft(key = key, seed = seed)
 
-        val title = draft.name.trim().ifEmpty { def.name }
+        val res = DeviceParamsValidator.validated(rawDraft)
+        val e = DeviceParamsValidator.validateForPlan(res.normalized, isPro)
 
-        val cleaned = DeviceParamsValidator.normalizePowerText(draft.powerText)
-        val raw = cleaned.toDoubleOrNull()?.takeIf { it > 0.0 } ?: def.power.toDouble()
-        val watts = raw.toInt().coerceAtLeast(1)
+        // Решение "валидно/не валидно" — только по errors
+        if (e.nameError != null) continue
+        if (e.powerError != null) continue
+        if (isPro && (e.powerFactorError != null || e.demandRatioError != null)) continue
 
-        val pf = if (isPro) draft.powerFactorText.trim().replace(',', '.').toDoubleOrNull() else null
-        val dr = if (isPro) draft.demandRatioText.trim().replace(',', '.').toDoubleOrNull() else null
+        val n = res.normalized
 
-        val type = if (isPro) draft.deviceType else def.deviceType
+        val title = n.name
+        val watts = n.powerText.toDouble().toInt()
+        val pf = if (isPro) n.powerFactorText.toDouble() else null
+        val dr = if (isPro) n.demandRatioText.toDouble() else null
+
+        val type = if (isPro) n.deviceType else def.deviceType
 
         val volt = if (isPro) {
-            when (draft.voltageType) {
+            when (n.voltageType) {
                 VoltageType.AC_1PHASE -> Voltage(220, VoltageType.AC_1PHASE)
                 VoltageType.AC_3PHASE -> Voltage(380, VoltageType.AC_3PHASE)
                 VoltageType.DC -> def.voltage
             }
         } else def.voltage
 
-        val hm = if (isPro) draft.hasMotor else def.hasMotor
-        val rd = if (isPro) draft.requiresDedicatedCircuit else def.requiresDedicatedCircuit
-        val rs = if (isPro) draft.requiresSocketConnection else def.requiresSocketConnection
+        val hm = if (isPro) n.hasMotor else def.hasMotor
+        val rd = if (isPro) n.requiresDedicatedCircuit else def.requiresDedicatedCircuit
+        val rs = if (isPro) n.requiresSocketConnection else def.requiresSocketConnection
 
         out += DomainDeviceCreateRequest(
             title = title,
@@ -674,12 +699,8 @@ private fun buildRequestsForPicker(
             requiresSocketConnection = rs
         )
     }
+
     return out
 }
 
-private fun validateRatio(input: String): String? {
-    val v = input.trim().replace(',', '.').toDoubleOrNull()
-    if (v == null) return "Введите число"
-    if (v < 0.1 || v > 1.0) return "Допустимо 0.1 — 1.0"
-    return null
-}
+private fun Double.format(digits: Int) = "%.${digits}f".format(this).replace(',', '.')

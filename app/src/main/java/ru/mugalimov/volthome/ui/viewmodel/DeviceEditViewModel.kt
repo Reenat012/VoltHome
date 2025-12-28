@@ -3,16 +3,16 @@ package ru.mugalimov.volthome.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import ru.mugalimov.volthome.core.validation.PowerValidator
 import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.VoltageType
 import ru.mugalimov.volthome.domain.use_case.UpdateDeviceFieldsUseCase
+import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsValidator
+import javax.inject.Inject
 
 @HiltViewModel
 class DeviceEditViewModel @Inject constructor(
@@ -26,9 +26,14 @@ class DeviceEditViewModel @Inject constructor(
         val powerText: String = "",
         val isSaving: Boolean = false,
         val error: String? = null,
-        val powerError: String? = null,
 
-        // ✅ теперь реальные значения (не строки)
+        // validation (единый источник)
+        val nameError: String? = null,
+        val powerError: String? = null,
+        val powerFactorError: String? = null,
+        val demandRatioError: String? = null,
+
+        // PRO values
         val deviceType: DeviceType = DeviceType.OTHER,
         val powerFactorText: String = "",
         val demandRatioText: String = "",
@@ -37,24 +42,37 @@ class DeviceEditViewModel @Inject constructor(
         val hasMotor: Boolean = false,
         val requiresDedicatedCircuit: Boolean = false,
         val requiresSocketConnection: Boolean = true,
-
-        // validation
-        val powerFactorError: String? = null,
-        val demandRatioError: String? = null
     )
 
     private val _ui = MutableStateFlow(UiState())
     val ui: StateFlow<UiState> = _ui.asStateFlow()
 
     private var isPro: Boolean = false
-    fun setPlan(isPro: Boolean) { this.isPro = isPro }
+
+    private fun recompute(next: UiState): UiState {
+        val raw = DeviceParamsValidator.toDraft(next)
+        val res = DeviceParamsValidator.validated(raw)
+        val e = DeviceParamsValidator.validateForPlan(res.normalized, isPro)
+
+        return next.copy(
+            nameError = e.nameError,
+            powerError = e.powerError,
+            powerFactorError = e.powerFactorError,
+            demandRatioError = e.demandRatioError
+        )
+    }
+
+    fun setPlan(isPro: Boolean) {
+        this.isPro = isPro
+        _ui.value = recompute(_ui.value)
+    }
 
     fun load(deviceId: Long) {
         viewModelScope.launch {
             val device = deviceRepository.getDeviceById(deviceId.toInt())
                 ?: error("Устройство не найдено: $deviceId")
 
-            _ui.value = UiState(
+            val loaded = UiState(
                 deviceId = device.id,
                 name = device.name,
                 powerText = device.power.toString(),
@@ -66,104 +84,80 @@ class DeviceEditViewModel @Inject constructor(
                 requiresDedicatedCircuit = device.requiresDedicatedCircuit,
                 requiresSocketConnection = device.requiresSocketConnection
             )
+
+            _ui.value = recompute(loaded)
         }
     }
 
     fun setName(value: String) {
-        _ui.value = _ui.value.copy(name = value.take(80))
+        _ui.value = recompute(_ui.value.copy(name = value))
     }
 
     fun setPowerText(value: String) {
-        val raw = value.replace(',', '.')
-        val noSpaces = raw.replace(Regex("[\\s\\u00A0\\u202F]"), "")
-        val cleaned = buildString(noSpaces.length) {
-            var dotSeen = false
-            for (ch in noSpaces) {
-                when {
-                    ch.isDigit() -> append(ch)
-                    ch == '.' && !dotSeen -> { append(ch); dotSeen = true }
-                    else -> Unit
-                }
-            }
-        }
-
-        val asInt = cleaned.toDoubleOrNull()?.toInt()
-        val err = when {
-            cleaned.isEmpty() -> "Введите число > 0"
-            asInt == null || asInt <= 0 -> "Введите число > 0"
-            else -> PowerValidator.errorMessage(asInt)
-        }
-
-        _ui.value = _ui.value.copy(powerText = cleaned, powerError = err)
+        _ui.value = recompute(_ui.value.copy(powerText = value))
     }
 
     fun setDeviceType(value: DeviceType) {
         if (!isPro) return
-        _ui.value = _ui.value.copy(deviceType = value)
+        _ui.value = recompute(_ui.value.copy(deviceType = value))
     }
 
     fun setVoltageType(value: VoltageType) {
         if (!isPro) return
-        // DC запрещён — UI всё равно не даст выбрать, но на всякий:
         if (value == VoltageType.DC) return
-        _ui.value = _ui.value.copy(voltageType = value)
+        _ui.value = recompute(_ui.value.copy(voltageType = value))
     }
 
     fun setHasMotor(value: Boolean) {
         if (!isPro) return
-        _ui.value = _ui.value.copy(hasMotor = value)
+        _ui.value = recompute(_ui.value.copy(hasMotor = value))
     }
 
     fun setRequiresDedicatedCircuit(value: Boolean) {
         if (!isPro) return
-        _ui.value = _ui.value.copy(requiresDedicatedCircuit = value)
+        _ui.value = recompute(_ui.value.copy(requiresDedicatedCircuit = value))
     }
 
     fun setRequiresSocketConnection(value: Boolean) {
         if (!isPro) return
-        _ui.value = _ui.value.copy(requiresSocketConnection = value)
+        _ui.value = recompute(_ui.value.copy(requiresSocketConnection = value))
     }
 
     fun setPowerFactorText(value: String) {
         if (!isPro) return
-        val normalized = value.trim().replace(',', '.')
-        val err = validateRatio(normalized)
-        _ui.value = _ui.value.copy(powerFactorText = normalized, powerFactorError = err)
+        _ui.value = recompute(_ui.value.copy(powerFactorText = value))
     }
 
     fun setDemandRatioText(value: String) {
         if (!isPro) return
-        val normalized = value.trim().replace(',', '.')
-        val err = validateRatio(normalized)
-        _ui.value = _ui.value.copy(demandRatioText = normalized, demandRatioError = err)
+        _ui.value = recompute(_ui.value.copy(demandRatioText = value))
     }
 
     fun save(onSuccess: () -> Unit, onError: (String) -> Unit) {
         val s = _ui.value
         val id = s.deviceId ?: return
 
-        val name = s.name.trim()
-        if (name.isEmpty()) { onError("Введите имя устройства"); return }
+        val raw = DeviceParamsValidator.toDraft(s)
+        val res = DeviceParamsValidator.validated(raw)
+        val norm = res.normalized
+        val e = DeviceParamsValidator.validateForPlan(norm, isPro)
 
-        val rawText = s.powerText
-            .replace(',', '.')
-            .replace(Regex("[\\s\\u00A0\\u202F]"), "")
-        val raw = rawText.toDoubleOrNull()
-        if (raw == null || raw <= 0.0) { onError("Укажите корректную мощность"); return }
+        val firstError =
+            e.nameError
+                ?: e.powerError
+                ?: (if (isPro) e.powerFactorError else null)
+                ?: (if (isPro) e.demandRatioError else null)
 
-        val powerW = raw.toInt().coerceAtLeast(1)
-        PowerValidator.errorMessage(powerW)?.let { msg ->
-            _ui.value = _ui.value.copy(powerError = msg)
-            onError(msg); return
+        if (firstError != null) {
+            onError(firstError)
+            return
         }
 
-        val pf = if (isPro) s.powerFactorText.trim().replace(',', '.').toDoubleOrNull() else null
-        val dr = if (isPro) s.demandRatioText.trim().replace(',', '.').toDoubleOrNull() else null
-
-        if (isPro) {
-            validateRatio(pf)?.let { onError(it); return }
-            validateRatio(dr)?.let { onError(it); return }
-        }
+        // Парсим только из normalized (и только после отсутствия ошибок)
+        val powerW = norm.powerText.toDouble().toInt()
+        val name = norm.name
+        val pf = if (isPro) norm.powerFactorText.toDouble() else null
+        val dr = if (isPro) norm.demandRatioText.toDouble() else null
 
         viewModelScope.launch {
             try {
@@ -191,16 +185,5 @@ class DeviceEditViewModel @Inject constructor(
                 onError(t.message ?: "Ошибка сохранения")
             }
         }
-    }
-
-    private fun validateRatio(v: String): String? {
-        val d = v.toDoubleOrNull() ?: return "Введите число"
-        return validateRatio(d)
-    }
-
-    private fun validateRatio(v: Double?): String? {
-        if (v == null) return "Введите число"
-        if (v < 0.1 || v > 1.0) return "Допустимо 0.1 — 1.0"
-        return null
     }
 }

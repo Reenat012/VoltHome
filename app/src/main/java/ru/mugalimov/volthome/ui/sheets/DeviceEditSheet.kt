@@ -46,18 +46,24 @@ fun DeviceEditSheet(
         sheetState = sheetState,
         dragHandle = {
             Column(
-                modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 4.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp, bottom = 4.dp)
             ) {
                 BottomSheetDefaults.DragHandle()
                 Spacer(Modifier.height(6.dp))
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text("Редактирование устройства")
                     IconButton(
-                        enabled = !ui.isSaving && ui.powerError == null,
+                        enabled = !ui.isSaving
+                                && ui.powerError == null
+                                && (!isPro || (ui.powerFactorError == null && ui.demandRatioError == null)),
                         onClick = {
                             vm.save(
                                 onSuccess = { onSaved(); onDismiss() },
@@ -81,6 +87,7 @@ fun DeviceEditSheet(
             DeviceParamsEditor(
                 name = ui.name,
                 onNameChange = vm::setName,
+                nameError = ui.nameError,
                 powerText = ui.powerText,
                 onPowerTextChange = vm::setPowerText,
                 powerError = ui.powerError,
@@ -117,7 +124,10 @@ fun DeviceEditSheet(
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(
-                    enabled = !ui.isSaving && ui.powerError == null,
+                    enabled = !ui.isSaving
+                            && ui.nameError == null
+                            && ui.powerError == null
+                            && (!isPro || (ui.powerFactorError == null && ui.demandRatioError == null)),
                     onClick = {
                         vm.save(
                             onSuccess = { onSaved(); onDismiss() },
