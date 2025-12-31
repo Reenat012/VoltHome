@@ -28,10 +28,10 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.VoltageType
+import ru.mugalimov.volthome.ui.utilities.bringIntoViewOnFocus
+
 
 data class DeviceParamsEditorGate(
     val locked: Boolean,
@@ -403,9 +403,10 @@ private fun Modifier.maybeBringIntoView(
 ): Modifier {
     if (bringIntoViewRequester == null || scope == null) return this
     return this.onFocusChanged {
-        if (it.isFocused) scope.launch {
-            delay(200)
-            bringIntoViewRequester.bringIntoView()
-        }
+        bringIntoViewOnFocus(
+            scope = scope,
+            requester = bringIntoViewRequester,
+            focused = it.isFocused
+        )
     }
 }

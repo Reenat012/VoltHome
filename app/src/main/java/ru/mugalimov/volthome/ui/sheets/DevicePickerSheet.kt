@@ -23,8 +23,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
 import ru.mugalimov.volthome.domain.model.DefaultDevice
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.ProFeature
@@ -37,6 +37,7 @@ import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsValidator
 import ru.mugalimov.volthome.ui.components.device.adapter.InMemoryDeviceParamsAdapter
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
+import ru.mugalimov.volthome.ui.utilities.bringIntoViewOnFocus
 import javax.inject.Inject
 
 @SuppressLint("UnrememberedMutableState")
@@ -115,7 +116,9 @@ fun DevicePickerSheet(
 
     val filtered = remember(search, defaultDevices) {
         val q = search.trim().lowercase()
-        if (q.isEmpty()) defaultDevices else defaultDevices.filter { it.name.lowercase().contains(q) }
+        if (q.isEmpty()) defaultDevices else defaultDevices.filter {
+            it.name.lowercase().contains(q)
+        }
     }
 
     ModalBottomSheet(
@@ -175,10 +178,11 @@ fun DevicePickerSheet(
                 modifier = Modifier
                     .fillMaxWidth(0.95f)
                     .onFocusChanged {
-                        if (it.isFocused) scope.launch {
-                            delay(150)
-                            bringIntoViewRequester.bringIntoView()
-                        }
+                        bringIntoViewOnFocus(
+                            scope = scope,
+                            requester = bringIntoViewRequester,
+                            focused = it.isFocused
+                        )
                     },
                 singleLine = true,
                 placeholder = { Text("Поиск устройства…") }
@@ -322,9 +326,11 @@ private fun DevicePickerDeviceCard(
                             .fillMaxWidth()
                             .heightIn(min = 56.dp)
                             .onFocusChanged {
-                                if (it.isFocused) scope.launch {
-                                    delay(150); bringIntoViewRequester.bringIntoView()
-                                }
+                                bringIntoViewOnFocus(
+                                    scope = scope,
+                                    requester = bringIntoViewRequester,
+                                    focused = it.isFocused
+                                )
                             }
                     )
 
@@ -354,9 +360,11 @@ private fun DevicePickerDeviceCard(
                                     .weight(1f)
                                     .heightIn(min = 56.dp)
                                     .onFocusChanged {
-                                        if (it.isFocused) scope.launch {
-                                            delay(150); bringIntoViewRequester.bringIntoView()
-                                        }
+                                        bringIntoViewOnFocus(
+                                            scope = scope,
+                                            requester = bringIntoViewRequester,
+                                            focused = it.isFocused
+                                        )
                                     }
                             )
 
@@ -628,10 +636,11 @@ private fun LockedDecimalField(
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
         shape = RoundedCornerShape(12.dp),
         modifier = m.onFocusChanged {
-            if (it.isFocused) scope.launch {
-                delay(150)
-                bringIntoViewRequester.bringIntoView()
-            }
+            bringIntoViewOnFocus(
+                scope = scope,
+                requester = bringIntoViewRequester,
+                focused = it.isFocused
+            )
         }
     )
 }
