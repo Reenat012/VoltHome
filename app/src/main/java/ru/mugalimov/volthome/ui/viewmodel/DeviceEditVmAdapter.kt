@@ -17,6 +17,7 @@ class DeviceEditVmAdapter(
 
     @Composable
     override fun state(key: Long, seed: DeviceParamsDraft): DeviceParamsEditorState<Long> {
+        // seed игнорируем: источник правды в DeviceEdit — vm.ui
         val ui = vm.ui.collectAsState().value
 
         val draft = DeviceParamsDraft(
@@ -46,9 +47,7 @@ class DeviceEditVmAdapter(
             isExpanded = true,
             onExpandedChange = { /* no-op */ },
 
-            onNameChange = { raw ->
-                vm.setName(raw)
-            },
+            onNameChange = vm::setName,
             onPowerTextChange = vm::setPowerText,
 
             onDeviceTypeChange = vm::setDeviceType,

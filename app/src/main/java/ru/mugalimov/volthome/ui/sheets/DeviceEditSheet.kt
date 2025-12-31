@@ -13,15 +13,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import kotlinx.coroutines.launch
+import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.ProFeature
+import ru.mugalimov.volthome.domain.model.VoltageType
 import ru.mugalimov.volthome.ui.components.device.DeviceParamsEditor
 import ru.mugalimov.volthome.ui.components.device.DeviceParamsEditorGate
 import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsDraft
-import ru.mugalimov.volthome.ui.components.device.adapter.InMemoryDeviceParamsAdapter
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
 import ru.mugalimov.volthome.ui.viewmodel.DeviceEditViewModel
+import ru.mugalimov.volthome.ui.viewmodel.DeviceEditVmAdapter
 import javax.inject.Inject
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -39,11 +40,12 @@ fun DeviceEditSheet(
 
     val isPro = LocalUserPlan.current.isPro
 
-    // ✅ Коммит 5: paywall теперь живёт в adapter.onLockedClick()
-    val adapter = remember(isPro) {
-        InMemoryDeviceParamsAdapter<Long>(
+    // ✅ Коммит 2: DeviceEdit работает через DeviceEditVmAdapter (vm.ui -> draft/errors/callbacks)
+    val adapter = remember(isPro, vm) {
+        DeviceEditVmAdapter(
             isPro = isPro,
-            paywall = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) }
+            paywall = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) },
+            vm = vm
         )
     }
 
@@ -51,6 +53,22 @@ fun DeviceEditSheet(
     LaunchedEffect(isPro) { vm.setPlan(isPro) }
 
     val ui = vm.ui.collectAsState().value
+
+    // ✅ editor state берём из adapter, а не пробрасываем поля вручную
+    val st = adapter.state(
+        key = deviceId,
+        seed = DeviceParamsDraft(
+            name = "",
+            powerText = "",
+            deviceType = DeviceType.SOCKET,
+            powerFactorText = "",
+            demandRatioText = "",
+            voltageType = VoltageType.AC_1PHASE,
+            hasMotor = false,
+            requiresDedicatedCircuit = false,
+            requiresSocketConnection = false
+        )
+    )
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -96,40 +114,39 @@ fun DeviceEditSheet(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             DeviceParamsEditor(
-                // ✅ Коммит 5: locked click только через adapter.onLockedClick()
                 gate = DeviceParamsEditorGate(
                     locked = !isPro,
                     onLockedClick = adapter::onLockedClick
                 ),
 
-                name = ui.name,
-                onNameChange = vm::setName,
-                nameError = ui.nameError,
+                name = st.draft.name,
+                onNameChange = st.onNameChange,
+                nameError = st.errors.nameError,
 
-                powerText = ui.powerText,
-                onPowerTextChange = vm::setPowerText,
-                powerError = ui.powerError,
+                powerText = st.draft.powerText,
+                onPowerTextChange = st.onPowerTextChange,
+                powerError = st.errors.powerError,
 
-                deviceType = ui.deviceType,
-                onDeviceTypeChange = vm::setDeviceType,
+                deviceType = st.draft.deviceType,
+                onDeviceTypeChange = st.onDeviceTypeChange,
 
-                powerFactorText = ui.powerFactorText,
-                onPowerFactorTextChange = vm::setPowerFactorText,
-                powerFactorError = ui.powerFactorError,
+                powerFactorText = st.draft.powerFactorText,
+                onPowerFactorTextChange = st.onPowerFactorTextChange,
+                powerFactorError = st.errors.powerFactorError,
 
-                demandRatioText = ui.demandRatioText,
-                onDemandRatioTextChange = vm::setDemandRatioText,
-                demandRatioError = ui.demandRatioError,
+                demandRatioText = st.draft.demandRatioText,
+                onDemandRatioTextChange = st.onDemandRatioTextChange,
+                demandRatioError = st.errors.demandRatioError,
 
-                voltageType = ui.voltageType,
-                onVoltageTypeChange = vm::setVoltageType,
+                voltageType = st.draft.voltageType,
+                onVoltageTypeChange = st.onVoltageTypeChange,
 
-                hasMotor = ui.hasMotor,
-                onHasMotorChange = vm::setHasMotor,
-                requiresDedicatedCircuit = ui.requiresDedicatedCircuit,
-                onRequiresDedicatedCircuitChange = vm::setRequiresDedicatedCircuit,
-                requiresSocketConnection = ui.requiresSocketConnection,
-                onRequiresSocketConnectionChange = vm::setRequiresSocketConnection,
+                hasMotor = st.draft.hasMotor,
+                onHasMotorChange = st.onHasMotorChange,
+                requiresDedicatedCircuit = st.draft.requiresDedicatedCircuit,
+                onRequiresDedicatedCircuitChange = st.onRequiresDedicatedCircuitChange,
+                requiresSocketConnection = st.draft.requiresSocketConnection,
+                onRequiresSocketConnectionChange = st.onRequiresSocketConnectionChange,
 
                 bringIntoViewRequester = bringIntoViewRequester,
                 scope = scope
