@@ -119,7 +119,7 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
                 ProLocked(
                     isPro = isPro,
                     feature = ProFeature.PDF_EXPORT,
-                    onLockedClick = { viewModel.onExportPdfClick() },
+                    onLockedClick = { _ -> viewModel.onExportPdfClick() },
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .windowInsetsPadding(WindowInsets.navigationBars)

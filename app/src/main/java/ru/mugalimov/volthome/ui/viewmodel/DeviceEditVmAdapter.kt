@@ -1,3 +1,4 @@
+// File: volthome/ui/viewmodel/DeviceEditVmAdapter.kt
 package ru.mugalimov.volthome.ui.viewmodel
 
 import androidx.compose.runtime.Composable
@@ -6,6 +7,7 @@ import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsDraft
 import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsEditorAdapter
 import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsEditorState
 import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsErrors
+import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsValidator
 
 class DeviceEditVmAdapter(
     override val isPro: Boolean,
@@ -44,6 +46,7 @@ class DeviceEditVmAdapter(
             draft = draft,
             errors = errors,
 
+            // в DeviceEdit это всегда "развёрнуто"
             isExpanded = true,
             onExpandedChange = { /* no-op */ },
 
@@ -57,7 +60,49 @@ class DeviceEditVmAdapter(
 
             onHasMotorChange = vm::setHasMotor,
             onRequiresDedicatedCircuitChange = vm::setRequiresDedicatedCircuit,
-            onRequiresSocketConnectionChange = vm::setRequiresSocketConnection
+            onRequiresSocketConnectionChange = vm::setRequiresSocketConnection,
+
+            // gating
+            locked = !isPro,
+            onLockedClick = ::onLockedClick
         )
+    }
+
+    override fun peekDraftRaw(key: Long, seed: DeviceParamsDraft): DeviceParamsDraft {
+        val ui = vm.ui.value
+        return DeviceParamsDraft(
+            name = ui.name,
+            powerText = ui.powerText,
+            deviceType = ui.deviceType,
+            powerFactorText = ui.powerFactorText,
+            demandRatioText = ui.demandRatioText,
+            voltageType = ui.voltageType,
+            hasMotor = ui.hasMotor,
+            requiresDedicatedCircuit = ui.requiresDedicatedCircuit,
+            requiresSocketConnection = ui.requiresSocketConnection
+        )
+    }
+
+    override fun peekDraftNormalized(key: Long, seed: DeviceParamsDraft): DeviceParamsDraft {
+        val raw = peekDraftRaw(key, seed)
+        // нормализация внутри адаптера (НЕ в UI)
+        return DeviceParamsValidator.validated(raw).normalized
+    }
+
+    override fun peekErrors(key: Long, seed: DeviceParamsDraft): DeviceParamsErrors {
+        // В DeviceEdit ошибки уже вычислены во VM и лежат в ui
+        val ui = vm.ui.value
+        return DeviceParamsErrors(
+            nameError = ui.nameError,
+            powerError = ui.powerError,
+            powerFactorError = ui.powerFactorError,
+            demandRatioError = ui.demandRatioError
+        )
+    }
+
+    override fun isExpanded(key: Long): Boolean = true
+
+    override fun setExpanded(key: Long, expanded: Boolean) {
+        // no-op: в DeviceEdit expansion не управляется
     }
 }

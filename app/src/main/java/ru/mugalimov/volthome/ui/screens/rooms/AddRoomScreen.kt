@@ -1,3 +1,4 @@
+// File: volthome/ui/screens/rooms/AddRoomScreen.kt
 package ru.mugalimov.volthome.ui.screens.rooms
 
 import androidx.compose.animation.AnimatedVisibility
@@ -12,7 +13,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -21,22 +21,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.ElectricBolt
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
-import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -59,7 +53,6 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -72,12 +65,14 @@ import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.domain.model.Voltage
 import ru.mugalimov.volthome.domain.model.VoltageType
 import ru.mugalimov.volthome.domain.model.create.DeviceCreateRequest
+import ru.mugalimov.volthome.ui.components.device.DeviceParamsEditor
 import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsDraft
-import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsValidator
+import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsEditorState
 import ru.mugalimov.volthome.ui.components.device.adapter.InMemoryDeviceParamsAdapter
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
 import ru.mugalimov.volthome.ui.utilities.bringIntoViewOnFocus
+import java.util.Locale
 import javax.inject.Inject
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -87,7 +82,7 @@ fun AddRoomSheet(
     roomTypes: List<RoomType>,
     onConfirm: (name: String, roomType: RoomType, devices: List<DeviceCreateRequest>) -> Unit,
     onDismiss: () -> Unit,
-    paywallBus: PaywallBus = hiltViewModel<AddRoomSheetPaywallHolder>().paywallBus
+    paywallHolder: AddRoomSheetPaywallHolder = hiltViewModel()
 ) {
     var name by remember { mutableStateOf("") }
     var selectedType by remember { mutableStateOf(roomTypes.firstOrNull() ?: RoomType.STANDARD) }
@@ -99,10 +94,11 @@ fun AddRoomSheet(
 
     val isPro = LocalUserPlan.current.isPro
 
-    val editorAdapter = remember(isPro) {
+    // ✅ adapter на уровне экрана, не внутри Lazy-item
+    val editorAdapter = remember(isPro, paywallHolder) {
         InMemoryDeviceParamsAdapter<String>(
             isPro = isPro,
-            paywall = { paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR) }
+            paywall = paywallHolder::onAdvancedEditorLocked
         )
     }
 
@@ -148,10 +144,6 @@ fun AddRoomSheet(
                         requiresDedicatedCircuit = def.requiresDedicatedCircuit,
                         requiresSocketConnection = def.requiresSocketConnection
                     )
-                },
-                predicate = { e ->
-                    e.nameError != null || e.powerError != null ||
-                            e.powerFactorError != null || e.demandRatioError != null
                 }
             )
         }
@@ -247,6 +239,7 @@ fun AddRoomSheet(
 
                 item { Text("Устройства", style = MaterialTheme.typography.titleMedium) }
 
+                // ✅ стабильный key (не индекс)
                 items(defaultDevices, key = { it.id }) { device ->
                     val key = device.id.toString()
                     val qty = qtyMap[key] ?: 0
@@ -333,7 +326,7 @@ private fun DeviceRowEditable(
     onInc: () -> Unit,
     onDec: () -> Unit,
 
-    st: ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsEditorState<String>,
+    st: DeviceParamsEditorState<String>,
     bringIntoViewRequester: BringIntoViewRequester,
     scope: CoroutineScope,
 
@@ -366,22 +359,9 @@ private fun DeviceRowEditable(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    IconButton(onClick = onDec) {
-                        Icon(
-                            Icons.Rounded.Remove,
-                            contentDescription = "Уменьшить"
-                        )
-                    }
-                    Box(
-                        Modifier.width(28.dp),
-                        contentAlignment = Alignment.Center
-                    ) { Text(qty.toString()) }
-                    IconButton(onClick = onInc) {
-                        Icon(
-                            Icons.Rounded.Add,
-                            contentDescription = "Увеличить"
-                        )
-                    }
+                    IconButton(onClick = onDec) { Icon(Icons.Rounded.Remove, contentDescription = "Уменьшить") }
+                    Box(Modifier.width(28.dp), contentAlignment = Alignment.Center) { Text(qty.toString()) }
+                    IconButton(onClick = onInc) { Icon(Icons.Rounded.Add, contentDescription = "Увеличить") }
                 }
 
                 IconButton(onClick = onToggle) {
@@ -394,171 +374,43 @@ private fun DeviceRowEditable(
 
             AnimatedVisibility(visible = stExpanded) {
                 Column(modifier = Modifier.padding(top = 8.dp)) {
+                    // ✅ весь блок полей — теперь общий DeviceParamsEditor
+                    DeviceParamsEditor(
+                        name = st.draft.name,
+                        onNameChange = st.onNameChange,
+                        nameError = st.errors.nameError,
 
-                    OutlinedTextField(
-                        value = st.draft.name,
-                        onValueChange = st.onNameChange,
-                        label = { Text("Название") },
-                        singleLine = true,
-                        isError = st.errors.nameError != null,
-                        supportingText = {
-                            st.errors.nameError?.let { Text(it) }
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 56.dp)
-                            .onFocusChanged {
-                                bringIntoViewOnFocus(
-                                    scope = scope,
-                                    requester = bringIntoViewRequester,
-                                    focused = it.isFocused
-                                )
-                            }
+                        powerText = st.draft.powerText,
+                        onPowerTextChange = st.onPowerTextChange,
+                        powerError = st.errors.powerError,
+
+                        deviceType = st.draft.deviceType,
+                        onDeviceTypeChange = st.onDeviceTypeChange,
+
+                        powerFactorText = st.draft.powerFactorText,
+                        onPowerFactorTextChange = st.onPowerFactorTextChange,
+                        powerFactorError = st.errors.powerFactorError,
+
+                        demandRatioText = st.draft.demandRatioText,
+                        onDemandRatioTextChange = st.onDemandRatioTextChange,
+                        demandRatioError = st.errors.demandRatioError,
+
+                        voltageType = st.draft.voltageType,
+                        onVoltageTypeChange = st.onVoltageTypeChange,
+
+                        hasMotor = st.draft.hasMotor,
+                        onHasMotorChange = st.onHasMotorChange,
+                        requiresDedicatedCircuit = st.draft.requiresDedicatedCircuit,
+                        onRequiresDedicatedCircuitChange = st.onRequiresDedicatedCircuitChange,
+                        requiresSocketConnection = st.draft.requiresSocketConnection,
+                        onRequiresSocketConnectionChange = st.onRequiresSocketConnectionChange,
+
+                        locked = !isPro,
+                        onLockedClick = onLockedClick,
+
+                        bringIntoViewRequester = bringIntoViewRequester,
+                        scope = scope
                     )
-
-                    Spacer(Modifier.height(10.dp))
-
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            val error = st.errors.powerError
-
-                            OutlinedTextField(
-                                value = st.draft.powerText,
-                                onValueChange = st.onPowerTextChange,
-                                label = { Text("Мощность (Вт)") },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                trailingIcon = {
-                                    Icon(
-                                        Icons.Rounded.ElectricBolt,
-                                        contentDescription = null
-                                    )
-                                },
-                                isError = error != null,
-                                supportingText = { error?.let { Text(it) } },
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .heightIn(min = 56.dp)
-                                    .onFocusChanged {
-                                        bringIntoViewOnFocus(
-                                            scope = scope,
-                                            requester = bringIntoViewRequester,
-                                            focused = it.isFocused
-                                        )
-                                    }
-                            )
-
-                            EnumDropdownField(
-                                label = "Тип устройства",
-                                value = st.draft.deviceType,
-                                values = DeviceType.values().toList(),
-                                valueLabel = { it.name },
-                                locked = !isPro,
-                                onLockedClick = onLockedClick,
-                                onValueChange = st.onDeviceTypeChange,
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            val pfText = st.draft.powerFactorText
-                            val drText = st.draft.demandRatioText
-
-                            LockedDecimalField(
-                                label = "Коэфф. мощности (PF)",
-                                value = pfText,
-                                locked = !isPro,
-                                hint = "Влияет на расчёт тока",
-                                error = st.errors.powerFactorError,
-                                onLockedClick = onLockedClick,
-                                onValueChange = st.onPowerFactorTextChange,
-                                modifier = Modifier.weight(1f),
-                                bringIntoViewRequester = bringIntoViewRequester,
-                                scope = scope
-                            )
-
-                            LockedDecimalField(
-                                label = "Коэфф. спроса",
-                                value = drText,
-                                locked = !isPro,
-                                hint = "Учитывает реальную нагрузку",
-                                error = st.errors.demandRatioError,
-                                onLockedClick = onLockedClick,
-                                onValueChange = st.onDemandRatioTextChange,
-                                modifier = Modifier.weight(1f),
-                                bringIntoViewRequester = bringIntoViewRequester,
-                                scope = scope
-                            )
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            VoltageTypeDropdownField(
-                                label = "Напряжение",
-                                value = st.draft.voltageType,
-                                locked = !isPro,
-                                onLockedClick = onLockedClick,
-                                onValueChange = st.onVoltageTypeChange,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Spacer(Modifier.weight(1f))
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            YesNoDropdownField(
-                                label = "Есть двигатель",
-                                value = st.draft.hasMotor,
-                                locked = !isPro,
-                                onLockedClick = onLockedClick,
-                                onValueChange = st.onHasMotorChange,
-                                modifier = Modifier.weight(1f)
-                            )
-                            YesNoDropdownField(
-                                label = "Выделенная линия",
-                                value = st.draft.requiresDedicatedCircuit,
-                                locked = !isPro,
-                                onLockedClick = onLockedClick,
-                                onValueChange = st.onRequiresDedicatedCircuitChange,
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            YesNoDropdownField(
-                                label = "Подключение розеткой",
-                                value = st.draft.requiresSocketConnection,
-                                locked = !isPro,
-                                onLockedClick = onLockedClick,
-                                onValueChange = st.onRequiresSocketConnectionChange,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Spacer(Modifier.weight(1f))
-                        }
-                    }
                 }
             }
         }
@@ -590,51 +442,45 @@ private fun buildRequests(
             requiresSocketConnection = def.requiresSocketConnection
         )
 
-        val rawDraft = editorAdapter.peekDraft(key = key, seed = seed)
+        // ✅ Коммит 6: берём NORMALIZED draft из адаптера (UI не парсит/нормализует)
+        val nd = editorAdapter.peekDraftNormalized(key = key, seed = seed)
 
-        val res = DeviceParamsValidator.validated(rawDraft)
-        val e = DeviceParamsValidator.validateForPlan(res.normalized, isPro)
+        val title = nd.name.trim().ifBlank { def.name }
 
-        // Решение "валидно/не валидно" — только по errors
-        if (e.nameError != null) continue
-        if (e.powerError != null) continue
-        if (isPro && (e.powerFactorError != null || e.demandRatioError != null)) continue
+        // nd.powerText уже нормализован валидатором (включая запятую)
+        val watts = nd.powerText.toDoubleOrNull()?.toInt() ?: continue
 
-        val n = res.normalized
+        val pf = if (isPro) (nd.powerFactorText.toDoubleOrNull() ?: continue) else def.powerFactor
+        val dr = if (isPro) (nd.demandRatioText.toDoubleOrNull() ?: continue) else def.demandRatio
 
-        // Парсим только из normalized (после того как errors == null)
-        val title = n.name
-        val watts = n.powerText.toDouble().toInt()
-        val pf = if (isPro) n.powerFactorText.toDouble() else null
-        val dr = if (isPro) n.demandRatioText.toDouble() else null
-
-        val type = if (isPro) n.deviceType else def.deviceType
+        val type = if (isPro) nd.deviceType else def.deviceType
 
         val volt = if (isPro) {
-            when (n.voltageType) {
+            when (nd.voltageType) {
                 VoltageType.AC_1PHASE -> Voltage(220, VoltageType.AC_1PHASE)
                 VoltageType.AC_3PHASE -> Voltage(380, VoltageType.AC_3PHASE)
                 VoltageType.DC -> def.voltage
             }
         } else def.voltage
 
-        val hm = if (isPro) n.hasMotor else def.hasMotor
-        val rd = if (isPro) n.requiresDedicatedCircuit else def.requiresDedicatedCircuit
-        val rs = if (isPro) n.requiresSocketConnection else def.requiresSocketConnection
+        val hm = if (isPro) nd.hasMotor else def.hasMotor
+        val rd = if (isPro) nd.requiresDedicatedCircuit else def.requiresDedicatedCircuit
+        val rs = if (isPro) nd.requiresSocketConnection else def.requiresSocketConnection
 
         out += DeviceCreateRequest(
             title = title,
             type = type,
             count = count,
             ratedPowerW = watts,
-            powerFactor = pf ?: def.powerFactor,
-            demandRatio = dr ?: def.demandRatio,
+            powerFactor = pf,
+            demandRatio = dr,
             voltage = volt,
             hasMotor = hm,
             requiresDedicatedCircuit = rd,
             requiresSocketConnection = rs
         )
     }
+
     return out
 }
 
@@ -645,7 +491,8 @@ private fun roomTypeLabel(type: RoomType): String = when (type) {
     RoomType.OUTDOOR -> "Улица (УЗО)"
 }
 
-private fun Double.format(digits: Int) = "%.${digits}f".format(this).replace(',', '.')
+private fun Double.format(digits: Int): String =
+    String.format(Locale.US, "%.${digits}f", this)
 
 private fun applyPresetFor(
     type: RoomType,
@@ -679,180 +526,12 @@ private fun applyPresetFor(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun <T> EnumDropdownField(
-    label: String,
-    value: T,
-    values: List<T>,
-    valueLabel: (T) -> String,
-    locked: Boolean,
-    onLockedClick: () -> Unit,
-    onValueChange: (T) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val open = { if (locked) onLockedClick() else expanded = true }
-
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { open() },
-        modifier = modifier
-            .fillMaxWidth()
-            .heightIn(min = 56.dp)
-    ) {
-        OutlinedTextField(
-            value = valueLabel(value),
-            onValueChange = {},
-            readOnly = true,
-            enabled = true,
-            singleLine = true,
-            label = { Text(label) },
-            trailingIcon = {
-                if (locked) Icon(Icons.Rounded.Lock, contentDescription = null)
-                else ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
-            },
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier
-                .menuAnchor()
-                .fillMaxWidth()
-        )
-
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            values.forEach { item ->
-                DropdownMenuItem(
-                    text = { Text(valueLabel(item)) },
-                    onClick = { expanded = false; onValueChange(item) }
-                )
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun VoltageTypeDropdownField(
-    label: String,
-    value: VoltageType,
-    locked: Boolean,
-    onLockedClick: () -> Unit,
-    onValueChange: (VoltageType) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val open = { if (locked) onLockedClick() else expanded = true }
-
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { open() },
-        modifier = modifier
-            .fillMaxWidth()
-            .heightIn(min = 56.dp)
-    ) {
-        OutlinedTextField(
-            value = when (value) {
-                VoltageType.AC_1PHASE -> "AC 1ф (220 В)"
-                VoltageType.AC_3PHASE -> "AC 3ф (380 В)"
-                VoltageType.DC -> "DC"
-            },
-            onValueChange = {},
-            readOnly = true,
-            enabled = true,
-            singleLine = true,
-            label = { Text(label) },
-            supportingText = { Text("DC пока недоступен") },
-            trailingIcon = {
-                if (locked) Icon(Icons.Rounded.Lock, contentDescription = null)
-                else ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
-            },
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier
-                .menuAnchor()
-                .fillMaxWidth()
-        )
-
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(
-                text = { Text("AC 1ф (220 В)") },
-                onClick = { expanded = false; onValueChange(VoltageType.AC_1PHASE) }
-            )
-            DropdownMenuItem(
-                text = { Text("AC 3ф (380 В)") },
-                onClick = { expanded = false; onValueChange(VoltageType.AC_3PHASE) }
-            )
-            DropdownMenuItem(enabled = false, text = { Text("DC — скоро") }, onClick = {})
-        }
-    }
-}
-
-@Composable
-private fun YesNoDropdownField(
-    label: String,
-    value: Boolean,
-    locked: Boolean,
-    onLockedClick: () -> Unit,
-    onValueChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    EnumDropdownField(
-        label = label,
-        value = value,
-        values = listOf(true, false),
-        valueLabel = { if (it) "Да" else "Нет" },
-        locked = locked,
-        onLockedClick = onLockedClick,
-        onValueChange = onValueChange,
-        modifier = modifier
-    )
-}
-
-@Composable
-private fun LockedDecimalField(
-    label: String,
-    value: String,
-    locked: Boolean,
-    hint: String?,
-    error: String?,
-    onLockedClick: () -> Unit,
-    onValueChange: (String) -> Unit,
-    modifier: Modifier,
-    bringIntoViewRequester: BringIntoViewRequester,
-    scope: CoroutineScope
-) {
-    val m = modifier
-        .fillMaxWidth()
-        .heightIn(min = 56.dp)
-        .let { base -> if (locked) base.clickable { onLockedClick() } else base }
-
-    OutlinedTextField(
-        value = value,
-        onValueChange = { if (!locked) onValueChange(it) },
-        label = { Text(label) },
-        enabled = true,
-        readOnly = locked,
-        singleLine = true,
-        isError = (error != null && !locked),
-        supportingText = {
-            when {
-                locked && hint != null -> Text(hint)
-                !locked && error != null -> Text(error)
-                hint != null -> Text(hint)
-            }
-        },
-        trailingIcon = { if (locked) Icon(Icons.Rounded.Lock, contentDescription = null) },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-        shape = RoundedCornerShape(12.dp),
-        modifier = m.onFocusChanged {
-            bringIntoViewOnFocus(
-                scope = scope,
-                requester = bringIntoViewRequester,
-                focused = it.isFocused
-            )
-        }
-    )
-}
-
 @HiltViewModel
 class AddRoomSheetPaywallHolder @Inject constructor(
-    val paywallBus: PaywallBus
-) : androidx.lifecycle.ViewModel()
+    private val paywallBus: PaywallBus
+) : androidx.lifecycle.ViewModel() {
+
+    fun onAdvancedEditorLocked() {
+        paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR)
+    }
+}

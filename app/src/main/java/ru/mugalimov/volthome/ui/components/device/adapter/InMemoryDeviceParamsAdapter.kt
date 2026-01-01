@@ -1,3 +1,4 @@
+// File: volthome/ui/components/device/adapter/InMemoryDeviceParamsAdapter.kt
 package ru.mugalimov.volthome.ui.components.device.adapter
 
 import androidx.compose.runtime.Composable
@@ -6,6 +7,15 @@ import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.VoltageType
 import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsValidator.validated
 
+/**
+ * Для AddRoomSheet / DevicePickerSheet / DeviceEditSheet.
+ * Хранит drafts/errors/expanded per key и отдаёт единый контракт в editor.
+ *
+ * ЕДИНСТВЕННАЯ точка правды:
+ *  - UI хранит RAW (как ввёл пользователь)
+ *  - ошибки считаются по NORMALIZED (через валидатор)
+ *  - UI может получить NORMALIZED draft без прямого вызова валидатора
+ */
 class InMemoryDeviceParamsAdapter<K>(
     override val isPro: Boolean,
     private val paywall: () -> Unit
@@ -30,6 +40,7 @@ class InMemoryDeviceParamsAdapter<K>(
 
     @Composable
     override fun state(key: K, seed: DeviceParamsDraft): DeviceParamsEditorState<K> {
+        // ensure state exists
         val currentDraft = drafts[key] ?: run {
             setDraft(key, seed)
             drafts.getValue(key)
@@ -67,23 +78,41 @@ class InMemoryDeviceParamsAdapter<K>(
 
             onHasMotorChange = { v -> update { it.copy(hasMotor = v) } },
             onRequiresDedicatedCircuitChange = { v -> update { it.copy(requiresDedicatedCircuit = v) } },
-            onRequiresSocketConnectionChange = { v -> update { it.copy(requiresSocketConnection = v) } }
+            onRequiresSocketConnectionChange = { v -> update { it.copy(requiresSocketConnection = v) } },
+
+            // gating
+            locked = !isPro,
+            onLockedClick = ::onLockedClick
         )
     }
 
-    fun peekDraft(key: K, seed: DeviceParamsDraft): DeviceParamsDraft {
+    override fun peekDraftRaw(key: K, seed: DeviceParamsDraft): DeviceParamsDraft {
         return drafts[key] ?: run {
             setDraft(key, seed)
             drafts.getValue(key)
         }
     }
 
-    fun peekErrors(key: K, seed: DeviceParamsDraft): DeviceParamsErrors {
+    /**
+     * Возвращает NORMALIZED draft (через общий валидатор), чтобы UI не делал локальную нормализацию.
+     */
+    override fun peekDraftNormalized(key: K, seed: DeviceParamsDraft): DeviceParamsDraft {
+        val raw = peekDraftRaw(key, seed)
+        return validated(raw).normalized
+    }
+
+    override fun peekErrors(key: K, seed: DeviceParamsDraft): DeviceParamsErrors {
         if (!errors.containsKey(key)) {
             val d = drafts[key] ?: seed
             setDraft(key, d)
         }
         return errors.getValue(key)
+    }
+
+    override fun isExpanded(key: K): Boolean = expanded[key] ?: false
+
+    override fun setExpanded(key: K, expanded: Boolean) {
+        this.expanded[key] = expanded
     }
 
     fun hasAnyErrors(
@@ -102,6 +131,4 @@ class InMemoryDeviceParamsAdapter<K>(
         }
         return false
     }
-
-    fun snapshot(key: K, seed: DeviceParamsDraft): DeviceParamsDraft = peekDraft(key, seed)
 }

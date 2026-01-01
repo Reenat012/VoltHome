@@ -4,7 +4,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.text.KeyboardOptions
@@ -31,12 +30,6 @@ import kotlinx.coroutines.CoroutineScope
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.VoltageType
 import ru.mugalimov.volthome.ui.utilities.bringIntoViewOnFocus
-
-
-data class DeviceParamsEditorGate(
-    val locked: Boolean,
-    val onLockedClick: () -> Unit
-)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -73,7 +66,8 @@ fun DeviceParamsEditor(
     onRequiresSocketConnectionChange: (Boolean) -> Unit,
 
     // gating
-    gate: DeviceParamsEditorGate,
+    locked: Boolean,
+    onLockedClick: () -> Unit,
 
     bringIntoViewRequester: androidx.compose.foundation.relocation.BringIntoViewRequester? = null,
     scope: CoroutineScope? = null,
@@ -121,8 +115,8 @@ fun DeviceParamsEditor(
                 value = deviceType,
                 values = DeviceType.values().toList(),
                 valueLabel = { it.name },
-                locked = gate.locked,
-                onLockedClick = gate.onLockedClick,
+                locked = locked,
+                onLockedClick = onLockedClick,
                 onValueChange = onDeviceTypeChange,
                 modifier = Modifier.weight(1f)
             )
@@ -135,10 +129,10 @@ fun DeviceParamsEditor(
             LockedDecimalField(
                 label = "Коэфф. мощности (PF)",
                 value = powerFactorText,
-                locked = gate.locked,
+                locked = locked,
                 hint = "Влияет на расчёт тока",
                 error = powerFactorError,
-                onLockedClick = gate.onLockedClick,
+                onLockedClick = onLockedClick,
                 onValueChange = onPowerFactorTextChange,
                 modifier = Modifier.weight(1f),
                 bringIntoViewRequester = bringIntoViewRequester,
@@ -148,10 +142,10 @@ fun DeviceParamsEditor(
             LockedDecimalField(
                 label = "Коэфф. спроса",
                 value = demandRatioText,
-                locked = gate.locked,
+                locked = locked,
                 hint = "Учитывает реальную нагрузку",
                 error = demandRatioError,
-                onLockedClick = gate.onLockedClick,
+                onLockedClick = onLockedClick,
                 onValueChange = onDemandRatioTextChange,
                 modifier = Modifier.weight(1f),
                 bringIntoViewRequester = bringIntoViewRequester,
@@ -166,12 +160,20 @@ fun DeviceParamsEditor(
             VoltageTypeDropdownField(
                 label = "Напряжение",
                 value = voltageType,
-                locked = gate.locked,
-                onLockedClick = gate.onLockedClick,
+                locked = locked,
+                onLockedClick = onLockedClick,
                 onValueChange = onVoltageTypeChange,
                 modifier = Modifier.weight(1f)
             )
-            Spacer(Modifier.weight(1f))
+
+            YesNoDropdownField(
+                label = "Подключение розеткой",
+                value = requiresSocketConnection,
+                locked = locked,
+                onLockedClick = onLockedClick,
+                onValueChange = onRequiresSocketConnectionChange,
+                modifier = Modifier.weight(1f)
+            )
         }
 
         Row(
@@ -181,34 +183,19 @@ fun DeviceParamsEditor(
             YesNoDropdownField(
                 label = "Есть двигатель",
                 value = hasMotor,
-                locked = gate.locked,
-                onLockedClick = gate.onLockedClick,
+                locked = locked,
+                onLockedClick = onLockedClick,
                 onValueChange = onHasMotorChange,
                 modifier = Modifier.weight(1f)
             )
             YesNoDropdownField(
                 label = "Выделенная линия",
                 value = requiresDedicatedCircuit,
-                locked = gate.locked,
-                onLockedClick = gate.onLockedClick,
+                locked = locked,
+                onLockedClick = onLockedClick,
                 onValueChange = onRequiresDedicatedCircuitChange,
                 modifier = Modifier.weight(1f)
             )
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            YesNoDropdownField(
-                label = "Подключение розеткой",
-                value = requiresSocketConnection,
-                locked = gate.locked,
-                onLockedClick = gate.onLockedClick,
-                onValueChange = onRequiresSocketConnectionChange,
-                modifier = Modifier.weight(1f)
-            )
-            Spacer(Modifier.weight(1f))
         }
     }
 }
@@ -253,6 +240,8 @@ private fun <T> EnumDropdownField(
             modifier = Modifier
                 .menuAnchor()
                 .fillMaxWidth()
+                // ✅ гарантируем отсутствие "тишины" на locked/readOnly anchor
+                .clickable { open() }
         )
 
         ExposedDropdownMenu(
@@ -313,6 +302,8 @@ private fun VoltageTypeDropdownField(
             modifier = Modifier
                 .menuAnchor()
                 .fillMaxWidth()
+                // ✅ гарантируем отсутствие "тишины" на locked/readOnly anchor
+                .clickable { open() }
         )
 
         ExposedDropdownMenu(
