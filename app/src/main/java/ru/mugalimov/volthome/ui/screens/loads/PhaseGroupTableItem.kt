@@ -77,6 +77,7 @@ fun PhaseGroupTableItem(
         Phase.A -> Color(0xFFF6D96B).copy(alpha = 0.25f)
         Phase.B -> Color(0xFF7ED492).copy(alpha = 0.25f)
         Phase.C -> Color(0xFFFF8A80).copy(alpha = 0.25f)
+        Phase.THREE_PHASE -> Color(0xFF9E9E9E).copy(alpha = 0.20f)
     }
 
     val highlightAlpha = if (isDropTargetHighlighted) 0.55f else 0.25f

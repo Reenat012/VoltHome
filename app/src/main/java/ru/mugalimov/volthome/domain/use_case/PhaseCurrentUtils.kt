@@ -12,7 +12,10 @@ fun phaseCurrents(groups: List<CircuitGroup>): Map<Phase, Double> =
 
 /** Определяет тип сети на основании фактического распределения фаз */
 fun inferVoltageType(groups: List<CircuitGroup>): VoltageType {
-    val distinct = groups.map { it.phase }.toSet()
+    val distinct = groups
+        .map { it.phase }
+        .filter { it != Phase.THREE_PHASE }
+        .toSet()
     return if (distinct.size >= 2) VoltageType.AC_3PHASE else VoltageType.AC_1PHASE
 }
 

@@ -53,11 +53,61 @@ class GetPhaseLoadUiUseCase @Inject constructor(
     }
 
     private fun buildPhaseItems(groups: List<CircuitGroup>): List<PhaseLoadItem> {
-        return listOf(Phase.A, Phase.B, Phase.C).map { phase ->
+        // 1) Сбор 3φ пула: устройства с AC_3PHASE (вне зависимости от фазы группы)
+        val threePhaseDevices = groups
+            .flatMap { g -> g.devices.map { d -> g to d } }
+            .filter { (_, d) -> d.voltage.type == ru.mugalimov.volthome.domain.model.VoltageType.AC_3PHASE }
+
+        val threePhaseGroups: List<PhaseGroupItem> =
+            threePhaseDevices
+                .groupBy(
+                    keySelector = { (g, _) -> g.groupId },
+                    valueTransform = { (g, d) -> g to d }
+                )
+                .values
+                .map { items ->
+                    val g = items.first().first
+                    val deviceRows = items.map { (_, d) ->
+                        PhaseDeviceItem(
+                            name = d.name,
+                            power = d.power.toDouble(),
+                            current = d.calculateCurrent()
+                        )
+                    }
+
+                    PhaseGroupItem(
+                        groupId = g.groupId,
+                        groupNumber = g.groupNumber,
+                        roomName = g.roomName,
+                        devices = deviceRows,
+                        roomId = g.roomId,
+                        totalPower = deviceRows.sumOf { it.power },
+                        totalCurrent = items.sumOf { (_, d) ->
+                            CurrentCalculator.calculateNominalCurrent(
+                                power       = d.power.toDouble(),
+                                voltage     = (d.voltage.value.takeIf { it > 0 } ?: 230).toDouble(),
+                                powerFactor = d.powerFactor,
+                                demandRatio = d.demandRatio,
+                                voltageType = d.voltage.type
+                            )
+                        }
+                    )
+                }
+
+        val p3Total = threePhaseGroups.sumOf { it.totalPower }
+        val i3Total = threePhaseGroups.sumOf { it.totalCurrent }
+
+        val p3PerPhase = p3Total / 3.0
+        val i3PerPhase = i3Total / 3.0
+
+        // 2) Секции A/B/C: берём только группы A/B/C и внутри них — только НЕ 3φ устройства
+        val phaseItems = listOf(Phase.A, Phase.B, Phase.C).map { phase ->
             val groupsOfPhase = groups.filter { it.phase == phase }
 
             val groupRows: List<PhaseGroupItem> = groupsOfPhase.map { g ->
-                val deviceRows = g.devices.map { d ->
+                val onePhaseDevices = g.devices.filter { it.voltage.type != ru.mugalimov.volthome.domain.model.VoltageType.AC_3PHASE }
+
+                val deviceRows = onePhaseDevices.map { d ->
                     PhaseDeviceItem(
                         name = d.name,
                         power = d.power.toDouble(),
@@ -66,13 +116,13 @@ class GetPhaseLoadUiUseCase @Inject constructor(
                 }
 
                 PhaseGroupItem(
-                    groupId = g.groupId,                 // ✅ добавили
+                    groupId = g.groupId,
                     groupNumber = g.groupNumber,
                     roomName = g.roomName,
                     devices = deviceRows,
                     roomId = g.roomId,
-                    totalPower = g.devices.sumOf { it.power.toDouble() },
-                    totalCurrent = g.devices.sumOf { d ->
+                    totalPower = deviceRows.sumOf { it.power },
+                    totalCurrent = onePhaseDevices.sumOf { d ->
                         CurrentCalculator.calculateNominalCurrent(
                             power       = d.power.toDouble(),
                             voltage     = (d.voltage.value.takeIf { it > 0 } ?: 230).toDouble(),
@@ -84,12 +134,25 @@ class GetPhaseLoadUiUseCase @Inject constructor(
                 )
             }
 
+            val p1 = groupRows.sumOf { it.totalPower }
+            val i1 = groupRows.sumOf { it.totalCurrent }
+
             PhaseLoadItem(
                 phase = phase,
                 groups = groupRows,
-                totalPower = groupRows.sumOf { it.totalPower },
-                totalCurrent = groupRows.sumOf { it.totalCurrent }
+                totalPower = p1 + p3PerPhase,
+                totalCurrent = i1 + i3PerPhase
             )
         }
+
+        // 3) Отдельный блок 3φ как отдельный PhaseLoadItem, чтобы не ломать контракт List<PhaseLoadItem>
+        val threePhaseItem = PhaseLoadItem(
+            phase = Phase.THREE_PHASE,
+            groups = threePhaseGroups,
+            totalPower = p3Total,
+            totalCurrent = i3Total
+        )
+
+        return phaseItems + threePhaseItem
     }
 }

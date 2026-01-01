@@ -52,7 +52,9 @@ class PhaseLoadViewModel @Inject constructor(
             preferencesRepository.phaseMode,
             explicationRepository.observeAllGroup()
         ) { items, mode, groups ->
-            val data = if (mode == PhaseMode.SINGLE) items.filter { it.phase == Phase.A } else items
+            val data = if (mode == PhaseMode.SINGLE) {
+                items.filter { it.phase == Phase.A || it.phase == Phase.THREE_PHASE }
+            } else items
 
             val hasGroupRcds = groups.any { it.rcdRequired }
             val incomer = incomerSelector.select(
@@ -88,6 +90,19 @@ class PhaseLoadViewModel @Inject constructor(
             return
         }
 
+        // ✅ Guard: 3φ группы нельзя переносить (они не принадлежат A/B/C)
+        val isThreePhaseGroup = uiState.value.data
+            .firstOrNull { it.phase == Phase.THREE_PHASE }
+            ?.groups
+            ?.any { it.groupId == groupId }
+            ?: false
+
+        if (isThreePhaseGroup) {
+            // no-op + уведомление (по желанию; можно убрать emit, если хочешь полностью тихий no-op)
+            _events.tryEmit("3-фазную нагрузку нельзя переносить между фазами")
+            return
+        }
+
         viewModelScope.launch {
             try {
                 val projectId = activeProjectDs.activeProjectId.firstOrNull()
@@ -105,7 +120,6 @@ class PhaseLoadViewModel @Inject constructor(
                         updatedAt = System.currentTimeMillis()
                     )
                 )
-                // UI обновится сам через Flow, не трогаем руками
             } catch (t: Throwable) {
                 _events.tryEmit("Не удалось изменить фазу. Попробуйте ещё раз.")
             }

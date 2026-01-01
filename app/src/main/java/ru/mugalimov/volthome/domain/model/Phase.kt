@@ -1,5 +1,5 @@
 package ru.mugalimov.volthome.domain.model
 
 enum class Phase {
-    A, B, C
+    A, B, C, THREE_PHASE
 }

@@ -1,3 +1,4 @@
+// ru/mugalimov/volthome/ui/screens/loads/PhaseLoadContent.kt
 package ru.mugalimov.volthome.ui.screens.loads
 
 import androidx.compose.foundation.clickable
@@ -55,7 +56,11 @@ import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
  * Контент экрана «Нагрузки».
  * - 1 фаза: донат (индикатор вводного) + карточка «Куда уходит ток» + «Что можно улучшить»
  *   + таблица только по фазе A.
- * - 3 фазы: донат A/B/C + таблица трёх фаз (как было).
+ * - 3 фазы: донат A/B/C + таблица трёх фаз.
+ *
+ * Коммит 4:
+ * - добавляем секцию "3-фазные нагрузки" (Phase.THREE_PHASE) отдельным блоком
+ * - исключаем 3φ из списков A/B/C (и, главное, из DnD/drop-zones)
  */
 @Composable
 fun PhaseLoadContent(
@@ -69,7 +74,7 @@ fun PhaseLoadContent(
     onGroupDropped: (groupId: Long, target: Phase) -> Unit,
     onReset: () -> Unit
 ) {
-    // Drop-zones в координатах ROOT (boundsInRoot)
+    // Drop-zones в координатах ROOT (boundsInRoot) — ТОЛЬКО для A/B/C
     val dropZones = remember { mutableStateMapOf<Phase, Rect>() }
 
     // Drag state
@@ -97,21 +102,29 @@ fun PhaseLoadContent(
         }
     }
 
-    // В 1-ф режиме показываем только фазу A; в 3-ф — все как есть
-    val shown = remember(phaseLoads, mode) {
-        if (mode == PhaseMode.SINGLE) phaseLoads.filter { it.phase == Phase.A } else phaseLoads
+    // ===== Разделение данных: A/B/C отдельно, 3φ отдельно =====
+
+    // 3φ item (если есть)
+    val threePhaseItem = remember(phaseLoads) {
+        phaseLoads.firstOrNull { it.phase == Phase.THREE_PHASE }
     }
 
-    // Токи по фазам для доната/индикатора
-    val perPhase = remember(shown) {
+    // A/B/C items (3φ сюда не попадает)
+    val phaseItems = remember(phaseLoads, mode) {
+        val abc = phaseLoads.filter { it.phase == Phase.A || it.phase == Phase.B || it.phase == Phase.C }
+        if (mode == PhaseMode.SINGLE) abc.filter { it.phase == Phase.A } else abc
+    }
+
+    // Токи по фазам для доната/индикатора (только A/B/C)
+    val perPhase = remember(phaseItems) {
         mapOf(
-            Phase.A to (shown.find { it.phase == Phase.A }?.totalCurrent ?: 0.0),
-            Phase.B to (shown.find { it.phase == Phase.B }?.totalCurrent ?: 0.0),
-            Phase.C to (shown.find { it.phase == Phase.C }?.totalCurrent ?: 0.0)
+            Phase.A to (phaseItems.find { it.phase == Phase.A }?.totalCurrent ?: 0.0),
+            Phase.B to (phaseItems.find { it.phase == Phase.B }?.totalCurrent ?: 0.0),
+            Phase.C to (phaseItems.find { it.phase == Phase.C }?.totalCurrent ?: 0.0)
         )
     }
 
-    // Локальное состояние разворота секций по фазам
+    // Локальное состояние разворота секций по фазам (только A/B/C)
     val expandedMap = remember(mode) {
         mutableStateMapOf<Phase, Boolean>().apply {
             this[Phase.A] = (mode == PhaseMode.SINGLE)
@@ -184,8 +197,9 @@ fun PhaseLoadContent(
                 }
             }
 
+            // ===== 1-ф режим: "Куда уходит ток" + советы (берём фазу A из phaseItems) =====
             if (mode == PhaseMode.SINGLE) {
-                val aItem = shown.firstOrNull { it.phase == Phase.A }
+                val aItem = phaseItems.firstOrNull { it.phase == Phase.A }
 
                 stickyHeader {
                     SectionHeader(
@@ -262,8 +276,18 @@ fun PhaseLoadContent(
                 }
             }
 
-            // Таблица фаз/групп — со сворачиванием по клику + DnD drop-zones
-            items(shown, key = { it.phase }) { item ->
+            // ===== ✅ Секция 3φ отдельным блоком (без DnD/drop-zone) =====
+            if (threePhaseItem != null && threePhaseItem.groups.isNotEmpty()) {
+                item {
+                    ThreePhaseLoadsSection(
+                        item = threePhaseItem,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+
+            // ===== Таблица фаз/групп — только A/B/C + DnD drop-zones =====
+            items(phaseItems, key = { it.phase }) { item ->
                 PhaseGroupTableItem(
                     item = item,
                     expanded = isExpanded(item.phase),
@@ -274,7 +298,12 @@ fun PhaseLoadContent(
 
                     isDropTargetHighlighted = (dragging != null && hoveredPhase == item.phase),
 
-                    onRegisterDropZone = { phase, rect -> dropZones[phase] = rect },
+                    onRegisterDropZone = { phase, rect ->
+                        // ✅ drop-zone только для A/B/C
+                        if (phase == Phase.A || phase == Phase.B || phase == Phase.C) {
+                            dropZones[phase] = rect
+                        }
+                    },
 
                     onDragStart = { payload ->
                         if (!canDrag) onPaywall() else dragging = payload
@@ -296,7 +325,7 @@ fun PhaseLoadContent(
                             return@PhaseGroupTableItem
                         }
 
-                        // ✅ проверка drop-а в ROOT координатах
+                        // ✅ проверка drop-а в ROOT координатах (по dropZones A/B/C)
                         val target = dropZones.entries.firstOrNull { (_, rect) ->
                             rect.contains(dragPosRoot)
                         }?.key

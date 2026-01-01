@@ -294,6 +294,7 @@ private fun PhaseDot(phase: Phase) {
                     Phase.A -> Color(0xFFF6D96B) // жёлтый
                     Phase.B -> Color(0xFF7ED492) // зелёный
                     Phase.C -> Color(0xFFFF8A80) // красный
+                    Phase.THREE_PHASE -> Color(0xFF9E9E9E) // нейтральный (3φ точка)
                 }
             )
     )

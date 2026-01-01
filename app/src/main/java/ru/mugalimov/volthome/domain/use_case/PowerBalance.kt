@@ -48,11 +48,12 @@ fun calcPhaseBalance(a: Double, b: Double, c: Double): PhaseBalance {
     )
 }
 
-/** Фиксированный порядок фаз для tie-break (A < B < C) */
+/** Фиксированный порядок фаз для tie-break (A < B < C); THREE_PHASE — отдельный кейс */
 private fun phaseOrder(p: Phase): Int = when (p) {
     Phase.A -> 0
     Phase.B -> 1
     Phase.C -> 2
+    Phase.THREE_PHASE -> 3
 }
 
 enum class BalanceLevel { OK, MINOR, HIGH }

@@ -42,4 +42,5 @@ private fun phaseColor(p: Phase): Color = when (p) {
     Phase.A -> Color(0xFFF6D96B)
     Phase.B -> Color(0xFF7ED492)
     Phase.C -> Color(0xFFFF8A80)
+    Phase.THREE_PHASE -> Color(0xFF9E9E9E)
 }
