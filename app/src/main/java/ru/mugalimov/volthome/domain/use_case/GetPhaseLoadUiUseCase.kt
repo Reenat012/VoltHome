@@ -69,6 +69,7 @@ class GetPhaseLoadUiUseCase @Inject constructor(
                     val g = items.first().first
                     val deviceRows = items.map { (_, d) ->
                         PhaseDeviceItem(
+                            deviceId = d.id,
                             name = d.name,
                             power = d.power.toDouble(),
                             current = d.calculateCurrent()
@@ -105,10 +106,12 @@ class GetPhaseLoadUiUseCase @Inject constructor(
             val groupsOfPhase = groups.filter { it.phase == phase }
 
             val groupRows: List<PhaseGroupItem> = groupsOfPhase.map { g ->
-                val onePhaseDevices = g.devices.filter { it.voltage.type != ru.mugalimov.volthome.domain.model.VoltageType.AC_3PHASE }
+                val onePhaseDevices = g.devices
+                    .filter { it.voltage.type != ru.mugalimov.volthome.domain.model.VoltageType.AC_3PHASE }
 
                 val deviceRows = onePhaseDevices.map { d ->
                     PhaseDeviceItem(
+                        deviceId = d.id,
                         name = d.name,
                         power = d.power.toDouble(),
                         current = d.calculateCurrent()

@@ -14,6 +14,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import ru.mugalimov.volthome.domain.model.Device
+import androidx.compose.runtime.key
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -37,11 +38,13 @@ fun DeviceChips(
     ) {
         // Чипы инстансов устройств (показываем кастомные name/power)
         visible.forEach { d ->
-            AssistChip(
-                onClick = { onDeviceClick(d.id) },
-                label = { Text("${d.name}", style = MaterialTheme.typography.labelLarge) },
-                colors = AssistChipDefaults.assistChipColors()
-            )
+            key(d.id) {
+                AssistChip(
+                    onClick = { onDeviceClick(d.id) },
+                    label = { Text("${d.name}", style = MaterialTheme.typography.labelLarge) },
+                    colors = AssistChipDefaults.assistChipColors()
+                )
+            }
         }
 
         // «+N» для раскрытия

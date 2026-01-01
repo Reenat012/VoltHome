@@ -488,10 +488,11 @@ class SyncManager @Inject constructor(
                 projectId = projectId
             )
             val newLocal = deviceDao.insert(entity)
-            val resolvedId = if (newLocal > 0) newLocal
-            else deviceDao.findByRoomAndName(ensuredRoomId, d.name)?.deviceId ?: continue
-
-            toMapDevices += d.id to resolvedId
+            if (newLocal <= 0) {
+                Log.w("Sync", "snapshot devices.skip: failed to insert device uuid=${d.id} name='${d.name}' roomId=$ensuredRoomId")
+                continue
+            }
+            toMapDevices += d.id to newLocal
         }
     }
 
@@ -693,46 +694,32 @@ class SyncManager @Inject constructor(
             val requiresSocket = (meta["requires_socket"] as? Boolean) ?: true
 
             if (localId == null) {
-                val existingByName = deviceDao.findByRoomAndName(ensuredRoomId!!, name)
-                if (existingByName != null) {
-                    deviceDao.update(
-                        existingByName.copy(
-                            name = name,
-                            power = power,
-                            voltage = voltage,
-                            demandRatio = demandRatio,
-                            createdAt = createdAt,
-                            roomId = ensuredRoomId,
-                            deviceType = deviceType,
-                            powerFactor = powerFactor,
-                            hasMotor = hasMotor,
-                            requiresDedicatedCircuit = requiresDedicated,
-                            requiresSocketConnection = requiresSocket,
-                            projectId = projectId
-                        )
+                val entity = DeviceEntity(
+                    deviceId = 0,
+                    name = name,
+                    power = power,
+                    voltage = voltage,
+                    demandRatio = demandRatio,
+                    createdAt = createdAt,
+                    roomId = ensuredRoomId!!,
+                    deviceType = deviceType,
+                    powerFactor = powerFactor,
+                    hasMotor = hasMotor,
+                    requiresDedicatedCircuit = requiresDedicated,
+                    requiresSocketConnection = requiresSocket,
+                    projectId = projectId
+                )
+
+                val insertedId = deviceDao.insert(entity)
+                if (insertedId <= 0) {
+                    Log.w(
+                        "Sync",
+                        "devices.upsert skip: failed to insert device uuid=${d.id} name='$name' roomId=$ensuredRoomId project=$projectId"
                     )
-                    toMapDevices += d.id to existingByName.deviceId
-                } else {
-                    val entity = DeviceEntity(
-                        deviceId = 0,
-                        name = name,
-                        power = power,
-                        voltage = voltage,
-                        demandRatio = demandRatio,
-                        createdAt = createdAt,
-                        roomId = ensuredRoomId!!,
-                        deviceType = deviceType,
-                        powerFactor = powerFactor,
-                        hasMotor = hasMotor,
-                        requiresDedicatedCircuit = requiresDedicated,
-                        requiresSocketConnection = requiresSocket,
-                        projectId = projectId
-                    )
-                    val insertedId = deviceDao.insert(entity)
-                    val resolvedId = if (insertedId > 0) insertedId
-                    else deviceDao.findByRoomAndName(ensuredRoomId!!, name)?.deviceId ?: continue
-                    toMapDevices += d.id to resolvedId
+                    continue
                 }
+
+                toMapDevices += d.id to insertedId
             } else {
                 val existing = deviceDao.getDeviceById(localId.toInt()) ?: continue
                 deviceDao.update(

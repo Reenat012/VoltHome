@@ -6,6 +6,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -47,9 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
-import androidx.compose.foundation.border
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Shape
+import androidx.compose.runtime.key
 
 @Composable
 fun PhaseGroupTableItem(
@@ -192,12 +191,14 @@ fun PhaseGroupTableItem(
                                     verticalArrangement = Arrangement.spacedBy(6.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    group.devices.forEach { deviceName ->
-                                        AssistChip(
-                                            onClick = {},
-                                            label = { Text(deviceName.name) },
-                                            border = AssistChipDefaults.assistChipBorder(false)
-                                        )
+                                    group.devices.forEach { deviceItem ->
+                                        key(deviceItem.deviceId) {
+                                            AssistChip(
+                                                onClick = {},
+                                                label = { Text(deviceItem.name) },
+                                                border = AssistChipDefaults.assistChipBorder(false)
+                                            )
+                                        }
                                     }
                                 }
                                 Spacer(Modifier.height(8.dp))
