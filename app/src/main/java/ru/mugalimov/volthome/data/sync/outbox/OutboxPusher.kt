@@ -684,16 +684,13 @@ class OutboxPusher @Inject constructor(
         val toDevices = mutableListOf<UuidMapDevice>()
         for (d in tree.devices) {
             if (d.is_deleted) continue
-            val roomUuid = (d.meta?.get("room_id") as? String) ?: continue
-            val roomLocal = uuidDao.getRoomLocal(roomUuid) ?: continue
-            val local = deviceDao.findByRoomAndName(roomLocal, d.name) ?: continue
 
-        // если в комнате несколько девайсов с таким именем — лучше пропустить авто-маппинг,
-        // чтобы не назначить UUID "не тому". Для этого метод findByRoomAndName должен возвращать
-        // либо ровно один, либо null. Если сейчас он гарантирует ровно один — оставь как было.
-            if (uuidDao.getDeviceUuidByLocal(local.deviceId) == null) {
-                toDevices += UuidMapDevice(deviceUuid = d.id, localId = local.deviceId)
-            }
+            // Если маппинг уже есть — ничего не делаем
+            if (uuidDao.getDeviceLocal(d.id) != null) continue
+
+            // Без стабильного идентификатора (localId <-> deviceUuid) нельзя корректно связать устройство.
+            // Эвристики по name запрещены, т.к. имена могут дублироваться.
+            Log.w("Outbox", "refreshUuidFromSnapshot: skip device uuid=${d.id} name='${d.name}' (no safe local mapping)")
         }
         if (toDevices.isNotEmpty()) uuidDao.putDevices(toDevices)
     }
