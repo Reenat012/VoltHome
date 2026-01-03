@@ -7,10 +7,12 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import ru.mugalimov.volthome.data.remote.auth.AuthSession
 import ru.mugalimov.volthome.data.repository.AuthRepository
 import ru.mugalimov.volthome.data.repository.ProjectsRepository
 import ru.mugalimov.volthome.data.remote.yandex.YandexTokenStore
+import ru.mugalimov.volthome.ui.screens.auth.contract.AuthState
 import javax.inject.Inject
 
 @HiltViewModel
@@ -19,6 +21,8 @@ class AuthViewModel @Inject constructor(
     private val projectsRepo: ProjectsRepository,
     private val yaTokenStore: YandexTokenStore
 ) : ViewModel() {
+
+    // === СЕТЕВОЕ / СЕРВЕРНОЕ СОСТОЯНИЕ АВТОРИЗАЦИИ ===
 
     sealed interface State {
         object Idle : State
@@ -30,11 +34,13 @@ class AuthViewModel @Inject constructor(
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state
 
+    // === СОСТОЯНИЕ СОГЛАСИЙ (GATE) ===
+
+    private val _consentState = MutableStateFlow(AuthState())
+    val consentState: StateFlow<AuthState> = _consentState
+
     /**
-     * Стартовая инициализация:
-     * - если в SessionManager есть сессия — считаем пользователя залогиненным
-     *   (даже если access формально протух: refreshGate/SessionAuthenticator это разрулят),
-     * - иначе показываем экран входа.
+     * Стартовая инициализация.
      */
     fun bootstrap() {
         viewModelScope.launch {
@@ -48,20 +54,35 @@ class AuthViewModel @Inject constructor(
         }
     }
 
+    // === СОГЛАСИЯ ===
+
+    fun onTermsAcceptanceChanged(accepted: Boolean) {
+        _consentState.update { it.copy(termsAccepted = accepted) }
+    }
+
+    fun onPdConsentAcceptanceChanged(accepted: Boolean) {
+        _consentState.update { it.copy(pdConsentAccepted = accepted) }
+    }
+
+    // === СТАРТ АВТОРИЗАЦИИ (ЖЁСТКИЙ GATE) ===
+
     fun startLogin() {
+        val consent = _consentState.value
+        if (!consent.canContinue) return
+
+        _consentState.update { it.copy(isLoading = true) }
         _state.value = State.Loading
     }
 
     fun handleResult(result: YandexAuthResult) {
         viewModelScope.launch {
-            // 1) аккуратно сохраним Я-токен (если SDK его выдаёт)
+            // 1) сохранить Я-токен, если есть
             if (result is YandexAuthResult.Success) {
                 val yaAccess = runCatching { result.token.value }.getOrNull()
-                // сохраняем или очищаем — всё на IO, без фризов
                 yaTokenStore.save(yaAccess)
             }
 
-            // 2) обмен/логин на сервере как раньше
+            // 2) серверный логин
             val res = authRepo.handleAuthResult(result)
             _state.value = res.fold(
                 onSuccess = { session ->
@@ -70,26 +91,29 @@ class AuthViewModel @Inject constructor(
                 },
                 onFailure = { State.Error(mapThrowableToUi(it)) }
             )
+
+            _consentState.update { it.copy(isLoading = false) }
         }
     }
 
     fun signOut() {
         viewModelScope.launch {
             authRepo.signOut()
-            yaTokenStore.clear() // чистим Я-токен
+            yaTokenStore.clear()
             _state.value = State.Idle
+            _consentState.value = AuthState()
         }
     }
 
     private fun mapThrowableToUi(t: Throwable): String {
         val code = t.message?.lowercase().orEmpty()
         return when (code) {
-            "cancelled"   -> "Авторизация отменена."
-            "connection"  -> "Нет сети. Проверь подключение и повтори."
-            "security"    -> "Ошибка конфигурации OAuth. Проверь redirect URI и client_id."
+            "cancelled"     -> "Авторизация отменена."
+            "connection"    -> "Нет сети. Проверь подключение и повтори."
+            "security"      -> "Ошибка конфигурации OAuth. Проверь redirect URI и client_id."
             "oauth_invalid" -> "Неверный/просроченный токен Яндекса. Попробуй снова."
-            "jwt_auth"    -> "Не удалось получить серверную сессию. Повтори вход."
-            else          -> "Ошибка входа. ${t.message ?: ""}".trim()
+            "jwt_auth"      -> "Не удалось получить серверную сессию. Повтори вход."
+            else            -> "Ошибка входа. ${t.message ?: ""}".trim()
         }
     }
 }
