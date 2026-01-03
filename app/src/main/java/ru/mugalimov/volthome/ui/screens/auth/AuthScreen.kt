@@ -38,10 +38,12 @@ fun AuthScreen(
     onSuccess: () -> Unit
 ) {
     val vm: AuthViewModel = hiltViewModel()
+
     val state by vm.state.collectAsState()
+    val consentState by vm.consentState.collectAsState()
+
     val context = LocalContext.current
 
-    // Контракт Яндекс ID
     val launcher = rememberLauncherForActivityResult(contract = sdk.contract) { result: YandexAuthResult ->
         val tag = "YA_AUTH"
         when (result) {
@@ -55,15 +57,11 @@ fun AuthScreen(
     LaunchedEffect(Unit) { vm.bootstrap() }
     LaunchedEffect(state) { if (state is AuthViewModel.State.Success) onSuccess() }
 
-    var accepted by remember { mutableStateOf(false) }
-    val isLoading = state is AuthViewModel.State.Loading
-
-    // ---------- ОДНОЦВЕТНЫЙ ФОН ----------
     Surface(
         modifier = Modifier
             .fillMaxSize()
             .systemBarsPadding(),
-        color = Color.White // 🔹 Совпадает с фоном логотипа
+        color = Color.White
     ) {
         Box(
             modifier = Modifier.fillMaxSize(),
@@ -76,19 +74,18 @@ fun AuthScreen(
                     .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+
                 Spacer(Modifier.height(24.dp))
 
-                // ---------- ЛОГОТИП ----------
                 Image(
                     painter = rememberAsyncImagePainter("file:///android_asset/report_pdf/img/logo.png"),
                     contentDescription = "Логотип VoltHome",
                     modifier = Modifier
                         .fillMaxWidth(0.36f)
                         .aspectRatio(1f)
-                        .padding(top = 24.dp, bottom = 0.dp)
+                        .padding(top = 24.dp)
                 )
 
-                // ---------- ПОДЗАГОЛОВОК ----------
                 Text(
                     text = "Вход в VoltHome",
                     style = MaterialTheme.typography.titleLarge,
@@ -98,13 +95,10 @@ fun AuthScreen(
 
                 Spacer(Modifier.height(12.dp))
 
-                // ---------- КАРТОЧКА СОГЛАСИЯ ----------
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    ),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)),
                     shape = MaterialTheme.shapes.large
                 ) {
@@ -112,19 +106,20 @@ fun AuthScreen(
                         modifier = Modifier.padding(20.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
+
+                        // 1) Checkbox #1
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Checkbox(
-                                checked = accepted,
-                                onCheckedChange = { accepted = it },
+                                checked = consentState.termsAccepted,
+                                onCheckedChange = vm::onTermsAcceptanceChanged,
                                 modifier = Modifier.padding(end = 8.dp)
                             )
                             Text(
                                 text = "Я принимаю условия использования",
                                 style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.weight(1f)
                             )
                         }
@@ -139,6 +134,34 @@ fun AuthScreen(
                             )
                         }
 
+                        // 2) Checkbox #2
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Checkbox(
+                                checked = consentState.pdConsentAccepted,
+                                onCheckedChange = vm::onPdConsentAcceptanceChanged,
+                                modifier = Modifier.padding(end = 8.dp)
+                            )
+                            Text(
+                                text = "Я даю согласие на обработку персональных данных",
+                                style = MaterialTheme.typography.bodyLarge,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        DocumentLink(
+                            icon = Icons.Default.Description,
+                            text = "Согласие на обработку ПДн"
+                        ) {
+                            context.openDocument(
+                                webUrl = LegalUrls.PD_CONSENT,
+                                localAssetPath = "documents/pd_consent.html"
+                            )
+                        }
+
+                        // 3) Ссылка без чекбокса
                         DocumentLink(
                             icon = Icons.Default.PrivacyTip,
                             text = "Политика конфиденциальности"
@@ -153,16 +176,14 @@ fun AuthScreen(
 
                 Spacer(Modifier.height(16.dp))
 
-                // ---------- КНОПКА ВХОДА ----------
                 YandexSignInButton(
-                    enabled = accepted && !isLoading,
-                    loading = isLoading
+                    enabled = consentState.canContinue,
+                    loading = consentState.isLoading
                 ) {
                     vm.startLogin()
                     launcher.launch(YandexAuthLoginOptions())
                 }
 
-                // ---------- ОШИБКА ----------
                 (state as? AuthViewModel.State.Error)?.let { err ->
                     Spacer(Modifier.height(8.dp))
                     Text(
@@ -178,7 +199,6 @@ fun AuthScreen(
     }
 }
 
-/** Кнопка «Войти с Яндекс ID» со спиннером и иконкой, с плавными состояниями. */
 @Composable
 private fun YandexSignInButton(
     enabled: Boolean,
@@ -186,14 +206,12 @@ private fun YandexSignInButton(
     onClick: () -> Unit
 ) {
     val container by animateColorAsState(
-        targetValue = if (enabled) MaterialTheme.colorScheme.primary
-        else MaterialTheme.colorScheme.surfaceVariant,
+        targetValue = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
         animationSpec = spring(),
         label = "btnContainer"
     )
     val content by animateColorAsState(
-        targetValue = if (enabled) MaterialTheme.colorScheme.onPrimary
-        else MaterialTheme.colorScheme.onSurfaceVariant,
+        targetValue = if (enabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
         animationSpec = spring(),
         label = "btnContent"
     )
@@ -245,7 +263,6 @@ private fun YandexSignInButton(
     }
 }
 
-/** Ссылка на документ с иконкой. */
 @Composable
 private fun DocumentLink(
     icon: ImageVector,
