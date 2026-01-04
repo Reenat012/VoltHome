@@ -176,16 +176,16 @@ private fun SettingsContent(
             )
         }
 
-        // Выделенная (фиолетовая) CTA-плитка Telegram
-        item {
-            SettingsTile(
-                iconPainter = painterResource(R.drawable.telegram_communication_chat_interaction_network_connection), // можно заменить на Campaign при наличии icons-extended
-                title = "Telegram-канал VoltHome",
-                subtitle = "Новости, обновления и советы по электрике",
-                onClick = { context.openExternalUrl(TELEGRAM_URL) },
-                prominent = true
-            )
-        }
+//        // Выделенная (фиолетовая) CTA-плитка Telegram
+//        item {
+//            SettingsTile(
+//                iconPainter = painterResource(R.drawable.telegram_communication_chat_interaction_network_connection), // можно заменить на Campaign при наличии icons-extended
+//                title = "Telegram-канал VoltHome",
+//                subtitle = "Новости, обновления и советы по электрике",
+//                onClick = { context.openExternalUrl(TELEGRAM_URL) },
+//                prominent = true
+//            )
+//        }
 
         item { Spacer(modifier = Modifier.height(8.dp)) }
 

@@ -30,7 +30,12 @@ class AuthRepositoryImpl @Inject constructor(
     private val tokenRefreshScheduler: TokenRefreshScheduler
 ) : AuthRepository {
 
-    override fun loginOptions(): YandexAuthLoginOptions = YandexAuthLoginOptions()
+    override fun loginOptions(): YandexAuthLoginOptions {
+        // Централизованное создание options.
+        // На текущем этапе — без параметров, но НЕ в UI.
+        // Если SDK поддерживает Builder — сюда же переносим builder-конфиг без касаний UI.
+        return YandexAuthLoginOptions()
+    }
 
     override suspend fun handleAuthResult(result: YandexAuthResult): Result<AuthSession> =
         withContext(Dispatchers.IO) {
