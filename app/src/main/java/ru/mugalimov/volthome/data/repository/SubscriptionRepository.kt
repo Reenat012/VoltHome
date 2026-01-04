@@ -1,6 +1,7 @@
 package ru.mugalimov.volthome.data.repository
 
 import ru.mugalimov.volthome.domain.model.UserPlan
+import ru.mugalimov.volthome.domain.model.ProProduct
 
 /**
  * Репозиторий подписки RuStore.
@@ -8,6 +9,12 @@ import ru.mugalimov.volthome.domain.model.UserPlan
  * и обновляет UserPlanRepository.
  */
 interface SubscriptionRepository {
+
+    /**
+     * Список PRO-продуктов, которые приложение умеет продавать.
+     * Сейчас — минимум (один SKU), но оставляем как List для будущих планов (месяц/год).
+     */
+    fun getProProducts(): List<ProProduct>
 
     /**
      * Синхронизировать статус подписки с сервера.

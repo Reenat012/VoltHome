@@ -6,13 +6,23 @@ import ru.mugalimov.volthome.data.remote.api.BillingApi
 import ru.mugalimov.volthome.data.remote.api.RustoreConfirmRequest
 import ru.mugalimov.volthome.data.repository.SubscriptionRepository
 import ru.mugalimov.volthome.data.repository.UserPlanRepository
+import ru.mugalimov.volthome.domain.model.ProProduct
+import ru.mugalimov.volthome.domain.model.PurchaseKind
 import ru.mugalimov.volthome.domain.model.UserPlan
+import ru.mugalimov.volthome.domain.model.VOLTHOME_PRO_MONTHLY_PRODUCT_ID
 
 @Singleton
 class SubscriptionRepositoryImpl @Inject constructor(
     private val billingApi: BillingApi,
     private val userPlanRepository: UserPlanRepository
 ) : SubscriptionRepository {
+
+    override fun getProProducts(): List<ProProduct> = listOf(
+        ProProduct(
+            productId = VOLTHOME_PRO_MONTHLY_PRODUCT_ID,
+            kind = PurchaseKind.SUBSCRIPTION
+        )
+    )
 
     override suspend fun syncStatus(): Result<UserPlan> =
         runCatching {

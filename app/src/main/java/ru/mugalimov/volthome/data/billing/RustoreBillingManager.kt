@@ -1,63 +1,66 @@
 package ru.mugalimov.volthome.data.billing
 
 import android.app.Activity
-import javax.inject.Inject
-import javax.inject.Singleton
+import ru.mugalimov.volthome.domain.model.ProProduct
 
-/**
- * Обёртка над RuStore Pay SDK.
- *
- * Сейчас реализация — заглушка. Сюда нужно будет перенести логику из гайда:
- * - инициализацию клиента,
- * - старт покупки по productId,
- * - обработку deeplink/интента,
- * - извлечение orderId / purchaseToken.
- */
 interface RustoreBillingManager {
 
-    sealed class PurchaseResult {
+    sealed class PurchaseOutcome {
         data class Success(
             val productId: String,
             val orderId: String,
             val purchaseToken: String
-        ) : PurchaseResult()
+        ) : PurchaseOutcome()
 
-        object Cancelled : PurchaseResult()
+        object Cancelled : PurchaseOutcome()
 
-        data class Failed(
-            val message: String? = null,
-            val throwable: Throwable? = null
-        ) : PurchaseResult()
+        data class Error(val error: PurchaseError) : PurchaseOutcome()
     }
 
+    sealed class RestoreOutcome {
+        object Success : RestoreOutcome()
+        data class Error(val error: PurchaseError) : RestoreOutcome()
+    }
+
+    sealed class PurchaseError {
+        data class WrongProductKind(
+            val expected: String,
+            val actual: String
+        ) : PurchaseError()
+
+        data class InvalidContext(val reason: String) : PurchaseError()
+
+        data class InvalidActivePurchase(
+            val message: String?,
+            val throwable: Throwable
+        ) : PurchaseError()
+
+        data class SdkError(
+            val message: String?,
+            val throwable: Throwable
+        ) : PurchaseError()
+
+        data class Unknown(
+            val message: String?,
+            val throwable: Throwable
+        ) : PurchaseError()
+    }
+
+    suspend fun subscribe(
+        activity: Activity,
+        product: ProProduct
+    ): PurchaseOutcome
+
     /**
-     * Запустить покупку подписки.
-     *
-     * activity — текущая Activity (MainActivity),
-     * productId — идентификатор продукта в RuStore (например, "volthome_pro_monthly").
+     * Backward-compat: пока VM дергает покупку по productId.
      */
     suspend fun launchPurchase(
         activity: Activity,
         productId: String
-    ): PurchaseResult
-}
+    ): PurchaseOutcome
 
-/**
- * Временная заглушка, чтобы не ронять приложение, пока не подключен реальный Pay SDK.
- *
- * В релизе НЕ использовать — только на время интеграции.
- */
-@Singleton
-class RustoreBillingManagerStub @Inject constructor() : RustoreBillingManager {
-
-    override suspend fun launchPurchase(
-        activity: Activity,
-        productId: String
-    ): RustoreBillingManager.PurchaseResult {
-        // TODO: подключить реальный RuStore Pay SDK согласно
-        // https://www.rustore.ru/help/guides/payments/kotlin-java
-        return RustoreBillingManager.PurchaseResult.Failed(
-            message = "Оплата через RuStore пока не настроена"
-        )
-    }
+    /**
+     * Restore purchases entrypoint (должен НЕ бросать исключения).
+     */
+    suspend fun restorePurchases(activity: Activity): RestoreOutcome
 }
