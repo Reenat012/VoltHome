@@ -84,6 +84,32 @@ abstract class AppDatabase : RoomDatabase() {
 
         // ======== существующие миграции ========
 
+        // ======== missing legacy migrations ========
+
+        // 13 → 14
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // no-op
+                // версия 14 не меняла схему, только версию БД
+            }
+        }
+
+        // 14 → 15
+        val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // no-op
+                // версия 15 не меняла схему, только версию БД
+            }
+        }
+
+        // 15 → 16
+        val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // no-op
+                // версия 16 — база для MIGRATION_16_17
+            }
+        }
+
         val MIGRATION_16_17 = object : Migration(16, 17) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 // no-op
