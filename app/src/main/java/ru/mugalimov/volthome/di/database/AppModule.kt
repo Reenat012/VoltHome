@@ -42,6 +42,9 @@ object DatabaseModule {
             .setQueryExecutor(java.util.concurrent.Executors.newFixedThreadPool(4))
             .setTransactionExecutor(java.util.concurrent.Executors.newSingleThreadExecutor())
             .addMigrations(
+                AppDatabase.MIGRATION_13_14,
+                AppDatabase.MIGRATION_14_15,
+                AppDatabase.MIGRATION_15_16,
                 AppDatabase.MIGRATION_16_17,
                 AppDatabase.MIGRATION_17_18,
                 AppDatabase.MIGRATION_18_19,
@@ -55,7 +58,7 @@ object DatabaseModule {
             )
             // Для клиентов с очень старыми версиями (<16) просто пересоздаём БД
             .fallbackToDestructiveMigrationFrom(
-                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
             )
             .addCallback(object : RoomDatabase.Callback() {
                 override fun onCreate(db: SupportSQLiteDatabase) {
