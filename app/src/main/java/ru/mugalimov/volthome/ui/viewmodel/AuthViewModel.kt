@@ -2,17 +2,21 @@ package ru.mugalimov.volthome.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.yandex.authsdk.YandexAuthLoginOptions
 import com.yandex.authsdk.YandexAuthResult
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import ru.mugalimov.volthome.BuildConfig
 import ru.mugalimov.volthome.data.remote.auth.AuthSession
+import ru.mugalimov.volthome.data.remote.yandex.YandexTokenStore
 import ru.mugalimov.volthome.data.repository.AuthRepository
 import ru.mugalimov.volthome.data.repository.ProjectsRepository
-import ru.mugalimov.volthome.data.remote.yandex.YandexTokenStore
+import ru.mugalimov.volthome.ui.screens.auth.contract.AuthConfigCheckResult
 import ru.mugalimov.volthome.ui.screens.auth.contract.AuthState
+import ru.mugalimov.volthome.ui.screens.auth.contract.checkAuthConfig
 import javax.inject.Inject
 
 @HiltViewModel
@@ -39,10 +43,18 @@ class AuthViewModel @Inject constructor(
     private val _consentState = MutableStateFlow(AuthState())
     val consentState: StateFlow<AuthState> = _consentState
 
+    fun loginOptions(): YandexAuthLoginOptions = authRepo.loginOptions()
+
     /**
      * Стартовая инициализация.
      */
     fun bootstrap() {
+        // 0) Проверка конфигурации OAuth (до любых стартов AuthSdkActivity)
+        when (val cfg = checkAuthConfig(BuildConfig.YANDEX_CLIENT_ID)) {
+            AuthConfigCheckResult.Ok -> _consentState.update { it.copy(configError = null) }
+            is AuthConfigCheckResult.Invalid -> _consentState.update { it.copy(configError = cfg.error) }
+        }
+
         viewModelScope.launch {
             val session = authRepo.currentSession()
             if (session != null) {
@@ -68,7 +80,12 @@ class AuthViewModel @Inject constructor(
 
     fun startLogin() {
         val consent = _consentState.value
-        if (!consent.canContinue) return
+        if (!consent.canContinue) {
+            if (consent.configError != null) {
+                _state.value = State.Error("Ошибка конфигурации входа. Обновите приложение.")
+            }
+            return
+        }
 
         _consentState.update { it.copy(isLoading = true) }
         _state.value = State.Loading

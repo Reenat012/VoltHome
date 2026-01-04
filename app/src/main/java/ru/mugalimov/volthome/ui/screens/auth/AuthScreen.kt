@@ -24,7 +24,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.rememberAsyncImagePainter
-import com.yandex.authsdk.YandexAuthLoginOptions
 import com.yandex.authsdk.YandexAuthResult
 import com.yandex.authsdk.YandexAuthSdk
 import ru.mugalimov.volthome.R
@@ -41,7 +40,6 @@ fun AuthScreen(
 
     val state by vm.state.collectAsState()
     val consentState by vm.consentState.collectAsState()
-
     val context = LocalContext.current
 
     val launcher = rememberLauncherForActivityResult(contract = sdk.contract) { result: YandexAuthResult ->
@@ -56,6 +54,9 @@ fun AuthScreen(
 
     LaunchedEffect(Unit) { vm.bootstrap() }
     LaunchedEffect(state) { if (state is AuthViewModel.State.Success) onSuccess() }
+
+    // options создаём централизованно (через репозиторий внутри VM)
+    val loginOptions = remember { vm.loginOptions() }
 
     Surface(
         modifier = Modifier
@@ -181,7 +182,7 @@ fun AuthScreen(
                     loading = consentState.isLoading
                 ) {
                     vm.startLogin()
-                    launcher.launch(YandexAuthLoginOptions())
+                    launcher.launch(loginOptions)
                 }
 
                 (state as? AuthViewModel.State.Error)?.let { err ->

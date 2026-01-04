@@ -10,10 +10,11 @@ package ru.mugalimov.volthome.ui.screens.auth.contract
 data class AuthState(
     val termsAccepted: Boolean = false,
     val pdConsentAccepted: Boolean = false,
-    val isLoading: Boolean = false
+    val isLoading: Boolean = false,
+    val configError: ConfigError? = null
 ) {
     val canContinue: Boolean
-        get() = termsAccepted && pdConsentAccepted && !isLoading
+        get() = termsAccepted && pdConsentAccepted && !isLoading && configError == null
 }
 
 /**
@@ -58,4 +59,14 @@ enum class DocumentType {
     USER_AGREEMENT,
     PD_CONSENT,
     PRIVACY_POLICY
+}
+
+/**
+ * Ошибки конфигурации OAuth.
+ * Без URL/текстов документов.
+ */
+sealed interface ConfigError {
+    object MissingClientId : ConfigError
+    object MissingRedirectUri : ConfigError
+    data class Other(val debugMessage: String) : ConfigError
 }
