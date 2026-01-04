@@ -13,6 +13,9 @@
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         tools:node="remove" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_CONNECT"
+        tools:node="remove" />
 
     <!-- Видимость пакетов/интентов для открытия ссылок и приоритета клиентов -->
     <queries>
