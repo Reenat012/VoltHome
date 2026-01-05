@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.outlined.DragIndicator
 import androidx.compose.material.icons.outlined.Power
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -28,10 +29,12 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -48,7 +51,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
-import androidx.compose.runtime.key
 
 @Composable
 fun PhaseGroupTableItem(
@@ -67,11 +69,6 @@ fun PhaseGroupTableItem(
     isDropTargetHighlighted: Boolean,
     onDragCancel: () -> Unit,
 ) {
-    // ⚠️ Хак: нельзя сослаться на локальный data class из другого файла напрямую.
-    // Поэтому ниже я использую "typealias" через внутреннюю обёртку:
-    // смотри внизу файла PhaseLoadContent.kt — там должен быть typealias.
-    // Если не хочешь typealias — скажи, дам вариант с отдельным файлом модели.
-
     val phaseAccent = when (item.phase) {
         Phase.A -> Color(0xFFF6D96B).copy(alpha = 0.25f)
         Phase.B -> Color(0xFF7ED492).copy(alpha = 0.25f)
@@ -100,6 +97,8 @@ fun PhaseGroupTableItem(
         shape = MaterialTheme.shapes.large
     ) {
         Column(Modifier.fillMaxWidth()) {
+
+            // Заголовок секции фазы (без drag)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -136,56 +135,86 @@ fun PhaseGroupTableItem(
             ) {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                     item.groups.forEachIndexed { index, group ->
-                        var groupCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+                        var handleCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
 
+                        // ВАЖНО: pointerInput теперь ТОЛЬКО на handle (явное действие).
+                        // Тело блока не перехватывает жест → scroll работает по умолчанию.
                         Box(
-                            modifier = Modifier
-                                .onGloballyPositioned { groupCoords = it }
-                                .pointerInput(canDrag, group.groupId) {
-                                    detectDragGestures(
-                                        onDragStart = { startLocal ->
-                                            if (!canDrag) { onPaywall(); return@detectDragGestures }
-
-                                            val c = groupCoords ?: return@detectDragGestures
-                                            val startRoot = c.localToRoot(startLocal)
-                                            onDragMove(startRoot) // ✅ чтобы overlay не “прыгал” с (0,0)
-
-                                            onDragStart(
-                                                PhaseLoadContentKt_DragPayload(
-                                                    groupId = group.groupId,
-                                                    fromPhase = item.phase,
-                                                    title = "Группа №${group.groupNumber} (${group.roomName})"
-                                                )
-                                            )
-                                        },
-                                        onDrag = { change, _ ->
-                                            if (!canDrag) return@detectDragGestures
-                                            change.consume()
-                                            val c = groupCoords ?: return@detectDragGestures
-                                            onDragMove(c.localToRoot(change.position))
-                                        },
-                                        onDragCancel = {
-                                            onDragCancel() // ✅ обязательно, иначе overlay может “зависнуть”
-                                        },
-                                        onDragEnd = {
-                                            if (!canDrag) return@detectDragGestures
-                                            onDragEnd(
-                                                PhaseLoadContentKt_DragPayload(
-                                                    groupId = group.groupId,
-                                                    fromPhase = item.phase,
-                                                    title = "Группа №${group.groupNumber} (${group.roomName})"
-                                                )
-                                            )
-                                        }
-                                    )
-                                }
+                            modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(Modifier.padding(vertical = 8.dp)) {
-                                Text(
-                                    text = "Группа №${group.groupNumber} (${group.roomName})",
-                                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium)
-                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Группа №${group.groupNumber} (${group.roomName})",
+                                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                                        modifier = Modifier.weight(1f)
+                                    )
+
+                                    IconButton(
+                                        onClick = {
+                                            // onClick не используется — drag идёт через жест.
+                                            // Нажатие на кнопку без жеста ничего не делает.
+                                        },
+                                        modifier = Modifier
+                                            .onGloballyPositioned { handleCoords = it }
+                                            .pointerInput(canDrag, group.groupId) {
+                                                detectDragGestures(
+                                                    onDragStart = { startLocal ->
+                                                        if (!canDrag) {
+                                                            onPaywall()
+                                                            return@detectDragGestures
+                                                        }
+
+                                                        val c = handleCoords ?: return@detectDragGestures
+                                                        val startRoot = c.localToRoot(startLocal)
+
+                                                        // Чтобы overlay не “прыгал” с (0,0)
+                                                        onDragMove(startRoot)
+
+                                                        onDragStart(
+                                                            PhaseLoadContentKt_DragPayload(
+                                                                groupId = group.groupId,
+                                                                fromPhase = item.phase,
+                                                                title = "Группа №${group.groupNumber} (${group.roomName})"
+                                                            )
+                                                        )
+                                                    },
+                                                    onDrag = { change, _ ->
+                                                        if (!canDrag) return@detectDragGestures
+                                                        // Здесь намеренно consume — это уже явный drag.
+                                                        change.consume()
+                                                        val c = handleCoords ?: return@detectDragGestures
+                                                        onDragMove(c.localToRoot(change.position))
+                                                    },
+                                                    onDragCancel = {
+                                                        onDragCancel()
+                                                    },
+                                                    onDragEnd = {
+                                                        if (!canDrag) return@detectDragGestures
+                                                        onDragEnd(
+                                                            PhaseLoadContentKt_DragPayload(
+                                                                groupId = group.groupId,
+                                                                fromPhase = item.phase,
+                                                                title = "Группа №${group.groupNumber} (${group.roomName})"
+                                                            )
+                                                        )
+                                                    }
+                                                )
+                                            }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.DragIndicator,
+                                            contentDescription = "Перетащить группу"
+                                        )
+                                    }
+                                }
+
                                 Spacer(Modifier.height(8.dp))
+
                                 FlowRow(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -201,12 +230,15 @@ fun PhaseGroupTableItem(
                                         }
                                     }
                                 }
+
                                 Spacer(Modifier.height(8.dp))
+
                                 Text(
                                     text = "${group.totalPower.toInt()} Вт • ${"%.2f".format(group.totalCurrent)} A",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+
                                 if (index != item.groups.lastIndex) {
                                     Spacer(Modifier.height(12.dp))
                                     Divider()
@@ -221,8 +253,7 @@ fun PhaseGroupTableItem(
 }
 
 /**
- * ✅ Чтобы не городить отдельный файл модели, выносим payload как публичный data class.
- * Тогда PhaseLoadContent и PhaseGroupTableItem используют один и тот же тип.
+ * Общий payload для DnD.
  */
 data class PhaseLoadContentKt_DragPayload(
     val groupId: Long,
