@@ -5,4 +5,18 @@
     <string name="notification_sync_text">Отправка изменений…</string>
     <string name="rustore_console_app_id">2063638579</string>
     <string name="rustore_pay_deeplink_scheme">volthome-pay</string>
+
+    <!-- Device types (UI labels) -->
+    <string name="device_type_lighting">Освещение</string>
+    <string name="device_type_socket">Розетки</string>
+    <string name="device_type_heavy_duty">Мощное оборудование</string>
+
+    <string name="device_type_air_conditioner">Кондиционер</string>
+    <string name="device_type_electric_stove">Электроплита</string>
+    <string name="device_type_oven">Духовой шкаф</string>
+    <string name="device_type_washing_machine">Стиральная машина</string>
+    <string name="device_type_dishwasher">Посудомоечная машина</string>
+    <string name="device_type_water_heater">Водонагреватель</string>
+
+    <string name="device_type_other">Другое</string>
 </resources>

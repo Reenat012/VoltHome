@@ -129,7 +129,7 @@ fun GroupCardCompact(
                                 voltage = real.voltage.value,
                                 demandRatio = real.demandRatio,
                                 powerFactor = real.powerFactor,
-                                deviceType = real.deviceType.name,
+                                deviceType = real.deviceType, // ← enum, НЕ string
                                 hasMotor = real.hasMotor,
                                 requiresDedicatedCircuit = real.requiresDedicatedCircuit,
                                 requiresSocketConnection = real.requiresSocketConnection
@@ -180,7 +180,7 @@ fun GroupCardCompact(
             AnimatedVisibility(visible = expanded.value) {
                 Column {
                     Spacer(Modifier.height(12.dp)); Divider(); Spacer(Modifier.height(12.dp))
-                    GroupParameterRow("Тип группы", group.groupType.name)
+                    GroupParameterRow("Тип группы", group.groupType.toString())
                     GroupParameterRow("Сечение кабеля", "${group.cableSection} мм²")
                     GroupParameterRow("Фаза", "${group.phase}")
                     if (group.rcdRequired) {

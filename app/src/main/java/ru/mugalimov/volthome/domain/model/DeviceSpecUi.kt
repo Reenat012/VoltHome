@@ -7,7 +7,7 @@ data class DeviceSpecUi(
     val voltage: Int?,                 // Вольты, если есть
     val demandRatio: Double?,          // если нет — покажем «—»
     val powerFactor: Double?,
-    val deviceType: String?,
+    val deviceType: DeviceType,
     val hasMotor: Boolean,
     val requiresDedicatedCircuit: Boolean,
     val requiresSocketConnection: Boolean? // если есть в доменной модели

@@ -30,6 +30,8 @@ import kotlinx.coroutines.CoroutineScope
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.VoltageType
 import ru.mugalimov.volthome.ui.utilities.bringIntoViewOnFocus
+import androidx.compose.ui.platform.LocalContext
+import ru.mugalimov.volthome.ui.utilities.label
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -110,11 +112,13 @@ fun DeviceParamsEditor(
                     .maybeBringIntoView(bringIntoViewRequester, scope)
             )
 
+            val context = LocalContext.current
+
             EnumDropdownField(
                 label = "Тип устройства",
                 value = deviceType,
                 values = DeviceType.values().toList(),
-                valueLabel = { it.name },
+                valueLabel = { it.label(context) },
                 locked = locked,
                 onLockedClick = onLockedClick,
                 onValueChange = onDeviceTypeChange,

@@ -36,6 +36,7 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import javax.inject.Inject
 import ru.mugalimov.volthome.data.repository.UserPlanRepository
+import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
 import ru.mugalimov.volthome.domain.model.ProFeature
 
@@ -258,7 +259,7 @@ fun ExplicationViewModel.buildReportData(): Pair<ReportMeta, List<ReportPhase>>?
                                 powerFactor = d.powerFactor
                             )
                             // Диагностика аномалий (не влияет на UI/PDF)
-                            if (d.deviceType.name == "LIGHTING" && (powerW ?: 0) >= 1000) {
+                            if (d.deviceType == DeviceType.LIGHTING && (powerW ?: 0) >= 1000) {
                                 Log.w(
                                     "ReportNormalizer",
                                     "Lighting device anomalous power: ${d.name} = ${powerW}W"

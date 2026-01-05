@@ -19,12 +19,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.Voltage
 import ru.mugalimov.volthome.domain.model.VoltageType
+import ru.mugalimov.volthome.ui.utilities.label
 
 /* ----------------- Модель «какой параметр поясняем» ----------------- */
 
@@ -42,6 +44,7 @@ fun CardDevice(
 ) {
     var info by remember { mutableStateOf<InfoTopic?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val context = LocalContext.current
 
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -93,8 +96,10 @@ fun CardDevice(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+
+
                     Text(
-                        text = deviceTypeLabel(device.deviceType),
+                        text = device.deviceType.label(context),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -279,19 +284,6 @@ private fun Voltage.toReadableLabel(): String {
         VoltageType.DC -> "пост. ток"
     }
     return "${this.value} В, $phase"
-}
-
-private fun deviceTypeLabel(type: DeviceType?): String = when (type) {
-    DeviceType.LIGHTING -> "Освещение"
-    DeviceType.SOCKET -> "Розетка"
-    DeviceType.HEAVY_DUTY -> "Мощное устройство"
-    DeviceType.AIR_CONDITIONER -> "Кондиционер"
-    DeviceType.ELECTRIC_STOVE -> "Электроплита"
-    DeviceType.OVEN -> "Духовой шкаф"
-    DeviceType.WASHING_MACHINE -> "Стиральная машина"
-    DeviceType.DISHWASHER -> "Посудомоечная машина"
-    DeviceType.WATER_HEATER -> "Водонагреватель"
-    DeviceType.OTHER, null -> "Другое"
 }
 
 /* --------- Тексты для листа-пояснения --------- */
