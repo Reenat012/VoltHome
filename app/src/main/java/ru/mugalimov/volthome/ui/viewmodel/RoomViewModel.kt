@@ -3,12 +3,14 @@ package ru.mugalimov.volthome.ui.viewmodel
 import android.content.ContentValues.TAG
 import android.util.Log
 import androidx.lifecycle.ViewModel
-import dagger.hilt.android.lifecycle.HiltViewModel
-import ru.mugalimov.volthome.data.repository.RoomRepository
-import javax.inject.Inject
 import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
@@ -17,32 +19,34 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import ru.mugalimov.volthome.core.error.RoomNotFoundException
 import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.data.repository.PreferencesRepository
+import ru.mugalimov.volthome.data.repository.RoomRepository
 import ru.mugalimov.volthome.domain.model.DefaultRoom
 import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.Room
 import ru.mugalimov.volthome.domain.model.RoomType
+import ru.mugalimov.volthome.domain.model.VoltageType
 import java.util.Date
 
-@HiltViewModel //viewModel будет управляться Hilt
-// класс отвечает за управление состоянием экрана (например, списка комнат)
-// и взаимодействие с данными через репозиторий.
-class RoomViewModel @Inject constructor( // @Inject constructor помечает конструктор как доступный для внедрения зависимостей
+@HiltViewModel
+class RoomViewModel @Inject constructor(
     private val roomRepository: RoomRepository,
     private val deviceRepository: DeviceRepository,
     private val preferencesRepository: PreferencesRepository
 ) : ViewModel() {
 
-    //приватное состояние, хранящее данные для UI (список комнат, загрузка, ошибки).
-    // Используется mutableStateOf (из Jetpack Compose) для реактивного обновления UI.
-    private val _uiState = MutableStateFlow(RoomUiState())
+    /** Одноразовые события в UI: снекбары и т.п. */
+    private val _actions = MutableSharedFlow<RoomsAction>(
+        replay = 0,
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    val actions: SharedFlow<RoomsAction> = _actions
 
-    //публичное свойство, предоставляющее доступ к _uiState
+    private val _uiState = MutableStateFlow(RoomUiState())
     val uiState: StateFlow<RoomUiState> = _uiState.asStateFlow()
 
-    // Получаем готовый список комнат для выпадающего меню
     private val _defaultRooms = MutableStateFlow<List<DefaultRoom>>(emptyList())
     val defaultRooms: StateFlow<List<DefaultRoom>> = _defaultRooms.asStateFlow()
 
@@ -54,20 +58,37 @@ class RoomViewModel @Inject constructor( // @Inject constructor помечает
         preferencesRepository.phaseMode
             .stateIn(viewModelScope, SharingStarted.Lazily, PhaseMode.THREE)
 
-    //Блок init вызывается при создании ViewModel.
-    //Здесь запускается метод observeRooms(),
-    //который начинает наблюдать (подписывается) за изменениями в списке комнат.
     init {
         observeRooms()
         loadDefaultRooms()
-
     }
 
     fun setPhaseMode(mode: PhaseMode) {
-        viewModelScope.launch { preferencesRepository.setPhaseMode(mode) }
+        viewModelScope.launch {
+            // Инвариант: нельзя включать 1φ, если в проекте есть 3φ устройства.
+            if (mode == PhaseMode.SINGLE) {
+                val rooms = uiState.value.rooms
+                val has3Phase = rooms.any { room ->
+                    val devices = deviceRepository.getAllDevicesByRoomId(room.id)
+                    devices.any { it.voltage.type == VoltageType.AC_3PHASE }
+                }
+
+                if (has3Phase) {
+                    emitUserMessage(
+                        "В проекте есть 3-фазные устройства. Переключение в 1-фазный режим невозможно."
+                    )
+                    return@launch
+                }
+            }
+
+            preferencesRepository.setPhaseMode(mode)
+        }
     }
 
-    //наблюдение за данными
+    private fun emitUserMessage(msg: String) {
+        viewModelScope.launch { _actions.emit(RoomsAction.UserMessage(msg)) }
+    }
+
     private fun observeRooms() {
         viewModelScope.launch {
             roomRepository.observeRooms()
@@ -79,7 +100,7 @@ class RoomViewModel @Inject constructor( // @Inject constructor помечает
                             error = e
                         )
                     }
-                } // Обрабатываем ошибки
+                }
                 .collect { rooms ->
                     _uiState.update {
                         it.copy(
@@ -89,30 +110,24 @@ class RoomViewModel @Inject constructor( // @Inject constructor помечает
                         )
                     }
 
-                    // считаем количества устройств по комнатам
-                    // (если хочешь — сделай через async/awaitAll, но так тоже ок)
                     val counts = rooms.associate { room ->
                         val cnt = deviceRepository.getAllDevicesByRoomId(room.id).size
                         room.id to cnt
                     }
                     _deviceCounts.value = counts
-                } // Обновляем список комнат
+                }
         }
     }
 
-    //добавление комнаты
     fun addRoom(name: String, roomType: RoomType) {
         viewModelScope.launch {
             executeOperation {
                 try {
-                    _uiState.update {
-                        it.copy(isLoading = true)
-                    }
-                    validateName(name) // Проверяем валидность имени
+                    _uiState.update { it.copy(isLoading = true) }
+                    validateName(name)
                     val newRoom = Room(name = name, createdAt = Date(), roomType = roomType)
-                    Log.d("addRoom VM", "${roomType}")
-
-                    roomRepository.addRoom(newRoom) //добавляем комнату через репозиторий
+                    Log.d("addRoom VM", "$roomType")
+                    roomRepository.addRoom(newRoom)
                 } catch (e: Exception) {
                     _uiState.update {
                         it.copy(
@@ -125,7 +140,6 @@ class RoomViewModel @Inject constructor( // @Inject constructor помечает
         }
     }
 
-    //удаление комнаты
     fun deleteRoom(roomId: Long) {
         viewModelScope.launch {
             executeOperation {
@@ -134,14 +148,11 @@ class RoomViewModel @Inject constructor( // @Inject constructor помечает
         }
     }
 
-    // Обновляем Room с devices внутри
     fun updateRoomWithDevices(roomId: Long) {
         viewModelScope.launch {
             try {
                 val devices = deviceRepository.getAllDevicesByRoomId(roomId)
-
                 val room = roomRepository.getRoomById(roomId)
-
                 val updateRoom = room?.copy(devices = devices)
 
                 if (room != null) {
@@ -164,21 +175,15 @@ class RoomViewModel @Inject constructor( // @Inject constructor помечает
         }
     }
 
-    /**
-     * Выполняет операцию с обработкой состояния загрузки и ошибок.
-     * @param block Блок кода, который нужно выполнить.
-     */
-    private suspend fun <T> executeOperation(
-        block: suspend () -> T
-    ) {
-        startLoading() // Начинаем загрузку
+    private suspend fun <T> executeOperation(block: suspend () -> T) {
+        startLoading()
         try {
-            block() // Выполняем операцию
-            clearError() // Очищаем ошибки, если операция успешна
+            block()
+            clearError()
         } catch (e: Exception) {
-            handleError(e) // Обрабатываем ошибку
+            handleError(e)
         } finally {
-            stopLoading() // Завершаем загрузку
+            stopLoading()
         }
     }
 
@@ -188,33 +193,27 @@ class RoomViewModel @Inject constructor( // @Inject constructor помечает
         }
     }
 
-    //обновляем список комнат в состоянии UI
     private fun updateRooms(rooms: List<Room>) {
         _uiState.update { it.copy(rooms = rooms, error = null) }
     }
 
-    //обрабатываем ошибку
     private fun handleError(e: Throwable) {
         _uiState.update { it.copy(error = e) }
     }
 
-    //начинаем загрузку и обновляем состояние UI
     private fun startLoading() {
         _uiState.update { it.copy(isLoading = true) }
     }
 
-    //завершаем загрузку и обновляем состояние UI
     private fun stopLoading() {
         _uiState.update { it.copy(isLoading = false) }
     }
 
-    //сброс ошибки в состоянии UI
     private fun clearError() {
         _uiState.update { it.copy(error = null) }
     }
 }
 
-//класс описывает состояние UI
 data class RoomUiState(
     val rooms: List<Room> = emptyList(),
     val isLoading: Boolean = true,

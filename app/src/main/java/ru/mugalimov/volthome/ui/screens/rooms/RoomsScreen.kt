@@ -74,6 +74,19 @@ fun RoomsScreen(
         }
     }
 
+    // ✅ Новый сбор событий от RoomViewModel (сообщение про запрет 3φ→1φ)
+    LaunchedEffect(Unit) {
+        viewModel.actions.collect { action: RoomsAction ->
+            when (action) {
+                is RoomsAction.UserMessage -> snackbarHostState.showSnackbar(action.message)
+                is RoomsAction.Error -> snackbarHostState.showSnackbar(
+                    "Ошибка: ${action.throwable.localizedMessage ?: "неизвестная"}"
+                )
+                else -> Unit
+            }
+        }
+    }
+
     val fabDisabled = isBusy
     val fabAlpha = if (fabDisabled) 0.5f else 1f
 
@@ -97,8 +110,6 @@ fun RoomsScreen(
             FloatingActionButton(
                 onClick = { if (!fabDisabled) showAddRoom.value = true },
                 modifier = Modifier.alpha(fabAlpha),
-//                containerColor = MaterialTheme.colorScheme.primary,
-//                contentColor = MaterialTheme.colorScheme.onPrimary
             ) {
                 Icon(Icons.Filled.Add, contentDescription = "Добавить")
             }
@@ -121,8 +132,6 @@ fun RoomsScreen(
         AddRoomSheet(
             defaultDevices = defaultDevices,
             roomTypes = RoomType.entries,
-            // ВАЖНО: используем новую сигнатуру — передаем уже кастомизированные устройства,
-            // как на экране «Комната» (имя + мощность (Вт) до вставки)
             onConfirm = { name, type, customizedRequests ->
                 addViewModel.createRoomWithDevicesCustomized(
                     name = name,
