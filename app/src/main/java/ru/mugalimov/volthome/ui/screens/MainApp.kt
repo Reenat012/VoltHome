@@ -66,8 +66,8 @@ fun MainApp(
     val userPlan = userPlanVm.plan.collectAsState().value
 
     // -----------------------------
-    // ✅ Глобальный paywall
-    // -----------------------------
+// ✅ Глобальный paywall
+// -----------------------------
     val context = LocalContext.current
     val paywallBus = remember {
         EntryPointAccessors.fromApplication(
@@ -78,9 +78,21 @@ fun MainApp(
 
     var paywallFeature by remember { mutableStateOf<ProFeature?>(null) }
 
-    LaunchedEffect(paywallBus) {
+// ✅ FIX: в PRO-режиме paywall не показываем вообще
+    LaunchedEffect(paywallBus, userPlan.isPro) {
         paywallBus.events.collect { feature ->
+            if (userPlan.isPro) {
+                // ignore
+                return@collect
+            }
             paywallFeature = feature
+        }
+    }
+
+// ✅ Доп. guard: если тариф стал PRO, закрываем уже открытый диалог
+    LaunchedEffect(userPlan.isPro) {
+        if (userPlan.isPro && paywallFeature != null) {
+            paywallFeature = null
         }
     }
 

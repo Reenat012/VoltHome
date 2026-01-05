@@ -9,13 +9,10 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.local.dao.OutboxDao
 import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
-import ru.mugalimov.volthome.data.local.entity.OutboxOpType
-import ru.mugalimov.volthome.data.local.entity.OutboxState
 import ru.mugalimov.volthome.data.repository.ProjectsRepository
 import ru.mugalimov.volthome.data.repository.UserPlanRepository
 import ru.mugalimov.volthome.domain.model.ProFeature
@@ -61,32 +58,12 @@ class ProjectsViewModel @Inject constructor(
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
-        // 1.3: слушаем outbox на FAILED_FATAL + PROJECT_CREATE + last_error == "pro_required_projects_limit"
-        // и показываем paywall (один раз на каждую запись).
-        val seenIds = HashSet<Long>()
-        viewModelScope.launch {
-            outboxDao.observeAll()
-                .map { list ->
-                    list.filter { e ->
-                        e.state == OutboxState.FAILED_FATAL &&
-                                e.op_type == OutboxOpType.PROJECT_CREATE &&
-                                e.last_error == ERR_PRO_REQUIRED_PROJECTS_LIMIT
-                    }.map { it.id }
-                }
-                .distinctUntilChanged()
-                .collect { ids ->
-                    // показываем paywall только для новых id, чтобы не спамить диалогом
-                    var triggered = false
-                    for (id in ids) {
-                        if (seenIds.add(id)) {
-                            triggered = true
-                        }
-                    }
-                    if (triggered) {
-                        paywallBus.request(ProFeature.PROJECTS_LIMIT)
-                    }
-                }
-        }
+        // ✅ FIX: paywall не должен появляться "сам по себе".
+        // Ранее тут был listener outbox FAILED_FATAL + PROJECT_CREATE и paywallBus.request(...)
+        // Теперь init не инициирует paywall вообще.
+        //
+        // outboxDao остаётся в зависимостях (может использоваться в других сценариях / будущем),
+        // но paywall показываем только из пользовательских действий (например createNewProject()).
     }
 
     fun createNewProject(name: String? = null) {
