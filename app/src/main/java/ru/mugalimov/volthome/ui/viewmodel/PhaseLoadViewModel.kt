@@ -29,7 +29,6 @@ class PhaseLoadViewModel @Inject constructor(
     private val explicationRepository: ExplicationRepository,
     private val incomerSelector: IncomerSelector,
 
-    // ✅ NEW
     private val overrideDao: GroupPhaseOverrideDao,
     private val activeProjectDs: ActiveProjectDataStore,
     private val userPlanRepository: UserPlanRepository,
@@ -53,8 +52,12 @@ class PhaseLoadViewModel @Inject constructor(
             explicationRepository.observeAllGroup()
         ) { items, mode, groups ->
             val data = if (mode == PhaseMode.SINGLE) {
-                items.filter { it.phase == Phase.A || it.phase == Phase.THREE_PHASE }
-            } else items
+                // ✅ FIX: в 1φ режиме показываем ТОЛЬКО Phase.A
+                // Phase.THREE_PHASE полностью исключён из UI
+                items.filter { it.phase == Phase.A }
+            } else {
+                items
+            }
 
             val hasGroupRcds = groups.any { it.rcdRequired }
             val incomer = incomerSelector.select(
@@ -98,7 +101,6 @@ class PhaseLoadViewModel @Inject constructor(
             ?: false
 
         if (isThreePhaseGroup) {
-            // no-op + уведомление (по желанию; можно убрать emit, если хочешь полностью тихий no-op)
             _events.tryEmit("3-фазную нагрузку нельзя переносить между фазами")
             return
         }
@@ -141,7 +143,6 @@ class PhaseLoadViewModel @Inject constructor(
                 }
 
                 overrideDao.deleteByProject(projectId)
-                // UI вернётся к дефолтным фазам сам
             } catch (t: Throwable) {
                 _events.tryEmit("Не удалось сбросить изменения фаз.")
             }
