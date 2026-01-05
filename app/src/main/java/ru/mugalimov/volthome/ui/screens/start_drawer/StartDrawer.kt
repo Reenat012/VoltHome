@@ -36,12 +36,6 @@ import ru.mugalimov.volthome.R
 import ru.mugalimov.volthome.ui.model.ProjectUi
 import ru.mugalimov.volthome.ui.model.UserProfileUi
 import ru.mugalimov.volthome.ui.utilities.TelegramConsultationDialog
-import dagger.hilt.android.EntryPointAccessors
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.ui.platform.LocalContext
-import ru.mugalimov.volthome.domain.model.ProFeature
-import ru.mugalimov.volthome.ui.model.LocalUserPlan
-import ru.mugalimov.volthome.ui.paywall.PaywallEntryPoint
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,19 +63,6 @@ fun StartDrawer(
     var showConsultDialog by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
-
-    val plan = LocalUserPlan.current
-
-    val paywallBus = remember {
-        EntryPointAccessors.fromApplication(
-            context.applicationContext,
-            PaywallEntryPoint::class.java
-        ).paywallBus()
-    }
-
-    val aliveProjects = remember(projects) { projects.filter { !it.isDeleted } }
-
-
     fun openUrl(url: String) {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
         context.startActivity(intent)
@@ -116,8 +97,8 @@ fun StartDrawer(
                     ) {
                         item { DrawerSectionTitle("Мои проекты") }
 
-                        items(aliveProjects, key = { it.id }) { p ->
-                        NavigationDrawerItem(
+                        items(projects, key = { it.id }) { p ->
+                            NavigationDrawerItem(
                                 label = {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
@@ -135,7 +116,10 @@ fun StartDrawer(
                                                 onClick = { menuForProjectId = p.id },
                                                 modifier = Modifier.size(36.dp)
                                             ) {
-                                                Icon(Icons.Default.MoreVert, contentDescription = "Меню проекта")
+                                                Icon(
+                                                    Icons.Default.MoreVert,
+                                                    contentDescription = "Меню проекта"
+                                                )
                                             }
                                             DropdownMenu(
                                                 expanded = menuForProjectId == p.id,
@@ -173,47 +157,34 @@ fun StartDrawer(
                         }
 
                         item {
-                            val reachedFreeLimit = !plan.isPro && aliveProjects.size >= 3
-
+                            val disabled = projects.size >= 3
                             NavigationDrawerItem(
-                                label = {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Text(
-                                            text = if (!reachedFreeLimit) "+ Добавить проект" else "Лимит: 3 проекта",
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        if (reachedFreeLimit) {
-                                            Icon(
-                                                imageVector = Icons.Default.Lock,
-                                                contentDescription = "Доступно в PRO",
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-                                    }
-                                },
+                                label = { Text(if (!disabled) "+ Добавить проект" else "Лимит: 3 проекта") },
                                 selected = false,
                                 onClick = {
-                                    if (reachedFreeLimit) {
-                                        paywallBus.request(ProFeature.PROJECTS_LIMIT)
-                                    } else {
+                                    if (!disabled) {
                                         scope.launch {
-                                            drawerState.close()
-                                            onCreateProject()
+                                            drawerState.close(); onCreateProject()
                                         }
                                     }
                                 },
                                 icon = { Icon(Icons.Default.Shield, contentDescription = null) },
                                 colors = NavigationDrawerItemDefaults.colors(
-                                    selectedTextColor = if (reachedFreeLimit) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    selectedTextColor = if (disabled) MaterialTheme.colorScheme.onSurface.copy(
+                                        alpha = 0.38f
+                                    )
                                     else MaterialTheme.colorScheme.onSurface,
-                                    unselectedTextColor = if (reachedFreeLimit) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    unselectedTextColor = if (disabled) MaterialTheme.colorScheme.onSurface.copy(
+                                        alpha = 0.38f
+                                    )
                                     else MaterialTheme.colorScheme.onSurface,
-                                    selectedIconColor = if (reachedFreeLimit) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    selectedIconColor = if (disabled) MaterialTheme.colorScheme.onSurface.copy(
+                                        alpha = 0.38f
+                                    )
                                     else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    unselectedIconColor = if (reachedFreeLimit) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    unselectedIconColor = if (disabled) MaterialTheme.colorScheme.onSurface.copy(
+                                        alpha = 0.38f
+                                    )
                                     else MaterialTheme.colorScheme.onSurfaceVariant,
                                 ),
                                 modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
@@ -235,53 +206,62 @@ fun StartDrawer(
                             )
                         }
 
-                        item {
-                            NavigationDrawerItem(
-                                label = { Text("VoltHome PRO") },
-                                selected = false,
-                                onClick = {
-                                    scope.launch {
-                                        drawerState.close()
-                                        onOpenSubscription()
-                                    }
-                                },
-                                icon = { Icon(Icons.Default.Payment, contentDescription = null) },
-                                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-                            )
-                        }
+//                        item {
+//                            NavigationDrawerItem(
+//                                label = { Text("VoltHome PRO") },
+//                                selected = false,
+//                                onClick = {
+//                                    scope.launch {
+//                                        drawerState.close()
+//                                        onOpenSubscription()
+//                                    }
+//                                },
+//                                icon = { Icon(Icons.Default.Payment, contentDescription = null) },
+//                                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+//                            )
+//                        }
 
 
-                        item {
-                            NavigationDrawerItem(
-                                label = {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text("Консультация")
-                                        Spacer(Modifier.width(6.dp))
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(MaterialTheme.shapes.small)
-                                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
-                                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                                        ) {
-                                            Text(
-                                                text = "Бета",
-                                                style = MaterialTheme.typography.labelSmall.copy(
-                                                    color = MaterialTheme.colorScheme.primary,
-                                                    fontWeight = FontWeight.SemiBold
-                                                )
-                                            )
-                                        }
-                                    }
-                                },
-                                selected = false,
-                                onClick = {
-                                    scope.launch { drawerState.close() }
-                                    showConsultDialog = true
-                                },
-                                icon = { Icon(Icons.Outlined.SupportAgent, contentDescription = null) },
-                                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-                            )
-                        }
+//                        item {
+//                            NavigationDrawerItem(
+//                                label = {
+//                                    Row(verticalAlignment = Alignment.CenterVertically) {
+//                                        Text("Консультация")
+//                                        Spacer(Modifier.width(6.dp))
+//                                        Box(
+//                                            modifier = Modifier
+//                                                .clip(MaterialTheme.shapes.small)
+//                                                .background(
+//                                                    MaterialTheme.colorScheme.primary.copy(
+//                                                        alpha = 0.15f
+//                                                    )
+//                                                )
+//                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+//                                        ) {
+//                                            Text(
+//                                                text = "Бета",
+//                                                style = MaterialTheme.typography.labelSmall.copy(
+//                                                    color = MaterialTheme.colorScheme.primary,
+//                                                    fontWeight = FontWeight.SemiBold
+//                                                )
+//                                            )
+//                                        }
+//                                    }
+//                                },
+//                                selected = false,
+//                                onClick = {
+//                                    scope.launch { drawerState.close() }
+//                                    showConsultDialog = true
+//                                },
+//                                icon = {
+//                                    Icon(
+//                                        Icons.Outlined.SupportAgent,
+//                                        contentDescription = null
+//                                    )
+//                                },
+//                                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+//                            )
+//                        }
 
                         item {
                             NavigationDrawerItem(
@@ -300,37 +280,29 @@ fun StartDrawer(
                             Divider(modifier = Modifier.padding(vertical = 8.dp))
                             DrawerSectionTitle("Соцсети")
 
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp),
-                                horizontalArrangement = Arrangement.SpaceEvenly
-                            ) {
-                                IconButton(onClick = { openUrl("https://t.me/volthomeapp") }) {
+                            NavigationDrawerItem(
+                                label = {
+                                    Column {
+                                        Text("Telegram")
+                                        Text(
+                                            text = "Инженерные компромиссы",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                },
+                                selected = false,
+                                onClick = { openUrl("https://t.me/volthomeapp") },
+                                icon = {
                                     Icon(
                                         painter = painterResource(R.drawable.telegram),
                                         contentDescription = "Telegram"
                                     )
-                                }
-                                IconButton(onClick = { openUrl("https://www.youtube.com/@volthomeapp") }) {
-                                    Icon(
-                                        painter = painterResource(R.drawable.youtube),
-                                        contentDescription = "YouTube"
-                                    )
-                                }
-                                IconButton(onClick = { openUrl("https://www.instagram.com/volthomeapp?igsh=bWd2aWNwaHY3eGtm") }) {
-                                    Icon(
-                                        painter = painterResource(R.drawable.instagram_svgrepo_com),
-                                        contentDescription = "Instagram"
-                                    )
-                                }
-                                IconButton(onClick = { openUrl("https://www.tiktok.com/@volthome6?_r=1&_t=ZS-91CmJqED9sa") }) {
-                                    Icon(
-                                        painter = painterResource(R.drawable.tiktok),
-                                        contentDescription = "TikTok"
-                                    )
-                                }
-                            }
+                                },
+                                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                            )
                         }
                     }
                 }
@@ -398,10 +370,15 @@ fun StartDrawer(
             text = { Text("Проект и связанные данные будут удалены. Это действие нельзя отменить.") },
             confirmButton = {
                 TextButton(onClick = {
-                    onDeleteProject(toDelete); deleteConfirmForId = null; scope.launch { drawerState.close() }
+                    onDeleteProject(toDelete); deleteConfirmForId =
+                    null; scope.launch { drawerState.close() }
                 }) { Text("Удалить") }
             },
-            dismissButton = { TextButton(onClick = { deleteConfirmForId = null }) { Text("Отмена") } }
+            dismissButton = {
+                TextButton(onClick = {
+                    deleteConfirmForId = null
+                }) { Text("Отмена") }
+            }
         )
     }
 }

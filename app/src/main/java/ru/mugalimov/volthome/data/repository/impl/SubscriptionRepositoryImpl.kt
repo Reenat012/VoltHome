@@ -7,6 +7,7 @@ import ru.mugalimov.volthome.data.remote.api.BillingApi
 import ru.mugalimov.volthome.data.remote.api.RustoreConfirmRequest
 import ru.mugalimov.volthome.data.repository.SubscriptionRepository
 import ru.mugalimov.volthome.data.repository.UserPlanRepository
+import ru.mugalimov.volthome.domain.model.ProProduct
 import ru.mugalimov.volthome.domain.model.UserPlan
 
 @Singleton
@@ -14,6 +15,9 @@ class SubscriptionRepositoryImpl @Inject constructor(
     private val billingApi: BillingApi,
     private val userPlanRepository: UserPlanRepository
 ) : SubscriptionRepository {
+    override fun getProProducts(): List<ProProduct> {
+        TODO("Not yet implemented")
+    }
 
     companion object {
         private const val TAG = "SubscriptionRepo"
