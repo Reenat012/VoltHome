@@ -4,7 +4,15 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MaterialTheme.colorScheme
@@ -14,17 +22,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import ru.mugalimov.volthome.core.theme.UiPhase
+import ru.mugalimov.volthome.core.theme.UiStatus
+import ru.mugalimov.volthome.core.theme.VhColors
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.PhaseMode
-import ru.mugalimov.volthome.domain.use_case.balanceUi
+import ru.mugalimov.volthome.domain.use_case.BalanceStatus
+import ru.mugalimov.volthome.domain.use_case.balanceStatus
 import ru.mugalimov.volthome.domain.use_case.calcPhaseBalance
 
 @Composable
@@ -52,11 +62,12 @@ fun PhaseLoadDonutChart(
         val totalRated = (incomerRating ?: 0).coerceAtLeast(1)
         val pct = ((a / totalRated) * 100.0).coerceIn(0.0, 100.0)
 
-        val color = when {
-            pct >= alertPct -> MaterialTheme.colorScheme.error
-            pct >= warnPct  -> MaterialTheme.colorScheme.tertiary
-            else            -> MaterialTheme.colorScheme.primary
+        val status = when {
+            pct >= alertPct -> UiStatus.ERROR
+            pct >= warnPct -> UiStatus.WARNING
+            else -> UiStatus.SUCCESS
         }
+        val color = VhColors.status(status)
 
         val progress by animateFloatAsState(
             targetValue = pct.toFloat() / 100f,
@@ -132,21 +143,27 @@ fun PhaseLoadDonutChart(
 
     // ===== 3-фазы: классический донат =====
     val bal = calcPhaseBalance(a, b, c)
-    val (statusText, statusColor) = balanceUi(bal.pct)
+    val balStatus = balanceStatus(bal.pct)
+    val (statusText, uiStatus) = when (balStatus) {
+        BalanceStatus.OK -> "Баланс в норме" to UiStatus.SUCCESS
+        BalanceStatus.MINOR -> "Небольшой перекос" to UiStatus.WARNING
+        BalanceStatus.HIGH -> "Сильный перекос" to UiStatus.ERROR
+    }
+    val statusColor = VhColors.status(uiStatus)
 
     val values = listOf(a, b, c)
     val baseColors = listOf(
-        Color(0xFFF6D96B), // A — жёлтый
-        Color(0xFF7ED492), // B — зелёный
-        Color(0xFFFF8A80)  // C — красный
+        VhColors.phase(UiPhase.A),
+        VhColors.phase(UiPhase.B),
+        VhColors.phase(UiPhase.C)
     )
     val colors = listOf(Phase.A, Phase.B, Phase.C).mapIndexed { i, _ ->
         if (listOf(Phase.A, Phase.B, Phase.C)[i] == bal.maxPhase) baseColors[i]
         else baseColors[i].copy(alpha = 0.6f)
     }
 
-    val ringBg = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)
-    val outlineColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+    val ringBg = colorScheme.surface.copy(alpha = 0.6f)
+    val outlineColor = colorScheme.outline.copy(alpha = 0.2f)
 
     val progress by animateFloatAsState(
         targetValue = 1f,
@@ -249,9 +266,27 @@ private fun PhaseLegend(a: Double, b: Double, c: Double, total: Double, worst: P
         horizontalAlignment = Alignment.Start,
         modifier = Modifier.fillMaxWidth(0.9f)
     ) {
-        LegendRow("Фаза A", a, total, Color(0xFFF6D96B), bold = worst == Phase.A)
-        LegendRow("Фаза B", b, total, Color(0xFF7ED492), bold = worst == Phase.B)
-        LegendRow("Фаза C", c, total, Color(0xFFFF8A80), bold = worst == Phase.C)
+        LegendRow(
+            "Фаза A",
+            a,
+            total,
+            VhColors.phase(UiPhase.A),
+            bold = worst == Phase.A
+        ) // COLOR_HARDCODE: phase A legend
+        LegendRow(
+            "Фаза B",
+            b,
+            total,
+            VhColors.phase(UiPhase.B),
+            bold = worst == Phase.B
+        ) // COLOR_HARDCODE: phase B legend
+        LegendRow(
+            "Фаза C",
+            c,
+            total,
+            VhColors.phase(UiPhase.C),
+            bold = worst == Phase.C
+        ) // COLOR_HARDCODE: phase C legend
     }
 }
 

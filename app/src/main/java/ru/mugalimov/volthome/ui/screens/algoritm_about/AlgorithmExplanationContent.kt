@@ -5,10 +5,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -41,6 +40,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import ru.mugalimov.volthome.core.theme.UiPhase
+import ru.mugalimov.volthome.core.theme.VhColors
 
 /*  Алгоритм: простыми словами + лёгкие визуальные акценты.
     — Иконки окрашены в primary
@@ -257,11 +258,6 @@ private fun InfoCard(
     }
 }
 
-/* ──────────────────────── Фазы / Баланс ─────────────────────── */
-
-private val PhaseA = Color(0xFFE74C3C)
-private val PhaseB = Color(0xFFF1C40F)
-private val PhaseC = Color(0xFF2ECC71)
 
 @Composable
 private fun PhaseBalanceCard() {
@@ -295,15 +291,15 @@ private fun PhaseBalanceCard() {
             )
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PhaseDot("Фаза A", PhaseA)
-                PhaseDot("Фаза B", PhaseB)
-                PhaseDot("Фаза C", PhaseC)
+                PhaseDot("Фаза A", VhColors.phase(UiPhase.A))
+                PhaseDot("Фаза B", VhColors.phase(UiPhase.B))
+                PhaseDot("Фаза C", VhColors.phase(UiPhase.C))
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                PhaseBar("Фаза A", 34, PhaseA)
-                PhaseBar("Фаза B", 33, PhaseB)
-                PhaseBar("Фаза C", 33, PhaseC)
+                PhaseBar("Фаза A", 34, VhColors.phase(UiPhase.A))
+                PhaseBar("Фаза B", 33, VhColors.phase(UiPhase.B))
+                PhaseBar("Фаза C", 33, VhColors.phase(UiPhase.C))
             }
 
             AssistChip(

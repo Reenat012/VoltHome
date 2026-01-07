@@ -4,25 +4,52 @@ package ru.mugalimov.volthome.ui.screens.explication
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.SafetyDivider
 import androidx.compose.material.icons.outlined.WaterDrop
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Divider
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import ru.mugalimov.volthome.core.theme.VhColors
+import ru.mugalimov.volthome.core.theme.toUiPhase
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.VoltageType
@@ -47,7 +74,8 @@ fun ShieldOverviewCard(
     val aI = perPhase.getOrZero(Phase.A)
     val bI = perPhase.getOrZero(Phase.B)
     val cI = perPhase.getOrZero(Phase.C)
-    val maxPhase = if (is3) listOf("A" to aI, "B" to bI, "C" to cI).maxBy { it.second }.first else null
+    val maxPhase =
+        if (is3) listOf("A" to aI, "B" to bI, "C" to cI).maxBy { it.second }.first else null
 
     val installedPowerW = groups.sumOf { it.devices.sumOf { d -> d.power ?: 0 } }
     // расчётная мощность (упрощённо: с учётом demandRatio устройств, если он есть; иначе берём 1.0)
@@ -122,9 +150,15 @@ fun ShieldOverviewCard(
                 is3 = is3,
                 hasGroupRcds = hasGroupRcds,
                 hasWetZones = hasWetZones,
-                onNetworkClick = { infoTopic = InfoTopic.NETWORK; scope.launch { sheetState.show() } },
-                onGroupRcdsClick = { infoTopic = InfoTopic.GROUP_RCDS; scope.launch { sheetState.show() } },
-                onWetZonesClick = { infoTopic = InfoTopic.WET_ZONES; scope.launch { sheetState.show() } }
+                onNetworkClick = {
+                    infoTopic = InfoTopic.NETWORK; scope.launch { sheetState.show() }
+                },
+                onGroupRcdsClick = {
+                    infoTopic = InfoTopic.GROUP_RCDS; scope.launch { sheetState.show() }
+                },
+                onWetZonesClick = {
+                    infoTopic = InfoTopic.WET_ZONES; scope.launch { sheetState.show() }
+                }
             )
 
             if (is3) {
@@ -133,7 +167,10 @@ fun ShieldOverviewCard(
             }
 
             Spacer(Modifier.height(12.dp))
-            Divider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+            Divider(
+                thickness = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+            )
             Spacer(Modifier.height(12.dp))
 
             // 2×2 грид параметров вводного оборудования
@@ -141,7 +178,9 @@ fun ShieldOverviewCard(
                 incomer = incomer,
                 is3 = is3,
                 hasGroupRcds = hasGroupRcds,
-                onHeaderInfoClick = { infoTopic = InfoTopic.INCOMER; scope.launch { sheetState.show() } },
+                onHeaderInfoClick = {
+                    infoTopic = InfoTopic.INCOMER; scope.launch { sheetState.show() }
+                },
                 onTileClick = { fieldTopic = it; scope.launch { sheetState.show() } }
             )
         }
@@ -158,9 +197,14 @@ fun ShieldOverviewCard(
             sheetState = sheetState
         ) {
             val (title, text) = when {
-                infoTopic != null   -> infoSheetContent(infoTopic!!, is3)
-                fieldTopic != null  -> fieldSheetContent(fieldTopic!!, incomer, is3)
-                else                -> totalsSheetContent(totalsTopic!!, installedPowerW, calculatedPowerW, groups.size)
+                infoTopic != null -> infoSheetContent(infoTopic!!, is3)
+                fieldTopic != null -> fieldSheetContent(fieldTopic!!, incomer, is3)
+                else -> totalsSheetContent(
+                    totalsTopic!!,
+                    installedPowerW,
+                    calculatedPowerW,
+                    groups.size
+                )
             }
             Column(
                 modifier = Modifier
@@ -267,11 +311,20 @@ private fun Badge(icon: ImageVector, text: String, onClick: () -> Unit) {
 @Composable
 private fun PhaseLine(aI: Double, bI: Double, cI: Double, maxPhase: String?) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        PhaseDot(Phase.A); Spacer(Modifier.width(6.dp)); Text(text = "${fmt1(aI)} A", style = MaterialTheme.typography.bodyMedium)
+        PhaseDot(Phase.A); Spacer(Modifier.width(6.dp)); Text(
+        text = "${fmt1(aI)} A",
+        style = MaterialTheme.typography.bodyMedium
+    )
         Spacer(Modifier.width(12.dp))
-        PhaseDot(Phase.B); Spacer(Modifier.width(6.dp)); Text(text = "${fmt1(bI)} A", style = MaterialTheme.typography.bodyMedium)
+        PhaseDot(Phase.B); Spacer(Modifier.width(6.dp)); Text(
+        text = "${fmt1(bI)} A",
+        style = MaterialTheme.typography.bodyMedium
+    )
         Spacer(Modifier.width(12.dp))
-        PhaseDot(Phase.C); Spacer(Modifier.width(6.dp)); Text(text = "${fmt1(cI)} A", style = MaterialTheme.typography.bodyMedium)
+        PhaseDot(Phase.C); Spacer(Modifier.width(6.dp)); Text(
+        text = "${fmt1(cI)} A",
+        style = MaterialTheme.typography.bodyMedium
+    )
         Spacer(Modifier.weight(1f))
         if (maxPhase != null) {
             Text(
@@ -290,12 +343,7 @@ private fun PhaseDot(phase: Phase) {
             .size(10.dp)
             .clip(CircleShape)
             .background(
-                when (phase) {
-                    Phase.A -> Color(0xFFF6D96B) // жёлтый
-                    Phase.B -> Color(0xFF7ED492) // зелёный
-                    Phase.C -> Color(0xFFFF8A80) // красный
-                    Phase.THREE_PHASE -> Color(0xFF9E9E9E) // нейтральный (3φ точка)
-                }
+                VhColors.phase(phase.toUiPhase())
             )
     )
 }
@@ -315,7 +363,11 @@ private fun IncomerGrid(
         IncomerKind.MCB_ONLY -> "Только автомат"
     }
     val schemeBadges = when {
-        incomer.kind == IncomerKind.MCB_PLUS_RCD && hasGroupRcds -> listOf("селективное", "противопожарное")
+        incomer.kind == IncomerKind.MCB_PLUS_RCD && hasGroupRcds -> listOf(
+            "селективное",
+            "противопожарное"
+        )
+
         else -> emptyList()
     }
 
@@ -347,7 +399,10 @@ private fun IncomerGrid(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         GridCell("Схема", scheme, schemeBadges) { onTileClick(FieldTopic.SCHEME) }
-        GridCell("Полюса", if (is3) "3P+N (4 пол.)" else "1P+N (2 пол.)") { onTileClick(FieldTopic.POLES) }
+        GridCell(
+            "Полюса",
+            if (is3) "3P+N (4 пол.)" else "1P+N (2 пол.)"
+        ) { onTileClick(FieldTopic.POLES) }
         GridCell(
             "Автомат",
             "${incomer.mcbRating} A • кривая ${incomer.mcbCurve} • Icn ${incomer.icn / 1000} кА"
@@ -401,7 +456,10 @@ private fun GridCell(
                         Surface(
                             shape = MaterialTheme.shapes.large,
                             color = MaterialTheme.colorScheme.surface,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+                            border = BorderStroke(
+                                1.dp,
+                                MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                            )
                         ) {
                             Text(
                                 text = b,
@@ -445,7 +503,11 @@ private fun infoSheetContent(topic: InfoTopic, is3: Boolean): Pair<String, Strin
             "• При необходимости — УЗО/RCBO на вводе (тип AC/A/F/B, чувствительность мА)."
 }
 
-private fun fieldSheetContent(topic: FieldTopic, incomer: IncomerSpec, is3: Boolean): Pair<String, String> =
+private fun fieldSheetContent(
+    topic: FieldTopic,
+    incomer: IncomerSpec,
+    is3: Boolean
+): Pair<String, String> =
     when (topic) {
         FieldTopic.SCHEME -> "Схема" to when (incomer.kind) {
             IncomerKind.MCB_PLUS_RCD ->
@@ -453,8 +515,10 @@ private fun fieldSheetContent(topic: FieldTopic, incomer: IncomerSpec, is3: Bool
                         "с большим током утечки (100–300 мА). При мелкой утечке (например, 30 мА) на линии первым сработает " +
                         "групповое УЗО, а вводное останется включённым. Вводное отключает питание при крупной/неселективной утечке " +
                         "или при суммарных утечках, превышающих его порог."
+
             IncomerKind.RCBO ->
                 "Дифавтомат (RCBO) — автомат + УЗО в одном корпусе. Защищает и от перегрузки/КЗ, и от утечек, экономит место."
+
             IncomerKind.MCB_ONLY ->
                 "Только автомат без УЗО на вводе. Защиту от утечек обеспечивают групповые УЗО/RCBO на линиях."
         }
@@ -488,9 +552,11 @@ private fun totalsSheetContent(
     TotalsTopic.GROUPS -> "Группы" to
             "Количество групп помогает оценить заполненность щита и селективность. " +
             "При росте числа групп проверьте место под модули и наличие отдельных УЗО там, где это требуется."
+
     TotalsTopic.INSTALLED -> "Установленная мощность" to
             "Сумма паспортных мощностей всех устройств: %.1f кВт.".format(installedPowerW / 1000.0) +
             "\nИспользуется для подбора кабелей и оценки максимума."
+
     TotalsTopic.CALCULATED -> "Расчётная нагрузка" to
             "Мощность с учётом коэффициентов спроса: %.1f кВт.".format(calculatedPowerW / 1000.0) +
             "\nОна ближе к реальной одновременной нагрузке и влияет на выбор вводного автомата."

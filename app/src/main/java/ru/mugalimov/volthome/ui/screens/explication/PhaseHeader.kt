@@ -8,14 +8,16 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import ru.mugalimov.volthome.core.theme.VhColors
+import ru.mugalimov.volthome.core.theme.toUiPhase
 import ru.mugalimov.volthome.domain.model.Phase
 
 @Composable
 fun PhaseHeader(phase: Phase) {
-    val bg = phaseColor(phase).copy(alpha = 0.22f)
-    val stroke = phaseColor(phase).copy(alpha = 0.65f)
+    val ui = phase.toUiPhase()
+    val bg = VhColors.phaseSurface(ui).copy(alpha = 0.22f)
+    val stroke = VhColors.phaseBorder(ui).copy(alpha = 0.65f)
 
     Surface(
         tonalElevation = 0.dp,
@@ -27,12 +29,4 @@ fun PhaseHeader(phase: Phase) {
             Text("Фаза ${phase.name}", style = MaterialTheme.typography.titleMedium)
         }
     }
-}
-
-// Единые цвета фаз
-private fun phaseColor(p: Phase): Color = when (p) {
-    Phase.A -> Color(0xFFF6D96B) // жёлтый
-    Phase.B -> Color(0xFF7ED492) // зелёный
-    Phase.C -> Color(0xFFFF8A80) // красный
-    Phase.THREE_PHASE -> Color(0xFF9E9E9E) // нейтральный (3φ)
 }

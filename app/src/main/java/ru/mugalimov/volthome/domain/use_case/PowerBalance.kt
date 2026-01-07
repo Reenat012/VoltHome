@@ -1,11 +1,8 @@
 package ru.mugalimov.volthome.domain.use_case
 
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
-import kotlin.math.abs
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.PhaseBalance
+import kotlin.math.abs
 
 /**
  * Рассчитывает дисбаланс фаз:
@@ -56,22 +53,12 @@ private fun phaseOrder(p: Phase): Int = when (p) {
     Phase.THREE_PHASE -> 3
 }
 
-enum class BalanceLevel { OK, MINOR, HIGH }
+enum class BalanceStatus { OK, MINOR, HIGH }
 
 /** Пороговые уровни дисбаланса. При необходимости вынеси в конфиг/константы. */
-fun balanceLevel(pct: Double): BalanceLevel = when {
-    pct < 10.0 -> BalanceLevel.OK       // <10% — норма
-    pct < 25.0 -> BalanceLevel.MINOR    // 10..25% — умеренный перекос
-    else       -> BalanceLevel.HIGH     // >25% — сильный перекос
+fun balanceStatus(pct: Double): BalanceStatus = when {
+    pct < 10.0 -> BalanceStatus.OK       // <10% — норма
+    pct < 25.0 -> BalanceStatus.MINOR    // 10..25% — умеренный перекос
+    else       -> BalanceStatus.HIGH     // >25% — сильный перекос
 }
 
-/**
- * (Опционально для UI) Возвращает текст/цвет для отображения уровня баланса.
- * Если держишь domain «чистым», перенеси эту функцию в UI-модуль.
- */
-@Composable
-fun balanceUi(pct: Double): Pair<String, Color> = when (balanceLevel(pct)) {
-    BalanceLevel.OK   -> "Баланс в норме"                  to MaterialTheme.colorScheme.primary
-    BalanceLevel.MINOR-> "Небольшой перекос"   to MaterialTheme.colorScheme.tertiary
-    BalanceLevel.HIGH -> "Сильный перекос"                 to MaterialTheme.colorScheme.error
-}

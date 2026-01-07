@@ -1,4 +1,4 @@
-package ru.mugalimov.volthome.ui.screens.loads
+package ru.mugalimov.volthome.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope

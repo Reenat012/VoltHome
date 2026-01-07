@@ -42,13 +42,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import ru.mugalimov.volthome.core.theme.VhColors
+import ru.mugalimov.volthome.core.theme.toUiPhase
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
 
@@ -69,12 +70,8 @@ fun PhaseGroupTableItem(
     isDropTargetHighlighted: Boolean,
     onDragCancel: () -> Unit,
 ) {
-    val phaseAccent = when (item.phase) {
-        Phase.A -> Color(0xFFF6D96B).copy(alpha = 0.25f)
-        Phase.B -> Color(0xFF7ED492).copy(alpha = 0.25f)
-        Phase.C -> Color(0xFFFF8A80).copy(alpha = 0.25f)
-        Phase.THREE_PHASE -> Color(0xFF9E9E9E).copy(alpha = 0.20f)
-    }
+    val uiPhase = item.phase.toUiPhase()
+    val phaseAccent = VhColors.phase(uiPhase).copy(alpha = 0.25f)
 
     val highlightAlpha = if (isDropTargetHighlighted) 0.55f else 0.25f
     val borderColor = if (isDropTargetHighlighted)
@@ -169,7 +166,8 @@ fun PhaseGroupTableItem(
                                                             return@detectDragGestures
                                                         }
 
-                                                        val c = handleCoords ?: return@detectDragGestures
+                                                        val c = handleCoords
+                                                            ?: return@detectDragGestures
                                                         val startRoot = c.localToRoot(startLocal)
 
                                                         // Чтобы overlay не “прыгал” с (0,0)
@@ -187,7 +185,8 @@ fun PhaseGroupTableItem(
                                                         if (!canDrag) return@detectDragGestures
                                                         // Здесь намеренно consume — это уже явный drag.
                                                         change.consume()
-                                                        val c = handleCoords ?: return@detectDragGestures
+                                                        val c = handleCoords
+                                                            ?: return@detectDragGestures
                                                         onDragMove(c.localToRoot(change.position))
                                                     },
                                                     onDragCancel = {

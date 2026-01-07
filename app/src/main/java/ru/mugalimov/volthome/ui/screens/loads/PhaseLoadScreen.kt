@@ -27,6 +27,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseGroupItem
 import ru.mugalimov.volthome.ui.viewmodel.ExplicationViewModel
+import ru.mugalimov.volthome.ui.viewmodel.PhaseLoadViewModel
 
 /**
  * Экран «Распределение по фазам».
