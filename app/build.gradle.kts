@@ -90,26 +90,21 @@ android {
 dependencies {
     implementation(libs.androidx.hilt.common)
     implementation(libs.androidx.work.runtime.ktx)
-    implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.foundation.layout)
     implementation(libs.androidx.compose.foundation)
+//    implementation(libs.compose.material3)
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
-    implementation(libs.androidx.ui)
-    implementation(libs.androidx.ui.graphics)
-    implementation(libs.androidx.ui.tooling.preview)
-    implementation(libs.androidx.material3)
     implementation(libs.androidx.benchmark.macro)
     implementation(libs.firebase.crashlytics.buildtools)
     implementation(libs.litert.support.api)
     implementation(libs.androidx.storage)
     implementation(libs.androidx.appcompat)
-    implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.browser)
 //    implementation(libs.androidx.foundation.desktop)
     testImplementation(libs.junit)
@@ -117,21 +112,14 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.ui.test.junit4)
-    debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
     implementation(libs.androidx.material.icons.extended)
-    implementation(libs.material3)
     implementation(libs.androidx.core.ktx.v1120)
-    implementation(libs.androidx.activity.compose.v182)
-    implementation(platform(libs.androidx.compose.bom.v20240200))
-    implementation(libs.androidx.compose.material3.material3)
-    implementation(libs.material.icons.extended)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
 
     // Room
     implementation(libs.androidx.room.runtime)
-    debugImplementation(libs.androidx.compose.ui.tooling)
     kapt("androidx.room:room-compiler:2.7.2")
     implementation(libs.androidx.room.ktx)
 
@@ -141,18 +129,10 @@ dependencies {
     implementation(libs.androidx.hilt.navigation.compose)
 
     implementation(libs.androidx.runtime)
-    implementation(libs.ui)
     implementation(libs.androidx.lifecycle.runtime.compose)
-    implementation(platform(libs.androidx.compose.bom))
-
-    implementation("androidx.compose.runtime:runtime:1.6.1")
-    implementation("androidx.compose.runtime:runtime-livedata:1.6.1")
 
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
-
-    implementation(libs.androidx.ui.v154)
-    implementation(libs.androidx.material3.v112)
 
     implementation(libs.gson)
 
@@ -173,7 +153,6 @@ dependencies {
     implementation("androidx.webkit:webkit:1.14.0")
 
     implementation("com.google.accompanist:accompanist-flowlayout:0.32.0")
-    implementation("androidx.compose.foundation:foundation:1.5.0") // для FlowRow
 
 //    implementation (libs.blurview)
 
@@ -181,8 +160,6 @@ dependencies {
 
 //    implementation("com.vk.id:vkid:2.3.2")
     implementation("androidx.security:security-crypto:1.1.0")
-
-    implementation("androidx.browser:browser:1.8.0")
 
 //    implementation("com.yandex.android:mobmetricalib:5.3.7") {
 //        exclude(group = "com.yandex.android", module = "authsdk")
@@ -211,6 +188,13 @@ dependencies {
     // RuStore Pay SDK
     implementation(platform(libs.rustore.sdk.bom))
     implementation(libs.rustore.sdk.pay)
+
+    //m3
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-graphics")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    debugImplementation("androidx.compose.ui:ui-tooling")
 }
 
 configurations.all {

@@ -2,6 +2,7 @@ package ru.mugalimov.volthome.ui.screens.explication
 
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
@@ -14,6 +15,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.FileDownload
+import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
@@ -25,7 +29,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
@@ -114,23 +117,29 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
                     }
                 }
 
-                val isPro = LocalUserPlan.current.isPro
+                val isProFab = LocalUserPlan.current.isPro
 
                 ProLocked(
-                    isPro = isPro,
+                    isPro = isProFab,
                     feature = ProFeature.PDF_EXPORT,
                     onLockedClick = { _ -> viewModel.onExportPdfClick() },
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .windowInsetsPadding(WindowInsets.navigationBars)
                         .padding(end = 16.dp, bottom = 16.dp),
-                    shape = FloatingActionButtonDefaults.shape, // чтобы overlay совпал с формой FAB
-                    showLockIcon = false // ✅ убираем замок, кнопка просто "серая"
+                    shape = FloatingActionButtonDefaults.shape,
+                    showLockIcon = false
                 ) {
                     FloatingActionButton(
                         onClick = { viewModel.onExportPdfClick() },
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier
+                            .border(
+                                width = 1.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant,
+                                shape = FloatingActionButtonDefaults.shape
+                            ),
                         elevation = FloatingActionButtonDefaults.elevation(
                             defaultElevation = 0.dp,
                             pressedElevation = 0.dp,
@@ -139,10 +148,10 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
                         )
                     ) {
                         Icon(
-                            painter = painterResource(R.drawable.pdf_svgrepo_com),
+                            imageVector = Icons.Rounded.FileDownload,
                             contentDescription = "Экспорт PDF",
-                            modifier = Modifier.size(36.dp),
-                            tint = Color.Unspecified
+                            modifier = Modifier.size(26.dp),
+                            tint = MaterialTheme.colorScheme.onPrimary
                         )
                     }
                 }

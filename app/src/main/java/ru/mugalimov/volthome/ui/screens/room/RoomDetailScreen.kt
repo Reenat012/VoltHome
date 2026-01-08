@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.ui.screens.room
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -109,7 +110,7 @@ fun RoomDetailScreen(
                 count = uiState.devices.size,
                 totalPowerW = uiState.devices.sumOf { it.power }
             )
-            androidx.compose.foundation.layout.Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(8.dp))
             DeviceListEditable(
                 devices = uiState.devices,
                 modifier = Modifier.fillMaxSize(),
@@ -124,24 +125,20 @@ fun RoomDetailScreen(
             defaultDevices = defaultDevices,
             onDismiss = { showAllDevices = false },
             onAdded = { _ ->
-                // при необходимости: показать snackbar/проскроллить к новым
                 showAllDevices = false
             }
         )
     }
 }
 
-/* ---------- Room summary: акцентные статистические бейджи ---------- */
+/* ---------- Room summary: нейтральная панель статистики ---------- */
 
 @Composable
 private fun RoomSummary(count: Int, totalPowerW: Int) {
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)
-        ),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier
             .padding(horizontal = 16.dp, vertical = 8.dp)
             .fillMaxWidth()
@@ -161,8 +158,9 @@ private fun RoomSummary(count: Int, totalPowerW: Int) {
 private fun StatBadge(text: String) {
     Surface(
         shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surface,               // без обводки
-        contentColor = MaterialTheme.colorScheme.onSurface
+        color = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         Text(
             text = text,
@@ -172,37 +170,29 @@ private fun StatBadge(text: String) {
     }
 }
 
-/* ---------- UI helpers (без изменений) ---------- */
+/* ---------- UI helpers (семантика RoomTypeAvatar сохранена) ---------- */
 
 @Composable
 private fun RoomTypeAvatar(type: RoomType, modifier: Modifier = Modifier) {
-    val bg = MaterialTheme.colorScheme.surfaceVariant
-
-    // небольшой акцент — только цвет иконки
-    val iconTint = when (type) {
-        RoomType.STANDARD -> MaterialTheme.colorScheme.primary
-        RoomType.BATHROOM -> MaterialTheme.colorScheme.tertiary
-        RoomType.KITCHEN -> MaterialTheme.colorScheme.secondary
+    val bg = when (type) {
+        RoomType.STANDARD -> MaterialTheme.colorScheme.primaryContainer
+        RoomType.BATHROOM -> MaterialTheme.colorScheme.tertiaryContainer
+        RoomType.KITCHEN -> MaterialTheme.colorScheme.secondaryContainer
+        RoomType.OUTDOOR -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val fg = when (type) {
+        RoomType.STANDARD -> MaterialTheme.colorScheme.onPrimaryContainer
+        RoomType.BATHROOM -> MaterialTheme.colorScheme.onTertiaryContainer
+        RoomType.KITCHEN -> MaterialTheme.colorScheme.onSecondaryContainer
         RoomType.OUTDOOR -> MaterialTheme.colorScheme.onSurfaceVariant
     }
-
     val icon = when (type) {
         RoomType.STANDARD -> Icons.Rounded.Home
         RoomType.BATHROOM -> Icons.Rounded.Bathtub
         RoomType.KITCHEN -> Icons.Rounded.Kitchen
         RoomType.OUTDOOR -> Icons.Rounded.Park
     }
-
-    Surface(
-        color = bg,
-        contentColor = iconTint,
-        modifier = modifier,
-        shape = CircleShape,
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)
-        )
-    ) {
+    Surface(color = bg, contentColor = fg, modifier = modifier) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Icon(icon, contentDescription = null)
         }

@@ -49,6 +49,7 @@ rustoreSdkBom = "2025.08.01"
 foundationLayout = "1.10.0"
 foundation = "1.10.0"
 
+
 [libraries]
 androidx-activity-compose-v182 = { module = "androidx.activity:activity-compose", version.ref = "activityComposeVersion" }
 androidx-compose-bom-v20240200 = { module = "androidx.compose:compose-bom", version.ref = "composeBomVersion" }
@@ -106,6 +107,7 @@ rustore-sdk-bom = { module = "ru.rustore.sdk:bom", version.ref = "rustoreSdkBom"
 rustore-sdk-pay = { module = "ru.rustore.sdk:pay" }
 androidx-compose-foundation-layout = { group = "androidx.compose.foundation", name = "foundation-layout", version.ref = "foundationLayout" }
 androidx-compose-foundation = { group = "androidx.compose.foundation", name = "foundation", version.ref = "foundation" }
+
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

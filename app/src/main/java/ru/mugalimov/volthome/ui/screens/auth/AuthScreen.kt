@@ -31,6 +31,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -53,7 +54,6 @@ import coil.compose.rememberAsyncImagePainter
 import com.yandex.authsdk.YandexAuthResult
 import com.yandex.authsdk.YandexAuthSdk
 import ru.mugalimov.volthome.R
-import ru.mugalimov.volthome.core.theme.VhColors
 import ru.mugalimov.volthome.legal.LegalUrls
 import ru.mugalimov.volthome.ui.screens.welcome.openDocument
 import ru.mugalimov.volthome.ui.viewmodel.AuthViewModel
@@ -68,8 +68,6 @@ fun AuthScreen(
     val state by vm.state.collectAsState()
     val consentState by vm.consentState.collectAsState()
     val context = LocalContext.current
-
-    val t = VhColors.tokens
 
     val launcher = rememberLauncherForActivityResult(contract = sdk.contract) { result: YandexAuthResult ->
         val tag = "YA_AUTH"
@@ -91,7 +89,7 @@ fun AuthScreen(
         modifier = Modifier
             .fillMaxSize()
             .systemBarsPadding(),
-        color = t.bg
+        color = MaterialTheme.colorScheme.background
     ) {
         Box(
             modifier = Modifier.fillMaxSize(),
@@ -119,7 +117,7 @@ fun AuthScreen(
                 Text(
                     text = "Вход в VoltHome",
                     style = MaterialTheme.typography.titleLarge,
-                    color = t.textPrimary,
+                    color = MaterialTheme.colorScheme.onSurface,
                     textAlign = TextAlign.Center
                 )
 
@@ -128,8 +126,13 @@ fun AuthScreen(
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                    colors = CardDefaults.cardColors(containerColor = t.surfaceAlt),
-                    border = BorderStroke(1.dp, t.divider),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    ),
+                    border = BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.outlineVariant
+                    ),
                     shape = MaterialTheme.shapes.large
                 ) {
                     Column(
@@ -145,19 +148,13 @@ fun AuthScreen(
                             Checkbox(
                                 checked = consentState.termsAccepted,
                                 onCheckedChange = vm::onTermsAcceptanceChanged,
-                                modifier = Modifier.padding(end = 8.dp),
-                                colors = CheckboxDefaults.colors(
-                                    checkedColor = t.primary,
-                                    checkmarkColor = t.textOnAccent,
-                                    uncheckedColor = t.borderStrong,
-                                    disabledCheckedColor = t.primaryMuted,
-                                    disabledUncheckedColor = t.borderDisabled
-                                )
+                                colors = consentCheckboxColors(),
+                                modifier = Modifier.padding(end = 8.dp)
                             )
                             Text(
                                 text = "Я принимаю условия использования",
                                 style = MaterialTheme.typography.bodyLarge,
-                                color = t.textPrimary,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.weight(1f)
                             )
                         }
@@ -172,6 +169,11 @@ fun AuthScreen(
                             )
                         }
 
+                        Divider(
+                            thickness = 1.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant
+                        )
+
                         // 2) Checkbox #2
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -180,19 +182,13 @@ fun AuthScreen(
                             Checkbox(
                                 checked = consentState.pdConsentAccepted,
                                 onCheckedChange = vm::onPdConsentAcceptanceChanged,
-                                modifier = Modifier.padding(end = 8.dp),
-                                colors = CheckboxDefaults.colors(
-                                    checkedColor = t.primary,
-                                    checkmarkColor = t.textOnAccent,
-                                    uncheckedColor = t.borderStrong,
-                                    disabledCheckedColor = t.primaryMuted,
-                                    disabledUncheckedColor = t.borderDisabled
-                                )
+                                colors = consentCheckboxColors(),
+                                modifier = Modifier.padding(end = 8.dp)
                             )
                             Text(
                                 text = "Я даю согласие на обработку персональных данных",
                                 style = MaterialTheme.typography.bodyLarge,
-                                color = t.textPrimary,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.weight(1f)
                             )
                         }
@@ -206,6 +202,11 @@ fun AuthScreen(
                                 localAssetPath = "documents/pd_consent.html"
                             )
                         }
+
+                        Divider(
+                            thickness = 1.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant
+                        )
 
                         // 3) Ссылка без чекбокса
                         DocumentLink(
@@ -234,14 +235,14 @@ fun AuthScreen(
                     Spacer(Modifier.height(8.dp))
                     Text(
                         text = err.message,
-                        color = t.error,
+                        color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodyMedium,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
 
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(18.dp))
             }
         }
     }
@@ -253,28 +254,29 @@ private fun YandexSignInButton(
     loading: Boolean,
     onClick: () -> Unit
 ) {
-    val t = VhColors.tokens
+    val effectiveEnabled = enabled && !loading
 
     val container by animateColorAsState(
-        targetValue = if (enabled) t.primary else t.surfaceAlt,
+        targetValue = if (effectiveEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
         animationSpec = spring(),
         label = "btnContainer"
     )
     val content by animateColorAsState(
-        targetValue = if (enabled) t.textOnAccent else t.textDisabled,
+        targetValue = if (effectiveEnabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
         animationSpec = spring(),
         label = "btnContent"
     )
 
     Button(
         onClick = onClick,
-        enabled = enabled,
+        enabled = effectiveEnabled,
         shape = MaterialTheme.shapes.extraLarge,
+        border = if (!effectiveEnabled) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant) else null,
         colors = ButtonDefaults.buttonColors(
             containerColor = container,
             contentColor = content,
-            disabledContainerColor = container,
-            disabledContentColor = content
+            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
         ),
         elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp),
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
@@ -292,23 +294,22 @@ private fun YandexSignInButton(
                     color = content,
                     strokeWidth = 3.dp,
                     modifier = Modifier
-                        .size(40.dp)
-                        .padding(end = 10.dp)
+                        .size(20.dp)
+                        .padding(end = 12.dp)
                 )
             } else {
                 Image(
                     painter = painterResource(R.drawable.ya_symbol),
                     contentDescription = "Яндекс ID",
                     modifier = Modifier
-                        .size(40.dp)
-                        .padding(end = 10.dp)
+                        .size(22.dp)
+                        .padding(end = 12.dp)
                 )
             }
 
             Text(
                 text = if (loading) "Входим…" else "Войти с Яндекс ID",
-                style = MaterialTheme.typography.labelLarge,
-                color = content
+                style = MaterialTheme.typography.labelLarge
             )
         }
     }
@@ -320,15 +321,12 @@ private fun DocumentLink(
     text: String,
     onClick: () -> Unit
 ) {
-    val t = VhColors.tokens
-
     TextButton(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
         colors = ButtonDefaults.textButtonColors(
-            contentColor = t.primary,
-            disabledContentColor = t.textDisabled
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
         )
     ) {
         Row(
@@ -338,15 +336,25 @@ private fun DocumentLink(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = t.primary,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(end = 12.dp)
             )
             Text(
                 text = text,
                 style = MaterialTheme.typography.bodyLarge,
-                color = t.primary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f)
             )
         }
     }
 }
+
+@Composable
+private fun consentCheckboxColors() = CheckboxDefaults.colors(
+    checkedColor = MaterialTheme.colorScheme.primary,
+    checkmarkColor = MaterialTheme.colorScheme.onPrimary,
+    uncheckedColor = MaterialTheme.colorScheme.outline,
+    disabledCheckedColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+    disabledUncheckedColor = MaterialTheme.colorScheme.outlineVariant,
+    disabledIndeterminateColor = MaterialTheme.colorScheme.outlineVariant
+)
