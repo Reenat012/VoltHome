@@ -1,6 +1,5 @@
 package ru.mugalimov.volthome.ui.screens.rooms
 
-import RoomCard
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn

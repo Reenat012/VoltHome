@@ -42,10 +42,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import ru.mugalimov.volthome.core.theme.VhColors
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.Voltage
@@ -70,6 +71,8 @@ fun CardDevice(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
 
+    val t = VhColors.tokens
+
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
@@ -81,20 +84,8 @@ fun CardDevice(
                 .padding(end = 12.dp)
         )
 
-        val base = MaterialTheme.colorScheme.surface
-        val tone = when (device.deviceType) {
-            DeviceType.LIGHTING -> MaterialTheme.colorScheme.tertiaryContainer
-            DeviceType.SOCKET -> MaterialTheme.colorScheme.secondaryContainer
-            DeviceType.HEAVY_DUTY -> MaterialTheme.colorScheme.errorContainer
-            DeviceType.AIR_CONDITIONER -> MaterialTheme.colorScheme.primaryContainer
-            DeviceType.ELECTRIC_STOVE,
-            DeviceType.OVEN -> MaterialTheme.colorScheme.secondaryContainer
-            DeviceType.WASHING_MACHINE,
-            DeviceType.DISHWASHER -> MaterialTheme.colorScheme.tertiaryContainer
-            DeviceType.WATER_HEATER -> MaterialTheme.colorScheme.primaryContainer
-            DeviceType.OTHER -> MaterialTheme.colorScheme.surfaceVariant
-        }
-        val cardBg = tone.copy(alpha = 0.5f).compositeOver(base)
+        // Нейтральная индустриальная карточка без “раскраски по типам”
+        val cardBg = t.surfaceAlt
 
         ElevatedCard(
             shape = RoundedCornerShape(16.dp),
@@ -117,15 +108,15 @@ fun CardDevice(
                     Text(
                         text = device.name,
                         style = MaterialTheme.typography.titleMedium,
+                        color = t.textPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
 
-
                     Text(
                         text = device.deviceType.label(context),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = t.textSecondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -169,8 +160,7 @@ fun CardDevice(
                 var menuExpanded by remember { mutableStateOf(false) }
 
                 Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
+                    modifier = Modifier.align(Alignment.TopEnd)
                 ) {
                     IconButton(
                         onClick = { menuExpanded = true },
@@ -178,7 +168,8 @@ fun CardDevice(
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.MoreVert,
-                            contentDescription = "Меню"
+                            contentDescription = "Меню",
+                            tint = t.textSecondary
                         )
                     }
 
@@ -187,16 +178,28 @@ fun CardDevice(
                         onDismissRequest = { menuExpanded = false }
                     ) {
                         DropdownMenuItem(
-                            leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
-                            text = { Text("Редактировать") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Rounded.Edit,
+                                    contentDescription = null,
+                                    tint = t.textSecondary
+                                )
+                            },
+                            text = { Text("Редактировать", color = t.textPrimary) },
                             onClick = {
                                 menuExpanded = false
                                 onEditClick(device.id)
                             }
                         )
                         DropdownMenuItem(
-                            leadingIcon = { Icon(Icons.Rounded.Delete, contentDescription = null) },
-                            text = { Text("Удалить") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Rounded.Delete,
+                                    contentDescription = null,
+                                    tint = t.error
+                                )
+                            },
+                            text = { Text("Удалить", color = t.textPrimary) },
                             onClick = {
                                 menuExpanded = false
                                 onDeleteClick(device.id)
@@ -208,7 +211,7 @@ fun CardDevice(
         }
     }
 
-    // лист пояснений остаётся без изменений
+    // лист пояснений остаётся без изменений по структуре/логике
     if (info != null) {
         ModalBottomSheet(
             onDismissRequest = { info = null },
@@ -222,11 +225,15 @@ fun CardDevice(
                     .padding(horizontal = 20.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(title, style = MaterialTheme.typography.titleLarge)
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = t.textPrimary
+                )
                 Text(
                     description,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = t.textSecondary
                 )
             }
         }
@@ -241,41 +248,25 @@ private fun DeviceAvatar(type: DeviceType?, modifier: Modifier = Modifier) {
         DeviceType.LIGHTING -> Icons.Rounded.Lightbulb
         DeviceType.SOCKET,
         DeviceType.HEAVY_DUTY -> Icons.Rounded.Power
-
         DeviceType.AIR_CONDITIONER -> Icons.Rounded.AcUnit
         else -> Icons.Rounded.Settings
     }
-    val bg = when (type) {
-        DeviceType.LIGHTING -> MaterialTheme.colorScheme.tertiaryContainer
-        DeviceType.SOCKET -> MaterialTheme.colorScheme.secondaryContainer
-        DeviceType.HEAVY_DUTY -> MaterialTheme.colorScheme.errorContainer
-        DeviceType.AIR_CONDITIONER -> MaterialTheme.colorScheme.primaryContainer
-        DeviceType.ELECTRIC_STOVE,
-        DeviceType.OVEN -> MaterialTheme.colorScheme.secondaryContainer
 
-        DeviceType.WASHING_MACHINE,
-        DeviceType.DISHWASHER -> MaterialTheme.colorScheme.tertiaryContainer
+    val t = VhColors.tokens
 
-        DeviceType.WATER_HEATER -> MaterialTheme.colorScheme.primaryContainer
-        DeviceType.OTHER, null -> MaterialTheme.colorScheme.surfaceVariant
-    }
-    val fg =
-        if (bg == MaterialTheme.colorScheme.errorContainer) MaterialTheme.colorScheme.onErrorContainer
-        else when (bg) {
-            MaterialTheme.colorScheme.primaryContainer -> MaterialTheme.colorScheme.onPrimaryContainer
-            MaterialTheme.colorScheme.secondaryContainer -> MaterialTheme.colorScheme.onSecondaryContainer
-            MaterialTheme.colorScheme.tertiaryContainer -> MaterialTheme.colorScheme.onTertiaryContainer
-            else -> MaterialTheme.colorScheme.onSurfaceVariant
-        }
+    // Нейтральный avatar: без цветных “пятен” по типу устройства
+    val bg: Color = t.surface
+    val fg: Color = t.textSecondary
 
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(18.dp),
         color = bg,
-        contentColor = fg
+        contentColor = fg,
+        border = BorderStroke(1.dp, t.divider)
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = null)
+            Icon(icon, contentDescription = null, tint = fg)
         }
     }
 }
@@ -283,17 +274,19 @@ private fun DeviceAvatar(type: DeviceType?, modifier: Modifier = Modifier) {
 /** Чип с опциональным onClick */
 @Composable
 private fun Pill(text: String, onClick: (() -> Unit)? = null) {
+    val t = VhColors.tokens
     val clickable = onClick != null
+
     Surface(
         shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        color = t.surface,
+        border = BorderStroke(1.dp, t.divider),
         modifier = if (clickable) Modifier.clickable { onClick?.invoke() } else Modifier
     ) {
         Text(
             text = text,
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = t.textSecondary,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
         )
     }
@@ -312,7 +305,6 @@ private fun Voltage.toReadableLabel(): String {
 
 /* --------- Тексты для листа-пояснения --------- */
 
-// было: @Composable
 private fun InfoTopic.titleAndText(): Pair<String, String> = when (this) {
     InfoTopic.POWER -> "Мощность (Вт)" to
             "Номинальная потребляемая мощность устройства. Нужна для расчёта нагрузки и выбора автомата/кабеля."

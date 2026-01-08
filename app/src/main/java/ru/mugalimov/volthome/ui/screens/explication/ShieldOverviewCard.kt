@@ -96,12 +96,25 @@ fun ShieldOverviewCard(
     var fieldTopic by rememberSaveable { mutableStateOf<FieldTopic?>(null) }
     var totalsTopic by rememberSaveable { mutableStateOf<TotalsTopic?>(null) }
 
+    // ---------- roles ----------
+    val cs = MaterialTheme.colorScheme
+    val bgCard = cs.surface
+    val bgElevated = cs.surfaceContainerHigh
+    val bgSubtle = cs.surfaceContainer
+    val bgMuted = cs.surfaceVariant
+
+    val textPrimary = cs.onSurface
+    val textSecondary = cs.onSurfaceVariant
+
+    val outline = cs.outlineVariant.copy(alpha = 0.60f)
+    val divider = cs.outlineVariant.copy(alpha = 0.45f)
+
     // ---------- UI ----------
     Card(
         modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        colors = CardDefaults.cardColors(containerColor = bgCard),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+        border = BorderStroke(1.dp, outline)
     ) {
         Column(Modifier.padding(16.dp)) {
 
@@ -122,7 +135,7 @@ fun ShieldOverviewCard(
             Text(
                 text = "Сеть, ввод и сводка по мощности — всё, что нужно для общей оценки и подбора аппарата.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = textSecondary
             )
 
             Spacer(Modifier.height(12.dp))
@@ -167,10 +180,7 @@ fun ShieldOverviewCard(
             }
 
             Spacer(Modifier.height(12.dp))
-            Divider(
-                thickness = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-            )
+            Divider(thickness = 1.dp, color = divider)
             Spacer(Modifier.height(12.dp))
 
             // 2×2 грид параметров вводного оборудования
@@ -232,6 +242,9 @@ private enum class TotalsTopic { GROUPS, INSTALLED, CALCULATED }
 
 @Composable
 private fun ClickableSummaryRow(label: String, value: String, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val textSecondary = cs.onSurfaceVariant
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -243,7 +256,7 @@ private fun ClickableSummaryRow(label: String, value: String, onClick: () -> Uni
         Text(
             text = label,
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = textSecondary
         )
         Text(
             text = value,
@@ -286,10 +299,16 @@ private fun InfoBadges(
 
 @Composable
 private fun Badge(icon: ImageVector, text: String, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val bg = cs.surfaceContainerHigh
+    val outline = cs.outlineVariant.copy(alpha = 0.60f)
+    val iconTint = cs.onSurfaceVariant
+    val textPrimary = cs.onSurface
+
     Surface(
         shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+        color = bg,
+        border = BorderStroke(1.dp, outline)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -297,12 +316,12 @@ private fun Badge(icon: ImageVector, text: String, onClick: () -> Unit) {
                 .clickable(onClick = onClick)
                 .padding(horizontal = 10.dp, vertical = 6.dp)
         ) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(icon, contentDescription = null, tint = iconTint)
             Spacer(Modifier.width(6.dp))
             Text(
                 text = text,
                 style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurface
+                color = textPrimary
             )
         }
     }
@@ -424,10 +443,18 @@ private fun GridCell(
     trailingBadges: List<String> = emptyList(),
     onClick: () -> Unit
 ) {
+    val cs = MaterialTheme.colorScheme
+    val bg = cs.surfaceContainerHigh
+    val bgChip = cs.surface
+    val outline = cs.outlineVariant.copy(alpha = 0.60f)
+    val textSecondary = cs.onSurfaceVariant
+    val textPrimary = cs.onSurface
+
     Surface(
-        tonalElevation = 1.dp,
+        tonalElevation = 0.dp,
         shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceVariant
+        color = bg,
+        border = BorderStroke(1.dp, outline)
     ) {
         Column(
             Modifier
@@ -438,14 +465,16 @@ private fun GridCell(
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = textSecondary
             )
             Spacer(Modifier.height(2.dp))
             Text(
                 text = value,
                 style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.Medium,
+                color = textPrimary
             )
+
             if (trailingBadges.isNotEmpty()) {
                 Spacer(Modifier.height(6.dp))
                 FlowRow(
@@ -455,17 +484,14 @@ private fun GridCell(
                     trailingBadges.forEach { b ->
                         Surface(
                             shape = MaterialTheme.shapes.large,
-                            color = MaterialTheme.colorScheme.surface,
-                            border = BorderStroke(
-                                1.dp,
-                                MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
-                            )
+                            color = bgChip,
+                            border = BorderStroke(1.dp, outline)
                         ) {
                             Text(
                                 text = b,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                 style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = textPrimary
                             )
                         }
                     }
@@ -563,4 +589,4 @@ private fun totalsSheetContent(
 }
 
 // ---------- utils ----------
-private fun fmt1(v: Double) = String.format("%.1f", v)
+private fun fmt1(v: Double) = String.format("%.1f", v).replace(',', '.')

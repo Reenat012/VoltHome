@@ -137,7 +137,11 @@ fun RoomDetailScreen(
 private fun RoomSummary(count: Int, totalPowerW: Int) {
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.primaryContainer,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)
+        ),
         modifier = Modifier
             .padding(horizontal = 16.dp, vertical = 8.dp)
             .fillMaxWidth()
@@ -172,25 +176,33 @@ private fun StatBadge(text: String) {
 
 @Composable
 private fun RoomTypeAvatar(type: RoomType, modifier: Modifier = Modifier) {
-    val bg = when (type) {
-        RoomType.STANDARD -> MaterialTheme.colorScheme.primaryContainer
-        RoomType.BATHROOM -> MaterialTheme.colorScheme.tertiaryContainer
-        RoomType.KITCHEN -> MaterialTheme.colorScheme.secondaryContainer
-        RoomType.OUTDOOR -> MaterialTheme.colorScheme.surfaceVariant
-    }
-    val fg = when (type) {
-        RoomType.STANDARD -> MaterialTheme.colorScheme.onPrimaryContainer
-        RoomType.BATHROOM -> MaterialTheme.colorScheme.onTertiaryContainer
-        RoomType.KITCHEN -> MaterialTheme.colorScheme.onSecondaryContainer
+    val bg = MaterialTheme.colorScheme.surfaceVariant
+
+    // небольшой акцент — только цвет иконки
+    val iconTint = when (type) {
+        RoomType.STANDARD -> MaterialTheme.colorScheme.primary
+        RoomType.BATHROOM -> MaterialTheme.colorScheme.tertiary
+        RoomType.KITCHEN -> MaterialTheme.colorScheme.secondary
         RoomType.OUTDOOR -> MaterialTheme.colorScheme.onSurfaceVariant
     }
+
     val icon = when (type) {
         RoomType.STANDARD -> Icons.Rounded.Home
         RoomType.BATHROOM -> Icons.Rounded.Bathtub
         RoomType.KITCHEN -> Icons.Rounded.Kitchen
         RoomType.OUTDOOR -> Icons.Rounded.Park
     }
-    Surface(color = bg, contentColor = fg, modifier = modifier) {
+
+    Surface(
+        color = bg,
+        contentColor = iconTint,
+        modifier = modifier,
+        shape = CircleShape,
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)
+        )
+    ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Icon(icon, contentDescription = null)
         }

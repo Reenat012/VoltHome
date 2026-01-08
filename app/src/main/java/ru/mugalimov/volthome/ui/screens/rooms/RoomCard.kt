@@ -1,8 +1,18 @@
-
+package ru.mugalimov.volthome.ui.screens.rooms
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bathtub
@@ -10,14 +20,20 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Kitchen
 import androidx.compose.material.icons.rounded.Park
-import androidx.compose.material3.*
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.compositeOver
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import ru.mugalimov.volthome.core.theme.VhColors
 import ru.mugalimov.volthome.domain.model.Room
 import ru.mugalimov.volthome.domain.model.RoomType
 
@@ -32,15 +48,10 @@ fun RoomCard(
     val needsRcd = room.roomType in setOf(RoomType.BATHROOM, RoomType.KITCHEN, RoomType.OUTDOOR)
     val count = devicesCount ?: room.devices.size
 
-    // ---- мягкая тонировка фона по типу комнаты (без прозрачности) ----
-    val base = MaterialTheme.colorScheme.surface
-    val tone = when (room.roomType) {
-        RoomType.STANDARD -> MaterialTheme.colorScheme.primaryContainer
-        RoomType.BATHROOM -> MaterialTheme.colorScheme.tertiaryContainer
-        RoomType.KITCHEN  -> MaterialTheme.colorScheme.secondaryContainer
-        RoomType.OUTDOOR  -> MaterialTheme.colorScheme.surfaceVariant
-    }
-    val cardBg = tone.copy(alpha = 0.50f).compositeOver(base)
+    val t = VhColors.tokens
+
+    // Нейтральная индустриальная карточка (без “раскраски по типам”)
+    val cardBg = t.surfaceAlt
 
     ElevatedCard(
         modifier = modifier.clickable { onClick() },
@@ -54,7 +65,6 @@ fun RoomCard(
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Крупная иконка-аватар слева (цвет по типу)
             RoomTypeAvatar(
                 type = room.roomType,
                 modifier = Modifier
@@ -62,7 +72,6 @@ fun RoomCard(
                     .padding(end = 12.dp)
             )
 
-            // Основной контент справа от аватара
             Column(modifier = Modifier.weight(1f)) {
                 Row(
                     verticalAlignment = Alignment.Top,
@@ -72,6 +81,7 @@ fun RoomCard(
                         Text(
                             text = room.name,
                             style = MaterialTheme.typography.titleMedium,
+                            color = t.textPrimary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -79,7 +89,7 @@ fun RoomCard(
                         Text(
                             text = roomTypeLabel(room.roomType),
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = t.textSecondary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -92,7 +102,7 @@ fun RoomCard(
                             Icon(
                                 imageVector = Icons.Rounded.Delete,
                                 contentDescription = "Удалить комнату",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+                                tint = t.textSecondary
                             )
                         }
                     }
@@ -116,52 +126,44 @@ fun RoomCard(
 
 @Composable
 private fun RoomTypeAvatar(type: RoomType, modifier: Modifier = Modifier) {
-    val (bg, fg, icon) = when (type) {
-        RoomType.STANDARD -> Triple(
-            MaterialTheme.colorScheme.primaryContainer,
-            MaterialTheme.colorScheme.onPrimaryContainer,
-            Icons.Rounded.Home
-        )
-        RoomType.BATHROOM -> Triple(
-            MaterialTheme.colorScheme.tertiaryContainer,
-            MaterialTheme.colorScheme.onTertiaryContainer,
-            Icons.Rounded.Bathtub
-        )
-        RoomType.KITCHEN -> Triple(
-            MaterialTheme.colorScheme.secondaryContainer,
-            MaterialTheme.colorScheme.onSecondaryContainer,
-            Icons.Rounded.Kitchen
-        )
-        RoomType.OUTDOOR -> Triple(
-            MaterialTheme.colorScheme.surfaceVariant,
-            MaterialTheme.colorScheme.onSurfaceVariant,
-            Icons.Rounded.Park
-        )
+    val icon = when (type) {
+        RoomType.STANDARD -> Icons.Rounded.Home
+        RoomType.BATHROOM -> Icons.Rounded.Bathtub
+        RoomType.KITCHEN -> Icons.Rounded.Kitchen
+        RoomType.OUTDOOR -> Icons.Rounded.Park
     }
+
+    val t = VhColors.tokens
+
+    // Нейтральный avatar: без цветных пятен
+    val bg: Color = t.surface
+    val fg: Color = t.textSecondary
 
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(22.dp),
         color = bg,
-        contentColor = fg
+        contentColor = fg,
+        border = BorderStroke(1.dp, t.divider)
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = null)
+            Icon(icon, contentDescription = null, tint = fg)
         }
     }
 }
 
 @Composable
 private fun SoftChip(text: String) {
+    val t = VhColors.tokens
     Surface(
         shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        color = t.surface,
+        border = BorderStroke(1.dp, t.divider)
     ) {
         Text(
             text = text,
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = t.textSecondary,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
         )
     }
@@ -169,15 +171,16 @@ private fun SoftChip(text: String) {
 
 @Composable
 private fun UzoChip() {
+    val t = VhColors.tokens
     Surface(
         shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.primaryContainer,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
+        color = t.primarySurface,
+        border = BorderStroke(1.dp, t.primary)
     ) {
         Text(
             text = "Требуется УЗО",
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            color = t.textPrimary,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
         )
     }
@@ -186,6 +189,6 @@ private fun UzoChip() {
 private fun roomTypeLabel(type: RoomType): String = when (type) {
     RoomType.STANDARD -> "Стандартная"
     RoomType.BATHROOM -> "Ванная"
-    RoomType.KITCHEN  -> "Кухня"
-    RoomType.OUTDOOR  -> "Улица"
+    RoomType.KITCHEN -> "Кухня"
+    RoomType.OUTDOOR -> "Улица"
 }

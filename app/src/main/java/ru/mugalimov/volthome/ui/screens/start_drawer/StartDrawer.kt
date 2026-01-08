@@ -4,21 +4,55 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Payment
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.outlined.SupportAgent
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Divider
+import androidx.compose.material3.DrawerState
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.NavigationDrawerItemDefaults
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,6 +67,7 @@ import coil.compose.AsyncImage
 import coil.compose.rememberAsyncImagePainter
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.R
+import ru.mugalimov.volthome.core.theme.VhColors
 import ru.mugalimov.volthome.ui.model.ProjectUi
 import ru.mugalimov.volthome.ui.model.UserProfileUi
 import ru.mugalimov.volthome.ui.utilities.TelegramConsultationDialog
@@ -62,6 +97,8 @@ fun StartDrawer(
     var deleteConfirmForId by remember { mutableStateOf<String?>(null) }
     var showConsultDialog by remember { mutableStateOf(false) }
 
+    val t = VhColors.tokens
+
     val context = LocalContext.current
     fun openUrl(url: String) {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
@@ -76,7 +113,9 @@ fun StartDrawer(
         drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet(
-                modifier = Modifier.widthIn(min = 280.dp, max = 320.dp)
+                modifier = Modifier.widthIn(min = 280.dp, max = 320.dp),
+                drawerContainerColor = t.bg,
+                drawerContentColor = t.textPrimary
             ) {
                 Column(modifier = Modifier.fillMaxHeight()) {
                     DrawerHeader(
@@ -109,6 +148,7 @@ fun StartDrawer(
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                             fontWeight = if (p.isActive) FontWeight.SemiBold else null,
+                                            color = t.textPrimary,
                                             modifier = Modifier.weight(1f)
                                         )
                                         Box {
@@ -118,7 +158,8 @@ fun StartDrawer(
                                             ) {
                                                 Icon(
                                                     Icons.Default.MoreVert,
-                                                    contentDescription = "Меню проекта"
+                                                    contentDescription = "Меню проекта",
+                                                    tint = t.textSecondary
                                                 )
                                             }
                                             DropdownMenu(
@@ -127,14 +168,14 @@ fun StartDrawer(
                                                 offset = DpOffset(x = (-8).dp, y = (-4).dp)
                                             ) {
                                                 DropdownMenuItem(
-                                                    text = { Text("Переименовать") },
+                                                    text = { Text("Переименовать", color = t.textPrimary) },
                                                     onClick = {
                                                         menuForProjectId = null
                                                         renameDialog = p.id to p.name
                                                     }
                                                 )
                                                 DropdownMenuItem(
-                                                    text = { Text("Удалить") },
+                                                    text = { Text("Удалить", color = t.textPrimary) },
                                                     onClick = {
                                                         menuForProjectId = null
                                                         deleteConfirmForId = p.id
@@ -152,142 +193,99 @@ fun StartDrawer(
                                     }
                                 },
                                 icon = {},
+                                colors = NavigationDrawerItemDefaults.colors(
+                                    selectedContainerColor = t.surfaceAlt,
+                                    unselectedContainerColor = t.bg,
+                                    selectedTextColor = t.textPrimary,
+                                    unselectedTextColor = t.textPrimary,
+                                    selectedIconColor = t.textSecondary,
+                                    unselectedIconColor = t.textSecondary
+                                ),
                                 modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                             )
                         }
 
                         item {
                             val disabled = projects.size >= 3
+                            val disabledText = t.textDisabled
+                            val enabledText = t.textPrimary
+                            val enabledIcon = t.textSecondary
+
                             NavigationDrawerItem(
                                 label = { Text(if (!disabled) "+ Добавить проект" else "Лимит: 3 проекта") },
                                 selected = false,
                                 onClick = {
                                     if (!disabled) {
-                                        scope.launch {
-                                            drawerState.close(); onCreateProject()
-                                        }
+                                        scope.launch { drawerState.close(); onCreateProject() }
                                     }
                                 },
                                 icon = { Icon(Icons.Default.Shield, contentDescription = null) },
                                 colors = NavigationDrawerItemDefaults.colors(
-                                    selectedTextColor = if (disabled) MaterialTheme.colorScheme.onSurface.copy(
-                                        alpha = 0.38f
-                                    )
-                                    else MaterialTheme.colorScheme.onSurface,
-                                    unselectedTextColor = if (disabled) MaterialTheme.colorScheme.onSurface.copy(
-                                        alpha = 0.38f
-                                    )
-                                    else MaterialTheme.colorScheme.onSurface,
-                                    selectedIconColor = if (disabled) MaterialTheme.colorScheme.onSurface.copy(
-                                        alpha = 0.38f
-                                    )
-                                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    unselectedIconColor = if (disabled) MaterialTheme.colorScheme.onSurface.copy(
-                                        alpha = 0.38f
-                                    )
-                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    selectedContainerColor = t.surfaceAlt,
+                                    unselectedContainerColor = t.bg,
+
+                                    selectedTextColor = if (disabled) disabledText else enabledText,
+                                    unselectedTextColor = if (disabled) disabledText else enabledText,
+
+                                    selectedIconColor = if (disabled) disabledText else enabledIcon,
+                                    unselectedIconColor = if (disabled) disabledText else enabledIcon
                                 ),
                                 modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                             )
                         }
 
-                        item { Divider(modifier = Modifier.padding(vertical = 8.dp)) }
+                        item { Divider(modifier = Modifier.padding(vertical = 8.dp), color = t.divider) }
                         item { DrawerSectionTitle("Разделы") }
 
                         item {
                             NavigationDrawerItem(
                                 label = { Text("Профиль") },
                                 selected = false,
-                                onClick = {
-                                    scope.launch { drawerState.close(); onOpenProfile() }
-                                },
+                                onClick = { scope.launch { drawerState.close(); onOpenProfile() } },
                                 icon = { Icon(Icons.Default.Person, contentDescription = null) },
+                                colors = NavigationDrawerItemDefaults.colors(
+                                    selectedContainerColor = t.surfaceAlt,
+                                    unselectedContainerColor = t.bg,
+                                    selectedTextColor = t.textPrimary,
+                                    unselectedTextColor = t.textPrimary,
+                                    selectedIconColor = t.textSecondary,
+                                    unselectedIconColor = t.textSecondary
+                                ),
                                 modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                             )
                         }
-
-//                        item {
-//                            NavigationDrawerItem(
-//                                label = { Text("VoltHome PRO") },
-//                                selected = false,
-//                                onClick = {
-//                                    scope.launch {
-//                                        drawerState.close()
-//                                        onOpenSubscription()
-//                                    }
-//                                },
-//                                icon = { Icon(Icons.Default.Payment, contentDescription = null) },
-//                                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-//                            )
-//                        }
-
-
-//                        item {
-//                            NavigationDrawerItem(
-//                                label = {
-//                                    Row(verticalAlignment = Alignment.CenterVertically) {
-//                                        Text("Консультация")
-//                                        Spacer(Modifier.width(6.dp))
-//                                        Box(
-//                                            modifier = Modifier
-//                                                .clip(MaterialTheme.shapes.small)
-//                                                .background(
-//                                                    MaterialTheme.colorScheme.primary.copy(
-//                                                        alpha = 0.15f
-//                                                    )
-//                                                )
-//                                                .padding(horizontal = 6.dp, vertical = 2.dp)
-//                                        ) {
-//                                            Text(
-//                                                text = "Бета",
-//                                                style = MaterialTheme.typography.labelSmall.copy(
-//                                                    color = MaterialTheme.colorScheme.primary,
-//                                                    fontWeight = FontWeight.SemiBold
-//                                                )
-//                                            )
-//                                        }
-//                                    }
-//                                },
-//                                selected = false,
-//                                onClick = {
-//                                    scope.launch { drawerState.close() }
-//                                    showConsultDialog = true
-//                                },
-//                                icon = {
-//                                    Icon(
-//                                        Icons.Outlined.SupportAgent,
-//                                        contentDescription = null
-//                                    )
-//                                },
-//                                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-//                            )
-//                        }
 
                         item {
                             NavigationDrawerItem(
                                 label = { Text("Информация") },
                                 selected = false,
-                                onClick = {
-                                    scope.launch { drawerState.close(); onOpenSettings() }
-                                },
+                                onClick = { scope.launch { drawerState.close(); onOpenSettings() } },
                                 icon = { Icon(Icons.Default.Info, contentDescription = null) },
+                                colors = NavigationDrawerItemDefaults.colors(
+                                    selectedContainerColor = t.surfaceAlt,
+                                    unselectedContainerColor = t.bg,
+                                    selectedTextColor = t.textPrimary,
+                                    unselectedTextColor = t.textPrimary,
+                                    selectedIconColor = t.textSecondary,
+                                    unselectedIconColor = t.textSecondary
+                                ),
                                 modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                             )
                         }
 
-// --- Соцсети ---
+                        // --- Соцсети ---
                         item {
-                            Divider(modifier = Modifier.padding(vertical = 8.dp))
+                            Divider(modifier = Modifier.padding(vertical = 8.dp), color = t.divider)
                             DrawerSectionTitle("Соцсети")
 
                             NavigationDrawerItem(
                                 label = {
                                     Column {
-                                        Text("Telegram")
+                                        Text("Telegram", color = t.textPrimary)
                                         Text(
                                             text = "Инженерные компромиссы",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            color = t.textSecondary,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
@@ -298,9 +296,18 @@ fun StartDrawer(
                                 icon = {
                                     Icon(
                                         painter = painterResource(R.drawable.telegram),
-                                        contentDescription = "Telegram"
+                                        contentDescription = "Telegram",
+                                        tint = t.textSecondary
                                     )
                                 },
+                                colors = NavigationDrawerItemDefaults.colors(
+                                    selectedContainerColor = t.surfaceAlt,
+                                    unselectedContainerColor = t.bg,
+                                    selectedTextColor = t.textPrimary,
+                                    unselectedTextColor = t.textPrimary,
+                                    selectedIconColor = t.textSecondary,
+                                    unselectedIconColor = t.textSecondary
+                                ),
                                 modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                             )
                         }
@@ -312,10 +319,14 @@ fun StartDrawer(
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text(title) },
+                    title = { Text(title, color = t.textPrimary) },
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(Icons.Default.Menu, contentDescription = "Открыть меню")
+                            Icon(
+                                Icons.Default.Menu,
+                                contentDescription = "Открыть меню",
+                                tint = t.textSecondary
+                            )
                         }
                     }
                 )
@@ -341,7 +352,7 @@ fun StartDrawer(
         var text by remember(renameData.first) { mutableStateOf(renameData.second) }
         AlertDialog(
             onDismissRequest = { renameDialog = null },
-            title = { Text("Переименовать проект") },
+            title = { Text("Переименовать проект", color = t.textPrimary) },
             text = {
                 OutlinedTextField(
                     value = text,
@@ -353,9 +364,7 @@ fun StartDrawer(
             confirmButton = {
                 TextButton(
                     enabled = text.isNotBlank(),
-                    onClick = {
-                        onRenameProject(renameData.first, text.trim()); renameDialog = null
-                    }
+                    onClick = { onRenameProject(renameData.first, text.trim()); renameDialog = null }
                 ) { Text("Сохранить") }
             },
             dismissButton = { TextButton(onClick = { renameDialog = null }) { Text("Отмена") } }
@@ -366,18 +375,17 @@ fun StartDrawer(
     if (toDelete != null) {
         AlertDialog(
             onDismissRequest = { deleteConfirmForId = null },
-            title = { Text("Удалить проект?") },
-            text = { Text("Проект и связанные данные будут удалены. Это действие нельзя отменить.") },
+            title = { Text("Удалить проект?", color = t.textPrimary) },
+            text = { Text("Проект и связанные данные будут удалены. Это действие нельзя отменить.", color = t.textSecondary) },
             confirmButton = {
                 TextButton(onClick = {
-                    onDeleteProject(toDelete); deleteConfirmForId =
-                    null; scope.launch { drawerState.close() }
-                }) { Text("Удалить") }
+                    onDeleteProject(toDelete)
+                    deleteConfirmForId = null
+                    scope.launch { drawerState.close() }
+                }) { Text("Удалить", color = t.error) }
             },
             dismissButton = {
-                TextButton(onClick = {
-                    deleteConfirmForId = null
-                }) { Text("Отмена") }
+                TextButton(onClick = { deleteConfirmForId = null }) { Text("Отмена") }
             }
         )
     }
@@ -388,6 +396,8 @@ private fun DrawerHeader(
     profile: UserProfileUi?,
     onLogout: () -> Unit
 ) {
+    val t = VhColors.tokens
+
     Column(
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
@@ -420,6 +430,7 @@ private fun DrawerHeader(
                 Text(
                     text = profile?.name ?: "Пользователь",
                     style = MaterialTheme.typography.titleMedium,
+                    color = t.textPrimary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -428,27 +439,33 @@ private fun DrawerHeader(
                     Text(
                         text = mail,
                         style = MaterialTheme.typography.bodySmall,
+                        color = t.textSecondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
             }
             IconButton(onClick = onLogout) {
-                Icon(Icons.Default.ExitToApp, contentDescription = "Выйти")
+                Icon(
+                    Icons.Default.ExitToApp,
+                    contentDescription = "Выйти",
+                    tint = t.textSecondary
+                )
             }
         }
         Spacer(Modifier.height(8.dp))
-        Divider()
+        Divider(color = t.divider)
         Spacer(Modifier.height(4.dp))
     }
 }
 
 @Composable
 private fun DrawerSectionTitle(text: String) {
+    val t = VhColors.tokens
     Text(
         text = text,
         modifier = Modifier.padding(start = 16.dp, bottom = 8.dp, top = 4.dp),
         style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.primary
+        color = t.primary
     )
 }

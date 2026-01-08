@@ -47,6 +47,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import ru.mugalimov.volthome.core.theme.VhColors
 import ru.mugalimov.volthome.legal.LegalUrls
 import ru.mugalimov.volthome.ui.screens.algoritm_about.AlgorithmExplanationContent
 import ru.mugalimov.volthome.ui.screens.welcome.openDocument
@@ -62,6 +63,8 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onShowOnboarding: () -> Unit
 ) {
+    val t = VhColors.tokens
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -69,7 +72,8 @@ fun SettingsScreen(
                     Text(
                         "Информация",
                         style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
+                        color = t.textPrimary
                     )
                 },
                 navigationIcon = {
@@ -77,17 +81,19 @@ fun SettingsScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Назад",
-                            tint = MaterialTheme.colorScheme.onSurface
+                            tint = t.textSecondary
                         )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface
+                    containerColor = t.bg,
+                    titleContentColor = t.textPrimary,
+                    navigationIconContentColor = t.textSecondary,
+                    actionIconContentColor = t.textSecondary
                 )
             )
         },
-        containerColor = MaterialTheme.colorScheme.surface
+        containerColor = t.bg
     ) { innerPadding ->
         SettingsContent(
             modifier = Modifier.padding(innerPadding),
@@ -104,6 +110,7 @@ private fun SettingsContent(
 ) {
     var showAlgoSheet by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val t = VhColors.tokens
 
     val legalItems = listOf(
         LegalItem(
@@ -172,17 +179,6 @@ private fun SettingsContent(
             )
         }
 
-//        // Выделенная (фиолетовая) CTA-плитка Telegram
-//        item {
-//            SettingsTile(
-//                iconPainter = painterResource(R.drawable.telegram_communication_chat_interaction_network_connection), // можно заменить на Campaign при наличии icons-extended
-//                title = "Telegram-канал VoltHome",
-//                subtitle = "Новости, обновления и советы по электрике",
-//                onClick = { context.openExternalUrl(TELEGRAM_URL) },
-//                prominent = true
-//            )
-//        }
-
         item { Spacer(modifier = Modifier.height(8.dp)) }
 
         /* ── Футер ── */
@@ -196,7 +192,9 @@ private fun SettingsContent(
     if (showAlgoSheet) {
         ModalBottomSheet(
             onDismissRequest = { showAlgoSheet = false },
-            dragHandle = { BottomSheetDefaults.DragHandle() }
+            dragHandle = { BottomSheetDefaults.DragHandle() },
+            containerColor = t.surface,
+            contentColor = t.textPrimary
         ) {
             Column(
                 modifier = Modifier
@@ -205,11 +203,20 @@ private fun SettingsContent(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 AlgorithmExplanationContent()
+
                 Spacer(Modifier.height(12.dp))
+
                 FilledTonalButton(
                     onClick = { showAlgoSheet = false },
-                    modifier = Modifier.align(Alignment.End)
+                    modifier = Modifier.align(Alignment.End),
+                    colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(
+                        containerColor = t.surfaceAlt,
+                        contentColor = t.textPrimary,
+                        disabledContainerColor = t.surface,
+                        disabledContentColor = t.textDisabled
+                    )
                 ) { Text("Понятно") }
+
                 Spacer(Modifier.height(8.dp))
             }
         }
@@ -220,17 +227,18 @@ private fun SettingsContent(
 
 @Composable
 private fun SectionHeader(title: String) {
+    val t = VhColors.tokens
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = title,
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.primary
+            color = t.primary
         )
         Spacer(Modifier.height(8.dp))
         Divider(
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-            thickness = 1.5.dp
+            color = t.divider,
+            thickness = 1.dp
         )
         Spacer(Modifier.height(8.dp))
     }
@@ -239,24 +247,22 @@ private fun SectionHeader(title: String) {
 /** Универсальная плитка настроек. Для CTA используйте prominent = true. */
 @Composable
 private fun SettingsTile(
-    icon: ImageVector? = null,        // ← теперь необязательно
+    icon: ImageVector? = null,
     iconPainter: androidx.compose.ui.graphics.painter.Painter? = null,
     title: String,
     subtitle: String,
     onClick: () -> Unit,
     prominent: Boolean = false
 ) {
-    val bg = if (prominent) MaterialTheme.colorScheme.primary
-    else MaterialTheme.colorScheme.surfaceContainerHigh
+    val t = VhColors.tokens
 
-    val titleColor = if (prominent) MaterialTheme.colorScheme.onPrimary
-    else MaterialTheme.colorScheme.onSurface
+    // В Settings не должно быть “фиолетовой CTA” — только один акцент (primary) и спокойные поверхности.
+    val bg = if (prominent) t.primarySurface else t.surfaceAlt
+    val border = if (prominent) t.primary else t.divider
 
-    val subtitleColor = if (prominent) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.9f)
-    else MaterialTheme.colorScheme.onSurfaceVariant
-
-    val iconTint = if (prominent) MaterialTheme.colorScheme.onPrimary
-    else MaterialTheme.colorScheme.primary
+    val titleColor = t.textPrimary
+    val subtitleColor = t.textSecondary
+    val iconTint = if (prominent) t.primary else t.textSecondary
 
     val shape = if (prominent) RoundedCornerShape(20.dp) else RoundedCornerShape(16.dp)
 
@@ -267,7 +273,8 @@ private fun SettingsTile(
         color = bg,
         shape = shape,
         tonalElevation = 0.dp,
-        shadowElevation = 0.dp
+        shadowElevation = 0.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, border)
     ) {
         Row(
             modifier = Modifier
@@ -301,8 +308,7 @@ private fun SettingsTile(
             ) {
                 Text(
                     text = title,
-                    style = if (prominent) MaterialTheme.typography.titleMedium
-                    else MaterialTheme.typography.bodyLarge,
+                    style = if (prominent) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyLarge,
                     fontWeight = if (prominent) FontWeight.SemiBold else FontWeight.Medium,
                     color = titleColor
                 )
@@ -319,6 +325,7 @@ private fun SettingsTile(
 @Composable
 private fun FooterVersion() {
     val context = LocalContext.current
+    val t = VhColors.tokens
     val version = remember {
         runCatching {
             val pm: PackageManager = context.packageManager
@@ -336,7 +343,7 @@ private fun FooterVersion() {
     Text(
         text = "VoltHome © 2025 • $version",
         style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = t.textMuted,
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 12.dp),

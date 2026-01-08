@@ -59,6 +59,13 @@ fun GroupCardCompact(
     val sheetDevice = remember { mutableStateOf<DeviceSpecUi?>(null) }
     val hint = remember { mutableStateOf<GroupHint?>(null) }
 
+    val cs = MaterialTheme.colorScheme
+    val outline = cs.outlineVariant.copy(alpha = 0.60f)
+    val divider = cs.outlineVariant.copy(alpha = 0.45f)
+    val bgBadge = cs.surfaceContainerHigh
+    val bgTrack = cs.surfaceContainer
+    val textSecondary = cs.onSurfaceVariant
+
     Surface(shape = MaterialTheme.shapes.large, tonalElevation = 3.dp) {
         Column(
             modifier = Modifier
@@ -157,29 +164,32 @@ fun GroupCardCompact(
                 Text(
                     "Загрузка",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = textSecondary
                 )
                 Spacer(Modifier.width(8.dp)) // ← горизонтальный отступ
                 LinearProgressIndicator(
                     progress = load.coerceAtMost(1.0).toFloat(),
                     modifier = Modifier
                         .weight(1f)
-                        .height(8.dp)                         // чуть толще
-                        .clip(RoundedCornerShape(50)),         // ← скругляем, «капсула»
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(50)),
                     color = barColor,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                    trackColor = bgTrack
                 )
                 Spacer(Modifier.width(8.dp)) // ← горизонтальный отступ
                 Text(
                     "${"%.0f".format(load * 100)}%",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = textSecondary
                 )
             }
 
             AnimatedVisibility(visible = expanded.value) {
                 Column {
-                    Spacer(Modifier.height(12.dp)); Divider(); Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(12.dp))
+                    Divider(color = divider, thickness = 1.dp)
+                    Spacer(Modifier.height(12.dp))
+
                     GroupParameterRow("Тип группы", group.groupType.toString())
                     GroupParameterRow("Сечение кабеля", "${group.cableSection} мм²")
                     GroupParameterRow("Фаза", "${group.phase}")
@@ -230,10 +240,16 @@ private enum class GroupHint { HEADER, BREAKER, POWER, CURRENT }
 
 @Composable
 private fun ParamBadge(icon: ImageVector, text: String, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val bg = cs.surfaceContainerHigh
+    val outline = cs.outlineVariant.copy(alpha = 0.60f)
+    val iconTint = cs.onSurfaceVariant
+    val textPrimary = cs.onSurface
+
     Surface(
         shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+        color = bg,
+        border = BorderStroke(1.dp, outline)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -241,15 +257,19 @@ private fun ParamBadge(icon: ImageVector, text: String, onClick: () -> Unit) {
                 .clickable(onClick = onClick)
                 .padding(horizontal = 10.dp, vertical = 6.dp)
         ) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.width(6.dp)) // ← внутри бейджа тоже ширина
-            Text(text, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface)
+            Icon(icon, contentDescription = null, tint = iconTint)
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelLarge,
+                color = textPrimary
+            )
         }
     }
 }
 
-private fun kw(watts: Int): String = "%.2f".format(watts / 1000.0)
-private fun amp(a: Double): String = "%.2f".format(a)
+private fun kw(watts: Int): String = "%.2f".format(watts / 1000.0).replace(',', '.')
+private fun amp(a: Double): String = "%.2f".format(a).replace(',', '.')
 
 private fun groupHintContent(hint: GroupHint, group: CircuitGroup): Pair<String, String> = when (hint) {
     GroupHint.HEADER -> "Карточка группы" to

@@ -129,9 +129,9 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
                 ) {
                     FloatingActionButton(
                         onClick = { viewModel.onExportPdfClick() },
-                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f),
-                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                        elevation = FloatingActionButtonDefaults.elevation( // ✅ убираем тень полностью
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        elevation = FloatingActionButtonDefaults.elevation(
                             defaultElevation = 0.dp,
                             pressedElevation = 0.dp,
                             focusedElevation = 0.dp,
