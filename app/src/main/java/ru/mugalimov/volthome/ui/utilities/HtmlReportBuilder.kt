@@ -151,14 +151,13 @@ class HtmlReportBuilder(private val context: Context) {
         model: ReportModel,
         isPro: Boolean = false
     ): String {
-        var html = runCatching { loadTemplate("report_pdf/template.html") }
-            .recoverCatching { loadTemplate("report_pdf/report.html") }
+        val htmlTemplate = runCatching { loadTemplate("report_pdf/template.html") }
             .getOrElse { FALLBACK_TEMPLATE }
 
-        html = if (html.contains("</head>", ignoreCase = true)) {
-            html.replace(Regex("</head>", RegexOption.IGNORE_CASE), "$INLINE_STYLE</head>")
+        var html = if (htmlTemplate.contains("</head>", ignoreCase = true)) {
+            htmlTemplate.replace(Regex("</head>", RegexOption.IGNORE_CASE), "$INLINE_STYLE</head>")
         } else {
-            "$INLINE_STYLE$html"
+            "$INLINE_STYLE$htmlTemplate"
         }
 
         html = html.replace("{{projectName}}", escape(model.header.projectName))
@@ -170,8 +169,6 @@ class HtmlReportBuilder(private val context: Context) {
         val explainHtml = buildExplainSections(model)
         val phasesHtml = buildPhasesTables(model.phases)
 
-        // 1) Если в шаблоне есть {{explainHtml}} — рендерим туда
-        // 2) Иначе — вставляем перед фазами (в {{phasesHtml}})
         html = if (html.contains("{{explainHtml}}")) {
             html.replace("{{explainHtml}}", explainHtml)
                 .replace("{{phasesHtml}}", phasesHtml)
