@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.domain.model.DeviceType
+import ru.mugalimov.volthome.domain.model.PlanCapabilities
 import ru.mugalimov.volthome.domain.model.VoltageType
 import ru.mugalimov.volthome.domain.use_case.UpdateDeviceFieldsUseCase
 import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsValidator
@@ -47,12 +48,21 @@ class DeviceEditViewModel @Inject constructor(
     private val _ui = MutableStateFlow(UiState())
     val ui: StateFlow<UiState> = _ui.asStateFlow()
 
-    private var isPro: Boolean = false
+    private var capabilities: PlanCapabilities = PlanCapabilities(
+        pdfExport = false,
+        professionalReportSections = false,
+        phaseDragAndDrop = false,
+        extendedDeviceEditor = false,
+        unlimitedProjects = false
+    )
+
+    private val canUseExtendedEditor: Boolean
+        get() = capabilities.extendedDeviceEditor
 
     private fun recompute(next: UiState): UiState {
         val raw = DeviceParamsValidator.toDraft(next)
         val res = DeviceParamsValidator.validated(raw)
-        val e = DeviceParamsValidator.validateForPlan(res.normalized, isPro)
+        val e = DeviceParamsValidator.validateForPlan(res.normalized, canUseExtendedEditor)
 
         return next.copy(
             nameError = e.nameError,
@@ -62,8 +72,26 @@ class DeviceEditViewModel @Inject constructor(
         )
     }
 
-    fun setPlan(isPro: Boolean) {
-        this.isPro = isPro
+    fun setPlan(canUseExtendedEditor: Boolean) {
+        // В этом коммите UI ещё передаёт canUseExtendedEditor.
+        // Внутри VM переводим это в capabilities, чтобы далее VM жил на флагах прав.
+        this.capabilities = if (canUseExtendedEditor) {
+            PlanCapabilities(
+                pdfExport = true,
+                professionalReportSections = true,
+                phaseDragAndDrop = true,
+                extendedDeviceEditor = true,
+                unlimitedProjects = true
+            )
+        } else {
+            PlanCapabilities(
+                pdfExport = false,
+                professionalReportSections = false,
+                phaseDragAndDrop = false,
+                extendedDeviceEditor = false,
+                unlimitedProjects = false
+            )
+        }
         _ui.value = recompute(_ui.value)
     }
 
@@ -139,13 +167,13 @@ class DeviceEditViewModel @Inject constructor(
         val raw = DeviceParamsValidator.toDraft(s)
         val res = DeviceParamsValidator.validated(raw)
         val norm = res.normalized
-        val e = DeviceParamsValidator.validateForPlan(norm, isPro)
+        val e = DeviceParamsValidator.validateForPlan(norm, canUseExtendedEditor)
 
         val firstError =
             e.nameError
                 ?: e.powerError
-                ?: (if (isPro) e.powerFactorError else null)
-                ?: (if (isPro) e.demandRatioError else null)
+                ?: (if (canUseExtendedEditor) e.powerFactorError else null)
+                ?: (if (canUseExtendedEditor) e.demandRatioError else null)
 
         if (firstError != null) {
             onError(firstError)
@@ -155,8 +183,8 @@ class DeviceEditViewModel @Inject constructor(
         // Парсим только из normalized (и только после отсутствия ошибок)
         val powerW = norm.powerText.toDouble().toInt()
         val name = norm.name
-        val pf = if (isPro) norm.powerFactorText.toDouble() else null
-        val dr = if (isPro) norm.demandRatioText.toDouble() else null
+        val pf = if (canUseExtendedEditor) norm.powerFactorText.toDouble() else null
+        val dr = if (canUseExtendedEditor) norm.demandRatioText.toDouble() else null
 
         viewModelScope.launch {
             try {
@@ -168,13 +196,13 @@ class DeviceEditViewModel @Inject constructor(
                     newPowerW = powerW,
 
                     // PRO
-                    newDeviceType = if (isPro) s.deviceType else null,
+                    newDeviceType = if (canUseExtendedEditor) s.deviceType else null,
                     newPowerFactor = pf,
                     newDemandRatio = dr,
-                    newVoltageType = if (isPro) s.voltageType else null,
-                    newHasMotor = if (isPro) s.hasMotor else null,
-                    newRequiresDedicatedCircuit = if (isPro) s.requiresDedicatedCircuit else null,
-                    newRequiresSocketConnection = if (isPro) s.requiresSocketConnection else null
+                    newVoltageType = if (canUseExtendedEditor) s.voltageType else null,
+                    newHasMotor = if (canUseExtendedEditor) s.hasMotor else null,
+                    newRequiresDedicatedCircuit = if (canUseExtendedEditor) s.requiresDedicatedCircuit else null,
+                    newRequiresSocketConnection = if (canUseExtendedEditor) s.requiresSocketConnection else null
                 )
 
                 _ui.value = s.copy(isSaving = false)

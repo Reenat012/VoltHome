@@ -6,6 +6,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.domain.model.CalcAssumption
 import ru.mugalimov.volthome.domain.model.CalcWarning
+import ru.mugalimov.volthome.domain.model.PlanCapabilities
 import ru.mugalimov.volthome.domain.model.report.ReportModel
 import ru.mugalimov.volthome.ui.utilities.HtmlReportBuilder
 import ru.mugalimov.volthome.ui.utilities.PdfPrinter
@@ -13,7 +14,7 @@ import ru.mugalimov.volthome.ui.viewmodel.ExplicationViewModel
 import ru.mugalimov.volthome.ui.viewmodel.GroupScreenState
 import ru.mugalimov.volthome.ui.viewmodel.buildReportData
 
-fun exportExplicationPdf(activity: Activity, vm: ExplicationViewModel, isPro: Boolean) {
+fun exportExplicationPdf(activity: Activity, vm: ExplicationViewModel,  caps: PlanCapabilities) {
     val legacy = vm.buildReportData() ?: return
     val (meta, phases) = legacy
 
@@ -53,8 +54,7 @@ fun exportExplicationPdf(activity: Activity, vm: ExplicationViewModel, isPro: Bo
 
     val html = HtmlReportBuilder(activity).build(
         model = reportModel,
-        isPro = isPro,
-        includeProfessionalSections = isPro
+        includeProfessionalSections = caps.professionalReportSections
     )
 
     when (activity) {

@@ -17,7 +17,7 @@ import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsValidator.
  *  - UI может получить NORMALIZED draft без прямого вызова валидатора
  */
 class InMemoryDeviceParamsAdapter<K>(
-    override val isPro: Boolean,
+    override val isAllowed: Boolean,
     private val paywall: () -> Unit
 ) : DeviceParamsEditorAdapter<K> {
 
@@ -35,7 +35,7 @@ class InMemoryDeviceParamsAdapter<K>(
     private fun setDraft(key: K, newDraftRaw: DeviceParamsDraft) {
         val res = validated(newDraftRaw)
         drafts[key] = newDraftRaw
-        errors[key] = DeviceParamsValidator.validateForPlan(res.normalized, isPro)
+        errors[key] = DeviceParamsValidator.validateForPlan(res.normalized, isAllowed)
     }
 
     @Composable
@@ -81,7 +81,7 @@ class InMemoryDeviceParamsAdapter<K>(
             onRequiresSocketConnectionChange = { v -> update { it.copy(requiresSocketConnection = v) } },
 
             // gating
-            locked = !isPro,
+            locked = !isAllowed,
             onLockedClick = ::onLockedClick
         )
     }

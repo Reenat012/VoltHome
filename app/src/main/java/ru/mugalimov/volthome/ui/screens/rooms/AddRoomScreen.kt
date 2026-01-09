@@ -92,12 +92,12 @@ fun AddRoomSheet(
     val bringIntoViewRequester = remember { BringIntoViewRequester() }
     val scope = rememberCoroutineScope()
 
-    val isPro = LocalUserPlan.current.isPro
+    val canUseExtendedEditor = LocalUserPlan.current.capabilities.extendedDeviceEditor
 
     // ✅ adapter на уровне экрана, не внутри Lazy-item
-    val editorAdapter = remember(isPro, paywallHolder) {
+    val editorAdapter = remember(canUseExtendedEditor, paywallHolder) {
         InMemoryDeviceParamsAdapter<String>(
-            isPro = isPro,
+            isAllowed = canUseExtendedEditor,
             paywall = paywallHolder::onAdvancedEditorLocked
         )
     }
@@ -193,7 +193,7 @@ fun AddRoomSheet(
                                     defaults = defaultDevices,
                                     qtyMap = qtyMap,
                                     editorAdapter = editorAdapter,
-                                    isPro = isPro
+                                    isAllowed = canUseExtendedEditor
                                 )
                                 onConfirm(
                                     name.ifBlank { roomTypeLabel(selectedType) },
@@ -271,7 +271,7 @@ fun AddRoomSheet(
                         bringIntoViewRequester = bringIntoViewRequester,
                         scope = scope,
 
-                        isPro = isPro,
+                        isAllowed = canUseExtendedEditor,
                         onLockedClick = editorAdapter::onLockedClick
                     )
                 }
@@ -330,7 +330,7 @@ private fun DeviceRowEditable(
     bringIntoViewRequester: BringIntoViewRequester,
     scope: CoroutineScope,
 
-    isPro: Boolean,
+    isAllowed: Boolean,
     onLockedClick: () -> Unit
 ) {
     Card(
@@ -405,7 +405,7 @@ private fun DeviceRowEditable(
                         requiresSocketConnection = st.draft.requiresSocketConnection,
                         onRequiresSocketConnectionChange = st.onRequiresSocketConnectionChange,
 
-                        locked = !isPro,
+                        locked = !isAllowed,
                         onLockedClick = onLockedClick,
 
                         bringIntoViewRequester = bringIntoViewRequester,
@@ -421,7 +421,7 @@ private fun buildRequests(
     defaults: List<DefaultDevice>,
     qtyMap: Map<String, Int>,
     editorAdapter: InMemoryDeviceParamsAdapter<String>,
-    isPro: Boolean
+    isAllowed: Boolean
 ): List<DeviceCreateRequest> {
     val byId = defaults.associateBy { it.id.toString() }
     val out = mutableListOf<DeviceCreateRequest>()
@@ -450,12 +450,12 @@ private fun buildRequests(
         // nd.powerText уже нормализован валидатором (включая запятую)
         val watts = nd.powerText.toDoubleOrNull()?.toInt() ?: continue
 
-        val pf = if (isPro) (nd.powerFactorText.toDoubleOrNull() ?: continue) else def.powerFactor
-        val dr = if (isPro) (nd.demandRatioText.toDoubleOrNull() ?: continue) else def.demandRatio
+        val pf = if (isAllowed) (nd.powerFactorText.toDoubleOrNull() ?: continue) else def.powerFactor
+        val dr = if (isAllowed) (nd.demandRatioText.toDoubleOrNull() ?: continue) else def.demandRatio
 
-        val type = if (isPro) nd.deviceType else def.deviceType
+        val type = if (isAllowed) nd.deviceType else def.deviceType
 
-        val volt = if (isPro) {
+        val volt = if (isAllowed) {
             when (nd.voltageType) {
                 VoltageType.AC_1PHASE -> Voltage(220, VoltageType.AC_1PHASE)
                 VoltageType.AC_3PHASE -> Voltage(380, VoltageType.AC_3PHASE)
@@ -463,9 +463,9 @@ private fun buildRequests(
             }
         } else def.voltage
 
-        val hm = if (isPro) nd.hasMotor else def.hasMotor
-        val rd = if (isPro) nd.requiresDedicatedCircuit else def.requiresDedicatedCircuit
-        val rs = if (isPro) nd.requiresSocketConnection else def.requiresSocketConnection
+        val hm = if (isAllowed) nd.hasMotor else def.hasMotor
+        val rd = if (isAllowed) nd.requiresDedicatedCircuit else def.requiresDedicatedCircuit
+        val rs = if (isAllowed) nd.requiresSocketConnection else def.requiresSocketConnection
 
         out += DeviceCreateRequest(
             title = title,

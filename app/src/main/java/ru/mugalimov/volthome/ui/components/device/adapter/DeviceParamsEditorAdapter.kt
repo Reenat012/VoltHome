@@ -5,7 +5,7 @@ import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.VoltageType
 
 interface DeviceParamsEditorAdapter<K> {
-    val isPro: Boolean
+    val isAllowed: Boolean
 
     /**
      * Единая точка входа для paywall.

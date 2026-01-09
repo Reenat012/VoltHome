@@ -73,7 +73,7 @@ class ProjectsViewModel @Inject constructor(
             val aliveCount = existing.count { !it.isDeleted }
 
             // 1.1: ранняя проверка ДО создания (никаких draft, никаких запросов)
-            if (!plan.isPro && aliveCount >= FREE_PROJECTS_LIMIT) {
+            if (!plan.capabilities.unlimitedProjects && aliveCount >= FREE_PROJECTS_LIMIT) {
                 paywallBus.request(ProFeature.PROJECTS_LIMIT)
                 return@launch
             }

@@ -149,8 +149,7 @@ class HtmlReportBuilder(private val context: Context) {
     @WorkerThread
     fun build(
         model: ReportModel,
-        isPro: Boolean = false,
-        includeProfessionalSections: Boolean = isPro
+        includeProfessionalSections: Boolean = false
     ): String {
         val htmlTemplate = runCatching { loadTemplate("report_pdf/template.html") }
             .getOrElse { FALLBACK_TEMPLATE }
@@ -180,7 +179,7 @@ class HtmlReportBuilder(private val context: Context) {
                 .replace("{{phases}}", combined)
         }
 
-        html = if (!isPro) {
+        html = if (!includeProfessionalSections) {
             html.replace(
                 "{{watermark}}",
                 """<div class="watermark"><img src="img/logo.png" alt="VoltHome" onerror="this.outerHTML='VoltHome'"/></div>"""

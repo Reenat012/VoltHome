@@ -56,12 +56,12 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
     val event by viewModel.events.collectAsState(initial = null)
 
     val plan = LocalUserPlan.current
-    val isPro = plan.isPro
     val caps = plan.capabilities
+    val canExportPdf = caps.pdfExport
 
-    LaunchedEffect(event, isPro) {
+    LaunchedEffect(event, canExportPdf) {
         if (event == ExplicationViewModel.UiEvent.ExportPdfRequested) {
-            (ctx as? ComponentActivity)?.let { exportExplicationPdf(it, viewModel, isPro) }
+            (ctx as? ComponentActivity)?.let { exportExplicationPdf(it, viewModel, caps) }
             viewModel.consumeEvent()
         }
     }
@@ -97,7 +97,7 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
                             modifier = Modifier.fillMaxSize(),
                             installedPowerW = s.installedPowerW,
                             calculatedPowerW = s.calculatedPowerW,
-                            showProfessionalEvidence = caps.canSeeProfessionalEvidence,
+                            showProfessionalEvidence = caps.professionalReportSections,
                             onProfessionalLockedClick = { viewModel.onExportPdfClick() } // временно: тот же paywall entry
                         )
                         Spacer(Modifier.height(16.dp))
@@ -127,7 +127,7 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
                 }
 
                 ProLocked(
-                    isPro = isPro,
+                    isAllowed = canExportPdf,
                     feature = ProFeature.PRO_REPORT,
                     onLockedClick = { _ -> viewModel.onExportPdfClick() },
                     modifier = Modifier

@@ -7,22 +7,30 @@ package ru.mugalimov.volthome.domain.model
  * Важно: это НЕ "оверлеи", а именно доступ к профессиональным артефактам.
  */
 data class PlanCapabilities(
-    /** Можно экспортировать PDF вообще */
-    val canExportPdf: Boolean,
+    /** Экспорт PDF */
+    val pdfExport: Boolean,
 
-    /** Можно видеть профессиональные секции в UI: шаги/допущения/предупреждения/нормативы */
-    val canSeeProfessionalEvidence: Boolean,
+    /** Профессиональные секции отчёта (обоснования/допущения/предупреждения/полный отчёт) */
+    val professionalReportSections: Boolean,
 
-    /** Можно включать профессиональные секции в отчёт (HTML/PDF) */
-    val canGenerateProfessionalReport: Boolean,
+    /** Drag & Drop фаз */
+    val phaseDragAndDrop: Boolean,
+
+    /** Расширенный редактор параметров устройства */
+    val extendedDeviceEditor: Boolean,
+
+    /** Отсутствие лимита проектов (FREE лимит снят) */
+    val unlimitedProjects: Boolean,
 ) {
     companion object {
         fun fromPlan(plan: UserPlan): PlanCapabilities {
             val pro = plan.isPro
             return PlanCapabilities(
-                canExportPdf = pro,
-                canSeeProfessionalEvidence = pro,
-                canGenerateProfessionalReport = pro,
+                pdfExport = pro,
+                professionalReportSections = pro,
+                phaseDragAndDrop = pro,
+                extendedDeviceEditor = pro,
+                unlimitedProjects = pro,
             )
         }
     }

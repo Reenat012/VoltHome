@@ -55,19 +55,19 @@ fun DeviceEditSheet(
     val bringIntoViewRequester = remember { BringIntoViewRequester() }
     val scope = rememberCoroutineScope()
 
-    val isPro = LocalUserPlan.current.isPro
+    val canUseExtendedEditor = LocalUserPlan.current.capabilities.extendedDeviceEditor
 
     // ✅ Коммит 2: DeviceEdit работает через DeviceEditVmAdapter (vm.ui -> draft/errors/callbacks)
-    val adapter = remember(isPro, vm, paywallHolder) {
+    val adapter = remember(canUseExtendedEditor, vm, paywallHolder) {
         DeviceEditVmAdapter(
-            isPro = isPro,
+            isAllowed = canUseExtendedEditor,
             paywall = paywallHolder::onAdvancedEditorLocked,
             vm = vm
         )
     }
 
     LaunchedEffect(deviceId) { vm.load(deviceId) }
-    LaunchedEffect(isPro) { vm.setPlan(isPro) }
+    LaunchedEffect(canUseExtendedEditor) { vm.setPlan(canUseExtendedEditor) }
 
     val ui = vm.ui.collectAsState().value
 
@@ -110,7 +110,7 @@ fun DeviceEditSheet(
                         enabled = !ui.isSaving
                                 && st.errors.nameError == null
                                 && st.errors.powerError == null
-                                && (!isPro || (st.errors.powerFactorError == null && st.errors.demandRatioError == null)),
+                                && (!canUseExtendedEditor || (st.errors.powerFactorError == null && st.errors.demandRatioError == null)),
                         onClick = {
                             vm.save(
                                 onSuccess = { onSaved(); onDismiss() },
@@ -132,7 +132,7 @@ fun DeviceEditSheet(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             DeviceParamsEditor(
-                locked = !isPro,
+                locked = !canUseExtendedEditor,
                 onLockedClick = adapter::onLockedClick,
 
                 name = st.draft.name,
@@ -175,7 +175,7 @@ fun DeviceEditSheet(
                     enabled = !ui.isSaving
                             && st.errors.nameError == null
                             && st.errors.powerError == null
-                            && (!isPro || (st.errors.powerFactorError == null && st.errors.demandRatioError == null)),
+                            && (!canUseExtendedEditor || (st.errors.powerFactorError == null && st.errors.demandRatioError == null)),
                     onClick = {
                         vm.save(
                             onSuccess = { onSaved(); onDismiss() },

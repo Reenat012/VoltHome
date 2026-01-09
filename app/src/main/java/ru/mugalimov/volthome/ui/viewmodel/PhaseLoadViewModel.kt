@@ -39,12 +39,6 @@ class PhaseLoadViewModel @Inject constructor(
     private val _events = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val events: SharedFlow<String> = _events.asSharedFlow()
 
-    // ✅ флаг PRO для UI (не единственная защита — в методах тоже есть guard)
-    val isPro: StateFlow<Boolean> =
-        userPlanRepository.planFlow
-            .map { it.isPro }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), UserPlan.FREE.isPro)
-
     val uiState: StateFlow<PhaseLoadUiState> =
         combine(
             getPhaseLoadUiUseCase(),
@@ -155,5 +149,6 @@ class PhaseLoadViewModel @Inject constructor(
         paywallBus.request(ProFeature.PHASE_DND_TEASER)
     }
 
-    private fun isUserPro(): Boolean = userPlanRepository.planFlow.value.isPro
+    private fun isUserPro(): Boolean =
+        userPlanRepository.planFlow.value.capabilities.phaseDragAndDrop
 }

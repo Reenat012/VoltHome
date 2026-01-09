@@ -65,6 +65,8 @@ fun MainApp(
     val userPlanVm: UserPlanViewModel = hiltViewModel()
     val userPlan = userPlanVm.plan.collectAsState().value
 
+    val hasAnyPaidAccess = userPlan.capabilities.unlimitedProjects
+
     // -----------------------------
 // ✅ Глобальный paywall
 // -----------------------------
@@ -79,9 +81,9 @@ fun MainApp(
     var paywallFeature by remember { mutableStateOf<ProFeature?>(null) }
 
 // ✅ FIX: в PRO-режиме paywall не показываем вообще
-    LaunchedEffect(paywallBus, userPlan.isPro) {
+    LaunchedEffect(paywallBus, hasAnyPaidAccess) {
         paywallBus.events.collect { feature ->
-            if (userPlan.isPro) {
+            if (hasAnyPaidAccess) {
                 // ignore
                 return@collect
             }
@@ -90,8 +92,8 @@ fun MainApp(
     }
 
 // ✅ Доп. guard: если тариф стал PRO, закрываем уже открытый диалог
-    LaunchedEffect(userPlan.isPro) {
-        if (userPlan.isPro && paywallFeature != null) {
+    LaunchedEffect(hasAnyPaidAccess) {
+        if (hasAnyPaidAccess && paywallFeature != null) {
             paywallFeature = null
         }
     }

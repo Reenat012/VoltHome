@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.domain.model.DefaultDevice
 import ru.mugalimov.volthome.domain.model.DeviceType
@@ -82,12 +83,12 @@ fun DevicePickerSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
 
-    val isPro = LocalUserPlan.current.isPro
+    val canUseExtendedEditor = LocalUserPlan.current.capabilities.extendedDeviceEditor
 
     // ✅ adapter на уровне sheet (НЕ внутри Lazy-item)
-    val editorAdapter = remember(isPro, paywallHolder) {
+    val editorAdapter = remember(canUseExtendedEditor, paywallHolder) {
         InMemoryDeviceParamsAdapter<String>(
-            isPro = isPro,
+            isAllowed = canUseExtendedEditor,
             paywall = paywallHolder::onAdvancedEditorLocked
         )
     }
@@ -171,7 +172,7 @@ fun DevicePickerSheet(
                                     defaults = defaultDevices,
                                     qtyMap = qty,
                                     editorAdapter = editorAdapter,
-                                    isPro = isPro
+                                    canUseExtendedEditor = canUseExtendedEditor
                                 )
                                 if (reqs.isEmpty()) {
                                     onDismiss()
@@ -244,7 +245,7 @@ fun DevicePickerSheet(
                         onDec = { qty[def.id] = (count - 1).coerceAtLeast(0) },
                         onInc = { qty[def.id] = (count + 1).coerceAtMost(99) },
                         st = st,
-                        isPro = isPro,
+                        isAllowed = canUseExtendedEditor,
                         onLockedClick = editorAdapter::onLockedClick,
                         bringIntoViewRequester = bringIntoViewRequester,
                         scope = scope
@@ -263,7 +264,7 @@ fun DevicePickerSheet(
                                 defaults = defaultDevices,
                                 qtyMap = qty,
                                 editorAdapter = editorAdapter,
-                                isPro = isPro
+                                canUseExtendedEditor = canUseExtendedEditor
                             )
                             if (reqs.isEmpty()) {
                                 onDismiss()
@@ -293,7 +294,7 @@ private fun DevicePickerDeviceCard(
     onDec: () -> Unit,
     onInc: () -> Unit,
     st: DeviceParamsEditorState<String>,
-    isPro: Boolean,
+    isAllowed: Boolean,
     onLockedClick: () -> Unit,
     bringIntoViewRequester: BringIntoViewRequester,
     scope: CoroutineScope
@@ -373,7 +374,7 @@ private fun DevicePickerDeviceCard(
                         requiresSocketConnection = st.draft.requiresSocketConnection,
                         onRequiresSocketConnectionChange = st.onRequiresSocketConnectionChange,
 
-                        locked = !isPro,
+                        locked = !isAllowed,
                         onLockedClick = onLockedClick,
 
                         bringIntoViewRequester = bringIntoViewRequester,
@@ -408,7 +409,7 @@ private fun buildRequestsForPicker(
     defaults: List<DefaultDevice>,
     qtyMap: Map<Long, Int>,
     editorAdapter: InMemoryDeviceParamsAdapter<String>,
-    isPro: Boolean
+    canUseExtendedEditor: Boolean
 ): List<DomainDeviceCreateRequest> {
     val byId = defaults.associateBy { it.id }
     val out = mutableListOf<DomainDeviceCreateRequest>()
@@ -437,12 +438,12 @@ private fun buildRequestsForPicker(
 
         val watts = nd.powerText.toDoubleOrNull()?.toInt() ?: continue
 
-        val pf = if (isPro) (nd.powerFactorText.toDoubleOrNull() ?: continue) else def.powerFactor
-        val dr = if (isPro) (nd.demandRatioText.toDoubleOrNull() ?: continue) else def.demandRatio
+        val pf = if (canUseExtendedEditor) (nd.powerFactorText.toDoubleOrNull() ?: continue) else def.powerFactor
+        val dr = if (canUseExtendedEditor) (nd.demandRatioText.toDoubleOrNull() ?: continue) else def.demandRatio
 
-        val type = if (isPro) nd.deviceType else def.deviceType
+        val type = if (canUseExtendedEditor) nd.deviceType else def.deviceType
 
-        val volt = if (isPro) {
+        val volt = if (canUseExtendedEditor) {
             when (nd.voltageType) {
                 VoltageType.AC_1PHASE -> Voltage(220, VoltageType.AC_1PHASE)
                 VoltageType.AC_3PHASE -> Voltage(380, VoltageType.AC_3PHASE)
@@ -450,9 +451,9 @@ private fun buildRequestsForPicker(
             }
         } else def.voltage
 
-        val hm = if (isPro) nd.hasMotor else def.hasMotor
-        val rd = if (isPro) nd.requiresDedicatedCircuit else def.requiresDedicatedCircuit
-        val rs = if (isPro) nd.requiresSocketConnection else def.requiresSocketConnection
+        val hm = if (canUseExtendedEditor) nd.hasMotor else def.hasMotor
+        val rd = if (canUseExtendedEditor) nd.requiresDedicatedCircuit else def.requiresDedicatedCircuit
+        val rs = if (canUseExtendedEditor) nd.requiresSocketConnection else def.requiresSocketConnection
 
         out += DomainDeviceCreateRequest(
             title = title,

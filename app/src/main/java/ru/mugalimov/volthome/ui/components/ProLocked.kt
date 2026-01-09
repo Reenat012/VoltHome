@@ -18,14 +18,14 @@ import ru.mugalimov.volthome.domain.model.ProFeature
 /**
  * Обёртка для PRO-фич.
  *
- * - isPro = true  -> просто показывает content
- * - isPro = false -> показывает content + overlay (клипнутый по форме)
+ * - isAllowed = true  -> просто показывает content
+ * - isAllowed = false -> показывает content + overlay (клипнутый по форме)
  *
  * По клику на overlay вызывает onLockedClick(feature)
  */
 @Composable
 fun ProLocked(
-    isPro: Boolean,
+    isAllowed: Boolean,
     feature: ProFeature,
     onLockedClick: (ProFeature) -> Unit,
     modifier: Modifier = Modifier,
@@ -39,7 +39,7 @@ fun ProLocked(
     ) {
         content()
 
-        if (!isPro) {
+        if (!isAllowed) {
             Box(
                 modifier = Modifier
                     .matchParentSize()

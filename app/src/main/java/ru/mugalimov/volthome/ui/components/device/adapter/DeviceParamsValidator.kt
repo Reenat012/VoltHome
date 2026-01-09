@@ -128,9 +128,9 @@ object DeviceParamsValidator {
      * - на free НЕ возвращаем ошибки по PF/DR
      * - на pro — возвращаем всё как есть
      */
-    fun validateForPlan(draft: DeviceParamsDraft, isPro: Boolean): DeviceParamsErrors {
+    fun validateForPlan(draft: DeviceParamsDraft, isAllowed: Boolean): DeviceParamsErrors {
         val e = validate(draft)
-        return if (isPro) e else e.copy(
+        return if (isAllowed) e else e.copy(
             powerFactorError = null,
             demandRatioError = null
         )

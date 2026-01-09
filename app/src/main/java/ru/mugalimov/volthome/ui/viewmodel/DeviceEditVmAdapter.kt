@@ -10,8 +10,8 @@ import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsErrors
 import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsValidator
 
 class DeviceEditVmAdapter(
-    override val isPro: Boolean,
-    private val paywall: () -> Unit,
+    override val isAllowed: Boolean,
+    val paywall: () -> Unit,
     private val vm: DeviceEditViewModel
 ) : DeviceParamsEditorAdapter<Long> {
 
@@ -63,7 +63,7 @@ class DeviceEditVmAdapter(
             onRequiresSocketConnectionChange = vm::setRequiresSocketConnection,
 
             // gating
-            locked = !isPro,
+            locked = !isAllowed,
             onLockedClick = ::onLockedClick
         )
     }

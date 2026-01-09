@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseGroupItem
+import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.viewmodel.ExplicationViewModel
 import ru.mugalimov.volthome.ui.viewmodel.PhaseLoadViewModel
 
@@ -46,7 +47,7 @@ fun PhaseLoadScreen(
         explicationViewModel.recalcAndSaveGroups()
     }
 
-    val isPro = viewModel.isPro.collectAsStateWithLifecycle().value
+    val canDrag = LocalUserPlan.current.capabilities.phaseDragAndDrop
     val uiState = viewModel.uiState.collectAsStateWithLifecycle().value
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -96,7 +97,7 @@ fun PhaseLoadScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding),
-                    canDrag = isPro,
+                    canDrag = canDrag,
                     onPaywall = { viewModel.onDnDLockedTapped() },
                     onGroupDropped = { groupId, phase -> viewModel.onGroupDragged(groupId, phase) },
                     onReset = { viewModel.onResetOverrides() }
