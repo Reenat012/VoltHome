@@ -65,6 +65,8 @@ fun ShieldOverviewCard(
     incomer: IncomerSpec,
     groups: List<CircuitGroup>,
     hasGroupRcds: Boolean,
+    installedPowerW: Int,
+    calculatedPowerW: Int,
     modifier: Modifier = Modifier
 ) {
     // ---------- данные ----------
@@ -76,16 +78,6 @@ fun ShieldOverviewCard(
     val cI = perPhase.getOrZero(Phase.C)
     val maxPhase =
         if (is3) listOf("A" to aI, "B" to bI, "C" to cI).maxBy { it.second }.first else null
-
-    val installedPowerW = groups.sumOf { it.devices.sumOf { d -> d.power ?: 0 } }
-    // расчётная мощность (упрощённо: с учётом demandRatio устройств, если он есть; иначе берём 1.0)
-    val calculatedPowerW = groups.sumOf { g ->
-        g.devices.sumOf { d ->
-            val p = (d.power ?: 0)
-            val k = (d.demandRatio ?: 1.0)
-            (p * k).toInt()
-        }
-    }
 
     val hasWetZones = remember(groups) { groups.any { it.rcdRequired } }
 

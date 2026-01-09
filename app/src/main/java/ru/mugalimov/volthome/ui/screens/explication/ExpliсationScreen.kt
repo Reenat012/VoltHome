@@ -90,7 +90,9 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
                             incomer = s.incomer,
                             groups = groups,
                             hasGroupRcds = s.hasGroupRcds,
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier.fillMaxSize(),
+                            installedPowerW = s.installedPowerW,
+                            calculatedPowerW = s.calculatedPowerW
                         )
                         Spacer(Modifier.height(16.dp))
                     }
