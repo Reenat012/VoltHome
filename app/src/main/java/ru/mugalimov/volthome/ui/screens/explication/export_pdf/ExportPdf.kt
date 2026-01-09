@@ -53,7 +53,8 @@ fun exportExplicationPdf(activity: Activity, vm: ExplicationViewModel, isPro: Bo
 
     val html = HtmlReportBuilder(activity).build(
         model = reportModel,
-        isPro = isPro
+        isPro = isPro,
+        includeProfessionalSections = isPro
     )
 
     when (activity) {

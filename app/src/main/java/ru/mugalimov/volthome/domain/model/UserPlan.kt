@@ -21,6 +21,9 @@ data class UserPlan(
                 (planUntilEpochSeconds == null ||
                         planUntilEpochSeconds * 1000L > System.currentTimeMillis())
 
+    val capabilities: PlanCapabilities
+        get() = PlanCapabilities.fromPlan(this)
+
     companion object {
         val FREE = UserPlan(plan = "free", planUntilEpochSeconds = null)
     }

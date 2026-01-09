@@ -98,7 +98,7 @@ class ExplicationViewModel @Inject constructor(
     fun onExportPdfClick() {
         val plan = userPlanRepository.planFlow.value
         if (!plan.isPro) {
-            paywallBus.request(ProFeature.PDF_EXPORT)
+            paywallBus.request(ProFeature.PRO_REPORT)
             return
         }
         _events.value = UiEvent.ExportPdfRequested

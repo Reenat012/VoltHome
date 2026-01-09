@@ -149,7 +149,8 @@ class HtmlReportBuilder(private val context: Context) {
     @WorkerThread
     fun build(
         model: ReportModel,
-        isPro: Boolean = false
+        isPro: Boolean = false,
+        includeProfessionalSections: Boolean = isPro
     ): String {
         val htmlTemplate = runCatching { loadTemplate("report_pdf/template.html") }
             .getOrElse { FALLBACK_TEMPLATE }
@@ -166,7 +167,7 @@ class HtmlReportBuilder(private val context: Context) {
             .replace("{{donutSection}}", buildDonutSection(model.donut))
             .replace("{{legendSection}}", buildLegend(model.donut))
 
-        val explainHtml = buildExplainSections(model)
+        val explainHtml = if (includeProfessionalSections) buildExplainSections(model) else ""
         val phasesHtml = buildPhasesTables(model.phases)
 
         html = if (html.contains("{{explainHtml}}")) {

@@ -70,6 +70,8 @@ fun ShieldOverviewCard(
     hasGroupRcds: Boolean,
     installedPowerW: CalculatedValue,
     calculatedPowerW: CalculatedValue,
+    showProfessionalEvidence: Boolean,
+    onProfessionalLockedClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     // ---------- данные ----------
@@ -175,10 +177,14 @@ fun ShieldOverviewCard(
             }
 
             Spacer(Modifier.height(12.dp))
-            CalculationEvidenceBlock(
-                installed = installedPowerW,
-                calculated = calculatedPowerW
-            )
+            if (showProfessionalEvidence) {
+                CalculationEvidenceBlock(
+                    installed = installedPowerW,
+                    calculated = calculatedPowerW
+                )
+            } else {
+                ProEvidenceStub(onClick = onProfessionalLockedClick)
+            }
 
             Spacer(Modifier.height(12.dp))
             Divider(thickness = 1.dp, color = divider)
@@ -335,6 +341,29 @@ private fun ClickableSummaryRow(label: String, value: String, onClick: () -> Uni
             style = MaterialTheme.typography.bodyLarge,
             fontWeight = FontWeight.Medium
         )
+    }
+}
+
+@Composable
+private fun ProEvidenceStub(onClick: () -> Unit) {
+    // Минимально, без “дешёвых” оверлеев:
+    // показываем аккуратную карточку-заглушку.
+    androidx.compose.material3.Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        tonalElevation = 1.dp,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text("Профессиональные обоснования", style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Шаги расчёта, допущения, предупреждения и нормативные ссылки доступны в PRO.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 

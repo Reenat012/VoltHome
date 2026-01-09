@@ -55,7 +55,9 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
     // события от VM (one-shot)
     val event by viewModel.events.collectAsState(initial = null)
 
-    val isPro = LocalUserPlan.current.isPro
+    val plan = LocalUserPlan.current
+    val isPro = plan.isPro
+    val caps = plan.capabilities
 
     LaunchedEffect(event, isPro) {
         if (event == ExplicationViewModel.UiEvent.ExportPdfRequested) {
@@ -94,7 +96,9 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
                             hasGroupRcds = s.hasGroupRcds,
                             modifier = Modifier.fillMaxSize(),
                             installedPowerW = s.installedPowerW,
-                            calculatedPowerW = s.calculatedPowerW
+                            calculatedPowerW = s.calculatedPowerW,
+                            showProfessionalEvidence = caps.canSeeProfessionalEvidence,
+                            onProfessionalLockedClick = { viewModel.onExportPdfClick() } // временно: тот же paywall entry
                         )
                         Spacer(Modifier.height(16.dp))
                     }
@@ -122,11 +126,9 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
                     }
                 }
 
-                val isProFab = LocalUserPlan.current.isPro
-
                 ProLocked(
-                    isPro = isProFab,
-                    feature = ProFeature.PDF_EXPORT,
+                    isPro = isPro,
+                    feature = ProFeature.PRO_REPORT,
                     onLockedClick = { _ -> viewModel.onExportPdfClick() },
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
