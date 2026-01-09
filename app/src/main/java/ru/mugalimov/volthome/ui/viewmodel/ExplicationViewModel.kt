@@ -55,7 +55,7 @@ class ExplicationViewModel @Inject constructor(
     private val calculateShieldOverviewUseCase: CalculateShieldOverviewUseCase,
     private val calculateDeviceBreakdownUseCase: CalculateDeviceBreakdownUseCase,
     @IoDispatcher private val dispatchers: CoroutineDispatcher,
-    private val userPlanRepository: UserPlanRepository,
+    val userPlanRepository: UserPlanRepository,
     private val paywallBus: PaywallBus,
 ) : ViewModel() {
 
@@ -109,14 +109,18 @@ class ExplicationViewModel @Inject constructor(
     }
 
     /** ВАЖНО: берём ИНСТАНС устройства по id из репозитория, без дефолтов. */
-    fun onDeviceClick(deviceId: Long) {
-        viewModelScope.launch {
-            _selectedDeviceBreakdown.value = null
-            val dev = deviceRepository.getDeviceById(deviceId.toInt())
-            _selectedDevice.value = dev
+    fun onDeviceClick(deviceId: Long) {viewModelScope.launch {
+        _selectedDeviceBreakdown.value = null
+
+        val dev = deviceRepository.getDeviceById(deviceId.toInt())
+        _selectedDevice.value = dev
+
+        val plan = userPlanRepository.planFlow.value
+        if (plan.capabilities.professionalReportSections) {
             _selectedDeviceBreakdown.value =
                 dev?.let { calculateDeviceBreakdownUseCase.execute(it) }
         }
+    }
     }
 
     fun clearSelected() {
@@ -161,8 +165,37 @@ class ExplicationViewModel @Inject constructor(
                             )
                         )
 
+                        val plan = userPlanRepository.planFlow.value
+                        val isProReport = plan.capabilities.professionalReportSections
+
                         val totals = calculateShieldOverviewUseCase.execute(groups)
-                        val warnings = buildWarningsFromGroups(groups)
+                        val warnings = if (isProReport) {
+                            buildWarningsFromGroups(groups)
+                        } else {
+                            emptyList()
+                        }
+
+                        val installedPower = if (isProReport) {
+                            totals.installedPowerW
+                        } else {
+                            totals.installedPowerW.copy(
+                                steps = emptyList(),
+                                assumptions = emptyList(),
+                                warnings = emptyList(),
+                                normRefs = emptyList()
+                            )
+                        }
+
+                        val calculatedPower = if (isProReport) {
+                            totals.calculatedPowerW
+                        } else {
+                            totals.calculatedPowerW.copy(
+                                steps = emptyList(),
+                                assumptions = emptyList(),
+                                warnings = emptyList(),
+                                normRefs = emptyList()
+                            )
+                        }
 
                         _uiState.value = GroupScreenState.Success(
                             groups = groups,
@@ -170,9 +203,13 @@ class ExplicationViewModel @Inject constructor(
                             totalCurrent = totalCurrent,
                             incomer = incomer,
                             hasGroupRcds = hasGroupRcds,
-                            installedPowerW = totals.installedPowerW,
-                            calculatedPowerW = totals.calculatedPowerW,
-                            shieldTotalsAssumptions = totals.calculatedPowerW.assumptions,
+                            installedPowerW = installedPower,
+                            calculatedPowerW = calculatedPower,
+                            shieldTotalsAssumptions = if (isProReport) {
+                                calculatedPower.assumptions
+                            } else {
+                                emptyList()
+                            },
                             calcWarnings = warnings
                         )
                     }
@@ -229,6 +266,9 @@ private fun buildWarningsFromGroups(groups: List<CircuitGroup>): List<CalcWarnin
  *  - SINGLE: донат загрузки вводного, headline только A
  */
 fun ExplicationViewModel.buildReportData(): Pair<ReportMeta, List<ReportPhase>>? {
+    val plan = userPlanRepository.planFlow.value
+    if (!plan.capabilities.professionalReportSections) return null
+
     val s = uiState.value as? GroupScreenState.Success ?: return null
     val date =
         SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(System.currentTimeMillis())

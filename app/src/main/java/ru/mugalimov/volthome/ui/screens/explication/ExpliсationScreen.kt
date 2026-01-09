@@ -98,7 +98,10 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
                             installedPowerW = s.installedPowerW,
                             calculatedPowerW = s.calculatedPowerW,
                             showProfessionalEvidence = caps.professionalReportSections,
-                            onProfessionalLockedClick = { viewModel.onExportPdfClick() } // временно: тот же paywall entry
+                            onProfessionalLockedClick = {
+                                // явная точка входа в PRO
+                                viewModel.onExportPdfClick() // временно, дальше заменим на REPORT_SECTIONS
+                            }
                         )
                         Spacer(Modifier.height(16.dp))
                     }

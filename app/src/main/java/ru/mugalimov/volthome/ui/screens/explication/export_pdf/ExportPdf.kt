@@ -26,24 +26,27 @@ fun exportExplicationPdf(activity: Activity, vm: ExplicationViewModel,  caps: Pl
     // Берём живые допущения/предупреждения из uiState (они у тебя уже считаются)
     val s = vm.uiState.value as? GroupScreenState.Success
 
-    val assumptions: List<CalcAssumption> = buildList {
-        if (s != null) {
-            addAll(s.installedPowerW.assumptions)
-            addAll(s.calculatedPowerW.assumptions)
-            addAll(s.shieldTotalsAssumptions)
+    val assumptions: List<CalcAssumption> =
+        if (caps.professionalReportSections && s != null) {
+            buildList {
+                addAll(s.installedPowerW.assumptions)
+                addAll(s.calculatedPowerW.assumptions)
+                addAll(s.shieldTotalsAssumptions)
+            }.distinctBy { it.toString() }
+        } else {
+            emptyList()
         }
-    }.distinctBy { it.toString() } // дешёвый дедуп, без знания структуры
 
-    val warnings: List<CalcWarning> = buildList {
-        if (s != null) {
-            // То, что ты уже считаешь в buildWarningsFromGroups
-            addAll(s.calcWarnings)
-
-            // Если в CalculatedValue тоже есть warnings — прокинем
-            addAll(s.installedPowerW.warnings)
-            addAll(s.calculatedPowerW.warnings)
+    val warnings: List<CalcWarning> =
+        if (caps.professionalReportSections && s != null) {
+            buildList {
+                addAll(s.calcWarnings)
+                addAll(s.installedPowerW.warnings)
+                addAll(s.calculatedPowerW.warnings)
+            }.distinctBy { "${it.severity}|${it.scope}|${it.title}|${it.message}" }
+        } else {
+            emptyList()
         }
-    }.distinctBy { "${it.severity}|${it.scope}|${it.title}|${it.message}" }
 
     val reportModel = reportBase.copy(
         assumptions = assumptions,

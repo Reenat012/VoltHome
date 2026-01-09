@@ -3,6 +3,7 @@ package ru.mugalimov.volthome.ui.screens.explication
 // ---------- imports ----------
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,6 +34,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -183,7 +185,12 @@ fun ShieldOverviewCard(
                     calculated = calculatedPowerW
                 )
             } else {
-                ProEvidenceStub(onClick = onProfessionalLockedClick)
+//                ProEvidenceStub(onClick = onProfessionalLockedClick)
+                ProfessionalSectionPlaceholder(
+                    title = "Инженерные обоснования",
+                    subtitle = "Допущения, предупреждения и пояснения расчёта",
+                    onUnlockClick = onProfessionalLockedClick
+                )
             }
 
             Spacer(Modifier.height(12.dp))
@@ -691,3 +698,36 @@ private fun totalsSheetContent(
 
 // ---------- utils ----------
 private fun fmt1(v: Double) = String.format("%.1f", v).replace(',', '.')
+
+@Composable
+fun ProfessionalSectionPlaceholder(
+    title: String,
+    subtitle: String,
+    onUnlockClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant,
+                shape = MaterialTheme.shapes.medium
+            )
+            .padding(16.dp)
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(12.dp))
+        TextButton(onClick = onUnlockClick) {
+            Text("Открыть PRO")
+        }
+    }
+}

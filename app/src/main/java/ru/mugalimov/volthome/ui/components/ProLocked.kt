@@ -16,12 +16,25 @@ import androidx.compose.ui.graphics.Shape
 import ru.mugalimov.volthome.domain.model.ProFeature
 
 /**
- * Обёртка для PRO-фич.
+ * Обёртка для PRO-действий (actions).
  *
- * - isAllowed = true  -> просто показывает content
- * - isAllowed = false -> показывает content + overlay (клипнутый по форме)
+ * ❗ ВАЖНО:
+ * Этот компонент предназначен ИСКЛЮЧИТЕЛЬНО для UI-действий:
+ * - Button / IconButton
+ * - FAB
+ * - Toggle / Switch
  *
- * По клику на overlay вызывает onLockedClick(feature)
+ * 🚫 ЗАПРЕЩЕНО использовать для:
+ * - Card / Column / Row с контентом
+ * - Секций отчёта
+ * - Любых composable, формирующих данные
+ *
+ * Причина:
+ * ProLocked НЕ является логическим gate — content() всегда строится.
+ *
+ *  * shape:
+ *  * Используется ТОЛЬКО для action-контейнеров (FAB/иконка).
+ *  * Не предназначен для карточек или секций.
  */
 @Composable
 fun ProLocked(
@@ -31,13 +44,13 @@ fun ProLocked(
     modifier: Modifier = Modifier,
     shape: Shape = CircleShape,
     showLockIcon: Boolean = true,
-    content: @Composable () -> Unit
+    action: @Composable () -> Unit
 ) {
     // Важно: клипуем контейнер, чтобы overlay НЕ был квадратом
     Box(
         modifier = modifier.clip(shape)
     ) {
-        content()
+        action()
 
         if (!isAllowed) {
             Box(
