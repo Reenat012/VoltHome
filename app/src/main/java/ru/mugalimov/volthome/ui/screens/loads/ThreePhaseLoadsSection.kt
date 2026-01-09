@@ -35,11 +35,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import ru.mugalimov.volthome.domain.model.DistributionDecision
+import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
 
 @Composable
 fun ThreePhaseLoadsSection(
     item: PhaseLoadItem,
+    decisionsByGroupNumber: Map<Int, DistributionDecision>,
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(true) }
@@ -72,7 +75,12 @@ fun ThreePhaseLoadsSection(
                 AssistChip(
                     onClick = {},
                     label = { Text("${item.groups.size}") },
-                    leadingIcon = { Icon(imageVector = Icons.Outlined.Power, contentDescription = null) },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.Power,
+                            contentDescription = null
+                        )
+                    },
                     border = AssistChipDefaults.assistChipBorder(false)
                 )
 
@@ -94,6 +102,8 @@ fun ThreePhaseLoadsSection(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
+
+
             AnimatedVisibility(
                 visible = expanded,
                 enter = fadeIn() + expandVertically(),
@@ -111,6 +121,17 @@ fun ThreePhaseLoadsSection(
                                 fontWeight = FontWeight.Medium
                             )
                             Spacer(Modifier.height(8.dp))
+
+                            val decision = decisionsByGroupNumber[group.groupNumber]
+                            if (decision != null) {
+                                Text(
+                                    text = buildDecisionLine(decision),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.height(8.dp))
+                            }
+
 
                             FlowRow(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -143,4 +164,18 @@ fun ThreePhaseLoadsSection(
             }
         }
     }
+}
+
+private fun buildDecisionLine(d: DistributionDecision): String {
+    fun fmt(v: Double) = String.format("%.1f", v)
+    fun m(map: Map<Phase, Double>): String {
+        val a = fmt(map[Phase.A] ?: 0.0)
+        val b = fmt(map[Phase.B] ?: 0.0)
+        val c = fmt(map[Phase.C] ?: 0.0)
+        return "A $a B $b C $c"
+    }
+
+    val before = m(d.phaseCurrentsBefore)
+    val after = m(d.phaseCurrentsAfter)
+    return "Почему: выбрана ${d.chosenPhase.name} (до $before → после $after)"
 }

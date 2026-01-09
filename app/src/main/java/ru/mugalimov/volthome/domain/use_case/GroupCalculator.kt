@@ -15,6 +15,7 @@ import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.domain.model.SafetyProfile
 import ru.mugalimov.volthome.domain.use_case.PhaseDistributor.distributeGroupsBalanced
+import ru.mugalimov.volthome.domain.use_case.PhaseDistributor.distributeGroupsBalancedWithLog
 import kotlin.math.ceil
 
 
@@ -85,18 +86,22 @@ class GroupCalculator(
                 .mapIndexed { idx, g -> g.copy(groupNumber = idx + 1) }
 
             // 4) Балансировка фаз / режим 1 фаза
-            val distributed: List<CircuitGroup> =
+            val (distributed, decisionLog) =
                 if (mode == PhaseMode.THREE) {
-                    distributeGroupsBalanced(normalized)
+                    distributeGroupsBalancedWithLog(normalized)
                 } else {
-                    normalized.map { it.copy(phase = Phase.A) }
+                    normalized.map { it.copy(phase = Phase.A) } to emptyList()
                 }
+
 
             // 5) Валидация до сохранения
             validateBeforeSave(distributed)
 
             // 6) НИКАКОГО сохранения здесь (если сохраняешь в VM)
-            GroupingResult.Success(ElectricalSystem(distributed))
+            GroupingResult.Success(
+                system = ElectricalSystem(distributed),
+                distributionDecisions = decisionLog
+            )
         } catch (e: Exception) {
             GroupingResult.Error("Ошибка расчёта: ${e.message}")
         }
@@ -110,11 +115,16 @@ class GroupCalculator(
             DeviceType.AIR_CONDITIONER,
             DeviceType.ELECTRIC_STOVE,
             DeviceType.HEAVY_DUTY -> true
+
             else -> false // розетки/освещение не уносим только из‑за мощности
         }
 
     /** Подбор автомата/кабеля/кривой по подгруппе. */
-    private fun selectBreaker(nominalCurrent: Double, deviceType: DeviceType, hasMotor: Boolean): GroupProfile {
+    private fun selectBreaker(
+        nominalCurrent: Double,
+        deviceType: DeviceType,
+        hasMotor: Boolean
+    ): GroupProfile {
         val current = ceil(nominalCurrent).toInt()
 
         val minRatingByType = mapOf(
@@ -275,8 +285,8 @@ class GroupCalculator(
 
 fun DeviceEntity.nominalCurrent(): Double =
     CurrentCalculator.calculateNominalCurrent(
-        power       = power.toDouble(),
-        voltage     = (voltage.value.takeIf { it > 0 } ?: 230).toDouble(),
+        power = power.toDouble(),
+        voltage = (voltage.value.takeIf { it > 0 } ?: 230).toDouble(),
         powerFactor = powerFactor,
         demandRatio = demandRatio,
         voltageType = voltage.type

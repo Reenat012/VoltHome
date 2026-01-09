@@ -58,6 +58,9 @@ import ru.mugalimov.volthome.domain.model.incomer.IncomerSpec
 import ru.mugalimov.volthome.domain.use_case.getOrZero
 import ru.mugalimov.volthome.domain.use_case.inferVoltageType
 import ru.mugalimov.volthome.domain.use_case.phaseCurrents
+import ru.mugalimov.volthome.domain.model.CalculatedValue
+import ru.mugalimov.volthome.domain.model.CalcAssumption
+import ru.mugalimov.volthome.domain.model.CalcStep
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -65,8 +68,8 @@ fun ShieldOverviewCard(
     incomer: IncomerSpec,
     groups: List<CircuitGroup>,
     hasGroupRcds: Boolean,
-    installedPowerW: Int,
-    calculatedPowerW: Int,
+    installedPowerW: CalculatedValue,
+    calculatedPowerW: CalculatedValue,
     modifier: Modifier = Modifier
 ) {
     // ---------- данные ----------
@@ -140,12 +143,12 @@ fun ShieldOverviewCard(
 
             ClickableSummaryRow(
                 label = "Установленная мощность",
-                value = "%.1f кВт".format(installedPowerW / 1000.0)
+                value = "%.1f кВт".format(installedPowerW.value / 1000.0)
             ) { totalsTopic = TotalsTopic.INSTALLED; scope.launch { sheetState.show() } }
 
             ClickableSummaryRow(
                 label = "Расчётная нагрузка",
-                value = "%.1f кВт".format(calculatedPowerW / 1000.0)
+                value = "%.1f кВт".format(calculatedPowerW.value / 1000.0)
             ) { totalsTopic = TotalsTopic.CALCULATED; scope.launch { sheetState.show() } }
 
             Spacer(Modifier.height(12.dp))
@@ -170,6 +173,12 @@ fun ShieldOverviewCard(
                 Spacer(Modifier.height(12.dp))
                 PhaseLine(aI = aI, bI = bI, cI = cI, maxPhase = maxPhase)
             }
+
+            Spacer(Modifier.height(12.dp))
+            CalculationEvidenceBlock(
+                installed = installedPowerW,
+                calculated = calculatedPowerW
+            )
 
             Spacer(Modifier.height(12.dp))
             Divider(thickness = 1.dp, color = divider)
@@ -203,8 +212,8 @@ fun ShieldOverviewCard(
                 fieldTopic != null -> fieldSheetContent(fieldTopic!!, incomer, is3)
                 else -> totalsSheetContent(
                     totalsTopic!!,
-                    installedPowerW,
-                    calculatedPowerW,
+                    installedPowerW.value,
+                    calculatedPowerW.value,
                     groups.size
                 )
             }
@@ -231,6 +240,77 @@ fun ShieldOverviewCard(
 private enum class InfoTopic { HEADER, NETWORK, GROUP_RCDS, WET_ZONES, INCOMER }
 private enum class FieldTopic { SCHEME, POLES, MCB, RCD }
 private enum class TotalsTopic { GROUPS, INSTALLED, CALCULATED }
+
+@Composable
+private fun CalculationEvidenceBlock(
+    installed: CalculatedValue,
+    calculated: CalculatedValue
+) {
+    val cs = MaterialTheme.colorScheme
+    val outline = cs.outlineVariant.copy(alpha = 0.60f)
+    val textSecondary = cs.onSurfaceVariant
+
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = cs.surfaceContainerHigh,
+        border = BorderStroke(1.dp, outline)
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "Расчёт",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            EvidenceValueBlock(label = "Установленная мощность", v = installed)
+            EvidenceValueBlock(label = "Расчётная нагрузка", v = calculated)
+        }
+    }
+}
+
+@Composable
+private fun EvidenceValueBlock(label: String, v: CalculatedValue) {
+    val cs = MaterialTheme.colorScheme
+    val textSecondary = cs.onSurfaceVariant
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(text = label, style = MaterialTheme.typography.labelLarge)
+        Text(
+            text = "Результат: %.1f кВт".format(v.value / 1000.0),
+            style = MaterialTheme.typography.bodyMedium
+        )
+
+        if (v.steps.isNotEmpty()) {
+            Text(
+                text = "Шаги:",
+                style = MaterialTheme.typography.labelMedium,
+                color = textSecondary
+            )
+            v.steps.forEach { step ->
+                Text(
+                    text = "• ${step.name}: ${step.formula}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = textSecondary
+                )
+            }
+        }
+
+        if (v.assumptions.isNotEmpty()) {
+            Text(
+                text = "Допущения:",
+                style = MaterialTheme.typography.labelMedium,
+                color = textSecondary
+            )
+            v.assumptions.forEach { a ->
+                Text(
+                    text = "• ${a.subject}: ${a.message}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = textSecondary
+                )
+            }
+        }
+    }
+}
 
 @Composable
 private fun ClickableSummaryRow(label: String, value: String, onClick: () -> Unit) {
@@ -563,8 +643,8 @@ private fun fieldSheetContent(
 
 private fun totalsSheetContent(
     topic: TotalsTopic,
-    installedPowerW: Int,
-    calculatedPowerW: Int,
+    installedPowerW: Double,
+    calculatedPowerW: Double,
     groupsCount: Int
 ): Pair<String, String> = when (topic) {
     TotalsTopic.GROUPS -> "Группы" to

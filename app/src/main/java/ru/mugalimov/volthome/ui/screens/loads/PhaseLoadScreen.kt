@@ -89,6 +89,7 @@ fun PhaseLoadScreen(
             else -> {
                 PhaseLoadContent(
                     phaseLoads = uiState.data,
+                    decisions = uiState.decisions,
                     mode = uiState.mode,
                     incomerRating = uiState.incomer?.mcbRating,
                     thresholds = uiState.thresholds,

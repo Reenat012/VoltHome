@@ -1,27 +1,49 @@
 package ru.mugalimov.volthome.domain.use_case
 
 import ru.mugalimov.volthome.domain.model.CalcAssumption
-import ru.mugalimov.volthome.domain.model.CoefficientSource
+import ru.mugalimov.volthome.domain.model.CalcInput
+import ru.mugalimov.volthome.domain.model.CalcOutput
+import ru.mugalimov.volthome.domain.model.CalcStep
+import ru.mugalimov.volthome.domain.model.CalculatedValue
 import ru.mugalimov.volthome.domain.model.CircuitGroup
+import ru.mugalimov.volthome.domain.model.CoefficientSource
 import javax.inject.Inject
 
 data class ShieldOverviewTotals(
-    val installedPowerW: Int,
-    val calculatedPowerW: Int,
-    val assumptions: List<CalcAssumption> = emptyList()
+    val installedPowerW: CalculatedValue,
+    val calculatedPowerW: CalculatedValue
 )
 
 class CalculateShieldOverviewUseCase @Inject constructor() {
 
     fun execute(groups: List<CircuitGroup>): ShieldOverviewTotals {
-        val installedPowerW = groups.sumOf { g ->
+        // -----------------------------
+        // Installed power (паспортная)
+        // -----------------------------
+        val installedPowerW: Int = groups.sumOf { g ->
             g.devices.sumOf { d -> (d.power ?: 0) }
         }
 
+        val installedSteps: List<CalcStep> = listOf(
+            CalcStep(
+                name = "Установленная мощность",
+                formula = "Pуст = Σ Pпаспорт",
+                inputs = listOf(
+                    CalcInput(name = "Σ Pпаспорт", value = installedPowerW.toDouble(), unit = "Вт")
+                ),
+                output = CalcOutput(value = installedPowerW.toDouble(), unit = "Вт"),
+                normRefs = emptyList(),
+                assumptions = emptyList()
+            )
+        )
+
+        // -----------------------------
+        // Calculated power (с учётом demandRatio)
+        // -----------------------------
         var defaultDemandRatioCount = 0
         var userDemandRatioCount = 0
 
-        val calculatedPowerW = groups.sumOf { g ->
+        val calculatedPowerW: Int = groups.sumOf { g ->
             g.devices.sumOf { d ->
                 val p = (d.power ?: 0)
                 val k = d.demandRatio
@@ -36,7 +58,7 @@ class CalculateShieldOverviewUseCase @Inject constructor() {
             }
         }
 
-        val assumptions = buildList {
+        val calculatedAssumptions: List<CalcAssumption> = buildList {
             if (defaultDemandRatioCount > 0) {
                 add(
                     CalcAssumption(
@@ -49,9 +71,6 @@ class CalculateShieldOverviewUseCase @Inject constructor() {
                     )
                 )
             }
-
-            // ВАЖНО: это опционально. Можно не добавлять, чтобы не шуметь.
-            // Но если тебе важно видеть, что пользовательские коэффициенты реально участвовали:
             if (userDemandRatioCount > 0) {
                 add(
                     CalcAssumption(
@@ -66,10 +85,41 @@ class CalculateShieldOverviewUseCase @Inject constructor() {
             }
         }
 
+        val calculatedSteps: List<CalcStep> = listOf(
+            CalcStep(
+                name = "Расчётная нагрузка",
+                formula = "Pрасч = Σ (Pпаспорт × kспроса)",
+                inputs = listOf(
+                    CalcInput(name = "Σ(Pпаспорт×k)", value = calculatedPowerW.toDouble(), unit = "Вт"),
+                    // счётчики — не числа формулы, но как входы для “протокола” полезны и валидны
+                    CalcInput(name = "k по умолч.", value = defaultDemandRatioCount.toDouble(), unit = "шт"),
+                    CalcInput(name = "k задано", value = userDemandRatioCount.toDouble(), unit = "шт"),
+                ),
+                output = CalcOutput(value = calculatedPowerW.toDouble(), unit = "Вт"),
+                normRefs = emptyList(),
+                assumptions = calculatedAssumptions
+            )
+        )
+
         return ShieldOverviewTotals(
-            installedPowerW = installedPowerW,
-            calculatedPowerW = calculatedPowerW,
-            assumptions = assumptions
+            installedPowerW = CalculatedValue(
+                value = installedPowerW.toDouble(),
+                unit = "Вт",
+                label = "Установленная мощность",
+                steps = installedSteps,
+                assumptions = emptyList(),
+                warnings = emptyList(),
+                normRefs = emptyList()
+            ),
+            calculatedPowerW = CalculatedValue(
+                value = calculatedPowerW.toDouble(),
+                unit = "Вт",
+                label = "Расчётная нагрузка",
+                steps = calculatedSteps,
+                assumptions = calculatedAssumptions,
+                warnings = emptyList(),
+                normRefs = emptyList()
+            )
         )
     }
 }

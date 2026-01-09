@@ -26,6 +26,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import ru.mugalimov.volthome.domain.model.CalculatedValue
+import ru.mugalimov.volthome.domain.model.DeviceCalcBreakdown
 import ru.mugalimov.volthome.domain.model.DeviceSpecUi
 import ru.mugalimov.volthome.ui.utilities.label
 
@@ -33,10 +35,13 @@ import ru.mugalimov.volthome.ui.utilities.label
 @Composable
 fun DeviceSpecSheet(
     device: DeviceSpecUi,
+    breakdown: DeviceCalcBreakdown?,
     onDismiss: () -> Unit,
     sheetState: SheetState
 ) {
     val context = LocalContext.current
+    val safeBreakdown = breakdown?.takeIf { it.deviceId == device.id }
+
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -64,6 +69,14 @@ fun DeviceSpecSheet(
                 "Коэффициент мощности",
                 device.powerFactor?.toString() ?: "—"
             )
+
+            // -------- Применение в расчёте --------
+            safeBreakdown?.let { b ->
+                Spacer(Modifier.height(12.dp))
+                Text("Применение в расчёте", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(6.dp))
+                CalculatedValueBlock(b.calculatedPower)
+            }
 
             // Тип/логика подключения — добавили иконки
             SpecRow(
@@ -97,13 +110,13 @@ private fun SpecRow(
 ) {
     androidx.compose.foundation.layout.Row(modifier = Modifier.fillMaxWidth()) {
         Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        androidx.compose.foundation.layout.Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(8.dp))
         Text(
             label,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+        Spacer(Modifier.weight(1f))
         Text(value, style = MaterialTheme.typography.bodyLarge)
     }
 }
@@ -122,14 +135,46 @@ private fun RowLabelValue(
     androidx.compose.foundation.layout.Row(modifier = Modifier.fillMaxWidth()) {
         if (icon != null) {
             Icon(icon, contentDescription = null)
-            androidx.compose.foundation.layout.Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(8.dp))
         }
         Text(
             label,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+        Spacer(Modifier.weight(1f))
         Text(value, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+@Composable
+private fun CalculatedValueBlock(v: CalculatedValue) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = "Результат: %.0f %s".format(v.value, v.unit),
+            style = MaterialTheme.typography.bodyLarge
+        )
+
+        if (v.steps.isNotEmpty()) {
+            Text("Шаги:", style = MaterialTheme.typography.labelLarge)
+            v.steps.forEach { step ->
+                Text(
+                    text = "• ${step.name}: ${step.formula}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        if (v.assumptions.isNotEmpty()) {
+            Text("Допущения:", style = MaterialTheme.typography.labelLarge)
+            v.assumptions.forEach { a ->
+                Text(
+                    text = "• ${a.message}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
     }
 }

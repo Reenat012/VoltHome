@@ -1,12 +1,14 @@
 package ru.mugalimov.volthome.data.repository
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import ru.mugalimov.volthome.data.local.entity.CircuitGroupEntity
 import ru.mugalimov.volthome.data.local.entity.CircuitGroupWithDevices
 import ru.mugalimov.volthome.data.local.entity.GroupDeviceJoin
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
+import ru.mugalimov.volthome.domain.model.DistributionDecision
 import ru.mugalimov.volthome.domain.model.phase_load.GroupWithDevices
 
 interface ExplicationRepository {
@@ -18,15 +20,15 @@ interface ExplicationRepository {
 
     suspend fun handleDeviceDeletion(deviceId: Long)
 
-    suspend fun getGroupById(groupId: Long) : CircuitGroup?
+    suspend fun getGroupById(groupId: Long): CircuitGroup?
 
-    suspend fun getGroupByRoom(roomName: String) : List<CircuitGroup>
+    suspend fun getGroupByRoom(roomName: String): List<CircuitGroup>
 
-    suspend fun getGroupByType(groupType: DeviceType) : List<CircuitGroup>
+    suspend fun getGroupByType(groupType: DeviceType): List<CircuitGroup>
 
     suspend fun updateGroup(groupId: Long)
 
-    suspend fun getAllGroups() : List<CircuitGroup>
+    suspend fun getAllGroups(): List<CircuitGroup>
 
     suspend fun deleteAllGroups()
 
@@ -40,4 +42,8 @@ interface ExplicationRepository {
     suspend fun replaceAllGroupsTransactional(
         groups: List<CircuitGroup>
     )
+
+    // ===== Decision log распределения фаз (пока без сохранения в БД) =====
+    fun observeDistributionDecisions(): Flow<List<DistributionDecision>>
+    suspend fun setLastDistributionDecisions(decisions: List<DistributionDecision>)
 }

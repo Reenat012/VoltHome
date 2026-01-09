@@ -49,8 +49,9 @@ class PhaseLoadViewModel @Inject constructor(
         combine(
             getPhaseLoadUiUseCase(),
             preferencesRepository.phaseMode,
-            explicationRepository.observeAllGroup()
-        ) { items, mode, groups ->
+            explicationRepository.observeAllGroup(),
+            explicationRepository.observeDistributionDecisions()
+        ) { items, mode, groups, decisions ->
             val data = if (mode == PhaseMode.SINGLE) {
                 // ✅ FIX: в 1φ режиме показываем ТОЛЬКО Phase.A
                 // Phase.THREE_PHASE полностью исключён из UI
@@ -72,7 +73,8 @@ class PhaseLoadViewModel @Inject constructor(
                 data = data,
                 mode = mode,
                 incomer = incomer,
-                thresholds = LoadThresholds()
+                thresholds = LoadThresholds(),
+                decisions = decisions
             )
         }
             .onStart { emit(PhaseLoadUiState(isLoading = true)) }

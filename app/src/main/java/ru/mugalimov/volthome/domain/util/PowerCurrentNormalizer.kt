@@ -6,6 +6,7 @@ import ru.mugalimov.volthome.domain.model.Voltage
 import ru.mugalimov.volthome.domain.model.VoltageType
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
+import ru.mugalimov.volthome.domain.model.CalcAssumption
 
 /**
 + * Заполняет недостающее поле мощности (Вт) или тока (А) по известному второму.
@@ -16,21 +17,30 @@ object PowerCurrentNormalizer {
     private const val TAG = "PowerCurrentNormalizer"
     private val SQRT3 = sqrt(3.0)
 
+    data class NormalizedPowerCurrent(
+        val powerW: Int?,
+        val currentA: Double?,
+        val assumptions: List<CalcAssumption> = emptyList()
+    )
+
     /**
      * @param powerW   мощность в Вт (может быть null/0)
      * @param currentA ток в А (может быть null/0.0)
      * @param voltage  модель напряжения (значение и тип сети)
      * @param powerFactor коэффициент мощности; если пришёл мусор — будет зажат в (0,1]
      *
-     * @return Пара (powerW, currentA) с заполненными недостающими значениями
+     * @return NormalizedPowerCurrent (powerW, currentA, assumptions)
      */
     fun ensurePAndI(
         powerW: Int?,
         currentA: Double?,
         voltage: Voltage,
         powerFactor: Double?
-    ): Pair<Int?, Double?> {
-        val pf = sanitizePf(powerFactor)
+    ): NormalizedPowerCurrent {
+        val (pf, pfAssumption) = sanitizePfWithAssumption(powerFactor)
+        val assumptions = buildList {
+            pfAssumption?.let { add(it) }
+        }
         var p = powerW?.takeIf { it > 0 }
         var i = currentA?.takeIf { it > 0.0 }
 
@@ -61,16 +71,58 @@ object PowerCurrentNormalizer {
             Log.w(TAG, "Suspicious device numbers: power=${p}W, current=${i}A")
         }
 
-        return p to i
+        return NormalizedPowerCurrent(
+            powerW = p,
+            currentA = i,
+            assumptions = assumptions
+        )
     }
 
-    private fun sanitizePf(pf: Double?): Double {
-        val v = pf ?: 1.0
+    private fun sanitizePfWithAssumption(pf: Double?): Pair<Double, CalcAssumption?> {
+        val v = pf
+        val applied = 1.0
         return when {
-            v.isNaN() || v.isInfinite() -> 1.0
-            v <= 0.0 -> 1.0
-            v > 1.0 -> 1.0
-            else -> v
+            v == null -> {
+                applied to CalcAssumption(
+                    kind = CalcAssumption.Kind.DEFAULT_USED,
+                    subject = "powerFactor",
+                    message = "Коэффициент мощности не задан — применено значение по умолчанию.",
+                    original = null,
+                    applied = applied
+                )
+            }
+
+            v.isNaN() || v.isInfinite() -> {
+                applied to CalcAssumption(
+                    kind = CalcAssumption.Kind.NORMALIZED,
+                    subject = "powerFactor",
+                    message = "Коэффициент мощности некорректен (NaN/Inf) — применено значение по умолчанию.",
+                    original = v,
+                    applied = applied
+                )
+            }
+
+            v <= 0.0 -> {
+                applied to CalcAssumption(
+                    kind = CalcAssumption.Kind.NORMALIZED,
+                    subject = "powerFactor",
+                    message = "Коэффициент мощности <= 0 — применено значение по умолчанию.",
+                    original = v,
+                    applied = applied
+                )
+            }
+
+            v > 1.0 -> {
+                applied to CalcAssumption(
+                    kind = CalcAssumption.Kind.NORMALIZED,
+                    subject = "powerFactor",
+                    message = "Коэффициент мощности > 1 — применено значение по умолчанию.",
+                    original = v,
+                    applied = applied
+                )
+            }
+
+            else -> v to null
         }
     }
 }

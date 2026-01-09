@@ -6,7 +6,7 @@ import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.report.DonutModel
 import ru.mugalimov.volthome.domain.model.report.ReportDevice
 import ru.mugalimov.volthome.domain.model.report.ReportGroup
-import ru.mugalimov.volthome.domain.model.report.ReportMeta
+import ru.mugalimov.volthome.domain.model.report.ReportModel
 import ru.mugalimov.volthome.domain.model.report.ReportPhase
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -35,7 +35,13 @@ class HtmlReportBuilder(private val context: Context) {
         "switchLabel", "groupSwitchLabel", "apparatusLabel",
         "protectionLabel", "breakerLabel", "rcdLabel", "deviceLabel"
     )
-    private val groupCableAliases = listOf("cableLabel", "lineLabel", "wireLabel", "cableInfo", "lineInfo")
+    private val groupCableAliases =
+        listOf("cableLabel", "lineLabel", "wireLabel", "cableInfo", "lineInfo")
+
+    // Для гибкого чтения моделей steps/assumptions/warnings/normRefs без жёсткой зависимости
+    private val titleAliases = listOf("title", "name", "label")
+    private val messageAliases = listOf("message", "text", "description", "details", "hint")
+    private val severityAliases = listOf("severity", "level", "type")
 
     // —— ТОЛЬКО CSS изменён: добавлены жёсткие запреты разрыва и префиксы ——
     private val INLINE_STYLE = """
@@ -91,13 +97,58 @@ class HtmlReportBuilder(private val context: Context) {
           tr.group-start { page-break-after: avoid !important; }
 
           .h2-tight { margin: 0 0 8px 0; }
+          
+          /* ————— Новые секции: расчёт/предупреждения/нормы ————— */
+                    .explain { margin: 14px 0 18px 0; }
+                    .explain .block {
+                      border: 1px solid #E5E7EB;
+                      border-radius: 12px;
+                      padding: 12px 12px;
+                      margin: 10px 0;
+                      background: #FFFFFF;
+                      break-inside: avoid !important;
+                      page-break-inside: avoid !important;
+                    }
+                    .explain .block h3 { margin: 0 0 8px 0; font-size: 13px; font-weight: 700; }
+                    .explain .muted { color: #6B7280; font-size: 12px; }
+                    .explain ul { margin: 6px 0 0 18px; padding: 0; }
+                    .explain li { margin: 4px 0; }
+          
+                    .step-title {
+                      display:flex;
+                      align-items:baseline;
+                      gap:8px;
+                      font-weight:700;
+                      font-size:12.5px;
+                      margin: 0 0 6px 0;
+                    }
+                    .pill {
+                      display:inline-block;
+                      padding: 2px 8px;
+                      border-radius: 9999px;
+                      font-size: 11px;
+                      font-weight: 700;
+                      background: #F3F4F6;
+                      color: #111827;
+                    }
+                    .pill.warn { background:#FEF3C7; color:#92400E; }
+                    .pill.err  { background:#FEE2E2; color:#991B1B; }
+                    .pill.info { background:#E5E7EB; color:#374151; }
+          
+                    .warn-item { border-left: 4px solid #D1D5DB; padding-left: 10px; margin: 10px 0; }
+                    .warn-item.warn { border-left-color: #F59E0B; }
+                    .warn-item.err { border-left-color: #EF4444; }
+                    .warn-item .t { font-weight:700; }
+                    .warn-item .m { margin-top: 2px; color:#374151; font-size:12px; }
+          
+                    .norm-list .code { font-weight: 800; }
+                    .norm-list .note { color:#6B7280; font-size:12px; }
         </style>
     """.trimIndent()
 
     @WorkerThread
     fun build(
-        meta: ReportMeta,
-        phases: List<ReportPhase>,
+        model: ReportModel,
         isPro: Boolean = false
     ): String {
         var html = runCatching { loadTemplate("report_pdf/template.html") }
@@ -110,18 +161,30 @@ class HtmlReportBuilder(private val context: Context) {
             "$INLINE_STYLE$html"
         }
 
-        html = html.replace("{{projectName}}", "")
-            .replace("{{date}}", escape(meta.date))
-            .replace("{{kpiBlock}}", buildKpiBlock(meta))
-            .replace("{{donutSection}}", buildDonutSection(meta.donut))
-            .replace("{{legendSection}}", buildLegend(meta.donut))
+        html = html.replace("{{projectName}}", escape(model.header.projectName))
+            .replace("{{date}}", escape(model.header.date))
+            .replace("{{kpiBlock}}", buildKpiBlock(model))
+            .replace("{{donutSection}}", buildDonutSection(model.donut))
+            .replace("{{legendSection}}", buildLegend(model.donut))
 
-        val phasesHtml = buildPhasesTables(phases)
-        html = html.replace("{{phasesHtml}}", phasesHtml)
-            .replace("{{phases}}", phasesHtml)
+        val explainHtml = buildExplainSections(model)
+        val phasesHtml = buildPhasesTables(model.phases)
+
+        // 1) Если в шаблоне есть {{explainHtml}} — рендерим туда
+        // 2) Иначе — вставляем перед фазами (в {{phasesHtml}})
+        html = if (html.contains("{{explainHtml}}")) {
+            html.replace("{{explainHtml}}", explainHtml)
+                .replace("{{phasesHtml}}", phasesHtml)
+                .replace("{{phases}}", phasesHtml)
+        } else {
+            val combined = explainHtml + phasesHtml
+            html.replace("{{phasesHtml}}", combined)
+                .replace("{{phases}}", combined)
+        }
 
         html = if (!isPro) {
-            html.replace("{{watermark}}",
+            html.replace(
+                "{{watermark}}",
                 """<div class="watermark"><img src="img/logo.png" alt="VoltHome" onerror="this.outerHTML='VoltHome'"/></div>"""
             )
         } else html.replace("{{watermark}}", "")
@@ -130,25 +193,189 @@ class HtmlReportBuilder(private val context: Context) {
         return html
     }
 
-    private fun buildKpiBlock(meta: ReportMeta): String {
-        val iA = formatA(meta.headlineCurrents["A"])
-        val iB = formatA(meta.headlineCurrents["B"])
-        val iC = formatA(meta.headlineCurrents["C"])
-        val isSingle = meta.donut is DonutModel.IncomerLoad
+    private fun buildExplainSections(model: ReportModel): String {
+        val hasSteps = model.steps.isNotEmpty()
+        val hasAssumptions = model.assumptions.isNotEmpty()
+        val hasWarnings = model.warnings.isNotEmpty()
+        val hasNorms = model.normRefs.isNotEmpty()
 
-        val totalGroups = runCatching { meta.totalGroups }.getOrNull()
-        val totalCurrentA = runCatching {
-            meta.javaClass.getDeclaredField("totalCurrentA").apply { isAccessible = true }.get(meta) as? Double
-        }.getOrNull()
+        if (!hasSteps && !hasAssumptions && !hasWarnings && !hasNorms) return ""
 
-        val incomerHuman = humanizeIncomer(meta.incomerLabel ?: "")
+        return buildString {
+            appendLine("""<div class="explain">""")
+
+            // 1) Расчёт
+            if (hasSteps) {
+                appendLine("""<div class="block">""")
+                appendLine("""<h3>Расчёт</h3>""")
+                model.steps.forEachIndexed { idx, step ->
+                    appendLine("""<div class="step">""")
+                    appendLine(
+                        """
+                    <div class="step-title">
+                      <span class="pill info">${idx + 1}</span>
+                      <span>${escape(step.title)}</span>
+                    </div>
+                    """.trimIndent()
+                    )
+                    if (step.lines.isNotEmpty()) {
+                        appendLine("<ul>")
+                        step.lines.forEach { line -> appendLine("""<li>${escape(line)}</li>""") }
+                        appendLine("</ul>")
+                    } else {
+                        appendLine("""<div class="muted">—</div>""")
+                    }
+                    appendLine("</div>")
+                }
+                appendLine("""</div>""")
+            }
+
+            // 2) Допущения
+            if (hasAssumptions) {
+                appendLine("""<div class="block">""")
+                appendLine("""<h3>Допущения</h3>""")
+                appendLine("<ul>")
+                model.assumptions.forEach { a ->
+                    appendLine("""<li>${formatAssumption(a)}</li>""")
+                }
+                appendLine("</ul>")
+                appendLine("""</div>""")
+            }
+
+            // 3) Предупреждения
+            if (hasWarnings) {
+                appendLine("""<div class="block">""")
+                appendLine("""<h3>Предупреждения</h3>""")
+                model.warnings.forEach { w ->
+                    appendLine(formatWarning(w))
+                }
+                appendLine("""</div>""")
+            }
+
+            // 4) Нормы
+            if (hasNorms) {
+                appendLine("""<div class="block">""")
+                appendLine("""<h3>Нормативные ссылки</h3>""")
+                appendLine("""<div class="norm-list">""")
+                appendLine("<ul>")
+                model.normRefs.forEach { n ->
+                    val head = buildString {
+                        append("""<span class="code">${escape(n.code)}</span>""")
+                        if (n.title.isNotBlank()) append(""" — ${escape(n.title)}""")
+                    }
+                    val note = n.note.takeIf { it.isNotBlank() }
+                        ?.let { """<div class="note">${escape(it)}</div>""" }
+                        ?: ""
+                    appendLine("""<li>$head$note</li>""")
+                }
+                appendLine("</ul>")
+                appendLine("""</div>""")
+                appendLine("""</div>""")
+            }
+
+            appendLine("""</div>""")
+        }
+    }
+
+    private fun formatAssumption(a: Any): String {
+        val title = readStringField(a, titleAliases)?.takeIf { it.isNotBlank() }
+        val msg = readStringField(a, messageAliases)?.takeIf { it.isNotBlank() }
+        return when {
+            title != null && msg != null -> "<b>${escape(title)}</b>: ${escape(msg)}"
+            title != null -> "<b>${escape(title)}</b>"
+            msg != null -> escape(msg)
+            else -> escape(a.toString())
+        }
+    }
+
+    private fun formatWarning(w: Any): String {
+        val severityRaw = readAnyField(w, severityAliases)
+            ?.toString()
+            ?.lowercase(Locale.getDefault())
+            .orEmpty()
+
+        val cls = when {
+            severityRaw.contains("error") || severityRaw.contains("critical") -> "err"
+            severityRaw.contains("warn") -> "warn"
+            else -> "info"
+        }
+
+        val pill = when (cls) {
+            "err" -> """<span class="pill err">ОШИБКА</span>"""
+            "warn" -> """<span class="pill warn">ВНИМАНИЕ</span>"""
+            else -> """<span class="pill info">ИНФО</span>"""
+        }
+
+        val title = readStringField(w, titleAliases)?.takeIf { it.isNotBlank() } ?: "Предупреждение"
+        val msg = readStringField(w, messageAliases)?.takeIf { it.isNotBlank() }
+
+        val itemCls = when (cls) {
+            "err" -> "warn-item err"
+            "warn" -> "warn-item warn"
+            else -> "warn-item"
+        }
+
+        return buildString {
+            appendLine("""<div class="$itemCls">""")
+            appendLine("""<div class="t">$pill ${escape(title)}</div>""")
+            if (msg != null) appendLine("""<div class="m">${escape(msg)}</div>""")
+            appendLine("""</div>""")
+        }
+    }
+
+    private fun readStringField(obj: Any, names: List<String>): String? {
+        for (n in names) {
+            val v = runCatching {
+                val f = obj.javaClass.getDeclaredField(n).apply { isAccessible = true }
+                f.get(obj)
+            }.getOrNull()
+
+            when (v) {
+                is String -> return v
+                null -> Unit
+                else -> {
+                    val s = v.toString()
+                    if (s.isNotBlank()) return s
+                }
+            }
+        }
+        return null
+    }
+
+    private fun readAnyField(obj: Any, names: List<String>): Any? {
+        for (n in names) {
+            val v = runCatching {
+                val f = obj.javaClass.getDeclaredField(n).apply { isAccessible = true }
+                f.get(obj)
+            }.getOrNull()
+            if (v != null) return v
+        }
+        return null
+    }
+
+    private fun buildKpiBlock(model: ReportModel): String {
+        val currents = model.kpis.headlineCurrents
+
+        val iA = formatA(currents["A"])
+        val iB = formatA(currents["B"])
+        val iC = formatA(currents["C"])
+
+        val isSingle = model.donut is DonutModel.IncomerLoad
+
+        val incomerHuman = humanizeIncomer(model.header.incomerLabel)
 
         return buildString {
             append("""<div class="kpi">""")
-            append("""<div>Дата: <b>${escape(meta.date)}</b></div>""")
+            append("""<div>Дата: <b>${escape(model.header.date)}</b></div>""")
             append("""<div>Вводной аппарат: <b>${escape(incomerHuman)}</b></div>""")
-            if (totalGroups != null) append("""<div>Всего групп: <b>$totalGroups</b></div>""")
-            if (totalCurrentA != null) append("""<div>Суммарный ток: <b>${df2.format(totalCurrentA)} $UNIT_A</b></div>""")
+
+            model.kpis.totalGroups?.let { tg ->
+                append("""<div>Всего групп: <b>$tg</b></div>""")
+            }
+            model.kpis.totalCurrentA?.let { totalI ->
+                append("""<div>Суммарный ток: <b>${df2.format(totalI)} $UNIT_A</b></div>""")
+            }
+
             append("""<div class="topline">""")
             append("""<span class="metric">Фаза A: <b>$iA</b></span>""")
             if (!isSingle) {
@@ -177,16 +404,20 @@ class HtmlReportBuilder(private val context: Context) {
             return """
               <div class="row">
                 <div><span class="dot $cls"></span>$label</div>
-                <div class="num">$strongOpen${df2.format(amp)} $UNIT_A$strongClose • ${df0.format(pct)}%</div>
+                <div class="num">$strongOpen${df2.format(amp)} $UNIT_A$strongClose • ${
+                df0.format(
+                    pct
+                )
+            }%</div>
               </div>
             """.trimIndent()
         }
 
         return """
           <div class="legend">
-            ${row("Фаза A","a", a, pa, a >= maxVal - em)}
-            ${row("Фаза B","b", b, pb, b >= maxVal - em)}
-            ${row("Фаза C","c", c, pc, c >= maxVal - em)}
+            ${row("Фаза A", "a", a, pa, a >= maxVal - em)}
+            ${row("Фаза B", "b", b, pb, b >= maxVal - em)}
+            ${row("Фаза C", "c", c, pc, c >= maxVal - em)}
           </div>
         """.trimIndent()
     }
@@ -210,7 +441,13 @@ class HtmlReportBuilder(private val context: Context) {
                             <tr class="group-start">
                               <td class="center" colspan="3">
                                 <span class="chip">${escape(g.title)}</span>
-                                ${if (metaLine.isNotEmpty()) """<span class="meta-inline">${escape(metaLine)}</span>""" else ""}
+                                ${
+                                if (metaLine.isNotEmpty()) """<span class="meta-inline">${
+                                    escape(
+                                        metaLine
+                                    )
+                                }</span>""" else ""
+                            }
                               </td>
                             </tr>
                             """.trimIndent()
@@ -248,6 +485,7 @@ class HtmlReportBuilder(private val context: Context) {
             }
             return null
         }
+
         val sw = firstNonBlank(groupSwitchAliases)
         val cable = firstNonBlank(groupCableAliases)
         return listOfNotNull(sw, cable).joinToString(" • ")
@@ -337,7 +575,11 @@ class HtmlReportBuilder(private val context: Context) {
                     val sy = cy + r * sin(Math.toRadians(startDeg))
                     val ex = cx + r * cos(Math.toRadians(endDeg))
                     val ey = cy + r * sin(Math.toRadians(endDeg))
-                    return "M ${fmtUS(sx)} ${fmtUS(sy)} A ${fmtUS(r)} ${fmtUS(r)} 0 $large 1 ${fmtUS(ex)} ${fmtUS(ey)}"
+                    return "M ${fmtUS(sx)} ${fmtUS(sy)} A ${fmtUS(r)} ${fmtUS(r)} 0 $large 1 ${
+                        fmtUS(
+                            ex
+                        )
+                    } ${fmtUS(ey)}"
                 }
 
                 val pathA = arcPath(start, pa / 100.0 * 360.0).also { start += pa / 100.0 * 360.0 }
@@ -356,6 +598,7 @@ class HtmlReportBuilder(private val context: Context) {
                 </div>
                 """.trimIndent()
             }
+
             is DonutModel.IncomerLoad -> {
                 val used = max(model.usedA, 0.0)
                 val limit = max(model.limitA, eps)
@@ -371,12 +614,24 @@ class HtmlReportBuilder(private val context: Context) {
                       stroke-dasharray="${fmtUS(pct)} ${fmtUS(100.0 - pct)}" stroke-dashoffset="25"/>
                   </svg>
                   <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:4px;">
-                    <div style="font-weight:700;font-size:13px;">${df2.format(used)} $UNIT_A из ${df0.format(limit)} $UNIT_A</div>
-                    <div style="font-size:12px;color:#666;">${df0.format(pct)}% • Запас: ${df2.format(reserve)} $UNIT_A</div>
+                    <div style="font-weight:700;font-size:13px;">${df2.format(used)} $UNIT_A из ${
+                    df0.format(
+                        limit
+                    )
+                } $UNIT_A</div>
+                    <div style="font-size:12px;color:#666;">${df0.format(pct)}% • Запас: ${
+                    df2.format(
+                        reserve
+                    )
+                } $UNIT_A</div>
                   </div>
                 </div>
                 <div class="donut-caption">Загрузка вводного автомата</div>
-                <div class="donut-sub muted">Всего: ${df2.format(used)} $UNIT_A из ${df0.format(limit)} $UNIT_A • ${df0.format(pct)}% • Запас ${df2.format(reserve)} $UNIT_A</div>
+                <div class="donut-sub muted">Всего: ${df2.format(used)} $UNIT_A из ${
+                    df0.format(
+                        limit
+                    )
+                } $UNIT_A • ${df0.format(pct)}% • Запас ${df2.format(reserve)} $UNIT_A</div>
                 """.trimIndent()
             }
         }
@@ -384,33 +639,71 @@ class HtmlReportBuilder(private val context: Context) {
 
     private fun humanizeIncomer(raw0: String): String {
         if (raw0.isBlank()) return ""
-        val parts = raw0.replace('•', ',').replace('·', ',').split(',').map { it.trim() }.filter { it.isNotEmpty() }
+        val parts = raw0.replace('•', ',').replace('·', ',')
+            .split(',').map { it.trim() }.filter { it.isNotEmpty() }
+
         val out = mutableListOf<String>()
         for (p in parts) {
             val lower = p.lowercase(Locale.getDefault())
-            if (p.equals("MCB_ONLY", true) || lower.contains("mcb only")) { out += "Автомат"; continue }
-            else if (p.equals("MCB_PLUS_RCD", true) || lower.contains("mcb+rcd") || lower.contains("mcb_plus_rcd")) { out += "Автомат + УЗО"; continue }
-            else if (p.equals("RCBO", true) || lower.contains("rcbo")) { out += "Диффавтомат"; continue }
+            if (p.equals("MCB_ONLY", true) || lower.contains("mcb only")) {
+                out += "Автомат"; continue
+            } else if (p.equals(
+                    "MCB_PLUS_RCD",
+                    true
+                ) || lower.contains("mcb+rcd") || lower.contains("mcb_plus_rcd")
+            ) {
+                out += "Автомат + УЗО"; continue
+            } else if (p.equals("RCBO", true) || lower.contains("rcbo")) {
+                out += "Диффавтомат"; continue
+            }
 
-            val polesMatch = Regex("""^\s*(\d+)\s*(p|pol(e|es))?\s*$""", RegexOption.IGNORE_CASE).matchEntire(p)
-            if (polesMatch != null) { val n = polesMatch.groupValues[1].toIntOrNull(); if (n != null) out += "$n ${if (n == 1) "полюс" else "полюса"}" else out += p; continue }
+            val polesMatch =
+                Regex("""^\s*(\d+)\s*(p|pol(e|es))?\s*$""", RegexOption.IGNORE_CASE).matchEntire(p)
+            if (polesMatch != null) {
+                val n = polesMatch.groupValues[1].toIntOrNull()
+                if (n != null) out += "$n ${if (n == 1) "полюс" else "полюса"}" else out += p
+                continue
+            }
 
             val nomMatch = Regex("""(\d+)\s*A\s*,?\s*([ABCD])?""", RegexOption.IGNORE_CASE).find(p)
-            if (nomMatch != null) { val a = nomMatch.groupValues.getOrNull(1); val curve = nomMatch.groupValues.getOrNull(2)?.uppercase(); out += buildString { append("${a} А"); if (!curve.isNullOrBlank()) append(", характеристика $curve") }; continue }
+            if (nomMatch != null) {
+                val a = nomMatch.groupValues.getOrNull(1)
+                val curve = nomMatch.groupValues.getOrNull(2)?.uppercase()
+                out += buildString {
+                    append("${a} А")
+                    if (!curve.isNullOrBlank()) append(", характеристика $curve")
+                }
+                continue
+            }
 
             if (lower.contains("icn") || lower.contains("ka") || lower.contains("ка")) {
-                val ka = Regex("""(\d+(?:[\.,]\d+)?)\s*k?a""", RegexOption.IGNORE_CASE).find(p)?.groupValues?.getOrNull(1)
+                val ka = Regex("""(\d+(?:[\.,]\d+)?)\s*k?a""", RegexOption.IGNORE_CASE)
+                    .find(p)?.groupValues?.getOrNull(1)
                 val onlyNum = Regex("""\d+""").find(p)?.value
-                val amps = if (ka != null) (ka.replace(',', '.').toDoubleOrNull() ?: 0.0) * 1000.0 else onlyNum?.toDoubleOrNull()
-                if (amps != null) { out += "отключающая способность ${df0.format(amps)} $UNIT_A"; continue }
+                val amps = if (ka != null) (ka.replace(',', '.').toDoubleOrNull()
+                    ?: 0.0) * 1000.0 else onlyNum?.toDoubleOrNull()
+                if (amps != null) {
+                    out += "отключающая способность ${df0.format(amps)} $UNIT_A"; continue
+                }
             }
 
             if (lower.contains("rcd")) {
-                val type = Regex("""rcd\s*([A-Z]+)""", RegexOption.IGNORE_CASE).find(p)?.groupValues?.getOrNull(1)?.uppercase()
-                val sens = Regex("""(\d+)\s*mA""", RegexOption.IGNORE_CASE).find(p)?.groupValues?.getOrNull(1)
-                out += buildString { append("тип УЗО"); if (!type.isNullOrBlank()) append(" $type"); if (!sens.isNullOrBlank()) append(", чувствительность ${df0.format(sens.toInt())} мА") }
+                val type = Regex(
+                    """rcd\s*([A-Z]+)""",
+                    RegexOption.IGNORE_CASE
+                ).find(p)?.groupValues?.getOrNull(1)?.uppercase()
+                val sens = Regex(
+                    """(\d+)\s*mA""",
+                    RegexOption.IGNORE_CASE
+                ).find(p)?.groupValues?.getOrNull(1)
+                out += buildString {
+                    append("тип УЗО")
+                    if (!type.isNullOrBlank()) append(" $type")
+                    if (!sens.isNullOrBlank()) append(", чувствительность ${df0.format(sens.toInt())} мА")
+                }
                 continue
             }
+
             out += p
         }
         return out.joinToString(" • ").ifBlank { raw0 }
@@ -429,7 +722,11 @@ class HtmlReportBuilder(private val context: Context) {
 
     private fun fmtUS(v: Double): String = String.format(Locale.US, "%.6f", v)
 
-    private fun formatA(v: Double?): String = when (v) { null -> ""; else -> "${df2.format(v)} $UNIT_A" }
+    private fun formatA(v: Double?): String =
+        when (v) {
+            null -> ""
+            else -> "${df2.format(v)} $UNIT_A"
+        }
 
     private val FALLBACK_TEMPLATE = """
         <!doctype html>

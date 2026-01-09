@@ -41,6 +41,10 @@ import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
 import ru.mugalimov.volthome.domain.model.ProFeature
 import ru.mugalimov.volthome.domain.model.CalcAssumption
+import ru.mugalimov.volthome.domain.model.CalcWarning
+import ru.mugalimov.volthome.domain.model.CalculatedValue
+import ru.mugalimov.volthome.domain.model.DeviceCalcBreakdown
+import ru.mugalimov.volthome.domain.use_case.CalculateDeviceBreakdownUseCase
 
 @HiltViewModel
 class ExplicationViewModel @Inject constructor(
@@ -49,6 +53,7 @@ class ExplicationViewModel @Inject constructor(
     private val preferencesRepository: PreferencesRepository,
     private val deviceRepository: DeviceRepository,
     private val calculateShieldOverviewUseCase: CalculateShieldOverviewUseCase,
+    private val calculateDeviceBreakdownUseCase: CalculateDeviceBreakdownUseCase,
     @IoDispatcher private val dispatchers: CoroutineDispatcher,
     private val userPlanRepository: UserPlanRepository,
     private val paywallBus: PaywallBus,
@@ -67,6 +72,10 @@ class ExplicationViewModel @Inject constructor(
     // выбранный инстанс устройства для показа в шите
     private val _selectedDevice = MutableStateFlow<Device?>(null)
     val selectedDevice: StateFlow<Device?> = _selectedDevice.asStateFlow()
+
+    private val _selectedDeviceBreakdown = MutableStateFlow<DeviceCalcBreakdown?>(null)
+    val selectedDeviceBreakdown: StateFlow<DeviceCalcBreakdown?> =
+        _selectedDeviceBreakdown.asStateFlow()
 
     // --- UI events (one-shot) ---
     sealed class UiEvent {
@@ -102,13 +111,17 @@ class ExplicationViewModel @Inject constructor(
     /** ВАЖНО: берём ИНСТАНС устройства по id из репозитория, без дефолтов. */
     fun onDeviceClick(deviceId: Long) {
         viewModelScope.launch {
+            _selectedDeviceBreakdown.value = null
             val dev = deviceRepository.getDeviceById(deviceId.toInt())
             _selectedDevice.value = dev
+            _selectedDeviceBreakdown.value =
+                dev?.let { calculateDeviceBreakdownUseCase.execute(it) }
         }
     }
 
     fun clearSelected() {
         _selectedDevice.value = null
+        _selectedDeviceBreakdown.value = null
     }
 
     fun recalcAndSaveGroups() {
@@ -128,6 +141,10 @@ class ExplicationViewModel @Inject constructor(
 
                         repo.replaceAllGroupsTransactional(groups)
 
+                        // ✅ Коммит 9: decision log распределения фаз → в репозиторий (in-memory),
+                        // чтобы PhaseLoad экран мог показать "почему так" по каждой группе.
+                        repo.setLastDistributionDecisions(res.distributionDecisions)
+
                         val totalGroups = groups.size
                         val totalCurrent = groups.sumOf { it.nominalCurrent }
                         val hasGroupRcds = groups.any { it.rcdRequired }
@@ -145,6 +162,7 @@ class ExplicationViewModel @Inject constructor(
                         )
 
                         val totals = calculateShieldOverviewUseCase.execute(groups)
+                        val warnings = buildWarningsFromGroups(groups)
 
                         _uiState.value = GroupScreenState.Success(
                             groups = groups,
@@ -154,7 +172,8 @@ class ExplicationViewModel @Inject constructor(
                             hasGroupRcds = hasGroupRcds,
                             installedPowerW = totals.installedPowerW,
                             calculatedPowerW = totals.calculatedPowerW,
-                            shieldTotalsAssumptions = totals.assumptions
+                            shieldTotalsAssumptions = totals.calculatedPowerW.assumptions,
+                            calcWarnings = warnings
                         )
                     }
                 }
@@ -174,12 +193,33 @@ sealed class GroupScreenState {
         val totalCurrent: Double,
         val incomer: IncomerSpec,
         val hasGroupRcds: Boolean,
-        val installedPowerW: Int,
-        val calculatedPowerW: Int,
-        val shieldTotalsAssumptions: List<CalcAssumption> = emptyList()
+        val installedPowerW: CalculatedValue,
+        val calculatedPowerW: CalculatedValue,
+        val shieldTotalsAssumptions: List<CalcAssumption> = emptyList(),
+        val calcWarnings: List<CalcWarning> = emptyList()
     ) : GroupScreenState()
 
     data class Error(val message: String) : GroupScreenState()
+}
+
+private fun buildWarningsFromGroups(groups: List<CircuitGroup>): List<CalcWarning> {
+    val warnings = mutableListOf<CalcWarning>()
+
+    groups.forEach { g ->
+        g.devices.forEach { d ->
+            // Ровно тот же триггер, что был в Log.w в buildReportData()
+            if (d.deviceType == DeviceType.LIGHTING && (d.power ?: 0) >= 1000) {
+                warnings += CalcWarning(
+                    severity = CalcWarning.Severity.WARNING,
+                    scope = "device:${d.id}",
+                    title = "Аномальная мощность освещения",
+                    message = "Освещение '${d.name}': ${(d.power ?: 0)}W"
+                )
+            }
+        }
+    }
+
+    return warnings
 }
 
 /**
@@ -202,6 +242,7 @@ fun ExplicationViewModel.buildReportData(): Pair<ReportMeta, List<ReportPhase>>?
             "B" to perPhase.getOrZero(Phase.B),
             "C" to perPhase.getOrZero(Phase.C)
         )
+
         PhaseMode.SINGLE -> mapOf(
             "A" to perPhase.getOrZero(Phase.A)
         )
@@ -244,18 +285,14 @@ fun ExplicationViewModel.buildReportData(): Pair<ReportMeta, List<ReportPhase>>?
                         switchLabel = GroupMetaFormatter.buildSwitchLabel(g),
                         cableLabel = GroupMetaFormatter.buildCableLabel(g),
                         devices = g.devices.map { d ->
-                            val (powerW, currentA) = PowerCurrentNormalizer.ensurePAndI(
+                            val normalized = PowerCurrentNormalizer.ensurePAndI(
                                 powerW = d.power.takeIf { it > 0 },
                                 currentA = d.calculateCurrent().takeIf { it > 0.0 },
                                 voltage = d.voltage,
                                 powerFactor = d.powerFactor
                             )
-                            if (d.deviceType == DeviceType.LIGHTING && (powerW ?: 0) >= 1000) {
-                                Log.w(
-                                    "ReportNormalizer",
-                                    "Lighting device anomalous power: ${d.name} = ${powerW}W"
-                                )
-                            }
+                            val powerW = normalized.powerW
+                            val currentA = normalized.currentA
                             ReportDevice(
                                 name = d.name,
                                 powerW = powerW,

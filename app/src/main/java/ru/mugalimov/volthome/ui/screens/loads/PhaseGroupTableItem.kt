@@ -50,12 +50,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ru.mugalimov.volthome.core.theme.VhColors
 import ru.mugalimov.volthome.core.theme.toUiPhase
+import ru.mugalimov.volthome.domain.model.DistributionDecision
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
 
 @Composable
 fun PhaseGroupTableItem(
     item: PhaseLoadItem,
+    decisionsByGroupNumber: Map<Int, DistributionDecision>,
     expanded: Boolean,
     onToggle: () -> Unit,
 
@@ -238,6 +240,17 @@ fun PhaseGroupTableItem(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
 
+                                // ✅ Коммит 9: "почему так" из decision log
+                                val decision = decisionsByGroupNumber[group.groupNumber]
+                                if (decision != null) {
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(
+                                        text = buildDecisionLine(decision),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
                                 if (index != item.groups.lastIndex) {
                                     Spacer(Modifier.height(12.dp))
                                     Divider()
@@ -259,3 +272,25 @@ data class PhaseLoadContentKt_DragPayload(
     val fromPhase: Phase,
     val title: String
 )
+
+private fun buildDecisionLine(d: DistributionDecision): String {
+    // коротко и по делу — без "лирики"
+    // пример: "Почему: выбрана B (до A 12.3 B 10.1 C 11.0 → после A 12.3 B 14.6 C 11.0)"
+    fun fmt(v: Double) = String.format("%.1f", v)
+    fun m(map: Map<Phase, Double>): String {
+        val a = fmt(map[Phase.A] ?: 0.0)
+        val b = fmt(map[Phase.B] ?: 0.0)
+        val c = fmt(map[Phase.C] ?: 0.0)
+        return "A $a B $b C $c"
+    }
+
+    val before = m(d.phaseCurrentsBefore)
+    val after = m(d.phaseCurrentsAfter)
+
+    val note = d.note
+        ?.takeIf { it.isNotBlank() }
+        ?.let { " • $it" }
+        ?: ""
+
+    return "Почему: выбрана ${d.chosenPhase.name} (до $before → после $after)$note"
+}

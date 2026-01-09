@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.domain.model.phase_load
 
+import ru.mugalimov.volthome.domain.model.DistributionDecision
 import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.incomer.IncomerSpec
 
@@ -9,5 +10,6 @@ data class PhaseLoadUiState(
     val error: Throwable? = null,
     val mode: PhaseMode = PhaseMode.THREE,
     val incomer: IncomerSpec? = null,
-    val thresholds: LoadThresholds = LoadThresholds()
+    val thresholds: LoadThresholds = LoadThresholds(),
+    val decisions: List<DistributionDecision> = emptyList()
     )

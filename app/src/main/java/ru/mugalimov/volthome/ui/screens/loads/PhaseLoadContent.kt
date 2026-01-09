@@ -46,6 +46,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import ru.mugalimov.volthome.domain.model.DistributionDecision
 import kotlin.math.roundToInt
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.PhaseMode
@@ -64,6 +65,7 @@ import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
  */
 @Composable
 fun PhaseLoadContent(
+    decisions: List<DistributionDecision> = emptyList(),
     phaseLoads: List<PhaseLoadItem>,
     mode: PhaseMode = PhaseMode.THREE,
     incomerRating: Int? = null,
@@ -90,6 +92,11 @@ fun PhaseLoadContent(
     var overlayContainerTopLeft by remember { mutableStateOf(Offset.Zero) }
 
     val haptic = LocalHapticFeedback.current
+
+    // ✅ быстрый доступ: решение по groupNumber
+        val decisionsByGroupNumber = remember(decisions) {
+               decisions.associateBy { it.groupNumber }
+            }
 
     // ✅ Подсветка drop-зоны должна считаться в тех же координатах, что и Rect (ROOT)
     val hoveredPhase by remember {
@@ -281,6 +288,7 @@ fun PhaseLoadContent(
                 item {
                     ThreePhaseLoadsSection(
                         item = threePhaseItem,
+                        decisionsByGroupNumber = decisionsByGroupNumber,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -290,6 +298,7 @@ fun PhaseLoadContent(
             items(phaseItems, key = { it.phase }) { item ->
                 PhaseGroupTableItem(
                     item = item,
+                    decisionsByGroupNumber = decisionsByGroupNumber,
                     expanded = isExpanded(item.phase),
                     onToggle = { togglePhase(item.phase) },
 

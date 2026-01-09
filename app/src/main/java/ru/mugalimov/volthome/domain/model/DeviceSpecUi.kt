@@ -2,6 +2,7 @@ package ru.mugalimov.volthome.domain.model
 
 // ui model, чтобы не зависеть от доменной DefaultDevice
 data class DeviceSpecUi(
+    val id: Long,
     val name: String,
     val power: Int,
     val voltage: Int?,                 // Вольты, если есть

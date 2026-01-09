@@ -42,6 +42,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.domain.model.CircuitGroup
+import ru.mugalimov.volthome.domain.model.DeviceCalcBreakdown
 import ru.mugalimov.volthome.domain.model.DeviceSpecUi
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
@@ -49,7 +50,8 @@ import ru.mugalimov.volthome.domain.model.DeviceSpecUi
 fun GroupCardCompact(
     group: CircuitGroup,
     onEdit: (() -> Unit)? = null,
-    onDeviceClick: (Long) -> Unit // наружу — id инстанса
+    onDeviceClick: (Long) -> Unit, // наружу — id инстанса
+    selectedDeviceBreakdown: DeviceCalcBreakdown? // <- приходит сверху (из VM)
 ) {
     val expanded = rememberSaveable(group.groupNumber) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -131,6 +133,7 @@ fun GroupCardCompact(
                         val real = group.devices.firstOrNull { it.id == id }
                         if (real != null) {
                             sheetDevice.value = DeviceSpecUi(
+                                id = real.id,
                                 name = real.name,
                                 power = real.power,
                                 voltage = real.voltage.value,
@@ -153,8 +156,9 @@ fun GroupCardCompact(
             }
 
             // Прогресс загрузки группы — вернули «капсулу» и нормальные горизонтальные отступы
-            val load = (if (group.circuitBreaker > 0) group.nominalCurrent / group.circuitBreaker else 0.0)
-                .coerceAtLeast(0.0)
+            val load =
+                (if (group.circuitBreaker > 0) group.nominalCurrent / group.circuitBreaker else 0.0)
+                    .coerceAtLeast(0.0)
             val barColor = when {
                 load > 0.8 -> MaterialTheme.colorScheme.error
                 load > 0.6 -> MaterialTheme.colorScheme.tertiary
@@ -219,7 +223,8 @@ fun GroupCardCompact(
                             sheetDevice.value = null
                         }
                     },
-                    sheetState = sheetState
+                    sheetState = sheetState,
+                    breakdown = selectedDeviceBreakdown,
                 )
             } else {
                 val (title, text) = groupHintContent(hint.value!!, group)
@@ -228,7 +233,11 @@ fun GroupCardCompact(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(title, style = MaterialTheme.typography.titleLarge)
-                    Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        text,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     Spacer(Modifier.height(8.dp))
                 }
             }
@@ -271,23 +280,28 @@ private fun ParamBadge(icon: ImageVector, text: String, onClick: () -> Unit) {
 private fun kw(watts: Int): String = "%.2f".format(watts / 1000.0).replace(',', '.')
 private fun amp(a: Double): String = "%.2f".format(a).replace(',', '.')
 
-private fun groupHintContent(hint: GroupHint, group: CircuitGroup): Pair<String, String> = when (hint) {
-    GroupHint.HEADER -> "Карточка группы" to
-            "Здесь параметры группы: автомат, мощность, ток и состав устройств. Блок помогает быстро оценить загрузку, требования к защите и необходимость перераспределения."
-    GroupHint.BREAKER -> {
-        val curveChar = group.breakerType.firstOrNull()?.uppercaseChar() ?: 'C'
-        val title = "Тип автомата: $curveChar${group.circuitBreaker}"
-        val common = "Формат «$curveChar${group.circuitBreaker}»: буква — кривая мгновенного отключения, число — номинал, А."
-        val body = when (curveChar) {
-            'B' -> "Кривая B ≈ 3–5×In. Для активных нагрузок и длинных линий."
-            'C' -> "Кривая C ≈ 5–10×In. Дефолт для розеточных/смешанных групп."
-            'D' -> "Кривая D ≈ 10–20×In. Для больших пусков (двигатели, насосы, сварка)."
-            else -> "Обычно используют B, C или D."
+private fun groupHintContent(hint: GroupHint, group: CircuitGroup): Pair<String, String> =
+    when (hint) {
+        GroupHint.HEADER -> "Карточка группы" to
+                "Здесь параметры группы: автомат, мощность, ток и состав устройств. Блок помогает быстро оценить загрузку, требования к защите и необходимость перераспределения."
+
+        GroupHint.BREAKER -> {
+            val curveChar = group.breakerType.firstOrNull()?.uppercaseChar() ?: 'C'
+            val title = "Тип автомата: $curveChar${group.circuitBreaker}"
+            val common =
+                "Формат «$curveChar${group.circuitBreaker}»: буква — кривая мгновенного отключения, число — номинал, А."
+            val body = when (curveChar) {
+                'B' -> "Кривая B ≈ 3–5×In. Для активных нагрузок и длинных линий."
+                'C' -> "Кривая C ≈ 5–10×In. Дефолт для розеточных/смешанных групп."
+                'D' -> "Кривая D ≈ 10–20×In. Для больших пусков (двигатели, насосы, сварка)."
+                else -> "Обычно используют B, C или D."
+            }
+            title to "$common\n\n$body"
         }
-        title to "$common\n\n$body"
+
+        GroupHint.POWER -> "Мощность группы" to
+                "Сумма мощностей устройств в группе, используется для проверки нагрузки и распределения по фазам."
+
+        GroupHint.CURRENT -> "Расчётный ток" to
+                "Сравните с номиналом автомата; рабочую загрузку держите ≤ 80%."
     }
-    GroupHint.POWER -> "Мощность группы" to
-            "Сумма мощностей устройств в группе, используется для проверки нагрузки и распределения по фазам."
-    GroupHint.CURRENT -> "Расчётный ток" to
-            "Сравните с номиналом автомата; рабочую загрузку держите ≤ 80%."
-}

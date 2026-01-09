@@ -36,6 +36,9 @@ import ru.mugalimov.volthome.domain.use_case.CurrentCalculator
 import javax.inject.Inject
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.FlowCollector
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import ru.mugalimov.volthome.domain.model.DistributionDecision
 
 class ExplicationRepositoryImpl @Inject constructor(
     private val groupDao: GroupDao,
@@ -46,6 +49,18 @@ class ExplicationRepositoryImpl @Inject constructor(
     @IoDispatcher private val dispatchers: CoroutineDispatcher,
     @ApplicationContext private val context: Context
 ) : ExplicationRepository {
+
+    // ===== Decision log распределения фаз (in-memory) =====
+    // Не пишем в БД, чтобы не тащить миграции. Для UI "почему так" достаточно.
+    private val _distributionDecisions =
+        MutableStateFlow<List<DistributionDecision>>(emptyList())
+
+    override fun observeDistributionDecisions(): Flow<List<DistributionDecision>> =
+        _distributionDecisions.asStateFlow()
+
+    override suspend fun setLastDistributionDecisions(decisions: List<DistributionDecision>) {
+        _distributionDecisions.value = decisions
+    }
 
     /** Поток доменных групп с учётом активного проекта. */
     override fun observeAllGroup(): Flow<List<CircuitGroup>> =
@@ -86,7 +101,8 @@ class ExplicationRepositoryImpl @Inject constructor(
             groupDao.getAllGroups()
 
         return groups.map { entity ->
-            val devices = groupDeviceJoinDao.getDevicesForGroup(entity.groupId)  // 🔁 было deviceDao.getDevicesForGroup(...)
+            val devices =
+                groupDeviceJoinDao.getDevicesForGroup(entity.groupId)  // 🔁 было deviceDao.getDevicesForGroup(...)
             GroupWithDevices(
                 group = entity.toDomainGroup(devices.map { it.toDomainDevice() }),
                 devices = devices.map { it.toDomainDevice() }
@@ -100,10 +116,16 @@ class ExplicationRepositoryImpl @Inject constructor(
             db.withTransaction {
                 groupDao.deleteAllGroups()
                 circuitGroups.forEach { group ->
-                    val entityToInsert = group.toEntityGroup().copy(groupId = 0, projectId = projectId)
+                    val entityToInsert =
+                        group.toEntityGroup().copy(groupId = 0, projectId = projectId)
                     val newGroupId = groupDao.addGroup(entityToInsert)
                     group.devices.forEach { device ->
-                        groupDeviceJoinDao.insertJoin(GroupDeviceJoin(groupId = newGroupId, deviceId = device.id))
+                        groupDeviceJoinDao.insertJoin(
+                            GroupDeviceJoin(
+                                groupId = newGroupId,
+                                deviceId = device.id
+                            )
+                        )
                     }
                 }
             }
@@ -118,11 +140,11 @@ class ExplicationRepositoryImpl @Inject constructor(
             .mapToDomainDevices()
             .sumOf { d ->
                 CurrentCalculator.calculateNominalCurrent(
-                    power        = d.power.toDouble(),
-                    voltage      = (d.voltage.value.takeIf { it > 0 } ?: 230).toDouble(),
-                    powerFactor  = d.powerFactor,
-                    demandRatio  = d.demandRatio,
-                    voltageType  = d.voltage.type
+                    power = d.power.toDouble(),
+                    voltage = (d.voltage.value.takeIf { it > 0 } ?: 230).toDouble(),
+                    powerFactor = d.powerFactor,
+                    demandRatio = d.demandRatio,
+                    voltageType = d.voltage.type
                 )
             }
 
@@ -168,14 +190,20 @@ class ExplicationRepositoryImpl @Inject constructor(
 
     override suspend fun getGroupByRoom(roomName: String): List<CircuitGroup> =
         withContext(dispatchers) {
-            try { groupDao.getGroupByRoom(roomName).mapToDomainGroups() }
-            catch (_: Exception) { throw GroupNotFoundException() }
+            try {
+                groupDao.getGroupByRoom(roomName).mapToDomainGroups()
+            } catch (_: Exception) {
+                throw GroupNotFoundException()
+            }
         }
 
     override suspend fun getGroupByType(groupType: DeviceType): List<CircuitGroup> =
         withContext(dispatchers) {
-            try { groupDao.getGroupByType(groupType).mapToDomainGroups() }
-            catch (_: Exception) { throw GroupNotFoundException() }
+            try {
+                groupDao.getGroupByType(groupType).mapToDomainGroups()
+            } catch (_: Exception) {
+                throw GroupNotFoundException()
+            }
         }
 
     override suspend fun replaceAllGroupsTransactional(groups: List<CircuitGroup>) =
@@ -183,7 +211,8 @@ class ExplicationRepositoryImpl @Inject constructor(
             val projectId = activeProjectDs.activeProjectId.first()
             db.withTransaction {
                 groupDao.deleteAllGroups()
-                val groupEntities = groups.map { it.toEntityGroup().copy(groupId = 0, projectId = projectId) }
+                val groupEntities =
+                    groups.map { it.toEntityGroup().copy(groupId = 0, projectId = projectId) }
                 val newIds = groupDao.insertGroups(groupEntities)
                 require(newIds.size == groups.size) { "insertGroups returned ${newIds.size} ids for ${groups.size} groups" }
 

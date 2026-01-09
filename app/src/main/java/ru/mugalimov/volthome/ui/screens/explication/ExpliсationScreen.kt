@@ -47,6 +47,8 @@ import ru.mugalimov.volthome.ui.viewmodel.GroupScreenState
 fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
     LaunchedEffect(Unit) { viewModel.recalcAndSaveGroups() }
 
+    val selectedBreakdown by viewModel.selectedDeviceBreakdown.collectAsState()
+
     val state by viewModel.uiState.collectAsState()
     val ctx = LocalContext.current
 
@@ -110,7 +112,8 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
                             ) { g ->
                                 GroupCardCompact(
                                     group = g,
-                                    onDeviceClick = { deviceId -> viewModel.onDeviceClick(deviceId) }
+                                    onDeviceClick = { deviceId -> viewModel.onDeviceClick(deviceId) },
+                                    selectedDeviceBreakdown = selectedBreakdown
                                 )
                                 Spacer(Modifier.height(12.dp))
                             }
