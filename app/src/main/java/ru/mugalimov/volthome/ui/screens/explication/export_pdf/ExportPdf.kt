@@ -8,6 +8,7 @@ import ru.mugalimov.volthome.domain.model.CalcAssumption
 import ru.mugalimov.volthome.domain.model.CalcWarning
 import ru.mugalimov.volthome.domain.model.PlanCapabilities
 import ru.mugalimov.volthome.domain.model.report.ReportModel
+import ru.mugalimov.volthome.domain.use_case.report.BuildProfessionalSectionsUseCase
 import ru.mugalimov.volthome.ui.utilities.HtmlReportBuilder
 import ru.mugalimov.volthome.ui.utilities.PdfPrinter
 import ru.mugalimov.volthome.ui.viewmodel.ExplicationViewModel
@@ -48,7 +49,23 @@ fun exportExplicationPdf(activity: Activity, vm: ExplicationViewModel,  caps: Pl
             emptyList()
         }
 
+    val professional = if (caps.professionalReportSections) {
+        BuildProfessionalSectionsUseCase().execute(
+            BuildProfessionalSectionsUseCase.Params(
+                phaseMode = vm.phaseMode.value,
+                meta = meta,
+                phases = phases,
+                distributionDecisions = emptyList(),
+                calcWarnings = warnings,
+                assumptions = assumptions,
+            )
+        )
+    } else {
+        null
+    }
+
     val reportModel = reportBase.copy(
+        professional = professional,
         assumptions = assumptions,
         warnings = warnings
         // steps = ... (позже)
