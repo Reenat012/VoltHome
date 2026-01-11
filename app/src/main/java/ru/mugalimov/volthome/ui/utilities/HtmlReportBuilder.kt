@@ -191,6 +191,80 @@ class HtmlReportBuilder(private val context: Context) {
     }
 
     private fun buildExplainSections(model: ReportModel): String {
+        // PRO-путь: строго берём из новой модели
+        val pro = model.professional ?: run {
+            // Legacy fallback: если professional ещё не прокинут, оставляем старое поведение
+            // (не ломаем существующий экспорт до полной миграции)
+            return buildExplainSectionsLegacy(model)
+        }
+
+        val hasEvidence = pro.evidence.isNotEmpty()
+        val hasWarnings = pro.warnings.isNotEmpty()
+        val hasNorms = pro.normRefs.isNotEmpty() // по DoD секция должна быть всегда в PRO
+
+        if (!hasEvidence && !hasWarnings && !hasNorms) return ""
+
+        return buildString {
+            appendLine("""<div class="explain">""")
+
+            // 1) Обоснования / Evidence
+            if (hasEvidence) {
+                appendLine("""<div class="block">""")
+                appendLine("""<h3>Обоснования</h3>""")
+                appendLine("<ol>")
+                pro.evidence.forEach { e ->
+                    appendLine(
+                        """
+                    <li>
+                      <div class="t"><b>${escape(e.title)}</b></div>
+                      <div class="m">${escape(e.body)}</div>
+                    </li>
+                    """.trimIndent()
+                    )
+                }
+                appendLine("</ol>")
+                appendLine("""</div>""")
+            }
+
+            // 2) Предупреждения
+            if (hasWarnings) {
+                appendLine("""<div class="block">""")
+                appendLine("""<h3>Предупреждения</h3>""")
+                pro.warnings.forEach { w ->
+                    appendLine(formatProWarning(w))
+                }
+                appendLine("""</div>""")
+            }
+
+            // 3) Нормативные ссылки (в PRO секция должна присутствовать всегда)
+            appendLine("""<div class="block">""")
+            appendLine("""<h3>Нормативные ссылки</h3>""")
+            appendLine("""<div class="norm-list">""")
+            appendLine("<ul>")
+            if (pro.normRefs.isEmpty()) {
+                appendLine("""<li><span class="code">Справочно</span><div class="note">Раздел доступен в PRO.</div></li>""")
+            } else {
+                pro.normRefs.forEach { n ->
+                    val head = buildString {
+                        append("""<span class="code">${escape(n.source)}</span>""")
+                        val section = n.section?.trim().takeIf { !it.isNullOrBlank() }
+                        if (section != null) append(""" — ${escape(section)}""")
+                    }
+                    val note = n.note?.trim().takeIf { !it.isNullOrBlank() }
+                        ?.let { """<div class="note">${escape(it)}</div>""" }
+                        ?: ""
+                    appendLine("""<li>$head$note</li>""")
+                }
+            }
+            appendLine("</ul>")
+            appendLine("""</div>""")
+            appendLine("""</div>""")
+
+            appendLine("""</div>""")
+        }
+    }
+
+    private fun buildExplainSectionsLegacy(model: ReportModel): String {
         val hasSteps = model.steps.isNotEmpty()
         val hasAssumptions = model.assumptions.isNotEmpty()
         val hasWarnings = model.warnings.isNotEmpty()
@@ -273,6 +347,38 @@ class HtmlReportBuilder(private val context: Context) {
             appendLine("""</div>""")
         }
     }
+
+    private fun formatProWarning(w: ru.mugalimov.volthome.domain.model.report.professional.ReportWarningItem): String {
+        val cls = when (w.severity) {
+            ru.mugalimov.volthome.domain.model.report.professional.ReportWarningItem.Severity.CRITICAL -> "err"
+            ru.mugalimov.volthome.domain.model.report.professional.ReportWarningItem.Severity.WARNING -> "warn"
+            ru.mugalimov.volthome.domain.model.report.professional.ReportWarningItem.Severity.INFO -> "info"
+        }
+
+        val pill = when (cls) {
+            "err" -> """<span class="pill err">ОШИБКА</span>"""
+            "warn" -> """<span class="pill warn">ВНИМАНИЕ</span>"""
+            else -> """<span class="pill info">ИНФО</span>"""
+        }
+
+        val itemCls = when (cls) {
+            "err" -> "warn-item err"
+            "warn" -> "warn-item warn"
+            else -> "warn-item"
+        }
+
+        return buildString {
+            appendLine("""<div class="$itemCls">""")
+            appendLine("""<div class="t">$pill ${escape(w.title)}</div>""")
+            appendLine("""<div class="m">${escape(w.message)}</div>""")
+            val scope = w.scope?.takeIf { it.isNotBlank() }
+            if (scope != null) {
+                appendLine("""<div class="muted">${escape(scope)}</div>""")
+            }
+            appendLine("""</div>""")
+        }
+    }
+
 
     private fun formatAssumption(a: Any): String {
         val title = readStringField(a, titleAliases)?.takeIf { it.isNotBlank() }

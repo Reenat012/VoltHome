@@ -24,38 +24,28 @@ fun exportExplicationPdf(activity: Activity, vm: ExplicationViewModel,  caps: Pl
         phases = phases
     )
 
-    // Берём живые допущения/предупреждения из uiState (они у тебя уже считаются)
+    // Берём живые данные из uiState (они у тебя уже считаются)
     val s = vm.uiState.value as? GroupScreenState.Success
 
-    val assumptions: List<CalcAssumption> =
-        if (caps.professionalReportSections && s != null) {
-            buildList {
-                addAll(s.installedPowerW.assumptions)
-                addAll(s.calculatedPowerW.assumptions)
-                addAll(s.shieldTotalsAssumptions)
-            }.distinctBy { it.toString() }
-        } else {
-            emptyList()
-        }
+    val professional = if (caps.professionalReportSections && s != null) {
+        val assumptions: List<CalcAssumption> = buildList {
+            addAll(s.installedPowerW.assumptions)
+            addAll(s.calculatedPowerW.assumptions)
+            addAll(s.shieldTotalsAssumptions)
+        }.distinctBy { it.toString() }
 
-    val warnings: List<CalcWarning> =
-        if (caps.professionalReportSections && s != null) {
-            buildList {
-                addAll(s.calcWarnings)
-                addAll(s.installedPowerW.warnings)
-                addAll(s.calculatedPowerW.warnings)
-            }.distinctBy { "${it.severity}|${it.scope}|${it.title}|${it.message}" }
-        } else {
-            emptyList()
-        }
+        val warnings: List<CalcWarning> = buildList {
+            addAll(s.calcWarnings)
+            addAll(s.installedPowerW.warnings)
+            addAll(s.calculatedPowerW.warnings)
+        }.distinctBy { "${it.severity}|${it.scope}|${it.title}|${it.message}" }
 
-    val professional = if (caps.professionalReportSections) {
         BuildProfessionalSectionsUseCase().execute(
             BuildProfessionalSectionsUseCase.Params(
                 phaseMode = vm.phaseMode.value,
                 meta = meta,
                 phases = phases,
-                distributionDecisions = emptyList(),
+                distributionDecisions = emptyList(), // decisions подключим позже, если нужно
                 calcWarnings = warnings,
                 assumptions = assumptions,
             )
@@ -64,18 +54,21 @@ fun exportExplicationPdf(activity: Activity, vm: ExplicationViewModel,  caps: Pl
         null
     }
 
+// ВАЖНО: warnings/assumptions больше НЕ дублируем в legacy полях ReportModel
     val reportModel = reportBase.copy(
         professional = professional,
-        assumptions = assumptions,
-        warnings = warnings
-        // steps = ... (позже)
-        // normRefs = ... (позже — сейчас типы конфликтуют)
+        assumptions = emptyList(),
+        warnings = emptyList(),
+        steps = emptyList(),
+        normRefs = emptyList()
     )
 
     val html = HtmlReportBuilder(activity).build(
         model = reportModel,
-        includeProfessionalSections = caps.professionalReportSections
+        includeProfessionalSections = (caps.professionalReportSections && professional != null)
     )
+
+
 
     when (activity) {
         is ComponentActivity -> {

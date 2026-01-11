@@ -267,7 +267,7 @@ private fun buildWarningsFromGroups(groups: List<CircuitGroup>): List<CalcWarnin
  */
 fun ExplicationViewModel.buildReportData(): Pair<ReportMeta, List<ReportPhase>>? {
     val plan = userPlanRepository.planFlow.value
-    if (!plan.capabilities.professionalReportSections) return null
+    if (!plan.capabilities.pdfExport) return null
 
     val s = uiState.value as? GroupScreenState.Success ?: return null
     val date =
