@@ -3,6 +3,7 @@ package ru.mugalimov.volthome.domain.model.report
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.CalcAssumption
 import ru.mugalimov.volthome.domain.model.CalcWarning
+import ru.mugalimov.volthome.domain.model.report.professional.ProfessionalSections
 
 /**
  * Единая структурированная модель отчёта для PDF/HTML.
@@ -15,16 +16,37 @@ import ru.mugalimov.volthome.domain.model.CalcWarning
  * - Сейчас ReportModel собирается в ExportPdf.kt из уже существующих meta+phases.
  * - Далее можно расширять: steps, assumptions, warnings, normRefs заполнять из расчётов.
  */
+
 data class ReportModel(
     val header: Header,
     val kpis: Kpis,
     val donut: DonutModel,
     val phases: List<ReportPhase>,
 
+    /**
+     * PRO-секции отчёта (обоснования / предупреждения / нормы).
+     *
+     * Free: null (не строим и не рендерим).
+     * Pro: non-null.
+     */
+    val professional: ProfessionalSections? = null,
+
     // Расширяемые секции
+    @Deprecated(
+        message = "Use professional.evidence instead",
+        level = DeprecationLevel.WARNING
+    )
     val steps: List<CalcStep> = emptyList(),
     val assumptions: List<CalcAssumption> = emptyList(),
+    @Deprecated(
+        message = "Use professional.warnings instead",
+        level = DeprecationLevel.WARNING
+    )
     val warnings: List<CalcWarning> = emptyList(),
+    @Deprecated(
+        message = "Use professional.normRefs instead",
+        level = DeprecationLevel.WARNING
+    )
     val normRefs: List<NormRef> = emptyList(),
 ) {
     data class Header(
