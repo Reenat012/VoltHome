@@ -44,6 +44,7 @@ import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.DeviceCalcBreakdown
 import ru.mugalimov.volthome.domain.model.DeviceSpecUi
+import ru.mugalimov.volthome.ui.model.LocalUserPlan
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -60,11 +61,12 @@ fun GroupCardCompact(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val sheetDevice = remember { mutableStateOf<DeviceSpecUi?>(null) }
     val hint = remember { mutableStateOf<GroupHint?>(null) }
+    val caps = LocalUserPlan.current.capabilities
 
     val cs = MaterialTheme.colorScheme
-    val outline = cs.outlineVariant.copy(alpha = 0.60f)
+
     val divider = cs.outlineVariant.copy(alpha = 0.45f)
-    val bgBadge = cs.surfaceContainerHigh
+
     val bgTrack = cs.surfaceContainer
     val textSecondary = cs.onSurfaceVariant
 
@@ -225,6 +227,7 @@ fun GroupCardCompact(
                     },
                     sheetState = sheetState,
                     breakdown = selectedDeviceBreakdown,
+                    showProfessionalSections = caps.professionalReportSections,
                 )
             } else {
                 val (title, text) = groupHintContent(hint.value!!, group)

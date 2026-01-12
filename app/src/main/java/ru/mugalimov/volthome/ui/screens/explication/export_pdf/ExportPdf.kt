@@ -54,8 +54,16 @@ fun exportExplicationPdf(activity: Activity, vm: ExplicationViewModel,  caps: Pl
         null
     }
 
-// ВАЖНО: warnings/assumptions больше НЕ дублируем в legacy полях ReportModel
-    val reportModel = reportBase.copy(
+    val reportBase2 = if (s != null) {
+        reportBase.copy(
+            kpis = reportBase.kpis.copy(
+                installedPowerW = s.installedPowerW.value,
+                calculatedPowerW = s.calculatedPowerW.value
+            )
+        )
+    } else reportBase
+
+    val reportModel = reportBase2.copy(
         professional = professional,
         assumptions = emptyList(),
         warnings = emptyList(),
@@ -63,9 +71,10 @@ fun exportExplicationPdf(activity: Activity, vm: ExplicationViewModel,  caps: Pl
         normRefs = emptyList()
     )
 
+// PDF: профессиональные секции полностью выключены
     val html = HtmlReportBuilder(activity).build(
         model = reportModel,
-        includeProfessionalSections = (caps.professionalReportSections && professional != null)
+        includeInlineNormatives = caps.professionalReportSections // inline-нормативы только в PRO
     )
 
 

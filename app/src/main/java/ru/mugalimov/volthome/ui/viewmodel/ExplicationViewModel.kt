@@ -1,6 +1,5 @@
 package ru.mugalimov.volthome.ui.viewmodel
 
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -13,12 +12,20 @@ import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.data.repository.PreferencesRepository
+import ru.mugalimov.volthome.data.repository.UserPlanRepository
 import ru.mugalimov.volthome.di.database.IoDispatcher
+import ru.mugalimov.volthome.domain.formatter.GroupMetaFormatter
+import ru.mugalimov.volthome.domain.model.CalcAssumption
+import ru.mugalimov.volthome.domain.model.CalcWarning
+import ru.mugalimov.volthome.domain.model.CalculatedValue
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Device
+import ru.mugalimov.volthome.domain.model.DeviceCalcBreakdown
+import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.GroupingResult
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.PhaseMode
+import ru.mugalimov.volthome.domain.model.ProFeature
 import ru.mugalimov.volthome.domain.model.VoltageType
 import ru.mugalimov.volthome.domain.model.incomer.IncomerSpec
 import ru.mugalimov.volthome.domain.model.report.DonutModel
@@ -26,25 +33,19 @@ import ru.mugalimov.volthome.domain.model.report.ReportDevice
 import ru.mugalimov.volthome.domain.model.report.ReportGroup
 import ru.mugalimov.volthome.domain.model.report.ReportMeta
 import ru.mugalimov.volthome.domain.model.report.ReportPhase
+import ru.mugalimov.volthome.domain.model.report.professional.ProfessionalSections
+import ru.mugalimov.volthome.domain.use_case.CalculateDeviceBreakdownUseCase
 import ru.mugalimov.volthome.domain.use_case.CalculateShieldOverviewUseCase
 import ru.mugalimov.volthome.domain.use_case.GroupCalculatorFactory
 import ru.mugalimov.volthome.domain.use_case.IncomerSelector
 import ru.mugalimov.volthome.domain.use_case.getOrZero
 import ru.mugalimov.volthome.domain.use_case.phaseCurrents
-import ru.mugalimov.volthome.domain.formatter.GroupMetaFormatter
+import ru.mugalimov.volthome.domain.use_case.report.BuildProfessionalSectionsUseCase
 import ru.mugalimov.volthome.domain.util.PowerCurrentNormalizer
+import ru.mugalimov.volthome.ui.paywall.PaywallBus
 import java.text.SimpleDateFormat
 import java.util.Locale
 import javax.inject.Inject
-import ru.mugalimov.volthome.data.repository.UserPlanRepository
-import ru.mugalimov.volthome.domain.model.DeviceType
-import ru.mugalimov.volthome.ui.paywall.PaywallBus
-import ru.mugalimov.volthome.domain.model.ProFeature
-import ru.mugalimov.volthome.domain.model.CalcAssumption
-import ru.mugalimov.volthome.domain.model.CalcWarning
-import ru.mugalimov.volthome.domain.model.CalculatedValue
-import ru.mugalimov.volthome.domain.model.DeviceCalcBreakdown
-import ru.mugalimov.volthome.domain.use_case.CalculateDeviceBreakdownUseCase
 
 @HiltViewModel
 class ExplicationViewModel @Inject constructor(
@@ -109,18 +110,19 @@ class ExplicationViewModel @Inject constructor(
     }
 
     /** ВАЖНО: берём ИНСТАНС устройства по id из репозитория, без дефолтов. */
-    fun onDeviceClick(deviceId: Long) {viewModelScope.launch {
-        _selectedDeviceBreakdown.value = null
+    fun onDeviceClick(deviceId: Long) {
+        viewModelScope.launch {
+            _selectedDeviceBreakdown.value = null
 
-        val dev = deviceRepository.getDeviceById(deviceId.toInt())
-        _selectedDevice.value = dev
+            val dev = deviceRepository.getDeviceById(deviceId.toInt())
+            _selectedDevice.value = dev
 
-        val plan = userPlanRepository.planFlow.value
-        if (plan.capabilities.professionalReportSections) {
-            _selectedDeviceBreakdown.value =
-                dev?.let { calculateDeviceBreakdownUseCase.execute(it) }
+            val plan = userPlanRepository.planFlow.value
+            if (plan.capabilities.professionalReportSections) {
+                _selectedDeviceBreakdown.value =
+                    dev?.let { calculateDeviceBreakdownUseCase.execute(it) }
+            }
         }
-    }
     }
 
     fun clearSelected() {
@@ -145,8 +147,7 @@ class ExplicationViewModel @Inject constructor(
 
                         repo.replaceAllGroupsTransactional(groups)
 
-                        // ✅ Коммит 9: decision log распределения фаз → в репозиторий (in-memory),
-                        // чтобы PhaseLoad экран мог показать "почему так" по каждой группе.
+                        // ✅ decision log распределения фаз → в репозиторий (in-memory)
                         repo.setLastDistributionDecisions(res.distributionDecisions)
 
                         val totalGroups = groups.size
@@ -169,13 +170,14 @@ class ExplicationViewModel @Inject constructor(
                         val isProReport = plan.capabilities.professionalReportSections
 
                         val totals = calculateShieldOverviewUseCase.execute(groups)
-                        val warnings = if (isProReport) {
+
+                        val calcWarningsFromGroups = if (isProReport) {
                             buildWarningsFromGroups(groups)
                         } else {
                             emptyList()
                         }
 
-                        val installedPower = if (isProReport) {
+                        val installedPower: CalculatedValue = if (isProReport) {
                             totals.installedPowerW
                         } else {
                             totals.installedPowerW.copy(
@@ -186,7 +188,7 @@ class ExplicationViewModel @Inject constructor(
                             )
                         }
 
-                        val calculatedPower = if (isProReport) {
+                        val calculatedPower: CalculatedValue = if (isProReport) {
                             totals.calculatedPowerW
                         } else {
                             totals.calculatedPowerW.copy(
@@ -197,6 +199,50 @@ class ExplicationViewModel @Inject constructor(
                             )
                         }
 
+                        val shieldTotalsAssumptions: List<CalcAssumption> =
+                            if (isProReport) calculatedPower.assumptions else emptyList()
+
+                        // === ProfessionalSections: собираем из фактов (без чтения uiState) ===
+
+                        val proAssumptions: List<CalcAssumption> =
+                            if (isProReport) {
+                                buildList {
+                                    addAll(installedPower.assumptions)
+                                    addAll(calculatedPower.assumptions)
+                                    addAll(shieldTotalsAssumptions)
+                                }.distinctBy { it.toString() }
+                            } else emptyList()
+
+                        val proWarnings: List<CalcWarning> =
+                            if (isProReport) {
+                                buildList {
+                                    addAll(calcWarningsFromGroups)
+                                    addAll(installedPower.warnings)
+                                    addAll(calculatedPower.warnings)
+                                }.distinctBy { "${it.severity}|${it.scope}|${it.title}|${it.message}" }
+                            } else emptyList()
+
+                        val (meta, phases) = buildReportDataFrom(
+                            groups = groups,
+                            incomer = incomer,
+                            totalGroups = totalGroups,
+                            mode = mode
+                        )
+
+                        val professionalSections: ProfessionalSections? =
+                            if (isProReport) {
+                                BuildProfessionalSectionsUseCase().execute(
+                                    BuildProfessionalSectionsUseCase.Params(
+                                        phaseMode = mode,
+                                        meta = meta,
+                                        phases = phases,
+                                        distributionDecisions = res.distributionDecisions,
+                                        calcWarnings = proWarnings,
+                                        assumptions = proAssumptions
+                                    )
+                                )
+                            } else null
+
                         _uiState.value = GroupScreenState.Success(
                             groups = groups,
                             totalGroups = totalGroups,
@@ -205,12 +251,9 @@ class ExplicationViewModel @Inject constructor(
                             hasGroupRcds = hasGroupRcds,
                             installedPowerW = installedPower,
                             calculatedPowerW = calculatedPower,
-                            shieldTotalsAssumptions = if (isProReport) {
-                                calculatedPower.assumptions
-                            } else {
-                                emptyList()
-                            },
-                            calcWarnings = warnings
+                            shieldTotalsAssumptions = shieldTotalsAssumptions,
+                            calcWarnings = calcWarningsFromGroups,
+                            professionalSections = professionalSections
                         )
                     }
                 }
@@ -233,7 +276,8 @@ sealed class GroupScreenState {
         val installedPowerW: CalculatedValue,
         val calculatedPowerW: CalculatedValue,
         val shieldTotalsAssumptions: List<CalcAssumption> = emptyList(),
-        val calcWarnings: List<CalcWarning> = emptyList()
+        val calcWarnings: List<CalcWarning> = emptyList(),
+        val professionalSections: ProfessionalSections? = null
     ) : GroupScreenState()
 
     data class Error(val message: String) : GroupScreenState()
@@ -244,7 +288,6 @@ private fun buildWarningsFromGroups(groups: List<CircuitGroup>): List<CalcWarnin
 
     groups.forEach { g ->
         g.devices.forEach { d ->
-            // Ровно тот же триггер, что был в Log.w в buildReportData()
             if (d.deviceType == DeviceType.LIGHTING && (d.power ?: 0) >= 1000) {
                 warnings += CalcWarning(
                     severity = CalcWarning.Severity.WARNING,
@@ -259,22 +302,16 @@ private fun buildWarningsFromGroups(groups: List<CircuitGroup>): List<CalcWarnin
     return warnings
 }
 
-/**
- * Формирование данных отчёта для PDF/превью.
- * Поддерживает оба режима:
- *  - THREE: донат распределения по фазам, headline A/B/C
- *  - SINGLE: донат загрузки вводного, headline только A
- */
-fun ExplicationViewModel.buildReportData(): Pair<ReportMeta, List<ReportPhase>>? {
-    val plan = userPlanRepository.planFlow.value
-    if (!plan.capabilities.pdfExport) return null
-
-    val s = uiState.value as? GroupScreenState.Success ?: return null
+private fun buildReportDataFrom(
+    groups: List<CircuitGroup>,
+    incomer: IncomerSpec,
+    totalGroups: Int,
+    mode: PhaseMode
+): Pair<ReportMeta, List<ReportPhase>> {
     val date =
         SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(System.currentTimeMillis())
 
-    val mode = phaseMode.value
-    val perPhase = phaseCurrents(s.groups)
+    val perPhase = phaseCurrents(groups)
 
     val headlineCurrents: Map<String, Double> = when (mode) {
         PhaseMode.THREE -> mapOf(
@@ -292,14 +329,14 @@ fun ExplicationViewModel.buildReportData(): Pair<ReportMeta, List<ReportPhase>>?
         PhaseMode.THREE -> DonutModel.PhaseDistribution(valuesA = perPhase)
         PhaseMode.SINGLE -> {
             val usedA = perPhase.getOrZero(Phase.A)
-            val limitA = s.incomer.mcbRating.toDouble()
+            val limitA = incomer.mcbRating.toDouble()
             DonutModel.IncomerLoad(usedA = usedA, limitA = limitA)
         }
     }
 
     val meta = ReportMeta(
         date = date,
-        incomerLabel = with(s.incomer) {
+        incomerLabel = with(incomer) {
             buildString {
                 append(kind.name)
                 append(", ")
@@ -310,16 +347,16 @@ fun ExplicationViewModel.buildReportData(): Pair<ReportMeta, List<ReportPhase>>?
         },
         headlineCurrents = headlineCurrents,
         donut = donut,
-        totalGroups = s.totalGroups
+        totalGroups = totalGroups
     )
 
-    val phases = s.groups
+    val phases = groups
         .groupBy { it.phase }
         .toSortedMap(compareBy { it.name })
-        .map { (phase, groups) ->
+        .map { (phase, phaseGroups) ->
             ReportPhase(
                 name = "Фаза ${phase.name}",
-                groups = groups.sortedBy { it.groupNumber }.map { g ->
+                groups = phaseGroups.sortedBy { it.groupNumber }.map { g ->
                     ReportGroup(
                         title = "Группа #${g.groupNumber} — ${g.roomName}",
                         switchLabel = GroupMetaFormatter.buildSwitchLabel(g),
@@ -331,12 +368,10 @@ fun ExplicationViewModel.buildReportData(): Pair<ReportMeta, List<ReportPhase>>?
                                 voltage = d.voltage,
                                 powerFactor = d.powerFactor
                             )
-                            val powerW = normalized.powerW
-                            val currentA = normalized.currentA
                             ReportDevice(
                                 name = d.name,
-                                powerW = powerW,
-                                currentA = currentA
+                                powerW = normalized.powerW,
+                                currentA = normalized.currentA
                             )
                         }
                     )
@@ -345,4 +380,24 @@ fun ExplicationViewModel.buildReportData(): Pair<ReportMeta, List<ReportPhase>>?
         }
 
     return meta to phases
+}
+
+/**
+ * Формирование данных отчёта для PDF/превью.
+ * Поддерживает оба режима:
+ *  - THREE: донат распределения по фазам, headline A/B/C
+ *  - SINGLE: донат загрузки вводного, headline только A
+ */
+fun ExplicationViewModel.buildReportData(): Pair<ReportMeta, List<ReportPhase>>? {
+    val plan = userPlanRepository.planFlow.value
+    if (!plan.capabilities.pdfExport) return null
+
+    val s = uiState.value as? GroupScreenState.Success ?: return null
+
+    return buildReportDataFrom(
+        groups = s.groups,
+        incomer = s.incomer,
+        totalGroups = s.totalGroups,
+        mode = phaseMode.value
+    )
 }

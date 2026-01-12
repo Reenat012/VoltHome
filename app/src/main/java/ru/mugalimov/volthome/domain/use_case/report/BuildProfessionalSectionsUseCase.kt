@@ -7,7 +7,6 @@ import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.report.ReportMeta
 import ru.mugalimov.volthome.domain.model.report.ReportPhase
 import ru.mugalimov.volthome.domain.model.report.professional.ProfessionalSections
-import ru.mugalimov.volthome.domain.model.report.professional.ReportEvidenceItem
 import ru.mugalimov.volthome.domain.model.report.professional.ReportNormRefItem
 import ru.mugalimov.volthome.domain.model.report.professional.ReportWarningItem
 
@@ -30,90 +29,9 @@ class BuildProfessionalSectionsUseCase {
 
     fun execute(params: Params): ProfessionalSections {
         return ProfessionalSections(
-            evidence = buildEvidence(params),
             warnings = buildWarnings(params.calcWarnings),
             normRefs = buildNormRefs()
         )
-    }
-
-    private fun buildEvidence(p: Params): List<ReportEvidenceItem> {
-        val out = mutableListOf<ReportEvidenceItem>()
-
-        // 1) Режим сети
-        out += ReportEvidenceItem(
-            id = "phase_mode",
-            title = "Режим сети",
-            body = when (p.phaseMode) {
-                PhaseMode.SINGLE -> "1φ (однофазная сеть)"
-                PhaseMode.THREE -> "3φ (трёхфазная сеть)"
-            }
-        )
-
-        // 2) Вводной аппарат (как факт выбора)
-        val incomer = p.meta.incomerLabel?.takeIf { it.isNotBlank() } ?: "—"
-        out += ReportEvidenceItem(
-            id = "incomer",
-            title = "Вводной аппарат",
-            body = incomer
-        )
-
-        // 3) Итоговые токи (из meta)
-        val currents = p.meta.headlineCurrents.entries
-            .sortedBy { it.key }
-            .joinToString(", ") { (k, v) -> "$k=${formatA(v)}" }
-        out += ReportEvidenceItem(
-            id = "headline_currents",
-            title = "Итоговые токи",
-            body = currents
-        )
-
-        // 4) Структура щита (по ReportPhase/ReportGroup/ReportDevice)
-        val groupsCount = p.phases.sumOf { it.groups.size }
-        val devicesCount = p.phases.sumOf { ph -> ph.groups.sumOf { it.devices.size } }
-        out += ReportEvidenceItem(
-            id = "structure",
-            title = "Структура расчёта",
-            body = "Группы: $groupsCount, устройства: $devicesCount"
-        )
-
-        // 5) Наличие подобранных labels (как факт)
-        val nonEmptySwitch = p.phases.flatMap { it.groups }.count { !it.switchLabel.isNullOrBlank() }
-        val nonEmptyCable = p.phases.flatMap { it.groups }.count { !it.cableLabel.isNullOrBlank() }
-        out += ReportEvidenceItem(
-            id = "selection_labels",
-            title = "Подбор по группам",
-            body = "Автоматы: $nonEmptySwitch/$groupsCount, кабели: $nonEmptyCable/$groupsCount"
-        )
-
-        // 6) Фазное распределение (только факт наличия decision log)
-        if (p.phaseMode == PhaseMode.THREE) {
-            val decisions = p.distributionDecisions.size
-            out += ReportEvidenceItem(
-                id = "phase_distribution",
-                title = "Распределение по фазам",
-                body = if (decisions > 0) {
-                    "Распределено групп: $decisions (decision log доступен)"
-                } else {
-                    "Распределение выполнено (decision log не передан в отчёт)"
-                }
-            )
-        }
-
-        // 7) Допущения (как факт применения)
-        if (p.assumptions.isNotEmpty()) {
-            val sample = p.assumptions.take(2).joinToString("; ") { it.message }
-            out += ReportEvidenceItem(
-                id = "assumptions",
-                title = "Допущения модели",
-                body = buildString {
-                    append("Допущений: ${p.assumptions.size}.")
-                    if (sample.isNotBlank()) append(" Примеры: $sample")
-                }
-            )
-        }
-
-        // DoD 5–8: в типовом проекте уже есть 5 пунктов (+1 для 3φ, +1 при assumptions).
-        return out
     }
 
     private fun buildWarnings(src: List<CalcWarning>): List<ReportWarningItem> {

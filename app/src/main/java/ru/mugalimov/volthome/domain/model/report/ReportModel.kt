@@ -33,7 +33,7 @@ data class ReportModel(
 
     // Расширяемые секции
     @Deprecated(
-        message = "Use professional.evidence instead",
+        message = "Evidence section removed",
         level = DeprecationLevel.WARNING
     )
     val steps: List<CalcStep> = emptyList(),
@@ -58,7 +58,11 @@ data class ReportModel(
     data class Kpis(
         val headlineCurrents: Map<String, Double>, // "A"/"B"/"C"
         val totalGroups: Int? = null,
-        val totalCurrentA: Double? = null
+        val totalCurrentA: Double? = null,
+
+        // --- commit 3: мощности для KPI PDF ---
+        val installedPowerW: Double? = null,
+        val calculatedPowerW: Double? = null,
     )
 
     /**

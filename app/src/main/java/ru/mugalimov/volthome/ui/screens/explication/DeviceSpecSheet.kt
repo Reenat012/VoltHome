@@ -36,6 +36,7 @@ import ru.mugalimov.volthome.ui.utilities.label
 fun DeviceSpecSheet(
     device: DeviceSpecUi,
     breakdown: DeviceCalcBreakdown?,
+    showProfessionalSections: Boolean,
     onDismiss: () -> Unit,
     sheetState: SheetState
 ) {
@@ -72,10 +73,21 @@ fun DeviceSpecSheet(
 
             // -------- Применение в расчёте --------
             safeBreakdown?.let { b ->
-                Spacer(Modifier.height(12.dp))
-                Text("Применение в расчёте", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(6.dp))
-                CalculatedValueBlock(b.calculatedPower)
+                // Вариант А: когда включены профессиональные секции — НЕ показываем legacy steps/assumptions в UI
+                if (!showProfessionalSections) {
+                    Spacer(Modifier.height(12.dp))
+                    Text("Применение в расчёте", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(6.dp))
+                    CalculatedValueBlock(b.calculatedPower)
+                } else {
+                    // можно вообще убрать; оставляю аккуратный “намёк” без деталей
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "Детали расчёта доступны в профессиональном отчёте.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             // Тип/логика подключения — добавили иконки
@@ -121,31 +133,6 @@ private fun SpecRow(
     }
 }
 
-@Composable
-private fun SpecRowText(label: String, value: String) {
-    RowLabelValue(null, label, value)
-}
-
-@Composable
-private fun RowLabelValue(
-    icon: androidx.compose.ui.graphics.vector.ImageVector?,
-    label: String,
-    value: String
-) {
-    androidx.compose.foundation.layout.Row(modifier = Modifier.fillMaxWidth()) {
-        if (icon != null) {
-            Icon(icon, contentDescription = null)
-            Spacer(Modifier.width(8.dp))
-        }
-        Text(
-            label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.weight(1f))
-        Text(value, style = MaterialTheme.typography.bodyLarge)
-    }
-}
 
 @Composable
 private fun CalculatedValueBlock(v: CalculatedValue) {
@@ -154,27 +141,6 @@ private fun CalculatedValueBlock(v: CalculatedValue) {
             text = "Результат: %.0f %s".format(v.value, v.unit),
             style = MaterialTheme.typography.bodyLarge
         )
-
-        if (v.steps.isNotEmpty()) {
-            Text("Шаги:", style = MaterialTheme.typography.labelLarge)
-            v.steps.forEach { step ->
-                Text(
-                    text = "• ${step.name}: ${step.formula}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        if (v.assumptions.isNotEmpty()) {
-            Text("Допущения:", style = MaterialTheme.typography.labelLarge)
-            v.assumptions.forEach { a ->
-                Text(
-                    text = "• ${a.message}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
+        // Вариант А: steps/assumptions НЕ рисуем в UI (они живут в ProfessionalSectionsBlock)
     }
 }

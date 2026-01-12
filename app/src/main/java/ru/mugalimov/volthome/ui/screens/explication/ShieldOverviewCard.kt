@@ -52,17 +52,16 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.core.theme.VhColors
 import ru.mugalimov.volthome.core.theme.toUiPhase
+import ru.mugalimov.volthome.domain.model.CalculatedValue
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.VoltageType
 import ru.mugalimov.volthome.domain.model.incomer.IncomerKind
 import ru.mugalimov.volthome.domain.model.incomer.IncomerSpec
+import ru.mugalimov.volthome.domain.report.InlineNormatives
 import ru.mugalimov.volthome.domain.use_case.getOrZero
 import ru.mugalimov.volthome.domain.use_case.inferVoltageType
 import ru.mugalimov.volthome.domain.use_case.phaseCurrents
-import ru.mugalimov.volthome.domain.model.CalculatedValue
-import ru.mugalimov.volthome.domain.model.CalcAssumption
-import ru.mugalimov.volthome.domain.model.CalcStep
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -98,11 +97,7 @@ fun ShieldOverviewCard(
     // ---------- roles ----------
     val cs = MaterialTheme.colorScheme
     val bgCard = cs.surface
-    val bgElevated = cs.surfaceContainerHigh
-    val bgSubtle = cs.surfaceContainer
-    val bgMuted = cs.surfaceVariant
 
-    val textPrimary = cs.onSurface
     val textSecondary = cs.onSurfaceVariant
 
     val outline = cs.outlineVariant.copy(alpha = 0.60f)
@@ -179,13 +174,7 @@ fun ShieldOverviewCard(
             }
 
             Spacer(Modifier.height(12.dp))
-            if (showProfessionalEvidence) {
-                CalculationEvidenceBlock(
-                    installed = installedPowerW,
-                    calculated = calculatedPowerW
-                )
-            } else {
-//                ProEvidenceStub(onClick = onProfessionalLockedClick)
+            if (!showProfessionalEvidence) {
                 ProfessionalSectionPlaceholder(
                     title = "Инженерные обоснования",
                     subtitle = "Допущения, предупреждения и пояснения расчёта",
@@ -254,76 +243,6 @@ private enum class InfoTopic { HEADER, NETWORK, GROUP_RCDS, WET_ZONES, INCOMER }
 private enum class FieldTopic { SCHEME, POLES, MCB, RCD }
 private enum class TotalsTopic { GROUPS, INSTALLED, CALCULATED }
 
-@Composable
-private fun CalculationEvidenceBlock(
-    installed: CalculatedValue,
-    calculated: CalculatedValue
-) {
-    val cs = MaterialTheme.colorScheme
-    val outline = cs.outlineVariant.copy(alpha = 0.60f)
-    val textSecondary = cs.onSurfaceVariant
-
-    Surface(
-        shape = MaterialTheme.shapes.medium,
-        color = cs.surfaceContainerHigh,
-        border = BorderStroke(1.dp, outline)
-    ) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                text = "Расчёт",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-
-            EvidenceValueBlock(label = "Установленная мощность", v = installed)
-            EvidenceValueBlock(label = "Расчётная нагрузка", v = calculated)
-        }
-    }
-}
-
-@Composable
-private fun EvidenceValueBlock(label: String, v: CalculatedValue) {
-    val cs = MaterialTheme.colorScheme
-    val textSecondary = cs.onSurfaceVariant
-
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(text = label, style = MaterialTheme.typography.labelLarge)
-        Text(
-            text = "Результат: %.1f кВт".format(v.value / 1000.0),
-            style = MaterialTheme.typography.bodyMedium
-        )
-
-        if (v.steps.isNotEmpty()) {
-            Text(
-                text = "Шаги:",
-                style = MaterialTheme.typography.labelMedium,
-                color = textSecondary
-            )
-            v.steps.forEach { step ->
-                Text(
-                    text = "• ${step.name}: ${step.formula}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = textSecondary
-                )
-            }
-        }
-
-        if (v.assumptions.isNotEmpty()) {
-            Text(
-                text = "Допущения:",
-                style = MaterialTheme.typography.labelMedium,
-                color = textSecondary
-            )
-            v.assumptions.forEach { a ->
-                Text(
-                    text = "• ${a.subject}: ${a.message}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = textSecondary
-                )
-            }
-        }
-    }
-}
 
 @Composable
 private fun ClickableSummaryRow(label: String, value: String, onClick: () -> Unit) {
@@ -351,28 +270,6 @@ private fun ClickableSummaryRow(label: String, value: String, onClick: () -> Uni
     }
 }
 
-@Composable
-private fun ProEvidenceStub(onClick: () -> Unit) {
-    // Минимально, без “дешёвых” оверлеев:
-    // показываем аккуратную карточку-заглушку.
-    androidx.compose.material3.Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        tonalElevation = 1.dp,
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text("Профессиональные обоснования", style = MaterialTheme.typography.titleSmall)
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "Шаги расчёта, допущения, предупреждения и нормативные ссылки доступны в PRO.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
 
 @Composable
 private fun InfoBadges(
@@ -616,18 +513,27 @@ private fun infoSheetContent(topic: InfoTopic, is3: Boolean): Pair<String, Strin
             "Сводка по сети и вводному аппарату плюс краткие итоги по мощностям. " +
             "Нажимайте на элементы — откроются пояснения простым языком и подсказки по выбору."
 
-    InfoTopic.NETWORK -> "Тип сети" to if (is3)
-        "3-фазная сеть 400/230 В: нагрузки распределяются по фазам A/B/C; ток на каждой фазе ниже и проще балансировать."
-    else
-        "1-фазная сеть 230 В: все группы на одной фазе; важно контролировать суммарную нагрузку и запас вводного автомата."
+    InfoTopic.NETWORK -> "Тип сети" to withNorm(
+        text = if (is3)
+            "3-фазная сеть 400/230 В: нагрузки распределяются по фазам A/B/C; ток на каждой фазе ниже и проще балансировать."
+        else
+            "1-фазная сеть 230 В: все группы на одной фазе; важно контролировать суммарную нагрузку и запас вводного автомата.",
+        key = InlineNormatives.FactKey.NETWORK_TYPE
+    )
 
-    InfoTopic.GROUP_RCDS -> "Групповые УЗО" to
+    InfoTopic.GROUP_RCDS -> "Групповые УЗО" to withNorm(
+        text =
             "УЗО ставят на отдельные линии (розетки, влажные помещения и т. п.). При утечке отключается только эта линия, " +
-            "а остальная часть щита остаётся под напряжением — это удобнее и безопаснее."
+            "а остальная часть щита остаётся под напряжением — это удобнее и безопаснее.",
+        key = InlineNormatives.FactKey.GROUP_RCDS
+    )
 
-    InfoTopic.WET_ZONES -> "Влажные зоны" to
+    InfoTopic.WET_ZONES -> "Влажные зоны" to withNorm(
+        text =
             "Ванные, санузлы и зоны у мойки. Для таких линий обычно применяют УЗО чувствительностью 30 мА. " +
-            "Следуйте проекту/ПУЭ и проверяйте степень защиты оборудования."
+            "Следуйте проекту/ПУЭ и проверяйте степень защиты оборудования.",
+        key = InlineNormatives.FactKey.WET_ZONES_30MA
+        )
 
     InfoTopic.INCOMER -> "Вводной аппарат" to
             "Главный коммутационный аппарат щита: позволяет быстро обесточить объект и защищает ввод от перегрузки и КЗ. " +
@@ -664,17 +570,23 @@ private fun fieldSheetContent(
             "1P+N (2 полюса): одновременно отключаются фаза и нейтраль одной линии. " +
                     "Разрыв нейтрали выполняется совместно с фазой штатным двухполюсным аппаратом."
 
-        FieldTopic.MCB -> "Автомат" to
+        FieldTopic.MCB -> "Автомат" to withNorm(
+            text =
                 "Номинал (In) — ток, который автомат способен длительно проводить без отключения.\n" +
                 "Кривая отключения (B/C/D) — диапазон мгновенного срабатывания: примерно B≈3–5·In, C≈5–10·In, D≈10–20·In. " +
                 "Выбор зависит от пусковых токов нагрузки.\n" +
-                "Отключающая способность: для бытовых MCB по IEC 60898-1 указывается Icn (кА); в квартирах часто 6 кА."
+                "Отключающая способность: для бытовых MCB по IEC 60898-1 указывается Icn (кА); в квартирах часто 6 кА.",
+            key = InlineNormatives.FactKey.MCB
+        )
 
-        FieldTopic.RCD -> "УЗО (ввод)" to
+        FieldTopic.RCD -> "УЗО (ввод)" to withNorm(
+            text =
                 "Тип чувствительности: AC (переменный), A (переменный + пульсирующий), F (доп. частоты/инверторы), B (постоянная составляющая). " +
                 "Чувствительность (мА): 30 мА — защита человека; 100/300 мА — противопожарные задачи. " +
                 "Селективное (S) — с выдержкой времени для селективности.\n" +
-                "Важно: обычное УЗО не защищает от перегрузки и короткого замыкания — это делает автомат. RCBO совмещает обе функции."
+                "Важно: обычное УЗО не защищает от перегрузки и короткого замыкания — это делает автомат. RCBO совмещает обе функции.",
+            key = InlineNormatives.FactKey.RCD
+        )
     }
 
 private fun totalsSheetContent(
@@ -687,17 +599,28 @@ private fun totalsSheetContent(
             "Количество групп помогает оценить заполненность щита и селективность. " +
             "При росте числа групп проверьте место под модули и наличие отдельных УЗО там, где это требуется."
 
-    TotalsTopic.INSTALLED -> "Установленная мощность" to
+    TotalsTopic.INSTALLED -> "Установленная мощность" to withNorm(
+        text =
             "Сумма паспортных мощностей всех устройств: %.1f кВт.".format(installedPowerW / 1000.0) +
-            "\nИспользуется для подбора кабелей и оценки максимума."
+            "\nИспользуется для подбора кабелей и оценки максимума.",
+        key = InlineNormatives.FactKey.INSTALLED_POWER
+    )
 
-    TotalsTopic.CALCULATED -> "Расчётная нагрузка" to
+    TotalsTopic.CALCULATED -> "Расчётная нагрузка" to withNorm(
+        text =
             "Мощность с учётом коэффициентов спроса: %.1f кВт.".format(calculatedPowerW / 1000.0) +
-            "\nОна ближе к реальной одновременной нагрузке и влияет на выбор вводного автомата."
+            "\nОна ближе к реальной одновременной нагрузке и влияет на выбор вводного автомата.",
+        key = InlineNormatives.FactKey.CALCULATED_LOAD
+    )
 }
 
 // ---------- utils ----------
 private fun fmt1(v: Double) = String.format("%.1f", v).replace(',', '.')
+
+private fun withNorm(text: String, key: InlineNormatives.FactKey): String {
+    val norm = InlineNormatives.forFact(key)?.trim().orEmpty()
+    return if (norm.isBlank()) text else text.trimEnd() + "\n\n" + norm
+}
 
 @Composable
 fun ProfessionalSectionPlaceholder(

@@ -17,7 +17,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.FileDownload
-import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
@@ -30,10 +29,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import ru.mugalimov.volthome.R
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.ProFeature
@@ -48,7 +45,6 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
     LaunchedEffect(Unit) { viewModel.recalcAndSaveGroups() }
 
     val selectedBreakdown by viewModel.selectedDeviceBreakdown.collectAsState()
-
     val state by viewModel.uiState.collectAsState()
     val ctx = LocalContext.current
 
@@ -58,6 +54,7 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
     val plan = LocalUserPlan.current
     val caps = plan.capabilities
     val canExportPdf = caps.pdfExport
+    val canShowProSections = caps.professionalReportSections
 
     LaunchedEffect(event, canExportPdf) {
         if (event == ExplicationViewModel.UiEvent.ExportPdfRequested) {
@@ -77,7 +74,6 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
         is GroupScreenState.Success -> {
             val groups = s.groups
             val bg = MaterialTheme.colorScheme.background
-
             val sections = remember(groups) { groups.groupBy { it.phase ?: Phase.A } }
 
             Box(
@@ -97,13 +93,13 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
                             modifier = Modifier.fillMaxSize(),
                             installedPowerW = s.installedPowerW,
                             calculatedPowerW = s.calculatedPowerW,
-                            showProfessionalEvidence = caps.professionalReportSections,
+                            showProfessionalEvidence = canShowProSections,
                             onProfessionalLockedClick = {
-                                // явная точка входа в PRO
-                                viewModel.onExportPdfClick() // временно, дальше заменим на REPORT_SECTIONS
+                                // явная точка входа в PRO (сейчас ведём в PRO_REPORT)
+                                viewModel.onExportPdfClick()
                             }
                         )
-                        Spacer(Modifier.height(16.dp))
+                        Spacer(Modifier.height(12.dp))
                     }
 
                     Phase.values().forEach { ph ->
@@ -144,12 +140,11 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
                         onClick = { viewModel.onExportPdfClick() },
                         containerColor = MaterialTheme.colorScheme.secondaryContainer,
                         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier
-                            .border(
-                                width = 1.dp,
-                                color = MaterialTheme.colorScheme.outlineVariant,
-                                shape = FloatingActionButtonDefaults.shape
-                            ),
+                        modifier = Modifier.border(
+                            width = 1.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                            shape = FloatingActionButtonDefaults.shape
+                        ),
                         elevation = FloatingActionButtonDefaults.elevation(
                             defaultElevation = 0.dp,
                             pressedElevation = 0.dp,
@@ -161,7 +156,9 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
                             imageVector = Icons.Rounded.FileDownload,
                             contentDescription = "Экспорт PDF",
                             modifier = Modifier.size(26.dp),
-                            tint = MaterialTheme.colorScheme.onPrimary
+                            // NOTE: раньше у тебя было onPrimary — это почти наверняка ошибка контраста.
+                            // На secondaryContainer логичнее onSecondaryContainer.
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer
                         )
                     }
                 }

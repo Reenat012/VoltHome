@@ -7,7 +7,6 @@ package ru.mugalimov.volthome.domain.model.report.professional
  * поле `professional` должно быть null.
  */
 data class ProfessionalSections(
-    val evidence: List<ReportEvidenceItem> = emptyList(),
     val warnings: List<ReportWarningItem> = emptyList(),
     val normRefs: List<ReportNormRefItem> = emptyList(),
 )

@@ -8,6 +8,7 @@ import ru.mugalimov.volthome.domain.model.report.ReportDevice
 import ru.mugalimov.volthome.domain.model.report.ReportGroup
 import ru.mugalimov.volthome.domain.model.report.ReportModel
 import ru.mugalimov.volthome.domain.model.report.ReportPhase
+import ru.mugalimov.volthome.domain.report.InlineNormatives
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.text.DecimalFormat
@@ -37,11 +38,6 @@ class HtmlReportBuilder(private val context: Context) {
     )
     private val groupCableAliases =
         listOf("cableLabel", "lineLabel", "wireLabel", "cableInfo", "lineInfo")
-
-    // Для гибкого чтения моделей steps/assumptions/warnings/normRefs без жёсткой зависимости
-    private val titleAliases = listOf("title", "name", "label")
-    private val messageAliases = listOf("message", "text", "description", "details", "hint")
-    private val severityAliases = listOf("severity", "level", "type")
 
     // —— ТОЛЬКО CSS изменён: добавлены жёсткие запреты разрыва и префиксы ——
     private val INLINE_STYLE = """
@@ -99,16 +95,7 @@ class HtmlReportBuilder(private val context: Context) {
           .h2-tight { margin: 0 0 8px 0; }
           
           /* ————— Новые секции: расчёт/предупреждения/нормы ————— */
-                    .explain { margin: 14px 0 18px 0; }
-                    .explain .block {
-                      border: 1px solid #E5E7EB;
-                      border-radius: 12px;
-                      padding: 12px 12px;
-                      margin: 10px 0;
-                      background: #FFFFFF;
-                      break-inside: avoid !important;
-                      page-break-inside: avoid !important;
-                    }
+                   
                     .explain .block h3 { margin: 0 0 8px 0; font-size: 13px; font-weight: 700; }
                     .explain .muted { color: #6B7280; font-size: 12px; }
                     .explain ul { margin: 6px 0 0 18px; padding: 0; }
@@ -142,14 +129,13 @@ class HtmlReportBuilder(private val context: Context) {
                     .warn-item .m { margin-top: 2px; color:#374151; font-size:12px; }
           
                     .norm-list .code { font-weight: 800; }
-                    .norm-list .note { color:#6B7280; font-size:12px; }
+                 
         </style>
     """.trimIndent()
 
-    @WorkerThread
     fun build(
         model: ReportModel,
-        includeProfessionalSections: Boolean = false
+        includeInlineNormatives: Boolean = false
     ): String {
         val htmlTemplate = runCatching { loadTemplate("report_pdf/template.html") }
             .getOrElse { FALLBACK_TEMPLATE }
@@ -162,301 +148,33 @@ class HtmlReportBuilder(private val context: Context) {
 
         html = html.replace("{{projectName}}", escape(model.header.projectName))
             .replace("{{date}}", escape(model.header.date))
-            .replace("{{kpiBlock}}", buildKpiBlock(model))
+            .replace("{{kpiBlock}}", buildKpiBlock(model, includeInlineNormatives))
             .replace("{{donutSection}}", buildDonutSection(model.donut))
             .replace("{{legendSection}}", buildLegend(model.donut))
 
-        val explainHtml = if (includeProfessionalSections) buildExplainSections(model) else ""
         val phasesHtml = buildPhasesTables(model.phases)
 
+        // подставляем только таблицы фаз (никаких explain секций)
         html = if (html.contains("{{explainHtml}}")) {
-            html.replace("{{explainHtml}}", explainHtml)
+            html.replace("{{explainHtml}}", "")
                 .replace("{{phasesHtml}}", phasesHtml)
                 .replace("{{phases}}", phasesHtml)
         } else {
-            val combined = explainHtml + phasesHtml
-            html.replace("{{phasesHtml}}", combined)
-                .replace("{{phases}}", combined)
+            html.replace("{{phasesHtml}}", phasesHtml)
+                .replace("{{phases}}", phasesHtml)
         }
 
-        html = if (!includeProfessionalSections) {
-            html.replace(
-                "{{watermark}}",
-                """<div class="watermark"><img src="img/logo.png" alt="VoltHome" onerror="this.outerHTML='VoltHome'"/></div>"""
-            )
-        } else html.replace("{{watermark}}", "")
+        // watermark теперь всегда один (как было в Free-режиме)
+        html = html.replace(
+            "{{watermark}}",
+            """<div class="watermark"><img src="img/logo.png" alt="VoltHome" onerror="this.outerHTML='VoltHome'"/></div>"""
+        )
 
         html = html.replace("{{footerSpacer}}", """<div class="footer-spacer"></div>""")
         return html
     }
 
-    private fun buildExplainSections(model: ReportModel): String {
-        // PRO-путь: строго берём из новой модели
-        val pro = model.professional ?: run {
-            // Legacy fallback: если professional ещё не прокинут, оставляем старое поведение
-            // (не ломаем существующий экспорт до полной миграции)
-            return buildExplainSectionsLegacy(model)
-        }
-
-        val hasEvidence = pro.evidence.isNotEmpty()
-        val hasWarnings = pro.warnings.isNotEmpty()
-        val hasNorms = pro.normRefs.isNotEmpty() // по DoD секция должна быть всегда в PRO
-
-        if (!hasEvidence && !hasWarnings && !hasNorms) return ""
-
-        return buildString {
-            appendLine("""<div class="explain">""")
-
-            // 1) Обоснования / Evidence
-            if (hasEvidence) {
-                appendLine("""<div class="block">""")
-                appendLine("""<h3>Обоснования</h3>""")
-                appendLine("<ol>")
-                pro.evidence.forEach { e ->
-                    appendLine(
-                        """
-                    <li>
-                      <div class="t"><b>${escape(e.title)}</b></div>
-                      <div class="m">${escape(e.body)}</div>
-                    </li>
-                    """.trimIndent()
-                    )
-                }
-                appendLine("</ol>")
-                appendLine("""</div>""")
-            }
-
-            // 2) Предупреждения
-            if (hasWarnings) {
-                appendLine("""<div class="block">""")
-                appendLine("""<h3>Предупреждения</h3>""")
-                pro.warnings.forEach { w ->
-                    appendLine(formatProWarning(w))
-                }
-                appendLine("""</div>""")
-            }
-
-            // 3) Нормативные ссылки (в PRO секция должна присутствовать всегда)
-            appendLine("""<div class="block">""")
-            appendLine("""<h3>Нормативные ссылки</h3>""")
-            appendLine("""<div class="norm-list">""")
-            appendLine("<ul>")
-            if (pro.normRefs.isEmpty()) {
-                appendLine("""<li><span class="code">Справочно</span><div class="note">Раздел доступен в PRO.</div></li>""")
-            } else {
-                pro.normRefs.forEach { n ->
-                    val head = buildString {
-                        append("""<span class="code">${escape(n.source)}</span>""")
-                        val section = n.section?.trim().takeIf { !it.isNullOrBlank() }
-                        if (section != null) append(""" — ${escape(section)}""")
-                    }
-                    val note = n.note?.trim().takeIf { !it.isNullOrBlank() }
-                        ?.let { """<div class="note">${escape(it)}</div>""" }
-                        ?: ""
-                    appendLine("""<li>$head$note</li>""")
-                }
-            }
-            appendLine("</ul>")
-            appendLine("""</div>""")
-            appendLine("""</div>""")
-
-            appendLine("""</div>""")
-        }
-    }
-
-    private fun buildExplainSectionsLegacy(model: ReportModel): String {
-        val hasSteps = model.steps.isNotEmpty()
-        val hasAssumptions = model.assumptions.isNotEmpty()
-        val hasWarnings = model.warnings.isNotEmpty()
-        val hasNorms = model.normRefs.isNotEmpty()
-
-        if (!hasSteps && !hasAssumptions && !hasWarnings && !hasNorms) return ""
-
-        return buildString {
-            appendLine("""<div class="explain">""")
-
-            // 1) Расчёт
-            if (hasSteps) {
-                appendLine("""<div class="block">""")
-                appendLine("""<h3>Расчёт</h3>""")
-                model.steps.forEachIndexed { idx, step ->
-                    appendLine("""<div class="step">""")
-                    appendLine(
-                        """
-                    <div class="step-title">
-                      <span class="pill info">${idx + 1}</span>
-                      <span>${escape(step.title)}</span>
-                    </div>
-                    """.trimIndent()
-                    )
-                    if (step.lines.isNotEmpty()) {
-                        appendLine("<ul>")
-                        step.lines.forEach { line -> appendLine("""<li>${escape(line)}</li>""") }
-                        appendLine("</ul>")
-                    } else {
-                        appendLine("""<div class="muted">—</div>""")
-                    }
-                    appendLine("</div>")
-                }
-                appendLine("""</div>""")
-            }
-
-            // 2) Допущения
-            if (hasAssumptions) {
-                appendLine("""<div class="block">""")
-                appendLine("""<h3>Допущения</h3>""")
-                appendLine("<ul>")
-                model.assumptions.forEach { a ->
-                    appendLine("""<li>${formatAssumption(a)}</li>""")
-                }
-                appendLine("</ul>")
-                appendLine("""</div>""")
-            }
-
-            // 3) Предупреждения
-            if (hasWarnings) {
-                appendLine("""<div class="block">""")
-                appendLine("""<h3>Предупреждения</h3>""")
-                model.warnings.forEach { w ->
-                    appendLine(formatWarning(w))
-                }
-                appendLine("""</div>""")
-            }
-
-            // 4) Нормы
-            if (hasNorms) {
-                appendLine("""<div class="block">""")
-                appendLine("""<h3>Нормативные ссылки</h3>""")
-                appendLine("""<div class="norm-list">""")
-                appendLine("<ul>")
-                model.normRefs.forEach { n ->
-                    val head = buildString {
-                        append("""<span class="code">${escape(n.code)}</span>""")
-                        if (n.title.isNotBlank()) append(""" — ${escape(n.title)}""")
-                    }
-                    val note = n.note.takeIf { it.isNotBlank() }
-                        ?.let { """<div class="note">${escape(it)}</div>""" }
-                        ?: ""
-                    appendLine("""<li>$head$note</li>""")
-                }
-                appendLine("</ul>")
-                appendLine("""</div>""")
-                appendLine("""</div>""")
-            }
-
-            appendLine("""</div>""")
-        }
-    }
-
-    private fun formatProWarning(w: ru.mugalimov.volthome.domain.model.report.professional.ReportWarningItem): String {
-        val cls = when (w.severity) {
-            ru.mugalimov.volthome.domain.model.report.professional.ReportWarningItem.Severity.CRITICAL -> "err"
-            ru.mugalimov.volthome.domain.model.report.professional.ReportWarningItem.Severity.WARNING -> "warn"
-            ru.mugalimov.volthome.domain.model.report.professional.ReportWarningItem.Severity.INFO -> "info"
-        }
-
-        val pill = when (cls) {
-            "err" -> """<span class="pill err">ОШИБКА</span>"""
-            "warn" -> """<span class="pill warn">ВНИМАНИЕ</span>"""
-            else -> """<span class="pill info">ИНФО</span>"""
-        }
-
-        val itemCls = when (cls) {
-            "err" -> "warn-item err"
-            "warn" -> "warn-item warn"
-            else -> "warn-item"
-        }
-
-        return buildString {
-            appendLine("""<div class="$itemCls">""")
-            appendLine("""<div class="t">$pill ${escape(w.title)}</div>""")
-            appendLine("""<div class="m">${escape(w.message)}</div>""")
-            val scope = w.scope?.takeIf { it.isNotBlank() }
-            if (scope != null) {
-                appendLine("""<div class="muted">${escape(scope)}</div>""")
-            }
-            appendLine("""</div>""")
-        }
-    }
-
-
-    private fun formatAssumption(a: Any): String {
-        val title = readStringField(a, titleAliases)?.takeIf { it.isNotBlank() }
-        val msg = readStringField(a, messageAliases)?.takeIf { it.isNotBlank() }
-        return when {
-            title != null && msg != null -> "<b>${escape(title)}</b>: ${escape(msg)}"
-            title != null -> "<b>${escape(title)}</b>"
-            msg != null -> escape(msg)
-            else -> escape(a.toString())
-        }
-    }
-
-    private fun formatWarning(w: Any): String {
-        val severityRaw = readAnyField(w, severityAliases)
-            ?.toString()
-            ?.lowercase(Locale.getDefault())
-            .orEmpty()
-
-        val cls = when {
-            severityRaw.contains("error") || severityRaw.contains("critical") -> "err"
-            severityRaw.contains("warn") -> "warn"
-            else -> "info"
-        }
-
-        val pill = when (cls) {
-            "err" -> """<span class="pill err">ОШИБКА</span>"""
-            "warn" -> """<span class="pill warn">ВНИМАНИЕ</span>"""
-            else -> """<span class="pill info">ИНФО</span>"""
-        }
-
-        val title = readStringField(w, titleAliases)?.takeIf { it.isNotBlank() } ?: "Предупреждение"
-        val msg = readStringField(w, messageAliases)?.takeIf { it.isNotBlank() }
-
-        val itemCls = when (cls) {
-            "err" -> "warn-item err"
-            "warn" -> "warn-item warn"
-            else -> "warn-item"
-        }
-
-        return buildString {
-            appendLine("""<div class="$itemCls">""")
-            appendLine("""<div class="t">$pill ${escape(title)}</div>""")
-            if (msg != null) appendLine("""<div class="m">${escape(msg)}</div>""")
-            appendLine("""</div>""")
-        }
-    }
-
-    private fun readStringField(obj: Any, names: List<String>): String? {
-        for (n in names) {
-            val v = runCatching {
-                val f = obj.javaClass.getDeclaredField(n).apply { isAccessible = true }
-                f.get(obj)
-            }.getOrNull()
-
-            when (v) {
-                is String -> return v
-                null -> Unit
-                else -> {
-                    val s = v.toString()
-                    if (s.isNotBlank()) return s
-                }
-            }
-        }
-        return null
-    }
-
-    private fun readAnyField(obj: Any, names: List<String>): Any? {
-        for (n in names) {
-            val v = runCatching {
-                val f = obj.javaClass.getDeclaredField(n).apply { isAccessible = true }
-                f.get(obj)
-            }.getOrNull()
-            if (v != null) return v
-        }
-        return null
-    }
-
-    private fun buildKpiBlock(model: ReportModel): String {
+    private fun buildKpiBlock(model: ReportModel, includeInlineNormatives: Boolean): String {
         val currents = model.kpis.headlineCurrents
 
         val iA = formatA(currents["A"])
@@ -467,10 +185,50 @@ class HtmlReportBuilder(private val context: Context) {
 
         val incomerHuman = humanizeIncomer(model.header.incomerLabel)
 
+        // commit 3: inline-нормативы в KPI (только если includeInlineNormatives = true)
+        fun inlineNorm(key: InlineNormatives.FactKey): String =
+            InlineNormatives.forFact(key)?.let { " — ${escape(it)}" }.orEmpty()
+
+        fun hasMainRcdLabel(raw: String): Boolean {
+            val s = raw.lowercase(Locale.getDefault())
+            // достаточно грубо: если явно упоминается rcd / узо / rcbo — считаем, что ввод с утечкой
+            return s.contains("rcd") || s.contains("узо") || s.contains("rcbo")
+        }
+
+        val incomerNormKey = if (hasMainRcdLabel(model.header.incomerLabel)) {
+            InlineNormatives.FactKey.MAIN_RCD
+        } else {
+            InlineNormatives.FactKey.INCOMER_SCHEME
+        }
+
         return buildString {
             append("""<div class="kpi">""")
             append("""<div>Дата: <b>${escape(model.header.date)}</b></div>""")
-            append("""<div>Вводной аппарат: <b>${escape(incomerHuman)}</b></div>""")
+
+            // Вводной аппарат + норматив (PRO only)
+            append(
+                """<div>Вводной аппарат: <b>${escape(incomerHuman)}</b>${
+                    if (includeInlineNormatives) inlineNorm(incomerNormKey) else ""
+                }</div>"""
+            )
+
+            // Мощности (если пришли из ExportPdf)
+            model.kpis.installedPowerW?.let { w ->
+                val kw = w / 1000.0
+                append(
+                    """<div>Установленная мощность: <b>${df1.format(kw)} кВт</b>${
+                        if (includeInlineNormatives) inlineNorm(InlineNormatives.FactKey.INSTALLED_POWER) else ""
+                    }</div>"""
+                )
+            }
+            model.kpis.calculatedPowerW?.let { w ->
+                val kw = w / 1000.0
+                append(
+                    """<div>Расчётная нагрузка: <b>${df1.format(kw)} кВт</b>${
+                        if (includeInlineNormatives) inlineNorm(InlineNormatives.FactKey.CALCULATED_LOAD) else ""
+                    }</div>"""
+                )
+            }
 
             model.kpis.totalGroups?.let { tg ->
                 append("""<div>Всего групп: <b>$tg</b></div>""")
