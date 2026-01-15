@@ -33,7 +33,8 @@ class PhaseDistributorTest {
         breakerType = "C",          // String
         rcdRequired = false,        // Boolean
         rcdCurrent = 0,             // <-- если у тебя Double, замени на 0.0
-        phase = phase
+        phase = phase,
+        installedPowerW = 0
     )
 
     private fun sumsByPhase(groups: List<CircuitGroup>): Triple<Double, Double, Double> {

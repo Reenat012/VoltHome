@@ -26,30 +26,22 @@ import androidx.compose.material.icons.outlined.SafetyDivider
 import androidx.compose.material.icons.outlined.WaterDrop
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.core.theme.VhColors
 import ru.mugalimov.volthome.core.theme.toUiPhase
 import ru.mugalimov.volthome.domain.model.CalculatedValue
@@ -62,6 +54,9 @@ import ru.mugalimov.volthome.domain.report.InlineNormatives
 import ru.mugalimov.volthome.domain.use_case.getOrZero
 import ru.mugalimov.volthome.domain.use_case.inferVoltageType
 import ru.mugalimov.volthome.domain.use_case.phaseCurrents
+import ru.mugalimov.volthome.ui.format.ExplicationNumberFormat as F
+import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetPayload
+import ru.mugalimov.volthome.ui.viewmodel.explication.InfoSheetPayloadFactory
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -73,7 +68,11 @@ fun ShieldOverviewCard(
     calculatedPowerW: CalculatedValue,
     showProfessionalEvidence: Boolean,
     onProfessionalLockedClick: () -> Unit,
-    modifier: Modifier = Modifier
+    onOpenInfoSheet: (InfoSheetPayload) -> Unit,
+    onInstalledPowerClick: (CalculatedValue) -> Unit,
+    onCalculatedPowerClick: (CalculatedValue) -> Unit,
+    onIncomerFieldClick: (InfoSheetPayloadFactory.IncomerField) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     // ---------- данные ----------
     val vType: VoltageType = inferVoltageType(groups)
@@ -87,19 +86,10 @@ fun ShieldOverviewCard(
 
     val hasWetZones = remember(groups) { groups.any { it.rcdRequired } }
 
-    // ---------- состояние bottom sheet ----------
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val scope = rememberCoroutineScope()
-    var infoTopic by rememberSaveable { mutableStateOf<InfoTopic?>(null) }
-    var fieldTopic by rememberSaveable { mutableStateOf<FieldTopic?>(null) }
-    var totalsTopic by rememberSaveable { mutableStateOf<TotalsTopic?>(null) }
-
     // ---------- roles ----------
     val cs = MaterialTheme.colorScheme
     val bgCard = cs.surface
-
     val textSecondary = cs.onSurfaceVariant
-
     val outline = cs.outlineVariant.copy(alpha = 0.60f)
     val divider = cs.outlineVariant.copy(alpha = 0.45f)
 
@@ -121,7 +111,7 @@ fun ShieldOverviewCard(
                 )
                 Spacer(Modifier.weight(1f))
                 IconButton(
-                    onClick = { infoTopic = InfoTopic.HEADER; scope.launch { sheetState.show() } }
+                    onClick = { onOpenInfoSheet(buildHeaderPayload()) }
                 ) {
                     Icon(Icons.Outlined.Info, contentDescription = "Что это?")
                 }
@@ -137,18 +127,24 @@ fun ShieldOverviewCard(
             // Итоги (без темы перекоса)
             ClickableSummaryRow(
                 label = "Группы",
-                value = "${groups.size}"
-            ) { totalsTopic = TotalsTopic.GROUPS; scope.launch { sheetState.show() } }
+                value = groups.size.toString()
+            ) {
+                onOpenInfoSheet(
+                    InfoSheetPayload.totalsGroups(
+                        groupsCount = groups.size
+                    )
+                )
+            }
 
             ClickableSummaryRow(
                 label = "Установленная мощность",
-                value = "%.1f кВт".format(installedPowerW.value / 1000.0)
-            ) { totalsTopic = TotalsTopic.INSTALLED; scope.launch { sheetState.show() } }
+                value = "${F.kwFromW(installedPowerW.value.toInt(), decimals = 1)} кВт"
+            ) { onInstalledPowerClick(installedPowerW) }
 
             ClickableSummaryRow(
                 label = "Расчётная нагрузка",
-                value = "%.1f кВт".format(calculatedPowerW.value / 1000.0)
-            ) { totalsTopic = TotalsTopic.CALCULATED; scope.launch { sheetState.show() } }
+                value = "${F.kwFromW(calculatedPowerW.value.toInt(), decimals = 1)} кВт"
+            ) { onCalculatedPowerClick(calculatedPowerW) }
 
             Spacer(Modifier.height(12.dp))
 
@@ -157,15 +153,9 @@ fun ShieldOverviewCard(
                 is3 = is3,
                 hasGroupRcds = hasGroupRcds,
                 hasWetZones = hasWetZones,
-                onNetworkClick = {
-                    infoTopic = InfoTopic.NETWORK; scope.launch { sheetState.show() }
-                },
-                onGroupRcdsClick = {
-                    infoTopic = InfoTopic.GROUP_RCDS; scope.launch { sheetState.show() }
-                },
-                onWetZonesClick = {
-                    infoTopic = InfoTopic.WET_ZONES; scope.launch { sheetState.show() }
-                }
+                onNetworkClick = { onOpenInfoSheet(buildNetworkPayload(is3)) },
+                onGroupRcdsClick = { onOpenInfoSheet(buildGroupRcdsPayload()) },
+                onWetZonesClick = { onOpenInfoSheet(buildWetZonesPayload()) }
             )
 
             if (is3) {
@@ -183,7 +173,7 @@ fun ShieldOverviewCard(
             }
 
             Spacer(Modifier.height(12.dp))
-            Divider(thickness = 1.dp, color = divider)
+            HorizontalDivider(thickness = 1.dp, color = divider)
             Spacer(Modifier.height(12.dp))
 
             // 2×2 грид параметров вводного оборудования
@@ -191,58 +181,14 @@ fun ShieldOverviewCard(
                 incomer = incomer,
                 is3 = is3,
                 hasGroupRcds = hasGroupRcds,
-                onHeaderInfoClick = {
-                    infoTopic = InfoTopic.INCOMER; scope.launch { sheetState.show() }
-                },
-                onTileClick = { fieldTopic = it; scope.launch { sheetState.show() } }
+                onHeaderInfoClick = { onOpenInfoSheet(buildIncomerPayload()) },
+                onTileClick = onIncomerFieldClick
             )
-        }
-    }
-
-    // ---------- BottomSheet: единый для всех подсказок ----------
-    if (infoTopic != null || fieldTopic != null || totalsTopic != null) {
-        ModalBottomSheet(
-            onDismissRequest = {
-                scope.launch { sheetState.hide() }.invokeOnCompletion {
-                    infoTopic = null; fieldTopic = null; totalsTopic = null
-                }
-            },
-            sheetState = sheetState
-        ) {
-            val (title, text) = when {
-                infoTopic != null -> infoSheetContent(infoTopic!!, is3)
-                fieldTopic != null -> fieldSheetContent(fieldTopic!!, incomer, is3)
-                else -> totalsSheetContent(
-                    totalsTopic!!,
-                    installedPowerW.value,
-                    calculatedPowerW.value,
-                    groups.size
-                )
-            }
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(text = title, style = MaterialTheme.typography.titleLarge)
-                Text(
-                    text = text,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(8.dp))
-            }
         }
     }
 }
 
 // ---------- вспомогательные блоки ----------
-
-private enum class InfoTopic { HEADER, NETWORK, GROUP_RCDS, WET_ZONES, INCOMER }
-private enum class FieldTopic { SCHEME, POLES, MCB, RCD }
-private enum class TotalsTopic { GROUPS, INSTALLED, CALCULATED }
-
 
 @Composable
 private fun ClickableSummaryRow(label: String, value: String, onClick: () -> Unit) {
@@ -269,7 +215,6 @@ private fun ClickableSummaryRow(label: String, value: String, onClick: () -> Uni
         )
     }
 }
-
 
 @Composable
 private fun InfoBadges(
@@ -335,20 +280,29 @@ private fun Badge(icon: ImageVector, text: String, onClick: () -> Unit) {
 @Composable
 private fun PhaseLine(aI: Double, bI: Double, cI: Double, maxPhase: String?) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        PhaseDot(Phase.A); Spacer(Modifier.width(6.dp)); Text(
-        text = "${fmt1(aI)} A",
-        style = MaterialTheme.typography.bodyMedium
-    )
+        PhaseDot(Phase.A)
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = "${F.a(aI, decimals = 1)} A",
+            style = MaterialTheme.typography.bodyMedium
+        )
+
         Spacer(Modifier.width(12.dp))
-        PhaseDot(Phase.B); Spacer(Modifier.width(6.dp)); Text(
-        text = "${fmt1(bI)} A",
-        style = MaterialTheme.typography.bodyMedium
-    )
+        PhaseDot(Phase.B)
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = "${F.a(bI, decimals = 1)} A",
+            style = MaterialTheme.typography.bodyMedium
+        )
+
         Spacer(Modifier.width(12.dp))
-        PhaseDot(Phase.C); Spacer(Modifier.width(6.dp)); Text(
-        text = "${fmt1(cI)} A",
-        style = MaterialTheme.typography.bodyMedium
-    )
+        PhaseDot(Phase.C)
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = "${F.a(cI, decimals = 1)} A",
+            style = MaterialTheme.typography.bodyMedium
+        )
+
         Spacer(Modifier.weight(1f))
         if (maxPhase != null) {
             Text(
@@ -366,9 +320,7 @@ private fun PhaseDot(phase: Phase) {
         Modifier
             .size(10.dp)
             .clip(CircleShape)
-            .background(
-                VhColors.phase(phase.toUiPhase())
-            )
+            .background(VhColors.phase(phase.toUiPhase()))
     )
 }
 
@@ -379,7 +331,7 @@ private fun IncomerGrid(
     is3: Boolean,
     hasGroupRcds: Boolean,
     onHeaderInfoClick: () -> Unit,
-    onTileClick: (FieldTopic) -> Unit
+    onTileClick: (InfoSheetPayloadFactory.IncomerField) -> Unit
 ) {
     val scheme = when (incomer.kind) {
         IncomerKind.MCB_PLUS_RCD -> "Автомат + УЗО"
@@ -391,7 +343,6 @@ private fun IncomerGrid(
             "селективное",
             "противопожарное"
         )
-
         else -> emptyList()
     }
 
@@ -415,29 +366,35 @@ private fun IncomerGrid(
         )
     }
 
-    // Отступ между заголовком и карточками
     Spacer(Modifier.height(8.dp))
 
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        GridCell("Схема", scheme, schemeBadges) { onTileClick(FieldTopic.SCHEME) }
         GridCell(
-            "Полюса",
-            if (is3) "3P+N (4 пол.)" else "1P+N (2 пол.)"
-        ) { onTileClick(FieldTopic.POLES) }
+            label = "Схема",
+            value = scheme,
+            trailingBadges = schemeBadges
+        ) { onTileClick(InfoSheetPayloadFactory.IncomerField.SCHEME) }
+
         GridCell(
-            "Автомат",
-            "${incomer.mcbRating} A • кривая ${incomer.mcbCurve} • Icn ${incomer.icn / 1000} кА"
-        ) { onTileClick(FieldTopic.MCB) }
+            label = "Полюса",
+            value = if (is3) "3P+N (4 пол.)" else "1P+N (2 пол.)"
+        ) { onTileClick(InfoSheetPayloadFactory.IncomerField.POLES) }
+
         GridCell(
-            "УЗО (ввод)",
-            if (incomer.kind != IncomerKind.MCB_ONLY)
+            label = "Автомат",
+            value = "${incomer.mcbRating} A • кривая ${incomer.mcbCurve} • Icn ${incomer.icn / 1000} кА"
+        ) { onTileClick(InfoSheetPayloadFactory.IncomerField.MCB) }
+
+        GridCell(
+            label = "УЗО (ввод)",
+            value = if (incomer.kind != IncomerKind.MCB_ONLY)
                 "тип ${incomer.rcdType} • ${incomer.rcdSensitivityMa} мА" +
                         if (incomer.rcdSelectivity.name == "S") " • селективное" else ""
             else "—"
-        ) { onTileClick(FieldTopic.RCD) }
+        ) { onTileClick(InfoSheetPayloadFactory.IncomerField.RCD) }
     }
 }
 
@@ -506,116 +463,59 @@ private fun GridCell(
     }
 }
 
-// ---------- контент шита ----------
+// ---------- payload builders (без legacy имен) ----------
 
-private fun infoSheetContent(topic: InfoTopic, is3: Boolean): Pair<String, String> = when (topic) {
-    InfoTopic.HEADER -> "Что в этом блоке" to
-            "Сводка по сети и вводному аппарату плюс краткие итоги по мощностям. " +
-            "Нажимайте на элементы — откроются пояснения простым языком и подсказки по выбору."
-
-    InfoTopic.NETWORK -> "Тип сети" to withNorm(
-        text = if (is3)
-            "3-фазная сеть 400/230 В: нагрузки распределяются по фазам A/B/C; ток на каждой фазе ниже и проще балансировать."
-        else
-            "1-фазная сеть 230 В: все группы на одной фазе; важно контролировать суммарную нагрузку и запас вводного автомата.",
-        key = InlineNormatives.FactKey.NETWORK_TYPE
+private fun buildHeaderPayload(): InfoSheetPayload =
+    InfoSheetPayload(
+        title = "Что в этом блоке",
+        interpretation = "Сводка по сети и вводному аппарату плюс краткие итоги по мощностям. " +
+                "Нажимайте на элементы — откроются пояснения простым языком и подсказки по выбору."
     )
 
-    InfoTopic.GROUP_RCDS -> "Групповые УЗО" to withNorm(
-        text =
-            "УЗО ставят на отдельные линии (розетки, влажные помещения и т. п.). При утечке отключается только эта линия, " +
-            "а остальная часть щита остаётся под напряжением — это удобнее и безопаснее.",
-        key = InlineNormatives.FactKey.GROUP_RCDS
-    )
-
-    InfoTopic.WET_ZONES -> "Влажные зоны" to withNorm(
-        text =
-            "Ванные, санузлы и зоны у мойки. Для таких линий обычно применяют УЗО чувствительностью 30 мА. " +
-            "Следуйте проекту/ПУЭ и проверяйте степень защиты оборудования.",
-        key = InlineNormatives.FactKey.WET_ZONES_30MA
+private fun buildNetworkPayload(is3: Boolean): InfoSheetPayload =
+    InfoSheetPayload(
+        title = "Тип сети",
+        interpretation = withNorm(
+            text = if (is3)
+                "3-фазная сеть 400/230 В: нагрузки распределяются по фазам A/B/C; ток на каждой фазе ниже и проще балансировать."
+            else
+                "1-фазная сеть 230 В: все группы на одной фазе; важно контролировать суммарную нагрузку и запас вводного автомата.",
+            key = InlineNormatives.FactKey.NETWORK_TYPE
         )
+    )
 
-    InfoTopic.INCOMER -> "Вводной аппарат" to
+private fun buildGroupRcdsPayload(): InfoSheetPayload =
+    InfoSheetPayload(
+        title = "Групповые УЗО",
+        interpretation = withNorm(
+            text = "УЗО ставят на отдельные линии (розетки, влажные помещения и т. п.). При утечке отключается только эта линия, " +
+                    "а остальная часть щита остаётся под напряжением — это удобнее и безопаснее.",
+            key = InlineNormatives.FactKey.GROUP_RCDS
+        )
+    )
+
+private fun buildWetZonesPayload(): InfoSheetPayload =
+    InfoSheetPayload(
+        title = "Влажные зоны",
+        interpretation = withNorm(
+            text = "Ванные, санузлы и зоны у мойки. Для таких линий обычно применяют УЗО чувствительностью 30 мА. " +
+                    "Следуйте проекту/ПУЭ и проверяйте степень защиты оборудования.",
+            key = InlineNormatives.FactKey.WET_ZONES_30MA
+        )
+    )
+
+private fun buildIncomerPayload(): InfoSheetPayload =
+    InfoSheetPayload(
+        title = "Вводной аппарат",
+        interpretation =
             "Главный коммутационный аппарат щита: позволяет быстро обесточить объект и защищает ввод от перегрузки и КЗ. " +
-            "Как правило включает:\n" +
-            "• Автоматический выключатель (номинал In, кривая отключения B/C/D, отключающая способность — кА).\n" +
-            "• Полюсность: 1P+N для 1-ф сети, 3P+N для 3-ф.\n" +
-            "• При необходимости — УЗО/RCBO на вводе (тип AC/A/F/B, чувствительность мА)."
-}
-
-private fun fieldSheetContent(
-    topic: FieldTopic,
-    incomer: IncomerSpec,
-    is3: Boolean
-): Pair<String, String> =
-    when (topic) {
-        FieldTopic.SCHEME -> "Схема" to when (incomer.kind) {
-            IncomerKind.MCB_PLUS_RCD ->
-                "Вводной автомат + отдельное УЗО на вводе. На ввод обычно ставят селективное (тип S) или противопожарное УЗО " +
-                        "с большим током утечки (100–300 мА). При мелкой утечке (например, 30 мА) на линии первым сработает " +
-                        "групповое УЗО, а вводное останется включённым. Вводное отключает питание при крупной/неселективной утечке " +
-                        "или при суммарных утечках, превышающих его порог."
-
-            IncomerKind.RCBO ->
-                "Дифавтомат (RCBO) — автомат + УЗО в одном корпусе. Защищает и от перегрузки/КЗ, и от утечек, экономит место."
-
-            IncomerKind.MCB_ONLY ->
-                "Только автомат без УЗО на вводе. Защиту от утечек обеспечивают групповые УЗО/RCBO на линиях."
-        }
-
-        FieldTopic.POLES -> "Полюса" to if (is3)
-            "3P+N (4 полюса): одновременно отключаются три фазы и нейтраль — полное обесточивание. " +
-                    "Распространённая конфигурация для вводных аппаратов в 3-ф сети."
-        else
-            "1P+N (2 полюса): одновременно отключаются фаза и нейтраль одной линии. " +
-                    "Разрыв нейтрали выполняется совместно с фазой штатным двухполюсным аппаратом."
-
-        FieldTopic.MCB -> "Автомат" to withNorm(
-            text =
-                "Номинал (In) — ток, который автомат способен длительно проводить без отключения.\n" +
-                "Кривая отключения (B/C/D) — диапазон мгновенного срабатывания: примерно B≈3–5·In, C≈5–10·In, D≈10–20·In. " +
-                "Выбор зависит от пусковых токов нагрузки.\n" +
-                "Отключающая способность: для бытовых MCB по IEC 60898-1 указывается Icn (кА); в квартирах часто 6 кА.",
-            key = InlineNormatives.FactKey.MCB
-        )
-
-        FieldTopic.RCD -> "УЗО (ввод)" to withNorm(
-            text =
-                "Тип чувствительности: AC (переменный), A (переменный + пульсирующий), F (доп. частоты/инверторы), B (постоянная составляющая). " +
-                "Чувствительность (мА): 30 мА — защита человека; 100/300 мА — противопожарные задачи. " +
-                "Селективное (S) — с выдержкой времени для селективности.\n" +
-                "Важно: обычное УЗО не защищает от перегрузки и короткого замыкания — это делает автомат. RCBO совмещает обе функции.",
-            key = InlineNormatives.FactKey.RCD
-        )
-    }
-
-private fun totalsSheetContent(
-    topic: TotalsTopic,
-    installedPowerW: Double,
-    calculatedPowerW: Double,
-    groupsCount: Int
-): Pair<String, String> = when (topic) {
-    TotalsTopic.GROUPS -> "Группы" to
-            "Количество групп помогает оценить заполненность щита и селективность. " +
-            "При росте числа групп проверьте место под модули и наличие отдельных УЗО там, где это требуется."
-
-    TotalsTopic.INSTALLED -> "Установленная мощность" to withNorm(
-        text =
-            "Сумма паспортных мощностей всех устройств: %.1f кВт.".format(installedPowerW / 1000.0) +
-            "\nИспользуется для подбора кабелей и оценки максимума.",
-        key = InlineNormatives.FactKey.INSTALLED_POWER
+                    "Как правило включает:\n" +
+                    "• Автоматический выключатель (номинал In, кривая отключения B/C/D, отключающая способность — кА).\n" +
+                    "• Полюсность: 1P+N для 1-ф сети, 3P+N для 3-ф.\n" +
+                    "• При необходимости — УЗО/RCBO на вводе (тип AC/A/F/B, чувствительность мА)."
     )
-
-    TotalsTopic.CALCULATED -> "Расчётная нагрузка" to withNorm(
-        text =
-            "Мощность с учётом коэффициентов спроса: %.1f кВт.".format(calculatedPowerW / 1000.0) +
-            "\nОна ближе к реальной одновременной нагрузке и влияет на выбор вводного автомата.",
-        key = InlineNormatives.FactKey.CALCULATED_LOAD
-    )
-}
 
 // ---------- utils ----------
-private fun fmt1(v: Double) = String.format("%.1f", v).replace(',', '.')
 
 private fun withNorm(text: String, key: InlineNormatives.FactKey): String {
     val norm = InlineNormatives.forFact(key)?.trim().orEmpty()

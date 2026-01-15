@@ -16,6 +16,7 @@ import ru.mugalimov.volthome.data.repository.UserPlanRepository
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.formatter.GroupMetaFormatter
 import ru.mugalimov.volthome.domain.model.CalcAssumption
+import ru.mugalimov.volthome.domain.model.CalcStep
 import ru.mugalimov.volthome.domain.model.CalcWarning
 import ru.mugalimov.volthome.domain.model.CalculatedValue
 import ru.mugalimov.volthome.domain.model.CircuitGroup
@@ -35,6 +36,7 @@ import ru.mugalimov.volthome.domain.model.report.ReportMeta
 import ru.mugalimov.volthome.domain.model.report.ReportPhase
 import ru.mugalimov.volthome.domain.model.report.professional.ProfessionalSections
 import ru.mugalimov.volthome.domain.use_case.CalculateDeviceBreakdownUseCase
+import ru.mugalimov.volthome.domain.use_case.CalculateGroupBreakdownUseCase
 import ru.mugalimov.volthome.domain.use_case.CalculateShieldOverviewUseCase
 import ru.mugalimov.volthome.domain.use_case.GroupCalculatorFactory
 import ru.mugalimov.volthome.domain.use_case.IncomerSelector
@@ -43,6 +45,9 @@ import ru.mugalimov.volthome.domain.use_case.phaseCurrents
 import ru.mugalimov.volthome.domain.use_case.report.BuildProfessionalSectionsUseCase
 import ru.mugalimov.volthome.domain.util.PowerCurrentNormalizer
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
+import ru.mugalimov.volthome.ui.screens.explication.sheets.CalcBlockUi
+import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetPayload
+import ru.mugalimov.volthome.ui.viewmodel.explication.InfoSheetPayloadFactory
 import java.text.SimpleDateFormat
 import java.util.Locale
 import javax.inject.Inject
@@ -55,6 +60,7 @@ class ExplicationViewModel @Inject constructor(
     private val deviceRepository: DeviceRepository,
     private val calculateShieldOverviewUseCase: CalculateShieldOverviewUseCase,
     private val calculateDeviceBreakdownUseCase: CalculateDeviceBreakdownUseCase,
+    private val calculateGroupBreakdownUseCase: CalculateGroupBreakdownUseCase,
     @IoDispatcher private val dispatchers: CoroutineDispatcher,
     val userPlanRepository: UserPlanRepository,
     private val paywallBus: PaywallBus,
@@ -78,6 +84,49 @@ class ExplicationViewModel @Inject constructor(
     val selectedDeviceBreakdown: StateFlow<DeviceCalcBreakdown?> =
         _selectedDeviceBreakdown.asStateFlow()
 
+    // --- BottomSheet payload (единый для подсказок) ---
+    private val _infoSheetPayload = MutableStateFlow<InfoSheetPayload?>(null)
+    val infoSheetPayload: StateFlow<InfoSheetPayload?> = _infoSheetPayload.asStateFlow()
+
+    fun openInfoSheet(payload: InfoSheetPayload) {
+        _infoSheetPayload.value = payload
+    }
+
+    fun closeInfoSheet() {
+        _infoSheetPayload.value = null
+    }
+
+    fun onGroupPowerClick(group: CircuitGroup) {
+        val plan = userPlanRepository.planFlow.value
+        val isPro = plan.capabilities.professionalReportSections
+
+        val breakdown = calculateGroupBreakdownUseCase.execute(group)
+
+        openInfoSheet(
+            InfoSheetPayload(
+                title = "Мощность группы",
+                currentValueText = "%.2f кВт".format(breakdown.installedPower.value / 1000.0),
+                calcBlocks = if (isPro) breakdown.installedPower.steps.toCalcBlocksUi() else emptyList(),
+                normRefs = emptyList()
+            )
+        )
+    }
+
+    fun onGroupCurrentClick(group: CircuitGroup) {
+        val plan = userPlanRepository.planFlow.value
+        val isPro = plan.capabilities.professionalReportSections
+
+        val breakdown = calculateGroupBreakdownUseCase.execute(group)
+
+        openInfoSheet(
+            InfoSheetPayload(
+                title = "Расчётный ток",
+                currentValueText = "%.2f А".format(breakdown.calculatedCurrent.value),
+                calcBlocks = if (isPro) breakdown.calculatedCurrent.steps.toCalcBlocksUi() else emptyList(),
+                normRefs = emptyList()
+            )
+        )
+    }
     // --- UI events (one-shot) ---
     sealed class UiEvent {
         object ExportPdfRequested : UiEvent()
@@ -128,6 +177,65 @@ class ExplicationViewModel @Inject constructor(
     fun clearSelected() {
         _selectedDevice.value = null
         _selectedDeviceBreakdown.value = null
+    }
+
+    fun onInstalledPowerClick(calculated: CalculatedValue) {
+        val plan = userPlanRepository.planFlow.value
+
+        openInfoSheet(
+            InfoSheetPayload(
+                title = "Установленная мощность",
+                currentValueText = "%.1f кВт".format(calculated.value / 1000.0),
+                calcBlocks = calculated.steps.toCalcBlocksUi(),
+                normRefs = if (plan.capabilities.professionalReportSections) {
+                    calculated.normRefs.map { it.toString() } // пока так, т.к. NormRef модель ты не прислал
+                } else emptyList()
+            )
+        )
+    }
+
+    fun onCalculatedPowerClick(calculated: CalculatedValue) {
+        val plan = userPlanRepository.planFlow.value
+
+        openInfoSheet(
+            InfoSheetPayload(
+                title = "Расчётная нагрузка",
+                currentValueText = "%.1f кВт".format(calculated.value / 1000.0),
+                calcBlocks = calculated.steps.toCalcBlocksUi(),
+                normRefs = if (plan.capabilities.professionalReportSections) {
+                    calculated.normRefs.map { it.toString() }
+                } else emptyList()
+            )
+        )
+    }
+
+    private fun List<CalcStep>.toCalcBlocksUi(): List<CalcBlockUi> {
+        return map { step ->
+            CalcBlockUi(
+                formulaText = step.formula,
+                substitutionLines = step.inputs.map { input ->
+                    // "Σ Pпаспорт = 1234 Вт"
+                    "${input.name} = ${fmtNumber(input.value)} ${input.unit}"
+                },
+                resultText = "${fmtNumber(step.output.value)} ${step.output.unit}"
+            )
+        }
+    }
+
+    private fun fmtNumber(v: Double): String {
+        // простая нормальная печать без запятых
+        val s = String.format(Locale.US, "%.2f", v)
+        return s.trimEnd('0').trimEnd('.')
+    }
+
+    fun onIncomerFieldClick(field: InfoSheetPayloadFactory.IncomerField, incomer: IncomerSpec, hasGroupRcds: Boolean) {
+        val payload = InfoSheetPayloadFactory.incomerField(
+            field = field,
+            incomer = incomer,
+            phaseMode = phaseMode.value,
+            hasGroupRcds = hasGroupRcds
+        )
+        openInfoSheet(payload)
     }
 
     fun recalcAndSaveGroups() {

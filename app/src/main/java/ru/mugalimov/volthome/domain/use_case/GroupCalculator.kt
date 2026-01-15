@@ -223,6 +223,7 @@ class GroupCalculator(
         room: RoomEntity
     ): CircuitGroup {
         val nominalCurrent = devices.sumOf { it.nominalCurrent() }
+        val installedPowerW = devices.sumOf { it.power } // ✅ домен, не UI
         return CircuitGroup(
             roomName = room.name,
             groupType = devices.first().deviceType,
@@ -234,6 +235,7 @@ class GroupCalculator(
             rcdRequired = safetyProfile.rcdRequired,
             rcdCurrent = safetyProfile.rcdCurrent,
             groupNumber = groupNumber,
+            installedPowerW = installedPowerW,
             roomId = room.id
         )
     }
@@ -246,6 +248,7 @@ class GroupCalculator(
         room: RoomEntity
     ): CircuitGroup {
         val nominalCurrent = device.nominalCurrent()
+        val installedPowerW = device.power
         return CircuitGroup(
             roomName = room.name,
             groupType = device.deviceType, // НЕ хардкодим HEAVY_DUTY
@@ -257,6 +260,7 @@ class GroupCalculator(
             rcdRequired = safetyProfile.rcdRequired,
             rcdCurrent = safetyProfile.rcdCurrent,
             groupNumber = groupNumber,
+            installedPowerW = installedPowerW,
             roomId = room.id
         )
     }

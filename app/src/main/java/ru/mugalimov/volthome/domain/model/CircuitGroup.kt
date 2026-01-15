@@ -11,6 +11,7 @@ data class CircuitGroup(
 
     // Расчетные параметры
     val nominalCurrent: Double,  // Суммарный расчетный ток группы (А)
+    val installedPowerW: Int,
     val circuitBreaker: Int,     // Номинал автомата (А)
     val cableSection: Double,    // Сечение кабеля (мм²)
     val breakerType: String,     // Тип автомата ("B", "C", "D")

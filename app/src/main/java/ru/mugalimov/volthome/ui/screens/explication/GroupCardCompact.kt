@@ -18,9 +18,8 @@ import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.ElectricBolt
 import androidx.compose.material.icons.outlined.ElectricalServices
 import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -44,29 +43,30 @@ import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.DeviceCalcBreakdown
 import ru.mugalimov.volthome.domain.model.DeviceSpecUi
+import ru.mugalimov.volthome.ui.format.ExplicationNumberFormat as F
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
+import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetPayload
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun GroupCardCompact(
     group: CircuitGroup,
     onEdit: (() -> Unit)? = null,
-    onDeviceClick: (Long) -> Unit, // наружу — id инстанса
-    selectedDeviceBreakdown: DeviceCalcBreakdown? // <- приходит сверху (из VM)
+    onDeviceClick: (Long) -> Unit,
+    selectedDeviceBreakdown: DeviceCalcBreakdown?,
+    onGroupPowerClick: (CircuitGroup) -> Unit,
+    onGroupCurrentClick: (CircuitGroup) -> Unit,
+    onOpenInfoSheet: (InfoSheetPayload) -> Unit
 ) {
     val expanded = rememberSaveable(group.groupNumber) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    // единый BottomSheet по карточке
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val sheetDevice = remember { mutableStateOf<DeviceSpecUi?>(null) }
-    val hint = remember { mutableStateOf<GroupHint?>(null) }
     val caps = LocalUserPlan.current.capabilities
 
     val cs = MaterialTheme.colorScheme
-
     val divider = cs.outlineVariant.copy(alpha = 0.45f)
-
     val bgTrack = cs.surfaceContainer
     val textSecondary = cs.onSurfaceVariant
 
@@ -76,27 +76,30 @@ fun GroupCardCompact(
                 .clickable { expanded.value = !expanded.value }
                 .padding(16.dp)
         ) {
+            // ── Header
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = "Группа ${group.groupNumber}",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
-                Spacer(Modifier.width(8.dp)) // ← горизонтальный отступ
+                Spacer(Modifier.width(8.dp))
                 Text(
                     text = group.roomName.orEmpty(),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = cs.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.weight(1f))
-                IconButton(onClick = {
-                    hint.value = GroupHint.HEADER
-                    scope.launch { sheetState.show() }
-                }) { Icon(Icons.Outlined.Info, contentDescription = null) }
+                IconButton(
+                    onClick = { onOpenInfoSheet(buildGroupHeaderPayload(group)) }
+                ) {
+                    Icon(Icons.Outlined.Info, contentDescription = null)
+                }
             }
 
             Spacer(Modifier.height(8.dp))
 
+            // ── Badges
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -105,28 +108,25 @@ fun GroupCardCompact(
                     icon = Icons.Outlined.ElectricalServices,
                     text = "${group.breakerType}${group.circuitBreaker}"
                 ) {
-                    hint.value = GroupHint.BREAKER
-                    scope.launch { sheetState.show() }
+                    onOpenInfoSheet(buildBreakerPayload(group))
                 }
+
                 ParamBadge(
                     icon = Icons.Outlined.Bolt,
-                    text = "${kw(group.devices.sumOf { it.power })} кВт"
+                    text = "${F.kwFromW(group.installedPowerW, decimals = 2)} кВт"
                 ) {
-                    hint.value = GroupHint.POWER
-                    scope.launch { sheetState.show() }
+                    onGroupPowerClick(group) // VM формирует InfoSheetPayload
                 }
+
                 ParamBadge(
                     icon = Icons.Outlined.ElectricBolt,
-                    text = "${amp(group.nominalCurrent)} А"
+                    text = "${F.a(group.nominalCurrent, decimals = 2)} А"
                 ) {
-                    hint.value = GroupHint.CURRENT
-                    scope.launch { sheetState.show() }
-                }
-                if (onEdit != null) {
-                    AssistChip(onClick = onEdit, label = { Text("Редактировать") })
+                    onGroupCurrentClick(group) // VM формирует InfoSheetPayload
                 }
             }
 
+            // ── Devices chips + device sheet
             if (group.devices.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
                 DeviceChips(
@@ -141,7 +141,7 @@ fun GroupCardCompact(
                                 voltage = real.voltage.value,
                                 demandRatio = real.demandRatio,
                                 powerFactor = real.powerFactor,
-                                deviceType = real.deviceType, // ← enum, НЕ string
+                                deviceType = real.deviceType,
                                 hasMotor = real.hasMotor,
                                 requiresDedicatedCircuit = real.requiresDedicatedCircuit,
                                 requiresSocketConnection = real.requiresSocketConnection
@@ -154,27 +154,28 @@ fun GroupCardCompact(
                     groupKey = group.groupNumber
                 )
                 Spacer(Modifier.height(8.dp))
-//                Divider()
             }
 
-            // Прогресс загрузки группы — вернули «капсулу» и нормальные горизонтальные отступы
+            // ── Load progress
             val load =
                 (if (group.circuitBreaker > 0) group.nominalCurrent / group.circuitBreaker else 0.0)
                     .coerceAtLeast(0.0)
+
             val barColor = when {
-                load > 0.8 -> MaterialTheme.colorScheme.error
-                load > 0.6 -> MaterialTheme.colorScheme.tertiary
-                else -> MaterialTheme.colorScheme.primary
+                load > 0.8 -> cs.error
+                load > 0.6 -> cs.tertiary
+                else -> cs.primary
             }
+
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "Загрузка",
+                    text = "Загрузка",
                     style = MaterialTheme.typography.labelSmall,
                     color = textSecondary
                 )
-                Spacer(Modifier.width(8.dp)) // ← горизонтальный отступ
+                Spacer(Modifier.width(8.dp))
                 LinearProgressIndicator(
-                    progress = load.coerceAtMost(1.0).toFloat(),
+                    progress = { load.coerceAtMost(1.0).toFloat() },
                     modifier = Modifier
                         .weight(1f)
                         .height(8.dp)
@@ -182,18 +183,19 @@ fun GroupCardCompact(
                     color = barColor,
                     trackColor = bgTrack
                 )
-                Spacer(Modifier.width(8.dp)) // ← горизонтальный отступ
+                Spacer(Modifier.width(8.dp))
                 Text(
-                    "${"%.0f".format(load * 100)}%",
+                    text = "${(load * 100).toInt()}%",
                     style = MaterialTheme.typography.labelSmall,
                     color = textSecondary
                 )
             }
 
+            // ── Expanded details
             AnimatedVisibility(visible = expanded.value) {
                 Column {
                     Spacer(Modifier.height(12.dp))
-                    Divider(color = divider, thickness = 1.dp)
+                    HorizontalDivider(color = divider, thickness = 1.dp)
                     Spacer(Modifier.height(12.dp))
 
                     GroupParameterRow("Тип группы", group.groupType.toString())
@@ -207,48 +209,29 @@ fun GroupCardCompact(
         }
     }
 
-    if (sheetDevice.value != null || hint.value != null) {
+    if (sheetDevice.value != null) {
         ModalBottomSheet(
             onDismissRequest = {
                 scope.launch { sheetState.hide() }.invokeOnCompletion {
                     sheetDevice.value = null
-                    hint.value = null
                 }
             },
             sheetState = sheetState
         ) {
-            if (sheetDevice.value != null) {
-                DeviceSpecSheet(
-                    device = sheetDevice.value!!,
-                    onDismiss = {
-                        scope.launch { sheetState.hide() }.invokeOnCompletion {
-                            sheetDevice.value = null
-                        }
-                    },
-                    sheetState = sheetState,
-                    breakdown = selectedDeviceBreakdown,
-                    showProfessionalSections = caps.professionalReportSections,
-                )
-            } else {
-                val (title, text) = groupHintContent(hint.value!!, group)
-                Column(
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text(title, style = MaterialTheme.typography.titleLarge)
-                    Text(
-                        text,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(8.dp))
-                }
-            }
+            DeviceSpecSheet(
+                device = sheetDevice.value!!,
+                onDismiss = {
+                    scope.launch { sheetState.hide() }.invokeOnCompletion {
+                        sheetDevice.value = null
+                    }
+                },
+                sheetState = sheetState,
+                breakdown = selectedDeviceBreakdown,
+                showProfessionalSections = caps.professionalReportSections,
+            )
         }
     }
 }
-
-private enum class GroupHint { HEADER, BREAKER, POWER, CURRENT }
 
 @Composable
 private fun ParamBadge(icon: ImageVector, text: String, onClick: () -> Unit) {
@@ -280,31 +263,33 @@ private fun ParamBadge(icon: ImageVector, text: String, onClick: () -> Unit) {
     }
 }
 
-private fun kw(watts: Int): String = "%.2f".format(watts / 1000.0).replace(',', '.')
-private fun amp(a: Double): String = "%.2f".format(a).replace(',', '.')
+// ──────────────────────────────────────────────────────────────────────────────
+// Payload builders (замена legacy groupHintContent)
+// ──────────────────────────────────────────────────────────────────────────────
 
-private fun groupHintContent(hint: GroupHint, group: CircuitGroup): Pair<String, String> =
-    when (hint) {
-        GroupHint.HEADER -> "Карточка группы" to
-                "Здесь параметры группы: автомат, мощность, ток и состав устройств. Блок помогает быстро оценить загрузку, требования к защите и необходимость перераспределения."
+private fun buildGroupHeaderPayload(group: CircuitGroup): InfoSheetPayload =
+    InfoSheetPayload(
+        title = "Карточка группы",
+        bullets = listOf(
+            "Здесь параметры группы: автомат, мощность, ток и состав устройств.",
+            "Блок помогает быстро оценить загрузку и необходимость перераспределения."
+        )
+    )
 
-        GroupHint.BREAKER -> {
-            val curveChar = group.breakerType.firstOrNull()?.uppercaseChar() ?: 'C'
-            val title = "Тип автомата: $curveChar${group.circuitBreaker}"
-            val common =
-                "Формат «$curveChar${group.circuitBreaker}»: буква — кривая мгновенного отключения, число — номинал, А."
-            val body = when (curveChar) {
-                'B' -> "Кривая B ≈ 3–5×In. Для активных нагрузок и длинных линий."
-                'C' -> "Кривая C ≈ 5–10×In. Дефолт для розеточных/смешанных групп."
-                'D' -> "Кривая D ≈ 10–20×In. Для больших пусков (двигатели, насосы, сварка)."
-                else -> "Обычно используют B, C или D."
-            }
-            title to "$common\n\n$body"
-        }
-
-        GroupHint.POWER -> "Мощность группы" to
-                "Сумма мощностей устройств в группе, используется для проверки нагрузки и распределения по фазам."
-
-        GroupHint.CURRENT -> "Расчётный ток" to
-                "Сравните с номиналом автомата; рабочую загрузку держите ≤ 80%."
+private fun buildBreakerPayload(group: CircuitGroup): InfoSheetPayload {
+    val curveChar = group.breakerType.firstOrNull()?.uppercaseChar() ?: 'C'
+    val title = "Тип автомата: $curveChar${group.circuitBreaker}"
+    val common =
+        "Формат «$curveChar${group.circuitBreaker}»: буква — кривая мгновенного отключения, число — номинал, А."
+    val body = when (curveChar) {
+        'B' -> "Кривая B ≈ 3–5×In. Для активных нагрузок и длинных линий."
+        'C' -> "Кривая C ≈ 5–10×In. Дефолт для розеточных/смешанных групп."
+        'D' -> "Кривая D ≈ 10–20×In. Для больших пусков (двигатели, насосы, сварка)."
+        else -> "Обычно используют B, C или D."
     }
+
+    return InfoSheetPayload(
+        title = title,
+        interpretation = "$common\n\n$body"
+    )
+}

@@ -2,6 +2,7 @@ package ru.mugalimov.volthome.ui.screens.explication
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -43,7 +44,6 @@ fun DeviceSpecSheet(
     val context = LocalContext.current
     val safeBreakdown = breakdown?.takeIf { it.deviceId == device.id }
 
-
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState
@@ -73,15 +73,16 @@ fun DeviceSpecSheet(
 
             // -------- Применение в расчёте --------
             safeBreakdown?.let { b ->
-                // Вариант А: когда включены профессиональные секции — НЕ показываем legacy steps/assumptions в UI
-                if (!showProfessionalSections) {
-                    Spacer(Modifier.height(12.dp))
-                    Text("Применение в расчёте", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(12.dp))
+                Text("Применение в расчёте", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(6.dp))
+
+                // Всегда показываем итог (и в Free, и в Pro) — без деталей шагов
+                CalculatedValueBlock(b.calculatedPower)
+
+                // В PRO не рисуем детали тут — они должны жить в едином InfoSheet (коммит 5)
+                if (showProfessionalSections) {
                     Spacer(Modifier.height(6.dp))
-                    CalculatedValueBlock(b.calculatedPower)
-                } else {
-                    // можно вообще убрать; оставляю аккуратный “намёк” без деталей
-                    Spacer(Modifier.height(12.dp))
                     Text(
                         "Детали расчёта доступны в профессиональном отчёте.",
                         style = MaterialTheme.typography.bodySmall,
@@ -90,7 +91,7 @@ fun DeviceSpecSheet(
                 }
             }
 
-            // Тип/логика подключения — добавили иконки
+            // Тип/логика подключения
             SpecRow(
                 Icons.Outlined.Devices,
                 "Тип устройства",
@@ -104,8 +105,8 @@ fun DeviceSpecSheet(
             SpecRow(
                 Icons.Outlined.ElectricalServices,
                 "Требует точку подключения/розетку",
-                device.requiresSocketConnection?.let { if (it) "Да" else "Нет" } ?: "—")
-            // Для «Двигатель» используем ту же строку, чтобы стиль был единый
+                device.requiresSocketConnection?.let { if (it) "Да" else "Нет" } ?: "—"
+            )
             SpecRow(Icons.Outlined.Build, "Двигатель", if (device.hasMotor) "Есть" else "Нет")
 
             Spacer(Modifier.height(16.dp))
@@ -113,14 +114,13 @@ fun DeviceSpecSheet(
     }
 }
 
-// Единый ряд «иконка — лейбл — значение»
 @Composable
 private fun SpecRow(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     value: String
 ) {
-    androidx.compose.foundation.layout.Row(modifier = Modifier.fillMaxWidth()) {
+    Row(modifier = Modifier.fillMaxWidth()) {
         Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.width(8.dp))
         Text(
@@ -133,7 +133,6 @@ private fun SpecRow(
     }
 }
 
-
 @Composable
 private fun CalculatedValueBlock(v: CalculatedValue) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -141,6 +140,6 @@ private fun CalculatedValueBlock(v: CalculatedValue) {
             text = "Результат: %.0f %s".format(v.value, v.unit),
             style = MaterialTheme.typography.bodyLarge
         )
-        // Вариант А: steps/assumptions НЕ рисуем в UI (они живут в ProfessionalSectionsBlock)
+        // Детали шагов не показываем: единый рендерер живёт в InfoSheetContent (коммит 5)
     }
 }

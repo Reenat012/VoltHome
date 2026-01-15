@@ -2,6 +2,7 @@ package ru.mugalimov.volthome.domain.model.report
 
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.CalcAssumption
+import ru.mugalimov.volthome.domain.model.CalcStep
 import ru.mugalimov.volthome.domain.model.CalcWarning
 import ru.mugalimov.volthome.domain.model.report.professional.ProfessionalSections
 
@@ -65,13 +66,6 @@ data class ReportModel(
         val calculatedPowerW: Double? = null,
     )
 
-    /**
-     * Шаги/объяснения расчёта (на будущее): "как получились цифры".
-     */
-    data class CalcStep(
-        val title: String,
-        val lines: List<String> = emptyList()
-    )
 
     /**
      * Нормативные ссылки (ПУЭ/ГОСТ/СП и т.п.) — на будущее.

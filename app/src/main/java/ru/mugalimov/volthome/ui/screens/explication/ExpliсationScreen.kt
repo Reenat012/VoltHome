@@ -17,38 +17,46 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.FileDownload
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.ProFeature
 import ru.mugalimov.volthome.ui.components.ProLocked
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.screens.explication.export_pdf.exportExplicationPdf
+import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetContent
 import ru.mugalimov.volthome.ui.viewmodel.ExplicationViewModel
 import ru.mugalimov.volthome.ui.viewmodel.GroupScreenState
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
     LaunchedEffect(Unit) { viewModel.recalcAndSaveGroups() }
 
     val selectedBreakdown by viewModel.selectedDeviceBreakdown.collectAsState()
+    val sheetPayload by viewModel.infoSheetPayload.collectAsState()
     val state by viewModel.uiState.collectAsState()
     val ctx = LocalContext.current
 
-    // события от VM (one-shot)
+// события от VM (one-shot)
     val event by viewModel.events.collectAsState(initial = null)
 
     val plan = LocalUserPlan.current
@@ -76,6 +84,9 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
             val bg = MaterialTheme.colorScheme.background
             val sections = remember(groups) { groups.groupBy { it.phase ?: Phase.A } }
 
+            val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            val scope = rememberCoroutineScope()
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -95,9 +106,20 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
                             calculatedPowerW = s.calculatedPowerW,
                             showProfessionalEvidence = canShowProSections,
                             onProfessionalLockedClick = {
-                                // явная точка входа в PRO (сейчас ведём в PRO_REPORT)
                                 viewModel.onExportPdfClick()
-                            }
+                            },
+                            onOpenInfoSheet = { payload ->
+                                viewModel.openInfoSheet(payload)
+                            },
+                            onIncomerFieldClick = { field ->
+                                viewModel.onIncomerFieldClick(
+                                    field = field,
+                                    incomer = s.incomer,
+                                    hasGroupRcds = s.hasGroupRcds
+                                )
+                            },
+                            onInstalledPowerClick = { viewModel.onInstalledPowerClick(it) },
+                            onCalculatedPowerClick = { viewModel.onCalculatedPowerClick(it) }
                         )
                         Spacer(Modifier.height(12.dp))
                     }
@@ -116,7 +138,12 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
                                 GroupCardCompact(
                                     group = g,
                                     onDeviceClick = { deviceId -> viewModel.onDeviceClick(deviceId) },
-                                    selectedDeviceBreakdown = selectedBreakdown
+                                    selectedDeviceBreakdown = selectedBreakdown,
+                                    onGroupPowerClick = { viewModel.onGroupPowerClick(it) },
+                                    onGroupCurrentClick = { viewModel.onGroupCurrentClick(it) },
+                                    onOpenInfoSheet = { payload ->
+                                        viewModel.openInfoSheet(payload)
+                                    }
                                 )
                                 Spacer(Modifier.height(12.dp))
                             }
@@ -162,10 +189,26 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
                         )
                     }
                 }
+
+
+
+                if (sheetPayload != null) {
+                    ModalBottomSheet(
+                        onDismissRequest = {
+                            scope.launch { sheetState.hide() }.invokeOnCompletion {
+                                viewModel.closeInfoSheet()
+                            }
+                        },
+                        sheetState = sheetState
+                    ) {
+                        InfoSheetContent(payload = sheetPayload!!)
+                    }
+                }
             }
         }
     }
 }
+
 
 private fun stableGroupKey(phase: Phase, g: CircuitGroup): String =
     "ph-${phase.name}__grp-${g.groupNumber}-${g.roomName}-${g.breakerType}${g.circuitBreaker}"
