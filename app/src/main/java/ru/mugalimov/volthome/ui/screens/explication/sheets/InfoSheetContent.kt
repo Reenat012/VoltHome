@@ -1,16 +1,13 @@
 package ru.mugalimov.volthome.ui.screens.explication.sheets
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -30,18 +27,25 @@ fun InfoSheetContent(
             .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text(text = payload.title, style = MaterialTheme.typography.titleLarge)
 
+        // Заголовок
+        Text(
+            text = payload.title,
+            style = MaterialTheme.typography.titleLarge
+        )
+
+        // Расчётное значение
         payload.currentValueText
             ?.takeIf { it.isNotBlank() }
             ?.let { current ->
                 Text(
-                    text = "Текущее значение: $current",
+                    text = "Расчётное значение: $current",
                     style = MaterialTheme.typography.bodyMedium,
                     color = cs.onSurfaceVariant
                 )
             }
 
+        // Буллеты
         if (payload.bullets.isNotEmpty()) {
             Text(
                 text = payload.bullets.joinToString(separator = "\n") { "• $it" },
@@ -50,6 +54,7 @@ fun InfoSheetContent(
             )
         }
 
+        // Пояснение
         payload.interpretation
             ?.takeIf { it.isNotBlank() }
             ?.let { interp ->
@@ -60,23 +65,50 @@ fun InfoSheetContent(
                 )
             }
 
-        if (payload.calcBlocks.isNotEmpty()) {
-            HorizontalDivider(color = cs.outlineVariant.copy(alpha = 0.45f))
+        // -------- Детали расчёта (СТРОГО по статусу) --------
+        when (payload.calcDetailsState) {
 
-            Text(
-                text = "Расчёт",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold
-            )
+            CalcDetailsState.AVAILABLE -> {
+                if (payload.calcBlocks.isNotEmpty()) {
+                    HorizontalDivider(
+                        color = cs.outlineVariant.copy(alpha = 0.45f)
+                    )
 
-            payload.calcBlocks.forEach { block ->
-                CalcBlockCard(block = block)
+                    Text(
+                        text = "Расчёт",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        payload.calcBlocks.forEach { block ->
+                            CalcBlockCard(block = block)
+                        }
+                    }
+                }
+            }
+
+            CalcDetailsState.LOCKED -> {
+                Text(
+                    text = "Детали расчёта доступны в PRO.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = cs.onSurfaceVariant
+                )
+            }
+
+            CalcDetailsState.NONE -> {
+                Text(
+                    text = "Шаги расчёта отсутствуют.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = cs.onSurfaceVariant
+                )
             }
         }
 
+        // Нормативы
         if (payload.normRefs.isNotEmpty()) {
             Text(
-                text = "Норматив: " + payload.normRefs.joinToString(separator = ", "),
+                text = "Норматив: ${payload.normRefs.joinToString(", ")}",
                 style = MaterialTheme.typography.bodySmall,
                 color = cs.onSurfaceVariant
             )
@@ -84,58 +116,4 @@ fun InfoSheetContent(
 
         Spacer(Modifier.height(8.dp))
     }
-}
-
-@Composable
-private fun CalcBlockCard(block: CalcBlockUi) {
-    val cs = MaterialTheme.colorScheme
-    val outline = cs.outlineVariant.copy(alpha = 0.60f)
-
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = cs.surfaceContainerHigh,
-        border = BorderStroke(1.dp, outline),
-        tonalElevation = 0.dp
-    ) {
-        Column(Modifier.padding(12.dp)) {
-            Text(
-                text = "Формула",
-                style = MaterialTheme.typography.labelMedium,
-                color = cs.onSurfaceVariant
-            )
-            Text(
-                text = block.formulaText,
-                style = MaterialTheme.typography.bodyMedium
-            )
-
-            if (block.substitutionLines.isNotEmpty()) {
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    text = "Подстановка",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = cs.onSurfaceVariant
-                )
-                block.substitutionLines.forEach { line ->
-                    Text(
-                        text = "• $line",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(10.dp))
-            Text(
-                text = "Результат",
-                style = MaterialTheme.typography.labelMedium,
-                color = cs.onSurfaceVariant
-            )
-            Text(
-                text = block.resultText,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.SemiBold
-            )
-        }
-    }
-
-    Spacer(Modifier.height(10.dp))
 }

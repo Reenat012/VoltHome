@@ -43,15 +43,25 @@ class CalculateGroupBreakdownUseCase @Inject constructor() {
         val currentSteps = listOf(
             CalcStep(
                 name = "Сумма расчётных токов устройств",
-                formula = "Iгр = Σ Ii",
+                formula = "Iгр = Σ Iрасч,i",
                 inputs = group.devices.map { d ->
                     CalcInput(
                         name = d.name,
-                        value = d.calculateCurrent(), // у тебя это уже есть в домене
+                        value = d.calculateCurrent(),
                         unit = "А"
                     )
                 },
-                output = CalcOutput(iA, "А")
+                output = CalcOutput(iA, "А"),
+                assumptions = listOf(
+                    CalcAssumption(
+                        kind = CalcAssumption.Kind.OTHER,
+                        source = CoefficientSource.DEFAULT,
+                        subject = "domainCalc.current",
+                        message = "Токи устройств рассчитаны с учётом коэффициента спроса и коэффициента мощности.",
+                        original = null,
+                        applied = null
+                    )
+                )
             )
         )
 

@@ -10,6 +10,7 @@ data class InfoSheetPayload(
     val bullets: List<String> = emptyList(),
     val interpretation: String? = null,
     val normRefs: List<String> = emptyList(),
+    val calcDetailsState: CalcDetailsState = CalcDetailsState.NONE,
     val calcBlocks: List<CalcBlockUi> = emptyList()
 ) {
     companion object {

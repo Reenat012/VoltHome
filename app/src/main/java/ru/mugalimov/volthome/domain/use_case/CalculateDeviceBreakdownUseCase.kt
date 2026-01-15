@@ -35,9 +35,9 @@ class CalculateDeviceBreakdownUseCase @Inject constructor() {
             steps = listOf(
                 CalcStep(
                     name = "Учет коэффициента спроса",
-                    formula = "Pрасч = P × kспроса",
+                    formula = "Pрасч = Pуст × kспроса",
                     inputs = listOf(
-                        CalcInput("P", power.toDouble(), "Вт"),
+                        CalcInput("Pуст", power.toDouble(), "Вт"),
                         CalcInput("kспроса", appliedDemand)
                     ),
                     output = CalcOutput(calcPowerW, "Вт"),

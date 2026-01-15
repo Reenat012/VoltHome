@@ -25,11 +25,13 @@ import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import ru.mugalimov.volthome.domain.model.CalculatedValue
 import ru.mugalimov.volthome.domain.model.DeviceCalcBreakdown
 import ru.mugalimov.volthome.domain.model.DeviceSpecUi
+import ru.mugalimov.volthome.ui.screens.explication.sheets.CalcDetailsState
 import ru.mugalimov.volthome.ui.utilities.label
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -44,6 +46,13 @@ fun DeviceSpecSheet(
     val context = LocalContext.current
     val safeBreakdown = breakdown?.takeIf { it.deviceId == device.id }
 
+    val detailsState: CalcDetailsState = when {
+        safeBreakdown == null -> CalcDetailsState.NONE
+        safeBreakdown.calculatedPower.steps.isEmpty() -> CalcDetailsState.NONE
+        showProfessionalSections -> CalcDetailsState.AVAILABLE
+        else -> CalcDetailsState.LOCKED
+    }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState
@@ -54,54 +63,81 @@ fun DeviceSpecSheet(
                 .padding(horizontal = 20.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(device.name, style = MaterialTheme.typography.titleLarge)
+
+            Text(
+                text = device.name,
+                style = MaterialTheme.typography.titleLarge
+            )
+
             Spacer(Modifier.height(4.dp))
 
-            // Технические параметры
+            // --- Технические параметры ---
             SpecRow(Icons.Outlined.Power, "Мощность", "${device.power} Вт")
             SpecRow(Icons.Outlined.Bolt, "Напряжение", device.voltage?.let { "$it В" } ?: "—")
-            SpecRow(
-                Icons.Outlined.Calculate,
-                "Коэффициент спроса",
-                device.demandRatio?.toString() ?: "—"
-            )
-            SpecRow(
-                Icons.Outlined.Emergency,
-                "Коэффициент мощности",
-                device.powerFactor?.toString() ?: "—"
-            )
+            SpecRow(Icons.Outlined.Calculate, "Коэффициент спроса", device.demandRatio?.toString() ?: "—")
+            SpecRow(Icons.Outlined.Emergency, "Коэффициент мощности", device.powerFactor?.toString() ?: "—")
 
-            // -------- Применение в расчёте --------
-            safeBreakdown?.let { b ->
-                Spacer(Modifier.height(12.dp))
-                Text("Применение в расчёте", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(6.dp))
+            // Пояснения (только когда есть смысл: детали доступны, т.е. мы в PRO)
+            if (detailsState == CalcDetailsState.AVAILABLE) {
+                Text(
+                    text = "Расчётная мощность определяется как Pрасч = Pуст × kспроса.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
-                // Всегда показываем итог (и в Free, и в Pro) — без деталей шагов
-                CalculatedValueBlock(b.calculatedPower)
-
-                // В PRO не рисуем детали тут — они должны жить в едином InfoSheet (коммит 5)
-                if (showProfessionalSections) {
-                    Spacer(Modifier.height(6.dp))
+                if (device.powerFactor != null) {
                     Text(
-                        "Детали расчёта доступны в профессиональном отчёте.",
+                        text = "Коэффициент мощности учитывается при расчёте токов нагрузки.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
 
-            // Тип/логика подключения
-            SpecRow(
-                Icons.Outlined.Devices,
-                "Тип устройства",
-                device.deviceType.label(context)
-            )
-            SpecRow(
-                Icons.Outlined.Cable,
-                "Выделенная линия",
-                if (device.requiresDedicatedCircuit) "Да" else "Нет"
-            )
+            // --- Применение в расчёте ---
+            safeBreakdown?.let { b ->
+                Spacer(Modifier.height(12.dp))
+
+                Text(
+                    text = "Применение в расчёте",
+                    style = MaterialTheme.typography.titleMedium
+                )
+
+                Spacer(Modifier.height(6.dp))
+
+                // Итог всегда
+                CalculatedValueBlock(b.calculatedPower)
+
+                Spacer(Modifier.height(6.dp))
+
+                when (detailsState) {
+                    CalcDetailsState.LOCKED -> {
+                        Text(
+                            text = "Детали расчёта доступны в PRO.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    CalcDetailsState.NONE -> {
+                        // Важно: это сообщение будет показываться и в Free, и в Pro, если steps реально пустые.
+                        // Если ты хочешь в Free при NONE молчать — это уже правило из коммита 2, правится логикой payload/статуса.
+                        Text(
+                            text = "Шаги расчёта отсутствуют для этого устройства.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    CalcDetailsState.AVAILABLE -> {
+                        // Здесь ничего: детали показываются через InfoSheet
+                    }
+                }
+            }
+
+            // --- Тип / логика подключения ---
+            SpecRow(Icons.Outlined.Devices, "Тип устройства", device.deviceType.label(context))
+            SpecRow(Icons.Outlined.Cable, "Выделенная линия", if (device.requiresDedicatedCircuit) "Да" else "Нет")
             SpecRow(
                 Icons.Outlined.ElectricalServices,
                 "Требует точку подключения/розетку",
@@ -116,12 +152,16 @@ fun DeviceSpecSheet(
 
 @Composable
 private fun SpecRow(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     label: String,
     value: String
 ) {
     Row(modifier = Modifier.fillMaxWidth()) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
         Spacer(Modifier.width(8.dp))
         Text(
             label,
@@ -129,17 +169,25 @@ private fun SpecRow(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(Modifier.weight(1f))
-        Text(value, style = MaterialTheme.typography.bodyLarge)
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyLarge
+        )
     }
 }
 
 @Composable
 private fun CalculatedValueBlock(v: CalculatedValue) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        val valueText =
+            if (v.unit == "Вт" && v.value >= 1000)
+                "%.0f Вт (%.1f кВт)".format(v.value, v.value / 1000.0)
+            else
+                "%.0f %s".format(v.value, v.unit)
+
         Text(
-            text = "Результат: %.0f %s".format(v.value, v.unit),
+            text = "Итог по устройству: $valueText",
             style = MaterialTheme.typography.bodyLarge
         )
-        // Детали шагов не показываем: единый рендерер живёт в InfoSheetContent (коммит 5)
     }
 }

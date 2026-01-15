@@ -91,13 +91,18 @@ class CalculateShieldOverviewUseCase @Inject constructor() {
                 formula = "Pрасч = Σ (Pпаспорт × kспроса)",
                 inputs = listOf(
                     CalcInput(name = "Σ(Pпаспорт×k)", value = calculatedPowerW.toDouble(), unit = "Вт"),
-                    // счётчики — не числа формулы, но как входы для “протокола” полезны и валидны
                     CalcInput(name = "k по умолч.", value = defaultDemandRatioCount.toDouble(), unit = "шт"),
                     CalcInput(name = "k задано", value = userDemandRatioCount.toDouble(), unit = "шт"),
                 ),
                 output = CalcOutput(value = calculatedPowerW.toDouble(), unit = "Вт"),
-                normRefs = emptyList(),
-                assumptions = calculatedAssumptions
+                assumptions = calculatedAssumptions + CalcAssumption(
+                    kind = CalcAssumption.Kind.OTHER,
+                    source = CoefficientSource.DEFAULT,
+                    subject = "power",
+                    message = "Коэффициент мощности не влияет на расчёт мощности, используется при расчёте токов.",
+                    original = null,
+                    applied = null
+                )
             )
         )
 
