@@ -4,7 +4,9 @@ import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.incomer.IncomerKind
 import ru.mugalimov.volthome.domain.model.incomer.IncomerSpec
 import ru.mugalimov.volthome.domain.model.incomer.RcdSelectivity
+import ru.mugalimov.volthome.ui.screens.explication.sheets.CalcDetailsState
 import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetPayload
+import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetType
 
 object InfoSheetPayloadFactory {
 
@@ -41,8 +43,10 @@ object InfoSheetPayloadFactory {
 
         return InfoSheetPayload(
             title = "Схема",
+            sheetType = InfoSheetType.REFERENCE,
             currentValueText = current,
-            bullets = bullets
+            bullets = bullets,
+            calcDetailsState = CalcDetailsState.HIDDEN
         )
     }
 
@@ -62,8 +66,10 @@ object InfoSheetPayloadFactory {
 
         return InfoSheetPayload(
             title = "Полюса",
+            sheetType = InfoSheetType.REFERENCE,
             currentValueText = current,
-            bullets = bullets
+            bullets = bullets,
+            calcDetailsState = CalcDetailsState.HIDDEN
         )
     }
 
@@ -85,8 +91,10 @@ object InfoSheetPayloadFactory {
 
         return InfoSheetPayload(
             title = "Автомат",
+            sheetType = InfoSheetType.REFERENCE,
             currentValueText = current,
-            bullets = bullets
+            bullets = bullets,
+            calcDetailsState = CalcDetailsState.HIDDEN
         )
     }
 
@@ -95,6 +103,7 @@ object InfoSheetPayloadFactory {
         if (incomer.kind == IncomerKind.MCB_ONLY || incomer.rcdType == null || incomer.rcdSensitivityMa == null) {
             return InfoSheetPayload(
                 title = "УЗО (ввод)",
+                sheetType = InfoSheetType.REFERENCE,
                 currentValueText = "—",
                 bullets = buildList {
                     add("На вводе УЗО не выбрано (схема: ${when (incomer.kind) {
@@ -103,7 +112,8 @@ object InfoSheetPayloadFactory {
                         IncomerKind.RCBO -> "Дифавтомат"
                     }})")
                     if (hasGroupRcds) add("Защиту от утечек обеспечивают групповые УЗО/дифы")
-                }
+                },
+                calcDetailsState = CalcDetailsState.HIDDEN
             )
         }
 
@@ -124,8 +134,10 @@ object InfoSheetPayloadFactory {
 
         return InfoSheetPayload(
             title = "УЗО (ввод)",
+            sheetType = InfoSheetType.REFERENCE,
             currentValueText = current,
-            bullets = bullets
+            bullets = bullets,
+            calcDetailsState = CalcDetailsState.HIDDEN
         )
     }
 }

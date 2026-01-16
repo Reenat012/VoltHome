@@ -123,7 +123,7 @@ fun DeviceSpecSheet(
                         // Важно: это сообщение будет показываться и в Free, и в Pro, если steps реально пустые.
                         // Если ты хочешь в Free при NONE молчать — это уже правило из коммита 2, правится логикой payload/статуса.
                         Text(
-                            text = "Шаги расчёта отсутствуют для этого устройства.",
+                            text = "Детали расчёта для этого устройства не формируются.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -131,6 +131,10 @@ fun DeviceSpecSheet(
 
                     CalcDetailsState.AVAILABLE -> {
                         // Здесь ничего: детали показываются через InfoSheet
+                    }
+
+                    CalcDetailsState.HIDDEN -> {
+                        // Для DeviceSpecSheet не актуально: "применение в расчёте" просто не показываем.
                     }
                 }
             }

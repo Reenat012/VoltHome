@@ -54,8 +54,10 @@ import ru.mugalimov.volthome.domain.report.InlineNormatives
 import ru.mugalimov.volthome.domain.use_case.getOrZero
 import ru.mugalimov.volthome.domain.use_case.inferVoltageType
 import ru.mugalimov.volthome.domain.use_case.phaseCurrents
+import ru.mugalimov.volthome.ui.screens.explication.sheets.CalcDetailsState
 import ru.mugalimov.volthome.ui.format.ExplicationNumberFormat as F
 import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetPayload
+import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetType
 import ru.mugalimov.volthome.ui.viewmodel.explication.InfoSheetPayloadFactory
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -468,51 +470,61 @@ private fun GridCell(
 private fun buildHeaderPayload(): InfoSheetPayload =
     InfoSheetPayload(
         title = "Что в этом блоке",
+        sheetType = InfoSheetType.REFERENCE,
         interpretation = "Сводка по сети и вводному аппарату плюс краткие итоги по мощностям. " +
-                "Нажимайте на элементы — откроются пояснения простым языком и подсказки по выбору."
+                "Нажимайте на элементы — откроются пояснения простым языком и подсказки по выбору.",
+        calcDetailsState = CalcDetailsState.HIDDEN
     )
 
 private fun buildNetworkPayload(is3: Boolean): InfoSheetPayload =
     InfoSheetPayload(
         title = "Тип сети",
+        sheetType = InfoSheetType.REFERENCE,
         interpretation = withNorm(
             text = if (is3)
                 "3-фазная сеть 400/230 В: нагрузки распределяются по фазам A/B/C; ток на каждой фазе ниже и проще балансировать."
             else
                 "1-фазная сеть 230 В: все группы на одной фазе; важно контролировать суммарную нагрузку и запас вводного автомата.",
             key = InlineNormatives.FactKey.NETWORK_TYPE
-        )
+        ),
+        calcDetailsState = CalcDetailsState.HIDDEN
     )
 
 private fun buildGroupRcdsPayload(): InfoSheetPayload =
     InfoSheetPayload(
         title = "Групповые УЗО",
+        sheetType = InfoSheetType.REFERENCE,
         interpretation = withNorm(
             text = "УЗО ставят на отдельные линии (розетки, влажные помещения и т. п.). При утечке отключается только эта линия, " +
                     "а остальная часть щита остаётся под напряжением — это удобнее и безопаснее.",
             key = InlineNormatives.FactKey.GROUP_RCDS
-        )
+        ),
+        calcDetailsState = CalcDetailsState.HIDDEN
     )
 
 private fun buildWetZonesPayload(): InfoSheetPayload =
     InfoSheetPayload(
         title = "Влажные зоны",
+        sheetType = InfoSheetType.REFERENCE,
         interpretation = withNorm(
             text = "Ванные, санузлы и зоны у мойки. Для таких линий обычно применяют УЗО чувствительностью 30 мА. " +
                     "Следуйте проекту/ПУЭ и проверяйте степень защиты оборудования.",
             key = InlineNormatives.FactKey.WET_ZONES_30MA
-        )
+        ),
+        calcDetailsState = CalcDetailsState.HIDDEN
     )
 
 private fun buildIncomerPayload(): InfoSheetPayload =
     InfoSheetPayload(
         title = "Вводной аппарат",
+        sheetType = InfoSheetType.REFERENCE,
         interpretation =
             "Главный коммутационный аппарат щита: позволяет быстро обесточить объект и защищает ввод от перегрузки и КЗ. " +
                     "Как правило включает:\n" +
                     "• Автоматический выключатель (номинал In, кривая отключения B/C/D, отключающая способность — кА).\n" +
                     "• Полюсность: 1P+N для 1-ф сети, 3P+N для 3-ф.\n" +
-                    "• При необходимости — УЗО/RCBO на вводе (тип AC/A/F/B, чувствительность мА)."
+                    "• При необходимости — УЗО/RCBO на вводе (тип AC/A/F/B, чувствительность мА).",
+        calcDetailsState = CalcDetailsState.HIDDEN
     )
 
 // ---------- utils ----------

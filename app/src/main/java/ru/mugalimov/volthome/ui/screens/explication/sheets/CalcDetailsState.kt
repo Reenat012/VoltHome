@@ -1,7 +1,13 @@
 package ru.mugalimov.volthome.ui.screens.explication.sheets
 
 enum class CalcDetailsState {
-    NONE,       // шаги расчёта отсутствуют в данных
-    LOCKED,     // шаги есть, но закрыты тарифом
-    AVAILABLE   // шаги есть и доступны
+    AVAILABLE,
+    LOCKED,
+    NONE,
+
+    /**
+     * Расчёт не применим (справочный sheet).
+     * Секция "Расчёт" не должна отображаться.
+     */
+    HIDDEN
 }

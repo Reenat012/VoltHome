@@ -43,7 +43,7 @@ class CalculateGroupBreakdownUseCase @Inject constructor() {
         val currentSteps = listOf(
             CalcStep(
                 name = "Сумма расчётных токов устройств",
-                formula = "Iгр = Σ Iрасч,i",
+                formula = "Iгр = Σ (Iном.i × kспроса.i)",
                 inputs = group.devices.map { d ->
                     CalcInput(
                         name = d.name,

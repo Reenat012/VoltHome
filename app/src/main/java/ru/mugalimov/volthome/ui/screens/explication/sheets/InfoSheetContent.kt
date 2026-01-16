@@ -65,8 +65,20 @@ fun InfoSheetContent(
                 )
             }
 
-        // -------- Детали расчёта (СТРОГО по статусу) --------
-        when (payload.calcDetailsState) {
+        // -------- Детали расчёта (СТРОГО по статусу + типу sheet’а) --------
+
+        // Нормализация на UI-границе:
+        // - справка всегда HIDDEN (даже если по ошибке прилетел NONE/LOCKED)
+        val effectiveState: CalcDetailsState = when (payload.sheetType) {
+            InfoSheetType.REFERENCE -> CalcDetailsState.HIDDEN
+            InfoSheetType.CALCULATION -> payload.calcDetailsState
+        }
+
+        when (effectiveState) {
+
+            CalcDetailsState.HIDDEN -> {
+                // Справочный sheet: секция "Расчёт" не рендерится вообще.
+            }
 
             CalcDetailsState.AVAILABLE -> {
                 if (payload.calcBlocks.isNotEmpty()) {
@@ -89,6 +101,16 @@ fun InfoSheetContent(
             }
 
             CalcDetailsState.LOCKED -> {
+                HorizontalDivider(
+                    color = cs.outlineVariant.copy(alpha = 0.45f)
+                )
+
+                Text(
+                    text = "Расчёт",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+
                 Text(
                     text = "Детали расчёта доступны в PRO.",
                     style = MaterialTheme.typography.bodySmall,
@@ -97,11 +119,25 @@ fun InfoSheetContent(
             }
 
             CalcDetailsState.NONE -> {
-                Text(
-                    text = "Шаги расчёта отсутствуют.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = cs.onSurfaceVariant
-                )
+                // КРИТИЧЕСКОЕ ПРАВИЛО:
+                // Сообщение об отсутствии шагов допустимо только для CALCULATION + NONE.
+                if (payload.sheetType == InfoSheetType.CALCULATION) {
+                    HorizontalDivider(
+                        color = cs.outlineVariant.copy(alpha = 0.45f)
+                    )
+
+                    Text(
+                        text = "Расчёт",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Text(
+                        text = "Шаги расчёта отсутствуют.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = cs.onSurfaceVariant
+                    )
+                }
             }
         }
 

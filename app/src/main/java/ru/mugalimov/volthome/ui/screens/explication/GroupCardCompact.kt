@@ -45,7 +45,9 @@ import ru.mugalimov.volthome.domain.model.DeviceCalcBreakdown
 import ru.mugalimov.volthome.domain.model.DeviceSpecUi
 import ru.mugalimov.volthome.ui.format.ExplicationNumberFormat as F
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
+import ru.mugalimov.volthome.ui.screens.explication.sheets.CalcDetailsState
 import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetPayload
+import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetType
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -270,10 +272,12 @@ private fun ParamBadge(icon: ImageVector, text: String, onClick: () -> Unit) {
 private fun buildGroupHeaderPayload(group: CircuitGroup): InfoSheetPayload =
     InfoSheetPayload(
         title = "Карточка группы",
+        sheetType = InfoSheetType.REFERENCE,
         bullets = listOf(
             "Здесь параметры группы: автомат, мощность, ток и состав устройств.",
             "Блок помогает быстро оценить загрузку и необходимость перераспределения."
-        )
+        ),
+        calcDetailsState = CalcDetailsState.HIDDEN
     )
 
 private fun buildBreakerPayload(group: CircuitGroup): InfoSheetPayload {
@@ -290,6 +294,8 @@ private fun buildBreakerPayload(group: CircuitGroup): InfoSheetPayload {
 
     return InfoSheetPayload(
         title = title,
-        interpretation = "$common\n\n$body"
+        sheetType = InfoSheetType.REFERENCE,
+        interpretation = "$common\n\n$body",
+        calcDetailsState = CalcDetailsState.HIDDEN
     )
 }

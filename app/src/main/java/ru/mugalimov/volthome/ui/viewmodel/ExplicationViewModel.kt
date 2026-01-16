@@ -16,7 +16,6 @@ import ru.mugalimov.volthome.data.repository.UserPlanRepository
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.formatter.GroupMetaFormatter
 import ru.mugalimov.volthome.domain.model.CalcAssumption
-import ru.mugalimov.volthome.domain.model.CalcStep
 import ru.mugalimov.volthome.domain.model.CalcWarning
 import ru.mugalimov.volthome.domain.model.CalculatedValue
 import ru.mugalimov.volthome.domain.model.CircuitGroup
@@ -45,8 +44,10 @@ import ru.mugalimov.volthome.domain.use_case.phaseCurrents
 import ru.mugalimov.volthome.domain.use_case.report.BuildProfessionalSectionsUseCase
 import ru.mugalimov.volthome.domain.util.PowerCurrentNormalizer
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
-import ru.mugalimov.volthome.ui.screens.explication.sheets.CalcBlockUi
+import ru.mugalimov.volthome.ui.screens.explication.sheets.CalcBlocksMapper
+import ru.mugalimov.volthome.ui.screens.explication.sheets.CalcDetailsState
 import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetPayload
+import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetType
 import ru.mugalimov.volthome.ui.viewmodel.explication.InfoSheetPayloadFactory
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -98,15 +99,26 @@ class ExplicationViewModel @Inject constructor(
 
     fun onGroupPowerClick(group: CircuitGroup) {
         val plan = userPlanRepository.planFlow.value
-        val isPro = plan.capabilities.professionalReportSections
+        val hasAccess = plan.capabilities.professionalReportSections
 
         val breakdown = calculateGroupBreakdownUseCase.execute(group)
+
+        val steps = breakdown.installedPower.steps
+        val hasSteps = steps.isNotEmpty()
+
+        val calcDetailsState = resolveCalcDetailsState(
+            hasSteps = hasSteps,
+            hasAccess = hasAccess
+        )
 
         openInfoSheet(
             InfoSheetPayload(
                 title = "Мощность группы",
+                sheetType = InfoSheetType.CALCULATION,
+                calcDetailsState = calcDetailsState,
                 currentValueText = "%.2f кВт".format(breakdown.installedPower.value / 1000.0),
-                calcBlocks = if (isPro) breakdown.installedPower.steps.toCalcBlocksUi() else emptyList(),
+                // Важно: LOCKED решаем по real steps, а в Free блоки можно не отдавать
+                calcBlocks = if (hasAccess) CalcBlocksMapper.mapSteps(steps) else emptyList(),
                 normRefs = emptyList()
             )
         )
@@ -114,15 +126,25 @@ class ExplicationViewModel @Inject constructor(
 
     fun onGroupCurrentClick(group: CircuitGroup) {
         val plan = userPlanRepository.planFlow.value
-        val isPro = plan.capabilities.professionalReportSections
+        val hasAccess = plan.capabilities.professionalReportSections
 
         val breakdown = calculateGroupBreakdownUseCase.execute(group)
+
+        val steps = breakdown.calculatedCurrent.steps
+        val hasSteps = steps.isNotEmpty()
+
+        val calcDetailsState = resolveCalcDetailsState(
+            hasSteps = hasSteps,
+            hasAccess = hasAccess
+        )
 
         openInfoSheet(
             InfoSheetPayload(
                 title = "Расчётный ток",
+                sheetType = InfoSheetType.CALCULATION,
+                calcDetailsState = calcDetailsState,
                 currentValueText = "%.2f А".format(breakdown.calculatedCurrent.value),
-                calcBlocks = if (isPro) breakdown.calculatedCurrent.steps.toCalcBlocksUi() else emptyList(),
+                calcBlocks = if (hasAccess) CalcBlocksMapper.mapSteps(steps) else emptyList(),
                 normRefs = emptyList()
             )
         )
@@ -179,53 +201,61 @@ class ExplicationViewModel @Inject constructor(
         _selectedDeviceBreakdown.value = null
     }
 
+    private fun resolveCalcDetailsState(
+        hasSteps: Boolean,
+        hasAccess: Boolean
+    ): CalcDetailsState = when {
+        !hasSteps -> CalcDetailsState.NONE
+        hasAccess -> CalcDetailsState.AVAILABLE
+        else -> CalcDetailsState.LOCKED
+    }
+
     fun onInstalledPowerClick(calculated: CalculatedValue) {
         val plan = userPlanRepository.planFlow.value
+        val hasAccess = plan.capabilities.professionalReportSections
+
+        val steps = calculated.steps
+        val hasSteps = steps.isNotEmpty()
+
+        val calcDetailsState = resolveCalcDetailsState(
+            hasSteps = hasSteps,
+            hasAccess = hasAccess
+        )
 
         openInfoSheet(
             InfoSheetPayload(
                 title = "Установленная мощность",
+                sheetType = InfoSheetType.CALCULATION,
+                calcDetailsState = calcDetailsState,
                 currentValueText = "%.1f кВт".format(calculated.value / 1000.0),
-                calcBlocks = calculated.steps.toCalcBlocksUi(),
-                normRefs = if (plan.capabilities.professionalReportSections) {
-                    calculated.normRefs.map { it.toString() } // пока так, т.к. NormRef модель ты не прислал
-                } else emptyList()
+                calcBlocks = if (hasAccess) CalcBlocksMapper.mapSteps(steps) else emptyList(),
+                normRefs = if (hasAccess) calculated.normRefs.map { it.toString() } else emptyList()
             )
         )
     }
 
     fun onCalculatedPowerClick(calculated: CalculatedValue) {
         val plan = userPlanRepository.planFlow.value
+        val hasAccess = plan.capabilities.professionalReportSections
+
+        val steps = calculated.steps
+        val hasSteps = steps.isNotEmpty()
+
+        val calcDetailsState = resolveCalcDetailsState(
+            hasSteps = hasSteps,
+            hasAccess = hasAccess
+        )
 
         openInfoSheet(
             InfoSheetPayload(
                 title = "Расчётная нагрузка",
+                sheetType = InfoSheetType.CALCULATION,
+                calcDetailsState = calcDetailsState,
                 currentValueText = "%.1f кВт".format(calculated.value / 1000.0),
-                calcBlocks = calculated.steps.toCalcBlocksUi(),
-                normRefs = if (plan.capabilities.professionalReportSections) {
-                    calculated.normRefs.map { it.toString() }
-                } else emptyList()
+                calcBlocks = if (hasAccess) CalcBlocksMapper.mapSteps(steps) else emptyList(),
+                normRefs = if (hasAccess) calculated.normRefs.map { it.toString() } else emptyList()
             )
         )
-    }
-
-    private fun List<CalcStep>.toCalcBlocksUi(): List<CalcBlockUi> {
-        return map { step ->
-            CalcBlockUi(
-                formulaText = step.formula,
-                substitutionLines = step.inputs.map { input ->
-                    // "Σ Pпаспорт = 1234 Вт"
-                    "${input.name} = ${fmtNumber(input.value)} ${input.unit}"
-                },
-                resultText = "${fmtNumber(step.output.value)} ${step.output.unit}"
-            )
-        }
-    }
-
-    private fun fmtNumber(v: Double): String {
-        // простая нормальная печать без запятых
-        val s = String.format(Locale.US, "%.2f", v)
-        return s.trimEnd('0').trimEnd('.')
     }
 
     fun onIncomerFieldClick(field: InfoSheetPayloadFactory.IncomerField, incomer: IncomerSpec, hasGroupRcds: Boolean) {
