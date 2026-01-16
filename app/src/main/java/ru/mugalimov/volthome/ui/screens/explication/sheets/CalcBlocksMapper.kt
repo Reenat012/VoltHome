@@ -12,6 +12,12 @@ object CalcBlocksMapper {
 
     private const val GROUP_CURRENT_LEGACY_FORMULA = "Iгр = Σ Iрасч,i"
 
+    // Соглашение для "прозрачных" групповых шагов:
+    // "<deviceName> / base" | "<deviceName> / k" | "<deviceName> / result"
+    private const val ROLE_BASE = "base"
+    private const val ROLE_K = "k"
+    private const val ROLE_RESULT = "result"
+
     fun mapSteps(steps: List<CalcStep>): List<CalcBlockUi> {
         return steps.map { step ->
             mapStep(step)
@@ -19,12 +25,23 @@ object CalcBlocksMapper {
     }
 
     private fun mapStep(step: CalcStep): CalcBlockUi {
-        // --- Спец-правило для "расчётного тока группы", чтобы не было разрыва 11.76 -> 8.82 без kспроса ---
+        // 1) Пробуем "прозрачный" шаблон по соглашению именования inputs.
+        val transparentLines = mapTransparentSubstitutionLinesOrNull(step)
+        if (transparentLines != null) {
+            return CalcBlockUi(
+                formulaText = step.formula,
+                substitutionLines = transparentLines,
+                resultText = "${fmtNumber(step.output.value)} ${step.output.unit}"
+            )
+        }
+
+        // 2) Legacy-правило (историческое): только если шаг в старом формате.
+        // Важно: в legacy мы НЕ должны "угадывать" k, если шаг не соответствует условиям.
         if (step.formula.trim() == GROUP_CURRENT_LEGACY_FORMULA) {
             return mapGroupCurrentStepWithDemand(step)
         }
 
-        // --- Default mapping ---
+        // 3) Default mapping (fallback)
         return CalcBlockUi(
             formulaText = step.formula,
             substitutionLines = step.inputs.map { input ->
@@ -32,6 +49,99 @@ object CalcBlocksMapper {
             },
             resultText = "${fmtNumber(step.output.value)} ${step.output.unit}"
         )
+    }
+
+    /**
+     * Поддержка "прозрачного" шаблона из доменных inputs:
+     *  - группируем inputs по deviceName и роли base|k|result
+     *  - строим строку: "<device> = <base> <unit> × <k> = <result> <unit>"
+     *
+     * Правила:
+     *  - коэффициент k не вычисляем и не угадываем
+     *  - строка создаётся только при наличии полного набора base+k+result на устройство
+     *
+     * Возврат:
+     *  - null -> шаг не похож на "прозрачный" (используем legacy/default)
+     *  - list -> шаг распознан как "прозрачный"
+     *      - может быть пустым (если inputs выглядят как прозрачные, но ни одного полного набора нет)
+     */
+    private fun mapTransparentSubstitutionLinesOrNull(step: CalcStep): List<String>? {
+        val inputs = step.inputs
+        if (inputs.isEmpty()) return null
+
+        // Быстрая проверка: есть ли вообще признаки прозрачного шаблона.
+        val looksLikeTransparent = inputs.any { input ->
+            val parsed = parseTransparentName(input.name)
+            parsed != null && (parsed.second == ROLE_BASE || parsed.second == ROLE_K || parsed.second == ROLE_RESULT)
+        }
+        if (!looksLikeTransparent) return null
+
+        data class TripleParts(
+            val deviceName: String,
+            var baseValue: Double? = null,
+            var baseUnit: String? = null,
+            var kValue: Double? = null,
+            var resultValue: Double? = null,
+            var resultUnit: String? = null
+        )
+
+        // Сохраняем порядок устройств как "первое появление в inputs"
+        val ordered = LinkedHashMap<String, TripleParts>()
+
+        inputs.forEach { input ->
+            val parsed = parseTransparentName(input.name) ?: return@forEach
+            val device = parsed.first
+            val role = parsed.second
+
+            val parts = ordered.getOrPut(device) { TripleParts(deviceName = device) }
+
+            when (role) {
+                ROLE_BASE -> {
+                    parts.baseValue = input.value
+                    parts.baseUnit = input.unit
+                }
+                ROLE_K -> {
+                    parts.kValue = input.value
+                }
+                ROLE_RESULT -> {
+                    parts.resultValue = input.value
+                    parts.resultUnit = input.unit
+                }
+            }
+        }
+
+        val lines = mutableListOf<String>()
+
+        ordered.values.forEach { parts ->
+            val baseV = parts.baseValue
+            val baseU = parts.baseUnit
+            val kV = parts.kValue
+            val resV = parts.resultValue
+            val resU = parts.resultUnit
+
+            // Строка только если полный набор.
+            if (baseV != null && baseU != null && kV != null && resV != null && resU != null) {
+                lines += "${parts.deviceName} = ${fmtNumber(baseV)} $baseU × ${fmtNumber(kV)} = ${fmtNumber(resV)} $resU"
+            }
+        }
+
+        return lines
+    }
+
+    /**
+     * Парсинг имени input по соглашению: "<deviceName> / <role>"
+     * Возвращает Pair(deviceName, role) или null.
+     */
+    private fun parseTransparentName(name: String): Pair<String, String>? {
+        // Жёстко используем разделитель " / " из спеки.
+        val idx = name.lastIndexOf(" / ")
+        if (idx <= 0) return null
+
+        val device = name.substring(0, idx).trim()
+        val role = name.substring(idx + 3).trim()
+
+        if (device.isEmpty() || role.isEmpty()) return null
+        return device to role
     }
 
     /**
@@ -49,7 +159,7 @@ object CalcBlocksMapper {
         // 1) Если не 1 input — не фантазируем, оставляем как есть (но формулу улучшим только если безопасно).
         if (inputs.size != 1) {
             return CalcBlockUi(
-                formulaText = "Iгр = Σ (Iном,i × kспроса,i)",
+                formulaText = "Iгр = Σ (Iном.i × kспроса.i)",
                 substitutionLines = inputs.map { input ->
                     // лучше оставить старый формат, чем придумать k
                     "${input.name} = ${fmtNumber(input.value)} ${input.unit}"
@@ -65,7 +175,7 @@ object CalcBlocksMapper {
         // Защита от деления на 0 / мусора
         if (abs(inV) < 1e-9) {
             return CalcBlockUi(
-                formulaText = "Iгр = Σ (Iном,i × kспроса,i)",
+                formulaText = "Iгр = Σ (Iном.i × kспроса.i)",
                 substitutionLines = listOf(
                     "${input.name}: ${fmtNumber(inV)} ${input.unit}"
                 ),
@@ -76,7 +186,7 @@ object CalcBlocksMapper {
         val k = outV / inV
 
         return CalcBlockUi(
-            formulaText = "Iгр = Σ (Iном,i × kспроса,i)",
+            formulaText = "Iгр = Σ (Iном.i × kспроса.i)",
             substitutionLines = listOf(
                 "${input.name}: ${fmtNumber(inV)} ${input.unit} × ${fmtNumber(k)} = ${fmtNumber(outV)} ${out.unit}"
             ),

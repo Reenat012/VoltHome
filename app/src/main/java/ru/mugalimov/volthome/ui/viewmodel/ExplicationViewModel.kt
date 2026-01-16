@@ -103,7 +103,11 @@ class ExplicationViewModel @Inject constructor(
 
         val breakdown = calculateGroupBreakdownUseCase.execute(group)
 
-        val steps = breakdown.installedPower.steps
+        // ✅ Sheet "Мощность группы" теперь показывает расчётную мощность (с kспроса),
+        // а не установленную.
+        val calculated = breakdown.calculatedPower
+
+        val steps = calculated.steps
         val hasSteps = steps.isNotEmpty()
 
         val calcDetailsState = resolveCalcDetailsState(
@@ -116,7 +120,7 @@ class ExplicationViewModel @Inject constructor(
                 title = "Мощность группы",
                 sheetType = InfoSheetType.CALCULATION,
                 calcDetailsState = calcDetailsState,
-                currentValueText = "%.2f кВт".format(breakdown.installedPower.value / 1000.0),
+                currentValueText = "%.2f кВт".format(calculated.value / 1000.0),
                 // Важно: LOCKED решаем по real steps, а в Free блоки можно не отдавать
                 calcBlocks = if (hasAccess) CalcBlocksMapper.mapSteps(steps) else emptyList(),
                 normRefs = emptyList()
@@ -149,6 +153,7 @@ class ExplicationViewModel @Inject constructor(
             )
         )
     }
+
     // --- UI events (one-shot) ---
     sealed class UiEvent {
         object ExportPdfRequested : UiEvent()
