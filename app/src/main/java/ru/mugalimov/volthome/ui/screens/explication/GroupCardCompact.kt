@@ -48,6 +48,7 @@ import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.screens.explication.sheets.CalcDetailsState
 import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetPayload
 import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetType
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -71,6 +72,10 @@ fun GroupCardCompact(
     val divider = cs.outlineVariant.copy(alpha = 0.45f)
     val bgTrack = cs.surfaceContainer
     val textSecondary = cs.onSurfaceVariant
+
+    val calculatedPowerW = group.devices
+        .sumOf { it.power.toDouble() * it.demandRatio }
+        .roundToInt()
 
     Surface(shape = MaterialTheme.shapes.large, tonalElevation = 3.dp) {
         Column(
@@ -115,7 +120,7 @@ fun GroupCardCompact(
 
                 ParamBadge(
                     icon = Icons.Outlined.Bolt,
-                    text = "${F.kwFromW(group.installedPowerW, decimals = 2)} кВт"
+                    text = "${F.kwFromW(calculatedPowerW, decimals = 2)} кВт"
                 ) {
                     onGroupPowerClick(group) // VM формирует InfoSheetPayload
                 }
