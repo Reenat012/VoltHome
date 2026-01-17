@@ -72,12 +72,13 @@ object CalcBlocksMapper {
         // Быстрая проверка: есть ли вообще признаки прозрачного шаблона.
         val looksLikeTransparent = inputs.any { input ->
             val parsed = parseTransparentName(input.name)
-            parsed != null && (parsed.second == ROLE_BASE || parsed.second == ROLE_K || parsed.second == ROLE_RESULT)
+            parsed != null && (parsed.role == ROLE_BASE || parsed.role == ROLE_K || parsed.role == ROLE_RESULT)
         }
         if (!looksLikeTransparent) return null
 
         data class TripleParts(
-            val deviceName: String,
+            val deviceKey: String,      // уникальный ключ (deviceId=...)
+            val deviceLabel: String,    // то, что показываем пользователю
             var baseValue: Double? = null,
             var baseUnit: String? = null,
             var kValue: Double? = null,
@@ -85,15 +86,18 @@ object CalcBlocksMapper {
             var resultUnit: String? = null
         )
 
-        // Сохраняем порядок устройств как "первое появление в inputs"
+// Сохраняем порядок устройств как "первое появление в inputs"
         val ordered = LinkedHashMap<String, TripleParts>()
 
         inputs.forEach { input ->
             val parsed = parseTransparentName(input.name) ?: return@forEach
-            val device = parsed.first
-            val role = parsed.second
+            val key = parsed.deviceKey
+            val label = parsed.deviceLabel
+            val role = parsed.role
 
-            val parts = ordered.getOrPut(device) { TripleParts(deviceName = device) }
+            val parts = ordered.getOrPut(key) {
+                TripleParts(deviceKey = key, deviceLabel = label)
+            }
 
             when (role) {
                 ROLE_BASE -> {
@@ -119,9 +123,15 @@ object CalcBlocksMapper {
             val resV = parts.resultValue
             val resU = parts.resultUnit
 
-            // Строка только если полный набор.
+            // 1) Полная триада (calculated): base × k = result
             if (baseV != null && baseU != null && kV != null && resV != null && resU != null) {
-                lines += "${parts.deviceName} = ${fmtNumber(baseV)} $baseU × ${fmtNumber(kV)} = ${fmtNumber(resV)} $resU"
+                lines += "${parts.deviceLabel} = ${fmtNumber(baseV)} $baseU × ${fmtNumber(kV)} = ${fmtNumber(resV)} $resU"
+                return@forEach
+            }
+
+            // 2) Только base (installed): "<label> = <base> <unit>"
+            if (baseV != null && baseU != null && kV == null && resV == null && resU == null) {
+                lines += "${parts.deviceLabel} = ${fmtNumber(baseV)} $baseU"
             }
         }
 
@@ -132,16 +142,52 @@ object CalcBlocksMapper {
      * Парсинг имени input по соглашению: "<deviceName> / <role>"
      * Возвращает Pair(deviceName, role) или null.
      */
-    private fun parseTransparentName(name: String): Pair<String, String>? {
-        // Жёстко используем разделитель " / " из спеки.
+    private data class TransparentNameParsed(
+        val deviceKey: String,
+        val deviceLabel: String,
+        val role: String
+    )
+
+    /**
+     * Поддерживаем 2 формата:
+     *
+     * NEW:
+     *   "deviceId=<id>;label=<name> / base|k|result"
+     *
+     * LEGACY:
+     *   "<name> / base|k|result"
+     */
+    private fun parseTransparentName(name: String): TransparentNameParsed? {
         val idx = name.lastIndexOf(" / ")
         if (idx <= 0) return null
 
-        val device = name.substring(0, idx).trim()
+        val left = name.substring(0, idx).trim()
         val role = name.substring(idx + 3).trim()
+        if (left.isEmpty() || role.isEmpty()) return null
 
-        if (device.isEmpty() || role.isEmpty()) return null
-        return device to role
+        // NEW format
+        if (left.startsWith("deviceId=") && left.contains(";label=")) {
+            val parts = left.split(";label=", limit = 2)
+            if (parts.size == 2) {
+                val idPart = parts[0].removePrefix("deviceId=").trim()
+                val label = parts[1].trim()
+                if (idPart.isNotEmpty() && label.isNotEmpty()) {
+                    val key = "deviceId=$idPart"
+                    return TransparentNameParsed(
+                        deviceKey = key,
+                        deviceLabel = label,
+                        role = role
+                    )
+                }
+            }
+        }
+
+        // LEGACY fallback: ключ = label
+        return TransparentNameParsed(
+            deviceKey = left,
+            deviceLabel = left,
+            role = role
+        )
     }
 
     /**

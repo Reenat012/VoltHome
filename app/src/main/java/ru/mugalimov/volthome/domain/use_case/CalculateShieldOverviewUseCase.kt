@@ -27,8 +27,9 @@ class CalculateShieldOverviewUseCase @Inject constructor() {
         val installedInputs: List<CalcInput> = groups
             .flatMap { it.devices }
             .map { d ->
+                val key = "deviceId=${d.id};label=${d.name}"
                 CalcInput(
-                    name = "${d.name} / base",
+                    name = "$key / base",
                     value = (d.power ?: 0).toDouble(),
                     unit = "Вт"
                 )
@@ -101,19 +102,21 @@ class CalculateShieldOverviewUseCase @Inject constructor() {
                 val appliedK = if (k == null) 1.0 else k
                 val result = (p * appliedK).toInt()
 
+                val key = "deviceId=${d.id};label=${d.name}"
+
                 listOf(
                     CalcInput(
-                        name = "${d.name} / base",
+                        name = "$key / base",
                         value = p.toDouble(),
                         unit = "Вт"
                     ),
                     CalcInput(
-                        name = "${d.name} / k",
+                        name = "$key / k",
                         value = appliedK,
                         unit = ""
                     ),
                     CalcInput(
-                        name = "${d.name} / result",
+                        name = "$key / result",
                         value = result.toDouble(),
                         unit = "Вт"
                     )
