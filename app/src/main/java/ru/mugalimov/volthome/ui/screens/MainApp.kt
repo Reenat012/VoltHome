@@ -31,6 +31,7 @@ import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import ru.mugalimov.volthome.BuildConfig
+import ru.mugalimov.volthome.domain.model.PlanCapabilities
 import ru.mugalimov.volthome.domain.model.ProFeature
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.model.ProjectUi
@@ -66,11 +67,9 @@ fun MainApp(
     val userPlanVm: UserPlanViewModel = hiltViewModel()
     val userPlan = userPlanVm.plan.collectAsState().value
 
-    val hasAnyPaidAccess = userPlan.capabilities.unlimitedProjects
-
     // -----------------------------
-// ✅ Глобальный paywall
-// -----------------------------
+    // ✅ Глобальный paywall (capabilities-aware)
+    // -----------------------------
     val context = LocalContext.current
     val paywallBus = remember {
         EntryPointAccessors.fromApplication(
@@ -81,20 +80,21 @@ fun MainApp(
 
     var paywallFeature by remember { mutableStateOf<ProFeature?>(null) }
 
-// ✅ FIX: в PRO-режиме paywall не показываем вообще
-    LaunchedEffect(paywallBus, hasAnyPaidAccess) {
+    LaunchedEffect(paywallBus, userPlan) {
+        val caps = userPlan.capabilities
         paywallBus.events.collect { feature ->
-            if (hasAnyPaidAccess) {
-                // ignore
+            if (isFeatureAllowed(feature, caps)) {
+                // already allowed — ignore
                 return@collect
             }
             paywallFeature = feature
         }
     }
 
-// ✅ Доп. guard: если тариф стал PRO, закрываем уже открытый диалог
-    LaunchedEffect(hasAnyPaidAccess) {
-        if (hasAnyPaidAccess && paywallFeature != null) {
+    // ✅ Guard: если capabilities обновились так, что текущая фича стала доступна — закрываем диалог
+    LaunchedEffect(userPlan, paywallFeature) {
+        val feature = paywallFeature ?: return@LaunchedEffect
+        if (isFeatureAllowed(feature, userPlan.capabilities)) {
             paywallFeature = null
         }
     }
@@ -138,6 +138,7 @@ fun MainApp(
                         subscriptionStatus = me.plan
                     )
                 }
+
                 else -> null
             }
         }
@@ -222,5 +223,20 @@ fun MainApp(
                 )
             }
         }
+    }
+}
+
+private fun isFeatureAllowed(feature: ProFeature, caps: PlanCapabilities): Boolean {
+    return when (feature) {
+        ProFeature.PROJECTS_LIMIT -> caps.unlimitedProjects
+        ProFeature.PHASE_DND_TEASER -> caps.phaseDragAndDrop
+        ProFeature.ADVANCED_DEVICE_EDITOR -> caps.extendedDeviceEditor
+
+        // ✅ export actions для отчёта (save/share/export PDF) — только при pdfExport
+        ProFeature.PRO_REPORT -> caps.pdfExport
+
+        // ✅ шаги/обоснования/предупреждения (проф. секции отчёта)
+        ProFeature.CALC_EXPLANATIONS -> caps.professionalReportSections
+        ProFeature.CALC_WARNINGS -> caps.professionalReportSections
     }
 }

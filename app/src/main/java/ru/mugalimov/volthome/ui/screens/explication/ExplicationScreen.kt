@@ -35,20 +35,23 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Phase
-import ru.mugalimov.volthome.domain.model.ProFeature
-import ru.mugalimov.volthome.ui.components.ProLocked
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
-import ru.mugalimov.volthome.ui.screens.explication.export_pdf.exportExplicationPdf
+import ru.mugalimov.volthome.ui.navigation.ReportPreviewNav
+import ru.mugalimov.volthome.ui.navigation.Screens
 import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetContent
 import ru.mugalimov.volthome.ui.viewmodel.ExplicationViewModel
 import ru.mugalimov.volthome.ui.viewmodel.GroupScreenState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
+fun ExplicationScreen(
+    navController: NavHostController,
+    viewModel: ExplicationViewModel = hiltViewModel()
+) {
     LaunchedEffect(Unit) { viewModel.recalcAndSaveGroups() }
 
     val selectedBreakdown by viewModel.selectedDeviceBreakdown.collectAsState()
@@ -64,9 +67,19 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
     val canExportPdf = caps.pdfExport
     val canShowProSections = caps.professionalReportSections
 
-    LaunchedEffect(event, canExportPdf) {
+    LaunchedEffect(event) {
         if (event == ExplicationViewModel.UiEvent.ExportPdfRequested) {
-            (ctx as? ComponentActivity)?.let { exportExplicationPdf(it, viewModel, caps) }
+            val activity = ctx as? ComponentActivity
+            if (activity != null) {
+                val html = viewModel.buildReportPreviewHtml(activity, caps)
+                if (!html.isNullOrBlank()) {
+                    navController.currentBackStackEntry
+                        ?.savedStateHandle
+                        ?.set(ReportPreviewNav.HTML_KEY, html)
+
+                    navController.navigate(Screens.ReportPreview.route)
+                }
+            }
             viewModel.consumeEvent()
         }
     }
@@ -152,42 +165,32 @@ fun ExplicationScreen(viewModel: ExplicationViewModel = hiltViewModel()) {
                     }
                 }
 
-                ProLocked(
-                    isAllowed = canExportPdf,
-                    feature = ProFeature.PRO_REPORT,
-                    onLockedClick = { _ -> viewModel.onExportPdfClick() },
+                FloatingActionButton(
+                    onClick = { viewModel.onExportPdfClick() }, // preview (Free + PRO)
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .windowInsetsPadding(WindowInsets.navigationBars)
-                        .padding(end = 16.dp, bottom = 16.dp),
-                    shape = FloatingActionButtonDefaults.shape,
-                    showLockIcon = false
-                ) {
-                    FloatingActionButton(
-                        onClick = { viewModel.onExportPdfClick() },
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.border(
+                        .padding(end = 16.dp, bottom = 16.dp)
+                        .border(
                             width = 1.dp,
                             color = MaterialTheme.colorScheme.outlineVariant,
                             shape = FloatingActionButtonDefaults.shape
                         ),
-                        elevation = FloatingActionButtonDefaults.elevation(
-                            defaultElevation = 0.dp,
-                            pressedElevation = 0.dp,
-                            focusedElevation = 0.dp,
-                            hoveredElevation = 0.dp
-                        )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.FileDownload,
-                            contentDescription = "Экспорт PDF",
-                            modifier = Modifier.size(26.dp),
-                            // NOTE: раньше у тебя было onPrimary — это почти наверняка ошибка контраста.
-                            // На secondaryContainer логичнее onSecondaryContainer.
-                            tint = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                    }
+                    elevation = FloatingActionButtonDefaults.elevation(
+                        defaultElevation = 0.dp,
+                        pressedElevation = 0.dp,
+                        focusedElevation = 0.dp,
+                        hoveredElevation = 0.dp
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.FileDownload,
+                        contentDescription = "Отчёт PDF",
+                        modifier = Modifier.size(26.dp),
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
                 }
 
 

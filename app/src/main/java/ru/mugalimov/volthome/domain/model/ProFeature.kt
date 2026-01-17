@@ -10,7 +10,7 @@ enum class ProFeature {
     ADVANCED_DEVICE_EDITOR,
 
     // professional artifacts
-    PRO_REPORT,          // полный профессиональный отчёт (в т.ч. PDF экспорт)
+    PRO_REPORT,          // export actions для отчёта (save/share/export PDF) и полный PRO-отчёт
     CALC_EXPLANATIONS,   // обоснования / шаги / прозрачность расчётов
     CALC_WARNINGS        // предупреждения по расчёту/данным
 }

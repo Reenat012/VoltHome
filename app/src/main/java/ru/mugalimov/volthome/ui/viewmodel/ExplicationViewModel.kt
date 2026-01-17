@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.ui.viewmodel
 
+import android.app.Activity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -25,6 +26,7 @@ import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.GroupingResult
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.PhaseMode
+import ru.mugalimov.volthome.domain.model.PlanCapabilities
 import ru.mugalimov.volthome.domain.model.ProFeature
 import ru.mugalimov.volthome.domain.model.VoltageType
 import ru.mugalimov.volthome.domain.model.incomer.IncomerSpec
@@ -44,6 +46,7 @@ import ru.mugalimov.volthome.domain.use_case.phaseCurrents
 import ru.mugalimov.volthome.domain.use_case.report.BuildProfessionalSectionsUseCase
 import ru.mugalimov.volthome.domain.util.PowerCurrentNormalizer
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
+import ru.mugalimov.volthome.ui.screens.explication.export_pdf.buildExplicationReportHtml
 import ru.mugalimov.volthome.ui.screens.explication.sheets.CalcBlocksMapper
 import ru.mugalimov.volthome.ui.screens.explication.sheets.CalcDetailsState
 import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetPayload
@@ -155,8 +158,22 @@ class ExplicationViewModel @Inject constructor(
     }
 
     // --- UI events (one-shot) ---
+    // --- UI events (one-shot) ---
     sealed class UiEvent {
+        /**
+         * Открыть превью отчёта (доступно в Free и PRO).
+         *
+         * ВАЖНО: оставляем имя ExportPdfRequested ради совместимости с текущим UI,
+         * который уже слушает именно это событие.
+         * На уровне поведения теперь это "PDF Preview Requested".
+         */
         object ExportPdfRequested : UiEvent()
+
+        /**
+         * Запрос на экспортные действия (save/share/export/брендинг и т.п.) — только PRO.
+         * UI/слой обработки должен сам решить, какие именно действия доступны и как их выполнять.
+         */
+        object PdfExportActionsRequested : UiEvent()
     }
 
     private val _events = MutableStateFlow<UiEvent?>(null)
@@ -172,13 +189,25 @@ class ExplicationViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Клик по "Отчёт PDF" = ОТКРЫТЬ ПРЕВЬЮ (Free + PRO).
+     * Никаких проверок pdfExport тут быть не должно.
+     */
     fun onExportPdfClick() {
+        _events.value = UiEvent.ExportPdfRequested
+    }
+
+    /**
+     * Экспортные действия (save/share/export/брендинг и т.п.) = только PRO.
+     * Здесь и только здесь проверяем pdfExport и ведём на paywall.
+     */
+    fun onPdfExportActionsClick() {
         val plan = userPlanRepository.planFlow.value
         if (!plan.capabilities.pdfExport) {
             paywallBus.request(ProFeature.PRO_REPORT)
             return
         }
-        _events.value = UiEvent.ExportPdfRequested
+        _events.value = UiEvent.PdfExportActionsRequested
     }
 
     fun consumeEvent() {
@@ -389,6 +418,10 @@ class ExplicationViewModel @Inject constructor(
             }
         }
     }
+
+    fun buildReportPreviewHtml(activity: Activity, caps: PlanCapabilities): String? {
+        return buildExplicationReportHtml(activity = activity, vm = this, caps = caps)
+    }
 }
 
 sealed class GroupScreenState {
@@ -516,9 +549,8 @@ private fun buildReportDataFrom(
  *  - SINGLE: донат загрузки вводного, headline только A
  */
 fun ExplicationViewModel.buildReportData(): Pair<ReportMeta, List<ReportPhase>>? {
-    val plan = userPlanRepository.planFlow.value
-    if (!plan.capabilities.pdfExport) return null
-
+    // ВАЖНО: данные отчёта для превью доступны в Free и PRO.
+    // Gate по pdfExport применяется только к экспортным действиям.
     val s = uiState.value as? GroupScreenState.Success ?: return null
 
     return buildReportDataFrom(
@@ -528,3 +560,4 @@ fun ExplicationViewModel.buildReportData(): Pair<ReportMeta, List<ReportPhase>>?
         mode = phaseMode.value
     )
 }
+

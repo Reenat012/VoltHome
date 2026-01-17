@@ -16,6 +16,7 @@ import ru.mugalimov.volthome.ui.screens.algoritm_about.AlgorithmExplanationScree
 import ru.mugalimov.volthome.ui.screens.explication.ExplicationScreen
 import ru.mugalimov.volthome.ui.screens.loads.PhaseLoadScreen
 import ru.mugalimov.volthome.ui.screens.profile.ProfileScreen
+import ru.mugalimov.volthome.ui.screens.report_preview.ReportPreviewScreen
 import ru.mugalimov.volthome.ui.screens.room.RoomDetailScreen
 import ru.mugalimov.volthome.ui.screens.rooms.RoomsScreen
 import ru.mugalimov.volthome.ui.screens.subscription.VoltHomeProScreen
@@ -103,7 +104,9 @@ fun NavGraphApp(
         }
 
         composable(route = Screens.LoadsScreen.route) { PhaseLoadScreen() }
-        composable(route = Screens.ExplicationScreen.route) { ExplicationScreen() }
+        composable(route = Screens.ExplicationScreen.route) {
+            ExplicationScreen(navController = navController)
+        }
 
         composable(
             route = Screens.RoomDetailScreen.route,
@@ -132,6 +135,32 @@ fun NavGraphApp(
 
         composable(Screens.SubscriptionScreen.route) {
             VoltHomeProScreen()
+        }
+
+
+
+        composable(route = Screens.ReportPreview.route) {
+            val prevEntry = navController.previousBackStackEntry
+
+            if (prevEntry == null) {
+                ReportPreviewScreen(html = "")
+                return@composable
+            }
+
+            // читаем один раз, НЕ StateFlow
+            val html = prevEntry.savedStateHandle.get<String>(ReportPreviewNav.HTML_KEY).orEmpty()
+
+            // чистим сразу после чтения (и это уже НЕ ломает UI)
+            LaunchedEffect(prevEntry) {
+                prevEntry.savedStateHandle.remove<String>(ReportPreviewNav.HTML_KEY)
+            }
+
+            if (html.isBlank()) {
+                ReportPreviewScreen(html = "")
+                return@composable
+            }
+
+            ReportPreviewScreen(html = html)
         }
     }
 }

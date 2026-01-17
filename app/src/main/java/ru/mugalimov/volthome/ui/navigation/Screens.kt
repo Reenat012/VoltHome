@@ -8,6 +8,7 @@ sealed class Screens(val route: String) {
     data object RoomsList : Screens("rooms")
     data object LoadsScreen : Screens("loads")
     data object ExplicationScreen : Screens("explication")
+    data object ReportPreview : Screens("report_preview")
 
     // Вложенные экраны
     data object AddRoom : Screens("add_room")
@@ -35,4 +36,6 @@ sealed class Screens(val route: String) {
     data object PhaseLoadScreen : Screens ("phase_load")
 
     data object SubscriptionScreen : Screens("subscription")
+
+
 }

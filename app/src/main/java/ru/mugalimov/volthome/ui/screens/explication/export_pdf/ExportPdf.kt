@@ -15,8 +15,21 @@ import ru.mugalimov.volthome.ui.viewmodel.ExplicationViewModel
 import ru.mugalimov.volthome.ui.viewmodel.GroupScreenState
 import ru.mugalimov.volthome.ui.viewmodel.buildReportData
 
-fun exportExplicationPdf(activity: Activity, vm: ExplicationViewModel,  caps: PlanCapabilities) {
-    val legacy = vm.buildReportData() ?: return
+/**
+ * Строит HTML отчёта для превью/экспорта.
+ *
+ * ВАЖНО:
+ * - Эта функция НЕ проверяет pdfExport.
+ * - Preview доступен в Free и PRO.
+ * - Ограничения экспорта должны применяться выше, в export-actions path.
+ */
+fun buildExplicationReportHtml(
+    activity: Activity,
+    vm: ExplicationViewModel,
+    caps: PlanCapabilities
+): String? {
+    // Данные отчёта: доступны в Free и PRO (gate по pdfExport тут запрещён).
+    val legacy = vm.buildReportData() ?: return null
     val (meta, phases) = legacy
 
     val reportBase = ReportModel.fromLegacy(
@@ -47,7 +60,7 @@ fun exportExplicationPdf(activity: Activity, vm: ExplicationViewModel,  caps: Pl
                 phases = phases,
                 distributionDecisions = emptyList(), // decisions подключим позже, если нужно
                 calcWarnings = warnings,
-                assumptions = assumptions,
+                assumptions = assumptions
             )
         )
     } else {
@@ -61,7 +74,9 @@ fun exportExplicationPdf(activity: Activity, vm: ExplicationViewModel,  caps: Pl
                 calculatedPowerW = s.calculatedPowerW.value
             )
         )
-    } else reportBase
+    } else {
+        reportBase
+    }
 
     val reportModel = reportBase2.copy(
         professional = professional,
@@ -71,13 +86,26 @@ fun exportExplicationPdf(activity: Activity, vm: ExplicationViewModel,  caps: Pl
         normRefs = emptyList()
     )
 
-// PDF: профессиональные секции полностью выключены
-    val html = HtmlReportBuilder(activity).build(
+    // HTML: inline-нормативы только в PRO (это про содержание, а не про доступность preview).
+    return HtmlReportBuilder(activity).build(
         model = reportModel,
-        includeInlineNormatives = caps.professionalReportSections // inline-нормативы только в PRO
+        includeInlineNormatives = caps.professionalReportSections
     )
+}
 
-
+/**
+ * Временный экспорт через системный Print UI.
+ *
+ * ВАЖНО:
+ * - Этот метод делает печать/экспорт (то есть действия).
+ * - Gate по pdfExport должен жить ВЫШЕ (в VM / export-actions path), не здесь.
+ */
+fun exportExplicationPdf(
+    activity: Activity,
+    vm: ExplicationViewModel,
+    caps: PlanCapabilities
+) {
+    val html = buildExplicationReportHtml(activity, vm, caps) ?: return
 
     when (activity) {
         is ComponentActivity -> {
@@ -85,6 +113,7 @@ fun exportExplicationPdf(activity: Activity, vm: ExplicationViewModel,  caps: Pl
                 PdfPrinter(activity).printHtml(html)
             }
         }
+
         else -> {
             activity.runOnUiThread {
                 PdfPrinter(activity).printHtml(html)
