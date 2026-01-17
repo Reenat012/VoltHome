@@ -48,6 +48,7 @@ uiGraphics = "1.9.4"
 rustoreSdkBom = "2025.08.01"
 foundationLayout = "1.10.0"
 foundation = "1.10.0"
+foundationVersion = "1.10.1"
 
 
 [libraries]
@@ -107,6 +108,7 @@ rustore-sdk-bom = { module = "ru.rustore.sdk:bom", version.ref = "rustoreSdkBom"
 rustore-sdk-pay = { module = "ru.rustore.sdk:pay" }
 androidx-compose-foundation-layout = { group = "androidx.compose.foundation", name = "foundation-layout", version.ref = "foundationLayout" }
 androidx-compose-foundation = { group = "androidx.compose.foundation", name = "foundation", version.ref = "foundation" }
+androidx-foundation = { group = "androidx.compose.foundation", name = "foundation", version.ref = "foundationVersion" }
 
 
 [plugins]

@@ -30,19 +30,13 @@ import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.viewmodel.ExplicationViewModel
 import ru.mugalimov.volthome.ui.viewmodel.PhaseLoadViewModel
 
-/**
- * Экран «Распределение по фазам».
- * - 1 фаза: индикатор загрузки вводного, скрыты B/C, «Топ потребителей», «Куда уходит ток», таблица фазы A.
- * - 3 фазы: классический донат A/B/C + таблица по трём фазам.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PhaseLoadScreen(
     viewModel: PhaseLoadViewModel = hiltViewModel(),
     explicationViewModel: ExplicationViewModel = hiltViewModel(),
-    onGroupAction: (PhaseGroupItem) -> Unit = {},   // навигация к редактированию/разделению группы
+    onGroupAction: (PhaseGroupItem) -> Unit = {},
 ) {
-    // При входе пересчитываем группы/вводной, чтобы UI был консистентен
     LaunchedEffect(Unit) {
         explicationViewModel.recalcAndSaveGroups()
     }
@@ -92,71 +86,19 @@ fun PhaseLoadScreen(
                     phaseLoads = uiState.data,
                     decisions = uiState.decisions,
                     mode = uiState.mode,
+                    phaseLoadMode = uiState.phaseLoadMode,
                     incomerRating = uiState.incomer?.mcbRating,
                     thresholds = uiState.thresholds,
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding),
                     canDrag = canDrag,
+                    onEnterManualMode = { viewModel.onEnterManualMode() },
                     onPaywall = { viewModel.onDnDLockedTapped() },
                     onGroupDropped = { groupId, phase -> viewModel.onGroupDragged(groupId, phase) },
                     onReset = { viewModel.onResetOverrides() }
                 )
             }
         }
-    }
-}
-
-/* ====== helper UI ====== */
-
-@Composable
-private fun LoadingView() {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator()
-    }
-}
-
-@Composable
-private fun ErrorView(
-    error: Throwable,
-    onRetry: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text(
-            text = "Ошибка загрузки",
-            style = MaterialTheme.typography.titleMedium
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = (error.message ?: error.toString()),
-            style = MaterialTheme.typography.bodyMedium,
-            textAlign = TextAlign.Center
-        )
-        Spacer(Modifier.height(16.dp))
-        Button(onClick = onRetry) {
-            Text("Повторить")
-        }
-    }
-}
-
-@Composable
-private fun EmptyView(text: String) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodyLarge,
-            textAlign = TextAlign.Center
-        )
     }
 }

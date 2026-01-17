@@ -1,4 +1,3 @@
-// ru/mugalimov/volthome/ui/screens/loads/PhaseLoadContent.kt
 package ru.mugalimov.volthome.ui.screens.loads
 
 import androidx.compose.foundation.clickable
@@ -40,10 +39,12 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import ru.mugalimov.volthome.domain.model.DistributionDecision
@@ -52,6 +53,7 @@ import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.phase_load.LoadThresholds
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
+import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadMode
 
 /**
  * Контент экрана «Нагрузки».
@@ -68,16 +70,25 @@ fun PhaseLoadContent(
     decisions: List<DistributionDecision> = emptyList(),
     phaseLoads: List<PhaseLoadItem>,
     mode: PhaseMode = PhaseMode.THREE,
+    phaseLoadMode: PhaseLoadMode = PhaseLoadMode.AUTO,
     incomerRating: Int? = null,
     thresholds: LoadThresholds = LoadThresholds(),
     modifier: Modifier = Modifier,
     canDrag: Boolean,
     onPaywall: () -> Unit,
+    onEnterManualMode: () -> Unit,
     onGroupDropped: (groupId: Long, target: Phase) -> Unit,
     onReset: () -> Unit
 ) {
     // Drop-zones в координатах ROOT (boundsInRoot) — ТОЛЬКО для A/B/C
     val dropZones = remember { mutableStateMapOf<Phase, Rect>() }
+
+    var overlayContainerSize by remember { mutableStateOf(IntSize.Zero) }
+    var dragOverlaySize by remember { mutableStateOf(IntSize.Zero) }
+
+    val density = LocalDensity.current
+    val overlayGapPx = with(density) { 12.dp.toPx() } // зазор между пальцем и карточкой
+
 
     // Drag state
     var dragging by remember { mutableStateOf<PhaseLoadContentKt_DragPayload?>(null) }
@@ -148,8 +159,8 @@ fun PhaseLoadContent(
         modifier = modifier
             .fillMaxSize()
             .onGloballyPositioned { coords ->
-                // ✅ координаты контейнера overlay в ROOT
                 overlayContainerTopLeft = coords.positionInRoot()
+                overlayContainerSize = coords.size
             }
     ) {
         LazyColumn(
@@ -159,6 +170,40 @@ fun PhaseLoadContent(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item { Spacer(Modifier.height(8.dp)) }
+
+            // Режим работы экрана (коммит 1): Auto / Manual
+            item {
+                val modeLabel = when (phaseLoadMode) {
+                    PhaseLoadMode.AUTO -> "Авто"
+                    PhaseLoadMode.MANUAL -> "Ручной"
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Режим: $modeLabel",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    // ✅ Точка входа в MANUAL (явное действие)
+                    if (phaseLoadMode == PhaseLoadMode.AUTO) {
+                        Text(
+                            text = "Перейти в ручной режим",
+                            modifier = Modifier
+                                .clickable {
+                                    if (canDrag) onEnterManualMode() else onPaywall()
+                                }
+                                .padding(vertical = 6.dp),
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                }
+            }
 
             // Донат / Индикатор вводного + маркетинговый замок для FREE
             item {
@@ -189,17 +234,30 @@ fun PhaseLoadContent(
 
             // Reset (PRO) / Paywall (FREE)
             item {
+                val resetEnabled = (phaseLoadMode == PhaseLoadMode.MANUAL) && canDrag
+
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End
                 ) {
                     Text(
-                        text = "Сбросить ручные изменения фаз",
+                        text = "Сбросить изменения и вернуться в режим Авто",
                         modifier = Modifier
-                            .clickable { if (canDrag) onReset() else onPaywall() }
+                            .clickable(
+                                enabled = resetEnabled || !canDrag,
+                            ) {
+                                when {
+                                    !canDrag -> onPaywall()      // Free: объясняющая модалка (коммит 3)
+                                    resetEnabled -> onReset()     // PRO + MANUAL: сброс + AUTO (коммит 5)
+                                    else -> Unit                  // PRO + AUTO: ничего (уже baseline)
+                                }
+                            }
                             .padding(vertical = 6.dp),
-                        color = if (canDrag) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant
+                        color = when {
+                            !canDrag -> MaterialTheme.colorScheme.onSurfaceVariant
+                            resetEnabled -> MaterialTheme.colorScheme.primary
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        }
                     )
                 }
             }
@@ -283,18 +341,8 @@ fun PhaseLoadContent(
                 }
             }
 
-            // ===== ✅ Секция 3φ отдельным блоком (без DnD/drop-zone) =====
-            if (threePhaseItem != null && threePhaseItem.groups.isNotEmpty()) {
-                item {
-                    ThreePhaseLoadsSection(
-                        item = threePhaseItem,
-                        decisionsByGroupNumber = decisionsByGroupNumber,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            }
+            val canStartDnD = (phaseLoadMode == PhaseLoadMode.MANUAL) && canDrag
 
-            // ===== Таблица фаз/групп — только A/B/C + DnD drop-zones =====
             items(phaseItems, key = { it.phase }) { item ->
                 PhaseGroupTableItem(
                     item = item,
@@ -302,45 +350,47 @@ fun PhaseLoadContent(
                     expanded = isExpanded(item.phase),
                     onToggle = { togglePhase(item.phase) },
 
-                    canDrag = canDrag,
-                    onPaywall = onPaywall,
-
                     isDropTargetHighlighted = (dragging != null && hoveredPhase == item.phase),
 
                     onRegisterDropZone = { phase, rect ->
-                        // ✅ drop-zone только для A/B/C
                         if (phase == Phase.A || phase == Phase.B || phase == Phase.C) {
                             dropZones[phase] = rect
                         }
                     },
 
-                    onDragStart = { payload ->
-                        if (!canDrag) onPaywall() else dragging = payload
+                    // ✅ ЕДИНАЯ точка gating-а: здесь решаем paywall/ignore/start
+                    onDragStartAttempt = { payload, startRoot ->
+                        // чтобы overlay не прыгал с (0,0), даже если старт разрешён
+                        dragPosRoot = startRoot
+                        dragPosLocal = startRoot - overlayContainerTopLeft
+
+                        when {
+                            !canDrag -> onPaywall()                 // Free: capability=false → модалка (коммит 3)
+                            phaseLoadMode != PhaseLoadMode.MANUAL -> Unit // PRO+AUTO: игнор
+                            else -> dragging = payload              // PRO+MANUAL: стартуем
+                        }
                     },
 
-                    // ✅ rootPos приходит в ROOT координатах (см. PhaseGroupTableItem: localToRoot)
                     onDragMove = { rootPos ->
+                        // двигаем только если DnD реально запущен (иначе это шум)
+                        if (dragging == null) return@PhaseGroupTableItem
                         dragPosRoot = rootPos
                         dragPosLocal = rootPos - overlayContainerTopLeft
                     },
 
-                    onDragCancel = {
-                        dragging = null
-                    },
+                    onDragCancel = { dragging = null },
 
-                    onDragEnd = { payload ->
-                        if (!canDrag) {
+                    onDragEndAttempt = { payload ->
+                        if (!canStartDnD || dragging == null) {
                             dragging = null
                             return@PhaseGroupTableItem
                         }
 
-                        // ✅ проверка drop-а в ROOT координатах (по dropZones A/B/C)
                         val target = dropZones.entries.firstOrNull { (_, rect) ->
                             rect.contains(dragPosRoot)
                         }?.key
 
                         val success = (target != null && target != payload.fromPhase)
-
                         if (success) {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             onGroupDropped(payload.groupId, target!!)
@@ -351,17 +401,40 @@ fun PhaseLoadContent(
                 )
             }
 
+            // ✅ 3φ — ПОСЛЕДНИМ блоком
+            if (threePhaseItem != null && threePhaseItem.groups.isNotEmpty()) {
+                item {
+                    ThreePhaseLoadsSection(
+                        item = threePhaseItem,
+                        decisionsByGroupNumber = decisionsByGroupNumber,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+
             item { Spacer(Modifier.height(8.dp)) }
         }
 
-        // Drag overlay
+        // Drag overlay (появляется СЛЕВА от пальца/хэндла)
         val p = dragging
         if (p != null) {
+            val containerW = overlayContainerSize.width
+            val containerH = overlayContainerSize.height
+
+            val overlayW = dragOverlaySize.width
+            val overlayH = dragOverlaySize.height
+
+            val desiredX = (dragPosLocal.x - overlayW - overlayGapPx).roundToInt()
+            val desiredY = (dragPosLocal.y - overlayH * 0.25f).roundToInt() // чуть выше пальца
+
+            val clampedX = desiredX.coerceIn(0, (containerW - overlayW).coerceAtLeast(0))
+            val clampedY = desiredY.coerceIn(0, (containerH - overlayH).coerceAtLeast(0))
+
             Card(
                 modifier = Modifier
                     .zIndex(1000f)
-                    // ✅ overlay рисуем в ЛОКАЛЬНЫХ координатах контейнера
-                    .offset { IntOffset(dragPosLocal.x.roundToInt(), dragPosLocal.y.roundToInt()) }
+                    .onGloballyPositioned { coords -> dragOverlaySize = coords.size }
+                    .offset { IntOffset(clampedX, clampedY) }
                     .widthIn(max = 280.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerHigh

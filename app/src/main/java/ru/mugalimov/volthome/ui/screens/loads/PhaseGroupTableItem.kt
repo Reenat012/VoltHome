@@ -61,14 +61,14 @@ fun PhaseGroupTableItem(
     expanded: Boolean,
     onToggle: () -> Unit,
 
-    canDrag: Boolean,
-    onPaywall: () -> Unit,
+    // ⚠️ Больше НЕ принимаем canDrag/onPaywall.
+    // Item всегда репортит попытку DnD наверх, а Content решает: paywall / ignore / start.
 
     onRegisterDropZone: (Phase, Rect) -> Unit,
 
-    onDragStart: (payload: PhaseLoadContentKt_DragPayload) -> Unit,
+    onDragStartAttempt: (payload: PhaseLoadContentKt_DragPayload, startRoot: Offset) -> Unit,
     onDragMove: (rootPos: Offset) -> Unit,
-    onDragEnd: (payload: PhaseLoadContentKt_DragPayload) -> Unit,
+    onDragEndAttempt: (payload: PhaseLoadContentKt_DragPayload) -> Unit,
     isDropTargetHighlighted: Boolean,
     onDragCancel: () -> Unit,
 ) {
@@ -97,7 +97,6 @@ fun PhaseGroupTableItem(
     ) {
         Column(Modifier.fillMaxWidth()) {
 
-            // Заголовок секции фазы (без drag)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -113,12 +112,7 @@ fun PhaseGroupTableItem(
                 AssistChip(
                     onClick = {},
                     label = { Text("${item.groups.size}") },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Outlined.Power,
-                            contentDescription = null
-                        )
-                    }
+                    leadingIcon = { Icon(Icons.Outlined.Power, contentDescription = null) }
                 )
                 Icon(
                     imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
@@ -136,125 +130,96 @@ fun PhaseGroupTableItem(
                     item.groups.forEachIndexed { index, group ->
                         var handleCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
 
-                        // ВАЖНО: pointerInput теперь ТОЛЬКО на handle (явное действие).
-                        // Тело блока не перехватывает жест → scroll работает по умолчанию.
-                        Box(
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(Modifier.padding(vertical = 8.dp)) {
+                        Column(Modifier.padding(vertical = 8.dp)) {
 
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Группа №${group.groupNumber} (${group.roomName})",
+                                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                                    modifier = Modifier.weight(1f)
+                                )
+
+                                val payload = PhaseLoadContentKt_DragPayload(
+                                    groupId = group.groupId,
+                                    fromPhase = item.phase,
+                                    title = "Группа №${group.groupNumber} (${group.roomName})"
+                                )
+
+                                IconButton(
+                                    onClick = { /* drag only */ },
+                                    modifier = Modifier
+                                        .onGloballyPositioned { handleCoords = it }
+                                        .pointerInput(group.groupId) {
+                                            detectDragGestures(
+                                                onDragStart = { startLocal ->
+                                                    val c = handleCoords ?: return@detectDragGestures
+                                                    val startRoot = c.localToRoot(startLocal)
+
+                                                    // ВАЖНО: всегда сообщаем наверх о попытке.
+                                                    // Content решит: paywall / ignore / start.
+                                                    onDragStartAttempt(payload, startRoot)
+                                                },
+                                                onDrag = { change, _ ->
+                                                    // Если Content не запустил DnD — он просто не будет рисовать overlay
+                                                    // и не подсветит drop-zones; но мы всё равно можем слать move.
+                                                    change.consume()
+                                                    val c = handleCoords ?: return@detectDragGestures
+                                                    onDragMove(c.localToRoot(change.position))
+                                                },
+                                                onDragCancel = { onDragCancel() },
+                                                onDragEnd = { onDragEndAttempt(payload) }
+                                            )
+                                        }
                                 ) {
-                                    Text(
-                                        text = "Группа №${group.groupNumber} (${group.roomName})",
-                                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                                        modifier = Modifier.weight(1f)
+                                    Icon(
+                                        imageVector = Icons.Outlined.DragIndicator,
+                                        contentDescription = "Перетащить группу"
                                     )
+                                }
+                            }
 
-                                    IconButton(
-                                        onClick = {
-                                            // onClick не используется — drag идёт через жест.
-                                            // Нажатие на кнопку без жеста ничего не делает.
-                                        },
-                                        modifier = Modifier
-                                            .onGloballyPositioned { handleCoords = it }
-                                            .pointerInput(canDrag, group.groupId) {
-                                                detectDragGestures(
-                                                    onDragStart = { startLocal ->
-                                                        if (!canDrag) {
-                                                            onPaywall()
-                                                            return@detectDragGestures
-                                                        }
+                            Spacer(Modifier.height(8.dp))
 
-                                                        val c = handleCoords
-                                                            ?: return@detectDragGestures
-                                                        val startRoot = c.localToRoot(startLocal)
-
-                                                        // Чтобы overlay не “прыгал” с (0,0)
-                                                        onDragMove(startRoot)
-
-                                                        onDragStart(
-                                                            PhaseLoadContentKt_DragPayload(
-                                                                groupId = group.groupId,
-                                                                fromPhase = item.phase,
-                                                                title = "Группа №${group.groupNumber} (${group.roomName})"
-                                                            )
-                                                        )
-                                                    },
-                                                    onDrag = { change, _ ->
-                                                        if (!canDrag) return@detectDragGestures
-                                                        // Здесь намеренно consume — это уже явный drag.
-                                                        change.consume()
-                                                        val c = handleCoords
-                                                            ?: return@detectDragGestures
-                                                        onDragMove(c.localToRoot(change.position))
-                                                    },
-                                                    onDragCancel = {
-                                                        onDragCancel()
-                                                    },
-                                                    onDragEnd = {
-                                                        if (!canDrag) return@detectDragGestures
-                                                        onDragEnd(
-                                                            PhaseLoadContentKt_DragPayload(
-                                                                groupId = group.groupId,
-                                                                fromPhase = item.phase,
-                                                                title = "Группа №${group.groupNumber} (${group.roomName})"
-                                                            )
-                                                        )
-                                                    }
-                                                )
-                                            }
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Outlined.DragIndicator,
-                                            contentDescription = "Перетащить группу"
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                group.devices.forEach { deviceItem ->
+                                    key(deviceItem.deviceId) {
+                                        AssistChip(
+                                            onClick = {},
+                                            label = { Text(deviceItem.name) },
+                                            border = AssistChipDefaults.assistChipBorder(false)
                                         )
                                     }
                                 }
+                            }
 
-                                Spacer(Modifier.height(8.dp))
+                            Spacer(Modifier.height(8.dp))
 
-                                FlowRow(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    group.devices.forEach { deviceItem ->
-                                        key(deviceItem.deviceId) {
-                                            AssistChip(
-                                                onClick = {},
-                                                label = { Text(deviceItem.name) },
-                                                border = AssistChipDefaults.assistChipBorder(false)
-                                            )
-                                        }
-                                    }
-                                }
+                            Text(
+                                text = "${group.totalPower.toInt()} Вт • ${"%.2f".format(group.totalCurrent)} A",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
 
-                                Spacer(Modifier.height(8.dp))
-
+                            val decision = decisionsByGroupNumber[group.groupNumber]
+                            if (decision != null) {
+                                Spacer(Modifier.height(6.dp))
                                 Text(
-                                    text = "${group.totalPower.toInt()} Вт • ${"%.2f".format(group.totalCurrent)} A",
-                                    style = MaterialTheme.typography.bodyMedium,
+                                    text = buildDecisionLine(decision),
+                                    style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                            }
 
-                                // ✅ Коммит 9: "почему так" из decision log
-                                val decision = decisionsByGroupNumber[group.groupNumber]
-                                if (decision != null) {
-                                    Spacer(Modifier.height(6.dp))
-                                    Text(
-                                        text = buildDecisionLine(decision),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-
-                                if (index != item.groups.lastIndex) {
-                                    Spacer(Modifier.height(12.dp))
-                                    Divider()
-                                }
+                            if (index != item.groups.lastIndex) {
+                                Spacer(Modifier.height(12.dp))
+                                Divider()
                             }
                         }
                     }

@@ -5,6 +5,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -27,9 +28,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,7 +46,8 @@ fun ThreePhaseLoadsSection(
     decisionsByGroupNumber: Map<Int, DistributionDecision>,
     modifier: Modifier = Modifier
 ) {
-    var expanded by remember { mutableStateOf(true) }
+    // ✅ Дефолт: свернуто
+    var expanded by remember { mutableStateOf(false) }
 
     Card(
         modifier = modifier,
@@ -55,25 +57,27 @@ fun ThreePhaseLoadsSection(
     ) {
         Column(Modifier.fillMaxWidth()) {
 
-            // Header
+            // ✅ Header: кликабельный как у фаз
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .clickable { expanded = !expanded }
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(imageVector = Icons.Outlined.Bolt, contentDescription = null)
-                Spacer(Modifier.height(0.dp))
+
                 Text(
                     text = "3-фазные нагрузки",
                     modifier = Modifier.padding(start = 8.dp),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
+
                 Spacer(Modifier.weight(1f))
 
                 AssistChip(
-                    onClick = {},
+                    onClick = {}, // не мешает, но не обязательно
                     label = { Text("${item.groups.size}") },
                     leadingIcon = {
                         Icon(
@@ -86,77 +90,74 @@ fun ThreePhaseLoadsSection(
 
                 Icon(
                     imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .padding(start = 8.dp)
-                        .padding(4.dp)
+                    contentDescription = if (expanded) "Свернуть" else "Развернуть",
+                    modifier = Modifier.padding(start = 8.dp)
                 )
-                // кликабельность можно сделать на всю строку, если хочешь — сейчас минимально
             }
 
-            // Totals
-            Text(
-                text = "${item.totalPower.toInt()} Вт • ${"%.2f".format(item.totalCurrent)} A",
-                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-
-
+            // ✅ Важно: всё, что не должно быть видно в collapsed — только внутри AnimatedVisibility
             AnimatedVisibility(
                 visible = expanded,
                 enter = fadeIn() + expandVertically(),
                 exit = shrinkVertically() + fadeOut()
             ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    item.groups.forEachIndexed { index, group ->
-                        Column {
-                            Text(
-                                text = "Группа №${group.groupNumber} (${group.roomName})",
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Spacer(Modifier.height(8.dp))
+                Column {
+                    // ✅ Totals теперь доступны только после раскрытия
+                    Text(
+                        text = "${item.totalPower.toInt()} Вт • ${"%.2f".format(item.totalCurrent)} A",
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
 
-                            val decision = decisionsByGroupNumber[group.groupNumber]
-                            if (decision != null) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        item.groups.forEachIndexed { index, group ->
+                            Column {
                                 Text(
-                                    text = buildDecisionLine(decision),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    text = "Группа №${group.groupNumber} (${group.roomName})",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Medium
                                 )
                                 Spacer(Modifier.height(8.dp))
-                            }
 
-
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                group.devices.forEach { device ->
-                                    AssistChip(
-                                        onClick = {},
-                                        label = { Text(device.name) },
-                                        border = AssistChipDefaults.assistChipBorder(false)
+                                val decision = decisionsByGroupNumber[group.groupNumber]
+                                if (decision != null) {
+                                    Text(
+                                        text = buildDecisionLine(decision),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
+                                    Spacer(Modifier.height(8.dp))
                                 }
-                            }
 
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                text = "${group.totalPower.toInt()} Вт • ${"%.2f".format(group.totalCurrent)} A",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    group.devices.forEach { device ->
+                                        AssistChip(
+                                            onClick = {},
+                                            label = { Text(device.name) },
+                                            border = AssistChipDefaults.assistChipBorder(false)
+                                        )
+                                    }
+                                }
 
-                            if (index != item.groups.lastIndex) {
-                                Spacer(Modifier.height(12.dp))
-                                Divider()
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    text = "${group.totalPower.toInt()} Вт • ${"%.2f".format(group.totalCurrent)} A",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
+                                if (index != item.groups.lastIndex) {
+                                    Spacer(Modifier.height(12.dp))
+                                    Divider()
+                                }
                             }
                         }
                     }

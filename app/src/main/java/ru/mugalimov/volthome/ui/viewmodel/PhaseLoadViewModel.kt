@@ -15,8 +15,8 @@ import ru.mugalimov.volthome.data.repository.UserPlanRepository
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.ProFeature
-import ru.mugalimov.volthome.domain.model.UserPlan
 import ru.mugalimov.volthome.domain.model.phase_load.LoadThresholds
+import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadMode
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadUiState
 import ru.mugalimov.volthome.domain.use_case.GetPhaseLoadUiUseCase
 import ru.mugalimov.volthome.domain.use_case.IncomerSelector
@@ -35,6 +35,8 @@ class PhaseLoadViewModel @Inject constructor(
     private val paywallBus: PaywallBus
 ) : ViewModel() {
 
+    private val phaseLoadMode = MutableStateFlow(PhaseLoadMode.AUTO)
+
     // ✅ события для snackbar
     private val _events = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val events: SharedFlow<String> = _events.asSharedFlow()
@@ -44,11 +46,10 @@ class PhaseLoadViewModel @Inject constructor(
             getPhaseLoadUiUseCase(),
             preferencesRepository.phaseMode,
             explicationRepository.observeAllGroup(),
-            explicationRepository.observeDistributionDecisions()
-        ) { items, mode, groups, decisions ->
+            explicationRepository.observeDistributionDecisions(),
+            phaseLoadMode
+        ) { items, mode, groups, decisions, phaseLoadMode ->
             val data = if (mode == PhaseMode.SINGLE) {
-                // ✅ FIX: в 1φ режиме показываем ТОЛЬКО Phase.A
-                // Phase.THREE_PHASE полностью исключён из UI
                 items.filter { it.phase == Phase.A }
             } else {
                 items
@@ -66,6 +67,7 @@ class PhaseLoadViewModel @Inject constructor(
             PhaseLoadUiState(
                 data = data,
                 mode = mode,
+                phaseLoadMode = phaseLoadMode,
                 incomer = incomer,
                 thresholds = LoadThresholds(),
                 decisions = decisions
@@ -80,16 +82,31 @@ class PhaseLoadViewModel @Inject constructor(
             )
 
     // =========================
+    // ✅ Режимы экрана
+    // =========================
+
+    fun onEnterManualMode() {
+        if (!isUserPro()) {
+            paywallBus.request(ProFeature.PHASE_DND_TEASER)
+            return
+        }
+        phaseLoadMode.value = PhaseLoadMode.MANUAL
+    }
+
+    // =========================
     // ✅ DnD API
     // =========================
 
     fun onGroupDragged(groupId: Long, targetPhase: Phase) {
+        // DnD возможен ТОЛЬКО в MANUAL (даже у PRO)
+        if (phaseLoadMode.value != PhaseLoadMode.MANUAL) return
+
         if (!isUserPro()) {
             paywallBus.request(ProFeature.PHASE_DND_TEASER)
             return
         }
 
-        // ✅ Guard: 3φ группы нельзя переносить (они не принадлежат A/B/C)
+        // ✅ Guard: 3φ группы нельзя переносить
         val isThreePhaseGroup = uiState.value.data
             .firstOrNull { it.phase == Phase.THREE_PHASE }
             ?.groups
@@ -125,6 +142,7 @@ class PhaseLoadViewModel @Inject constructor(
     }
 
     fun onResetOverrides() {
+        // В Free — объясняющая модалка (коммит 3), без “Купить PRO?”
         if (!isUserPro()) {
             paywallBus.request(ProFeature.PHASE_DND_TEASER)
             return
@@ -138,7 +156,13 @@ class PhaseLoadViewModel @Inject constructor(
                     return@launch
                 }
 
+                // 1) Очищаем ручные overrides
                 overrideDao.deleteByProject(projectId)
+
+                // 2) Возвращаем режим в AUTO (безопасный откат к baseline)
+                phaseLoadMode.value = PhaseLoadMode.AUTO
+
+                _events.tryEmit("Ручные изменения сброшены")
             } catch (t: Throwable) {
                 _events.tryEmit("Не удалось сбросить изменения фаз.")
             }

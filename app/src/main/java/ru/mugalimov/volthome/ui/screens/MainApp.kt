@@ -100,24 +100,57 @@ fun MainApp(
     }
 
     if (paywallFeature != null) {
-        AlertDialog(
-            onDismissRequest = { paywallFeature = null },
-            title = { Text("Купить PRO?") },
-            text = { Text("Эта функция доступна только в VoltHome PRO.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        paywallFeature = null
-                        appNavController.navigate(Screens.SubscriptionScreen.route) {
-                            launchSingleTop = true
-                        }
+        val feature = paywallFeature!!
+
+        when (feature) {
+            ProFeature.PHASE_DND_TEASER -> {
+                AlertDialog(
+                    onDismissRequest = { paywallFeature = null },
+                    title = { Text("Ручное управление фазами") },
+                    text = {
+                        Text(
+                            "В PRO можно вручную переносить группы между фазами.\n\n" +
+                                    "Это вмешательство в распределение: после каждого переноса сразу меняются токи по фазам и ΔI.\n\n" +
+                                    "Используйте ручной режим, чтобы быстро выровнять баланс под реальный сценарий нагрузок."
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                paywallFeature = null
+                                appNavController.navigate(Screens.SubscriptionScreen.route) {
+                                    launchSingleTop = true
+                                }
+                            }
+                        ) { Text("Открыть PRO") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { paywallFeature = null }) { Text("Понятно") }
                     }
-                ) { Text("Да") }
-            },
-            dismissButton = {
-                TextButton(onClick = { paywallFeature = null }) { Text("Нет") }
+                )
             }
-        )
+
+            else -> {
+                AlertDialog(
+                    onDismissRequest = { paywallFeature = null },
+                    title = { Text("Купить PRO?") },
+                    text = { Text("Эта функция доступна только в VoltHome PRO.") },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                paywallFeature = null
+                                appNavController.navigate(Screens.SubscriptionScreen.route) {
+                                    launchSingleTop = true
+                                }
+                            }
+                        ) { Text("Да") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { paywallFeature = null }) { Text("Нет") }
+                    }
+                )
+            }
+        }
     }
 
     // Подтягиваем профиль, когда авторизация успешна
