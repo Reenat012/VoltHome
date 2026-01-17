@@ -30,12 +30,12 @@ class UserPlanRepositoryImpl @Inject constructor() : UserPlanRepository {
      * ✅ Debug-only переключатель PRO.
      * В release BuildConfig.DEBUG=false, поэтому даже если кто-то вызовет — эффекта не будет.
      */
-    fun setDebugForcePro(enabled: Boolean) {
+    override fun setDebugForcePro(enabled: Boolean) {
         _debugForcePro.value = enabled
         recompute()
     }
 
-    fun isDebugForceProEnabled(): Boolean = _debugForcePro.value
+    override fun isDebugForceProEnabled(): Boolean = _debugForcePro.value
 
     private fun recompute() {
         _planFlow.value =

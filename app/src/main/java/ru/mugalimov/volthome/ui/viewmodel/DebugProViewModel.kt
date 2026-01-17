@@ -7,7 +7,6 @@ import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import ru.mugalimov.volthome.data.repository.UserPlanRepository
-import ru.mugalimov.volthome.data.repository.impl.UserPlanRepositoryImpl
 
 @HiltViewModel
 class DebugProViewModel @Inject constructor(
@@ -34,7 +33,6 @@ class DebugProViewModel @Inject constructor(
     }
 
     private fun apply(v: Boolean) {
-        (userPlanRepository as? UserPlanRepositoryImpl)?.setDebugForcePro(v)
-        // если вдруг подставишь другой repo — просто не применится, без крашей
+        userPlanRepository.setDebugForcePro(v)
     }
 }

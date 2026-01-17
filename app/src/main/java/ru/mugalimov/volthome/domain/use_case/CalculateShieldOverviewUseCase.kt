@@ -24,13 +24,21 @@ class CalculateShieldOverviewUseCase @Inject constructor() {
             g.devices.sumOf { d -> (d.power ?: 0) }
         }
 
+        val installedInputs: List<CalcInput> = groups
+            .flatMap { it.devices }
+            .map { d ->
+                CalcInput(
+                    name = "${d.name} / base",
+                    value = (d.power ?: 0).toDouble(),
+                    unit = "Вт"
+                )
+            }
+
         val installedSteps: List<CalcStep> = listOf(
             CalcStep(
                 name = "Установленная мощность",
-                formula = "Pуст = Σ Pпаспорт",
-                inputs = listOf(
-                    CalcInput(name = "Σ Pпаспорт", value = installedPowerW.toDouble(), unit = "Вт")
-                ),
+                formula = "Pуст(щит) = Σ Pуст,i",
+                inputs = installedInputs,
                 output = CalcOutput(value = installedPowerW.toDouble(), unit = "Вт"),
                 normRefs = emptyList(),
                 assumptions = emptyList()
@@ -85,15 +93,38 @@ class CalculateShieldOverviewUseCase @Inject constructor() {
             }
         }
 
+        val calculatedInputs: List<CalcInput> = groups
+            .flatMap { it.devices }
+            .flatMap { d ->
+                val p = (d.power ?: 0)
+                val k = d.demandRatio
+                val appliedK = if (k == null) 1.0 else k
+                val result = (p * appliedK).toInt()
+
+                listOf(
+                    CalcInput(
+                        name = "${d.name} / base",
+                        value = p.toDouble(),
+                        unit = "Вт"
+                    ),
+                    CalcInput(
+                        name = "${d.name} / k",
+                        value = appliedK,
+                        unit = ""
+                    ),
+                    CalcInput(
+                        name = "${d.name} / result",
+                        value = result.toDouble(),
+                        unit = "Вт"
+                    )
+                )
+            }
+
         val calculatedSteps: List<CalcStep> = listOf(
             CalcStep(
                 name = "Расчётная нагрузка",
-                formula = "Pрасч = Σ (Pпаспорт × kспроса)",
-                inputs = listOf(
-                    CalcInput(name = "Σ(Pпаспорт×k)", value = calculatedPowerW.toDouble(), unit = "Вт"),
-                    CalcInput(name = "k по умолч.", value = defaultDemandRatioCount.toDouble(), unit = "шт"),
-                    CalcInput(name = "k задано", value = userDemandRatioCount.toDouble(), unit = "шт"),
-                ),
+                formula = "Pрасч(щит) = Σ (Pуст,i × kспроса,i)",
+                inputs = calculatedInputs,
                 output = CalcOutput(value = calculatedPowerW.toDouble(), unit = "Вт"),
                 assumptions = calculatedAssumptions + CalcAssumption(
                     kind = CalcAssumption.Kind.OTHER,

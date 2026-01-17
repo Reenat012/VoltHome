@@ -30,6 +30,7 @@ import androidx.navigation.compose.rememberNavController
 import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import ru.mugalimov.volthome.BuildConfig
 import ru.mugalimov.volthome.domain.model.ProFeature
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.model.ProjectUi
@@ -212,13 +213,14 @@ fun MainApp(
             }
 
             // ✅ Debug-only PRO switch (поверх UI)
-            // В релизе его быть не должно: сам DebugProPanel обязан быть обёрнут в if (BuildConfig.DEBUG)
-            DebugProPanel(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .statusBarsPadding()
-                    .padding(top = 8.dp, end = 8.dp)
-            )
+            if (BuildConfig.DEBUG) {
+                DebugProPanel(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .statusBarsPadding()
+                        .padding(top = 8.dp, end = 8.dp)
+                )
+            }
         }
     }
 }

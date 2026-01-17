@@ -16,4 +16,16 @@ interface UserPlanRepository {
      * Обновить план (например, после загрузки профиля).
      */
     suspend fun setPlan(plan: UserPlan)
+
+    /**
+     * ✅ Debug-only форс PRO.
+     * В release BuildConfig.DEBUG=false, поэтому реализация обязана быть no-op.
+     */
+    fun setDebugForcePro(enabled: Boolean)
+
+    /**
+     * ✅ Debug-only: текущее состояние форса.
+     * В release может всегда возвращать false.
+     */
+    fun isDebugForceProEnabled(): Boolean
 }

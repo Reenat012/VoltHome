@@ -320,27 +320,11 @@ class ExplicationViewModel @Inject constructor(
                             emptyList()
                         }
 
-                        val installedPower: CalculatedValue = if (isProReport) {
-                            totals.installedPowerW
-                        } else {
-                            totals.installedPowerW.copy(
-                                steps = emptyList(),
-                                assumptions = emptyList(),
-                                warnings = emptyList(),
-                                normRefs = emptyList()
-                            )
-                        }
-
-                        val calculatedPower: CalculatedValue = if (isProReport) {
-                            totals.calculatedPowerW
-                        } else {
-                            totals.calculatedPowerW.copy(
-                                steps = emptyList(),
-                                assumptions = emptyList(),
-                                warnings = emptyList(),
-                                normRefs = emptyList()
-                            )
-                        }
+                        // ✅ ВАЖНО (Коммит 2):
+                        // totals (installed/calculated) всегда приходят в uiState с реальными steps.
+                        // Доступность решается через calcDetailsState/hasAccess при открытии sheet.
+                        val installedPower: CalculatedValue = totals.installedPowerW
+                        val calculatedPower: CalculatedValue = totals.calculatedPowerW
 
                         val shieldTotalsAssumptions: List<CalcAssumption> =
                             if (isProReport) calculatedPower.assumptions else emptyList()
