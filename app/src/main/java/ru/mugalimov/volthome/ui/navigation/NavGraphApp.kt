@@ -11,6 +11,7 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.screens.about.SettingsScreen
 import ru.mugalimov.volthome.ui.screens.algoritm_about.AlgorithmExplanationScreen
 import ru.mugalimov.volthome.ui.screens.explication.ExplicationScreen
@@ -137,30 +138,32 @@ fun NavGraphApp(
             VoltHomeProScreen()
         }
 
-
-
         composable(route = Screens.ReportPreview.route) {
             val prevEntry = navController.previousBackStackEntry
-
             if (prevEntry == null) {
-                ReportPreviewScreen(html = "")
+                ReportPreviewScreen(
+                    html = "",
+                    showProHint = true,
+                    onUnlockClick = { navController.navigate(Screens.SubscriptionScreen.route) }
+                )
                 return@composable
             }
 
-            // читаем один раз, НЕ StateFlow
-            val html = prevEntry.savedStateHandle.get<String>(ReportPreviewNav.HTML_KEY).orEmpty()
+            var fixedHtml by remember(prevEntry) { mutableStateOf<String?>(null) }
+            if (fixedHtml == null) {
+                fixedHtml = prevEntry.savedStateHandle
+                    .get<String>(ReportPreviewNav.HTML_KEY)
+                    .orEmpty()
+                    .takeIf { it.isNotBlank() }
 
-            // чистим сразу после чтения (и это уже НЕ ломает UI)
-            LaunchedEffect(prevEntry) {
                 prevEntry.savedStateHandle.remove<String>(ReportPreviewNav.HTML_KEY)
             }
 
-            if (html.isBlank()) {
-                ReportPreviewScreen(html = "")
-                return@composable
-            }
-
-            ReportPreviewScreen(html = html)
+            ReportPreviewScreen(
+                html = fixedHtml.orEmpty(),
+                showProHint = true,
+                onUnlockClick = { navController.navigate(Screens.SubscriptionScreen.route) }
+            )
         }
     }
 }

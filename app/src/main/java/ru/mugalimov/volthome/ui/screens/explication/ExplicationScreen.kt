@@ -42,6 +42,7 @@ import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.navigation.ReportPreviewNav
 import ru.mugalimov.volthome.ui.navigation.Screens
+import ru.mugalimov.volthome.ui.screens.explication.export_pdf.exportExplicationPdf
 import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetContent
 import ru.mugalimov.volthome.ui.viewmodel.ExplicationViewModel
 import ru.mugalimov.volthome.ui.viewmodel.GroupScreenState
@@ -68,20 +69,36 @@ fun ExplicationScreen(
     val canShowProSections = caps.professionalReportSections
 
     LaunchedEffect(event) {
-        if (event == ExplicationViewModel.UiEvent.ExportPdfRequested) {
-            val activity = ctx as? ComponentActivity
-            if (activity != null) {
-                val html = viewModel.buildReportPreviewHtml(activity, caps)
-                if (!html.isNullOrBlank()) {
-                    navController.currentBackStackEntry
-                        ?.savedStateHandle
-                        ?.set(ReportPreviewNav.HTML_KEY, html)
+        if (event != ExplicationViewModel.UiEvent.ExportPdfRequested) return@LaunchedEffect
 
-                    navController.navigate(Screens.ReportPreview.route)
-                }
-            }
+        val activity = ctx as? ComponentActivity
+        if (activity == null) {
             viewModel.consumeEvent()
+            return@LaunchedEffect
         }
+
+        if (caps.pdfExport) {
+            // ✅ PRO: сразу полный PDF (Print UI / экспорт)
+            exportExplicationPdf(
+                activity = activity,
+                vm = viewModel,
+                caps = caps
+            )
+            viewModel.consumeEvent()
+            return@LaunchedEffect
+        }
+
+        // ✅ FREE: только preview
+        val html = viewModel.buildReportPreviewHtml(activity, caps)
+        if (!html.isNullOrBlank()) {
+            navController.currentBackStackEntry
+                ?.savedStateHandle
+                ?.set(ReportPreviewNav.HTML_KEY, html)
+
+            navController.navigate(Screens.ReportPreview.route)
+        }
+
+        viewModel.consumeEvent()
     }
 
     when (val s = state) {
