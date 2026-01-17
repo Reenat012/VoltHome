@@ -166,15 +166,6 @@ fun ShieldOverviewCard(
             }
 
             Spacer(Modifier.height(12.dp))
-            if (!showProfessionalEvidence) {
-                ProfessionalSectionPlaceholder(
-                    title = "Инженерные обоснования",
-                    subtitle = "Допущения, предупреждения и пояснения расчёта",
-                    onUnlockClick = onProfessionalLockedClick
-                )
-            }
-
-            Spacer(Modifier.height(12.dp))
             HorizontalDivider(thickness = 1.dp, color = divider)
             Spacer(Modifier.height(12.dp))
 
