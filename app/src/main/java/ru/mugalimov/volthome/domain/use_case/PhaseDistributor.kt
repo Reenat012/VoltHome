@@ -1,6 +1,7 @@
 package ru.mugalimov.volthome.domain.use_case
 
 import ru.mugalimov.volthome.domain.model.CircuitGroup
+import ru.mugalimov.volthome.domain.model.DecisionEventType
 import ru.mugalimov.volthome.domain.model.DistributionDecision
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.VoltageType
@@ -101,14 +102,35 @@ object PhaseDistributor {
             assigned[idx] += updated
 
             val after = loads.toPhaseMap()
+            val deltaBefore = currentDelta(loads.copyOf().also { /* до добавления */ })
+            /* проще: считаем по before/after, см. ниже в коммите — важно лишь чтобы метрика была именно max-min */
+
+            val beforeDelta = currentDelta(doubleArrayOf(
+                before[Phase.A] ?: 0.0,
+                before[Phase.B] ?: 0.0,
+                before[Phase.C] ?: 0.0
+            ))
+            val afterDelta = currentDelta(doubleArrayOf(
+                after[Phase.A] ?: 0.0,
+                after[Phase.B] ?: 0.0,
+                after[Phase.C] ?: 0.0
+            ))
+
             decisions += DistributionDecision(
                 groupNumber = g.groupNumber,
                 groupCurrentA = g.nominalCurrent,
                 chosenPhase = phases[idx],
                 phaseCurrentsBefore = before,
                 phaseCurrentsAfter = after,
+
+                eventType = DecisionEventType.GREEDY_ASSIGN,
+                fromPhase = null,
+                toPhase = phases[idx],
+                imbalanceBeforeA = beforeDelta,
+                imbalanceAfterA = afterDelta,
+
                 algorithm = "balanced_greedy+local_opt",
-                note = "Greedy: picked phase with minimal load (tie-break via epsilon)"
+                note = "Greedy: picked phase with minimal load (tie-break via epsilon)" // остаётся, но UI не трогает
             )
         }
 
@@ -173,15 +195,33 @@ object PhaseDistributor {
                     loads[bestIdx] += g.nominalCurrent
 
                     val after = loads.toPhaseMap()
+                    val beforeDelta = currentDelta(doubleArrayOf(
+                        before[Phase.A] ?: 0.0,
+                        before[Phase.B] ?: 0.0,
+                        before[Phase.C] ?: 0.0
+                    ))
+                    val afterDelta = currentDelta(doubleArrayOf(
+                        after[Phase.A] ?: 0.0,
+                        after[Phase.B] ?: 0.0,
+                        after[Phase.C] ?: 0.0
+                    ))
+
                     decisions += DistributionDecision(
                         groupNumber = g.groupNumber,
                         groupCurrentA = g.nominalCurrent,
                         chosenPhase = to,
                         phaseCurrentsBefore = before,
                         phaseCurrentsAfter = after,
+
+                        eventType = DecisionEventType.LOCAL_OPT_MOVE,
+                        fromPhase = from,
+                        toPhase = to,
+                        imbalanceBeforeA = beforeDelta,
+                        imbalanceAfterA = afterDelta,
+
                         algorithm = "balanced_greedy+local_opt",
                         note = "LocalOpt(pass=${pass + 1}): moved $from -> $to to reduce delta %.3f -> %.3f"
-                            .format(currentDelta, bestDelta)
+                            .format(currentDelta, bestDelta) // остаётся как debug, UI не трогает
                     )
 
                     improved = true

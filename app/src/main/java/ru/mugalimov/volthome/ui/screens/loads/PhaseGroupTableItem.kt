@@ -10,7 +10,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -57,29 +56,28 @@ import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
 @Composable
 fun PhaseGroupTableItem(
     item: PhaseLoadItem,
-    decisionsByGroupNumber: Map<Int, DistributionDecision>,
+    decisionsByGroupNumber: Map<Int, List<DistributionDecision>>,
     expanded: Boolean,
     onToggle: () -> Unit,
-
-    // ⚠️ Больше НЕ принимаем canDrag/onPaywall.
-    // Item всегда репортит попытку DnD наверх, а Content решает: paywall / ignore / start.
-
     onRegisterDropZone: (Phase, Rect) -> Unit,
-
     onDragStartAttempt: (payload: PhaseLoadContentKt_DragPayload, startRoot: Offset) -> Unit,
     onDragMove: (rootPos: Offset) -> Unit,
     onDragEndAttempt: (payload: PhaseLoadContentKt_DragPayload) -> Unit,
     isDropTargetHighlighted: Boolean,
     onDragCancel: () -> Unit,
+
+    // ✅ теперь не используется (оставлено для совместимости с вызовами)
+    onDecisionDetailsClick: (groupNumber: Int) -> Unit = {}
 ) {
     val uiPhase = item.phase.toUiPhase()
     val phaseAccent = VhColors.phase(uiPhase).copy(alpha = 0.25f)
 
     val highlightAlpha = if (isDropTargetHighlighted) 0.55f else 0.25f
-    val borderColor = if (isDropTargetHighlighted)
+    val borderColor = if (isDropTargetHighlighted) {
         MaterialTheme.colorScheme.primary
-    else
+    } else {
         MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+    }
 
     val borderWidth = if (isDropTargetHighlighted) 2.dp else 1.dp
 
@@ -157,14 +155,9 @@ fun PhaseGroupTableItem(
                                                 onDragStart = { startLocal ->
                                                     val c = handleCoords ?: return@detectDragGestures
                                                     val startRoot = c.localToRoot(startLocal)
-
-                                                    // ВАЖНО: всегда сообщаем наверх о попытке.
-                                                    // Content решит: paywall / ignore / start.
                                                     onDragStartAttempt(payload, startRoot)
                                                 },
                                                 onDrag = { change, _ ->
-                                                    // Если Content не запустил DnD — он просто не будет рисовать overlay
-                                                    // и не подсветит drop-zones; но мы всё равно можем слать move.
                                                     change.consume()
                                                     val c = handleCoords ?: return@detectDragGestures
                                                     onDragMove(c.localToRoot(change.position))
@@ -207,14 +200,73 @@ fun PhaseGroupTableItem(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
 
-                            val decision = decisionsByGroupNumber[group.groupNumber]
+                            val events = decisionsByGroupNumber[group.groupNumber].orEmpty()
+                            val decision = events.lastOrNull()
+
                             if (decision != null) {
+                                val ui = decision.toDecisionExplanationUi()
+
+                                // ✅ Локальное состояние раскрытия "Подробнее" (теперь это B)
+                                var detailsExpanded by remember(group.groupId) { mutableStateOf(false) }
+
                                 Spacer(Modifier.height(6.dp))
+
+                                // A: заголовок (всегда)
                                 Text(
-                                    text = buildDecisionLine(decision),
-                                    style = MaterialTheme.typography.bodySmall,
+                                    text = ui.levelA_title,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+
+                                // A: метрика (всегда, если есть)
+                                if (ui.levelA_metric.isNotBlank()) {
+                                    Text(
+                                        text = ui.levelA_metric,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
+                                Spacer(Modifier.height(6.dp))
+
+                                // ✅ "Подробнее" → раскрывает/скрывает уровень B
+                                Text(
+                                    text = if (detailsExpanded) "Скрыть" else "Подробнее",
+                                    modifier = Modifier.clickable { detailsExpanded = !detailsExpanded },
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+
+                                // ✅ Уровень B показываем только при detailsExpanded
+                                AnimatedVisibility(
+                                    visible = detailsExpanded,
+                                    enter = fadeIn() + expandVertically(),
+                                    exit = shrinkVertically() + fadeOut()
+                                ) {
+                                    Column(Modifier.padding(top = 6.dp)) {
+
+                                        // B: причина
+                                        if (ui.levelB_reason.isNotBlank()) {
+                                            Text(
+                                                text = ui.levelB_reason,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+
+                                        // B: до/после
+                                        Text(
+                                            text = ui.levelB_before,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = ui.levelB_after,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
                             }
 
                             if (index != item.groups.lastIndex) {
@@ -237,25 +289,3 @@ data class PhaseLoadContentKt_DragPayload(
     val fromPhase: Phase,
     val title: String
 )
-
-private fun buildDecisionLine(d: DistributionDecision): String {
-    // коротко и по делу — без "лирики"
-    // пример: "Почему: выбрана B (до A 12.3 B 10.1 C 11.0 → после A 12.3 B 14.6 C 11.0)"
-    fun fmt(v: Double) = String.format("%.1f", v)
-    fun m(map: Map<Phase, Double>): String {
-        val a = fmt(map[Phase.A] ?: 0.0)
-        val b = fmt(map[Phase.B] ?: 0.0)
-        val c = fmt(map[Phase.C] ?: 0.0)
-        return "A $a B $b C $c"
-    }
-
-    val before = m(d.phaseCurrentsBefore)
-    val after = m(d.phaseCurrentsAfter)
-
-    val note = d.note
-        ?.takeIf { it.isNotBlank() }
-        ?.let { " • $it" }
-        ?: ""
-
-    return "Почему: выбрана ${d.chosenPhase.name} (до $before → после $after)$note"
-}

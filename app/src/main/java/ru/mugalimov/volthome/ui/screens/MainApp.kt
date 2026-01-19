@@ -130,6 +130,39 @@ fun MainApp(
                 )
             }
 
+            // ✅ Коммит 3: feature-specific объясняющая модалка (не тупой paywall)
+            ProFeature.DECISION_DETAILS -> {
+                AlertDialog(
+                    onDismissRequest = { paywallFeature = null },
+                    title = { Text("Аудит решения по фазам") },
+                    text = {
+                        Text(
+                            "В PRO открывается «Аудит решения» — не повтор A/B, а проверяемость распределения.\n\n" +
+                                    "Что там есть:\n" +
+                                    "• история шагов алгоритма по группе;\n" +
+                                    "• список перемещений между фазами (если алгоритм уточнял результат);\n" +
+                                    "• пояснение устойчивости: почему итог не случайный и закрепился.\n\n" +
+                                    "Это полезно, когда вы проверяете нестандартные сценарии и хотите понимать, " +
+                                    "было ли вмешательство алгоритма после базовой раскладки.\n\n" +
+                                    "В бесплатной версии доступно краткое объяснение (A/B). «Аудит решения» доступен в PRO."
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                paywallFeature = null
+                                appNavController.navigate(Screens.SubscriptionScreen.route) {
+                                    launchSingleTop = true
+                                }
+                            }
+                        ) { Text("Открыть PRO") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { paywallFeature = null }) { Text("Понятно") }
+                    }
+                )
+            }
+
             else -> {
                 AlertDialog(
                     onDismissRequest = { paywallFeature = null },
@@ -271,5 +304,9 @@ private fun isFeatureAllowed(feature: ProFeature, caps: PlanCapabilities): Boole
         // ✅ шаги/обоснования/предупреждения (проф. секции отчёта)
         ProFeature.CALC_EXPLANATIONS -> caps.professionalReportSections
         ProFeature.CALC_WARNINGS -> caps.professionalReportSections
+
+        // ✅ Коммит 3: техподробности выбора фазы (уровень C)
+        // Пока вяжем на professionalReportSections (строго через PlanCapabilities).
+        ProFeature.DECISION_DETAILS -> caps.professionalReportSections
     }
 }

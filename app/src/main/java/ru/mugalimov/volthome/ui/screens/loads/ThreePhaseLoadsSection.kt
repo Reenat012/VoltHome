@@ -37,16 +37,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ru.mugalimov.volthome.domain.model.DistributionDecision
-import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
 
 @Composable
 fun ThreePhaseLoadsSection(
     item: PhaseLoadItem,
-    decisionsByGroupNumber: Map<Int, DistributionDecision>,
-    modifier: Modifier = Modifier
+    decisionsByGroupNumber: Map<Int, List<DistributionDecision>>,
+    modifier: Modifier = Modifier,
+
+    // ✅ теперь не используется (оставлено для совместимости с вызовами)
+    onDecisionDetailsClick: (groupNumber: Int) -> Unit = {},
 ) {
-    // ✅ Дефолт: свернуто
     var expanded by remember { mutableStateOf(false) }
 
     Card(
@@ -57,7 +58,6 @@ fun ThreePhaseLoadsSection(
     ) {
         Column(Modifier.fillMaxWidth()) {
 
-            // ✅ Header: кликабельный как у фаз
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -77,14 +77,9 @@ fun ThreePhaseLoadsSection(
                 Spacer(Modifier.weight(1f))
 
                 AssistChip(
-                    onClick = {}, // не мешает, но не обязательно
+                    onClick = {},
                     label = { Text("${item.groups.size}") },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Outlined.Power,
-                            contentDescription = null
-                        )
-                    },
+                    leadingIcon = { Icon(imageVector = Icons.Outlined.Power, contentDescription = null) },
                     border = AssistChipDefaults.assistChipBorder(false)
                 )
 
@@ -95,14 +90,12 @@ fun ThreePhaseLoadsSection(
                 )
             }
 
-            // ✅ Важно: всё, что не должно быть видно в collapsed — только внутри AnimatedVisibility
             AnimatedVisibility(
                 visible = expanded,
                 enter = fadeIn() + expandVertically(),
                 exit = shrinkVertically() + fadeOut()
             ) {
                 Column {
-                    // ✅ Totals теперь доступны только после раскрытия
                     Text(
                         text = "${item.totalPower.toInt()} Вт • ${"%.2f".format(item.totalCurrent)} A",
                         modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
@@ -123,13 +116,75 @@ fun ThreePhaseLoadsSection(
                                 )
                                 Spacer(Modifier.height(8.dp))
 
-                                val decision = decisionsByGroupNumber[group.groupNumber]
+                                val events = decisionsByGroupNumber[group.groupNumber].orEmpty()
+                                val decision = events.lastOrNull()
+
                                 if (decision != null) {
+                                    val ui = decision.toDecisionExplanationUi()
+
+                                    // ✅ Локальное состояние раскрытия "Подробнее" (теперь это B)
+                                    var detailsExpanded by remember(group.groupId) { mutableStateOf(false) }
+
+                                    // A) Заголовок (всегда)
                                     Text(
-                                        text = buildDecisionLine(decision),
+                                        text = ui.levelA_title,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
+
+                                    // A) Метрика (всегда, если есть)
+                                    if (ui.levelA_metric.isNotBlank()) {
+                                        Spacer(Modifier.height(2.dp))
+                                        Text(
+                                            text = ui.levelA_metric,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+
+                                    Spacer(Modifier.height(6.dp))
+
+                                    // ✅ "Подробнее" → раскрывает/скрывает уровень B
+                                    Text(
+                                        text = if (detailsExpanded) "Скрыть" else "Подробнее",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.clickable { detailsExpanded = !detailsExpanded }
+                                    )
+
+                                    // ✅ Уровень B показываем только при detailsExpanded
+                                    AnimatedVisibility(
+                                        visible = detailsExpanded,
+                                        enter = fadeIn() + expandVertically(),
+                                        exit = shrinkVertically() + fadeOut()
+                                    ) {
+                                        Column(Modifier.padding(top = 6.dp)) {
+
+                                            // B) Причина
+                                            if (ui.levelB_reason.isNotBlank()) {
+                                                Text(
+                                                    text = ui.levelB_reason,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+
+                                            Spacer(Modifier.height(2.dp))
+
+                                            // B) До/После
+                                            Text(
+                                                text = ui.levelB_before,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Text(
+                                                text = ui.levelB_after,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+
                                     Spacer(Modifier.height(8.dp))
                                 }
 
@@ -165,18 +220,4 @@ fun ThreePhaseLoadsSection(
             }
         }
     }
-}
-
-private fun buildDecisionLine(d: DistributionDecision): String {
-    fun fmt(v: Double) = String.format("%.1f", v)
-    fun m(map: Map<Phase, Double>): String {
-        val a = fmt(map[Phase.A] ?: 0.0)
-        val b = fmt(map[Phase.B] ?: 0.0)
-        val c = fmt(map[Phase.C] ?: 0.0)
-        return "A $a B $b C $c"
-    }
-
-    val before = m(d.phaseCurrentsBefore)
-    val after = m(d.phaseCurrentsAfter)
-    return "Почему: выбрана ${d.chosenPhase.name} (до $before → после $after)"
 }

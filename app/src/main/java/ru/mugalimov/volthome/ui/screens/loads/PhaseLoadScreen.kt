@@ -21,12 +21,16 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dagger.hilt.android.EntryPointAccessors
+import ru.mugalimov.volthome.domain.model.ProFeature
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseGroupItem
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
+import ru.mugalimov.volthome.ui.paywall.PaywallEntryPoint
 import ru.mugalimov.volthome.ui.viewmodel.ExplicationViewModel
 import ru.mugalimov.volthome.ui.viewmodel.PhaseLoadViewModel
 
@@ -39,6 +43,14 @@ fun PhaseLoadScreen(
 ) {
     LaunchedEffect(Unit) {
         explicationViewModel.recalcAndSaveGroups()
+    }
+
+    val context = LocalContext.current
+    val paywallBus = remember {
+        EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            PaywallEntryPoint::class.java
+        ).paywallBus()
     }
 
     val canDrag = LocalUserPlan.current.capabilities.phaseDragAndDrop
@@ -96,7 +108,8 @@ fun PhaseLoadScreen(
                     onEnterManualMode = { viewModel.onEnterManualMode() },
                     onPaywall = { viewModel.onDnDLockedTapped() },
                     onGroupDropped = { groupId, phase -> viewModel.onGroupDragged(groupId, phase) },
-                    onReset = { viewModel.onResetOverrides() }
+                    onReset = { viewModel.onResetOverrides() },
+                    onDecisionDetailsClick = { _ -> Unit }
                 )
             }
         }

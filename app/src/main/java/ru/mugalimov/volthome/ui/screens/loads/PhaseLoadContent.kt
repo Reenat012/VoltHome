@@ -48,12 +48,12 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import ru.mugalimov.volthome.domain.model.DistributionDecision
-import kotlin.math.roundToInt
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.phase_load.LoadThresholds
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadMode
+import kotlin.math.roundToInt
 
 /**
  * Контент экрана «Нагрузки».
@@ -78,6 +78,7 @@ fun PhaseLoadContent(
     onPaywall: () -> Unit,
     onEnterManualMode: () -> Unit,
     onGroupDropped: (groupId: Long, target: Phase) -> Unit,
+    onDecisionDetailsClick: (groupNumber: Int) -> Unit,
     onReset: () -> Unit
 ) {
     // Drop-zones в координатах ROOT (boundsInRoot) — ТОЛЬКО для A/B/C
@@ -105,9 +106,9 @@ fun PhaseLoadContent(
     val haptic = LocalHapticFeedback.current
 
     // ✅ быстрый доступ: решение по groupNumber
-        val decisionsByGroupNumber = remember(decisions) {
-               decisions.associateBy { it.groupNumber }
-            }
+    val decisionsByGroupNumber = remember(decisions) {
+        decisions.groupBy { it.groupNumber } // Map<Int, List<DistributionDecision>>
+    }
 
     // ✅ Подсветка drop-зоны должна считаться в тех же координатах, что и Rect (ROOT)
     val hoveredPhase by remember {
@@ -120,6 +121,7 @@ fun PhaseLoadContent(
         }
     }
 
+
     // ===== Разделение данных: A/B/C отдельно, 3φ отдельно =====
 
     // 3φ item (если есть)
@@ -129,7 +131,8 @@ fun PhaseLoadContent(
 
     // A/B/C items (3φ сюда не попадает)
     val phaseItems = remember(phaseLoads, mode) {
-        val abc = phaseLoads.filter { it.phase == Phase.A || it.phase == Phase.B || it.phase == Phase.C }
+        val abc =
+            phaseLoads.filter { it.phase == Phase.A || it.phase == Phase.B || it.phase == Phase.C }
         if (mode == PhaseMode.SINGLE) abc.filter { it.phase == Phase.A } else abc
     }
 
@@ -150,6 +153,7 @@ fun PhaseLoadContent(
             this[Phase.C] = false
         }
     }
+
     fun isExpanded(phase: Phase) = expandedMap[phase] == true
     fun togglePhase(phase: Phase) {
         expandedMap[phase] = !(expandedMap[phase] ?: false)
@@ -269,7 +273,12 @@ fun PhaseLoadContent(
                 stickyHeader {
                     SectionHeader(
                         title = "Куда уходит ток",
-                        icon = { Icon(imageVector = Icons.Outlined.PieChart, contentDescription = null) }
+                        icon = {
+                            Icon(
+                                imageVector = Icons.Outlined.PieChart,
+                                contentDescription = null
+                            )
+                        }
                     )
                 }
 
@@ -295,7 +304,8 @@ fun PhaseLoadContent(
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 val top = byRoom.take(5)
-                                val restSum = (byRoom.drop(5).sumOf { it.second }).coerceAtLeast(0.0)
+                                val restSum =
+                                    (byRoom.drop(5).sumOf { it.second }).coerceAtLeast(0.0)
 
                                 top.forEach { (room, amps) ->
                                     val pct = if (totalA > 0) amps / totalA * 100.0 else 0.0
@@ -349,6 +359,7 @@ fun PhaseLoadContent(
                     decisionsByGroupNumber = decisionsByGroupNumber,
                     expanded = isExpanded(item.phase),
                     onToggle = { togglePhase(item.phase) },
+                    onDecisionDetailsClick = onDecisionDetailsClick,
 
                     isDropTargetHighlighted = (dragging != null && hoveredPhase == item.phase),
 
@@ -407,7 +418,8 @@ fun PhaseLoadContent(
                     ThreePhaseLoadsSection(
                         item = threePhaseItem,
                         decisionsByGroupNumber = decisionsByGroupNumber,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        onDecisionDetailsClick = onDecisionDetailsClick
                     )
                 }
             }
@@ -563,7 +575,13 @@ private fun AdviceCardSinglePhase(
             val top1PctIncomer = if (incomer > 0) (top1.second / incomer) * 100.0 else 0.0
 
             if (top1PctTotal >= 35.0) {
-                add("${top1.first} даёт ${fmt0(top1PctTotal)}% общей нагрузки (${fmt1(top1.second)} A, ${fmt0(top1PctIncomer)}% вводного). Разносите мощные приборы по времени/группам.")
+                add(
+                    "${top1.first} даёт ${fmt0(top1PctTotal)}% общей нагрузки (${fmt1(top1.second)} A, ${
+                        fmt0(
+                            top1PctIncomer
+                        )
+                    }% вводного). Разносите мощные приборы по времени/группам."
+                )
             }
 
             val top2 = roomShares.getOrNull(1)
@@ -572,7 +590,13 @@ private fun AdviceCardSinglePhase(
                 val pairPctTotal = (pairSum / totalRoomsA) * 100.0
                 val pairPctIncomer = if (incomer > 0) (pairSum / incomer) * 100.0 else 0.0
                 if (pairPctTotal >= 60.0) {
-                    add("Две зоны лидируют: ${top1.first} + ${top2.first} = ${fmt0(pairPctTotal)}% нагрузки (${fmt0(pairPctIncomer)}% вводного). Сведите одновременную работу к минимуму.")
+                    add(
+                        "Две зоны лидируют: ${top1.first} + ${top2.first} = ${fmt0(pairPctTotal)}% нагрузки (${
+                            fmt0(
+                                pairPctIncomer
+                            )
+                        }% вводного). Сведите одновременную работу к минимуму."
+                    )
                 }
             }
         }
