@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.ui.screens.loads
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +27,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -54,6 +56,7 @@ import ru.mugalimov.volthome.domain.model.phase_load.LoadThresholds
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadMode
 import kotlin.math.roundToInt
+import androidx.compose.ui.layout.boundsInRoot
 
 /**
  * Контент экрана «Нагрузки».
@@ -79,7 +82,14 @@ fun PhaseLoadContent(
     onEnterManualMode: () -> Unit,
     onGroupDropped: (groupId: Long, target: Phase) -> Unit,
     onDecisionDetailsClick: (groupNumber: Int) -> Unit,
-    onReset: () -> Unit
+    onReset: () -> Unit,
+
+    // Hints (commit 2)
+    manualModeHintShown: Boolean,
+    firstDragHintShown: Boolean,
+    markManualModeHintShown: () -> Unit,
+    markFirstDragHintShown: () -> Unit,
+    onDropMissed: () -> Unit, // ✅ Hint 3
 ) {
     // Drop-zones в координатах ROOT (boundsInRoot) — ТОЛЬКО для A/B/C
     val dropZones = remember { mutableStateMapOf<Phase, Rect>() }
@@ -89,7 +99,6 @@ fun PhaseLoadContent(
 
     val density = LocalDensity.current
     val overlayGapPx = with(density) { 12.dp.toPx() } // зазор между пальцем и карточкой
-
 
     // Drag state
     var dragging by remember { mutableStateOf<PhaseLoadContentKt_DragPayload?>(null) }
@@ -121,6 +130,12 @@ fun PhaseLoadContent(
         }
     }
 
+    // Hint 1: как только вошли в MANUAL и подсказка ещё не показывалась — фиксируем (один раз)
+    LaunchedEffect(phaseLoadMode, manualModeHintShown) {
+        if (phaseLoadMode == PhaseLoadMode.MANUAL && !manualModeHintShown) {
+            markManualModeHintShown()
+        }
+    }
 
     // ===== Разделение данных: A/B/C отдельно, 3φ отдельно =====
 
@@ -131,8 +146,9 @@ fun PhaseLoadContent(
 
     // A/B/C items (3φ сюда не попадает)
     val phaseItems = remember(phaseLoads, mode) {
-        val abc =
-            phaseLoads.filter { it.phase == Phase.A || it.phase == Phase.B || it.phase == Phase.C }
+        val abc = phaseLoads.filter {
+            it.phase == Phase.A || it.phase == Phase.B || it.phase == Phase.C
+        }
         if (mode == PhaseMode.SINGLE) abc.filter { it.phase == Phase.A } else abc
     }
 
@@ -159,6 +175,15 @@ fun PhaseLoadContent(
         expandedMap[phase] = !(expandedMap[phase] ?: false)
     }
 
+    // Коммит 3: панель фаз видна только при drag
+    val showDropTargetsPanel = (dragging != null)
+
+    LaunchedEffect(showDropTargetsPanel) {
+        // Во время drag используем ТОЛЬКО панельные зоны.
+        // Вне drag зоны нам не нужны (и не должны влиять на подсветку).
+        dropZones.clear()
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -167,10 +192,37 @@ fun PhaseLoadContent(
                 overlayContainerSize = coords.size
             }
     ) {
+        // ===== Панель целей фаз (Variant A) — ТОЛЬКО ВИЗУАЛ =====
+        // visible = (dragging != null)
+        AnimatedVisibility(
+            visible = showDropTargetsPanel,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .zIndex(900f)
+                .fillMaxWidth()
+        ) {
+            val p = dragging
+            if (p != null) {
+                PhaseDropTargetsPanel(
+                    fromPhase = p.fromPhase,
+                    highlightedPhase = hoveredPhase,
+                    onRegisterDropZone = { phase, rect ->
+                        // Панель — главный источник dropZones во время drag
+                        if (phase == Phase.A || phase == Phase.B || phase == Phase.C) {
+                            dropZones[phase] = rect
+                        }
+                    },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+            }
+        }
+
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                // чтобы панель (оверлей) не перекрывала верхний контент во время drag
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .padding(top = if (showDropTargetsPanel) 56.dp else 0.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item { Spacer(Modifier.height(8.dp)) }
@@ -206,6 +258,18 @@ fun PhaseLoadContent(
                             style = MaterialTheme.typography.labelLarge
                         )
                     }
+                }
+            }
+
+            // Hint 1 — первый вход в ручной режим (MANUAL)
+            item {
+                val showHint1 = (phaseLoadMode == PhaseLoadMode.MANUAL) && !manualModeHintShown
+                if (showHint1) {
+                    Text(
+                        text = "Зажмите значок ⠿ у группы и перетащите её на фазу сверху.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 
@@ -262,6 +326,18 @@ fun PhaseLoadContent(
                             resetEnabled -> MaterialTheme.colorScheme.primary
                             else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                         }
+                    )
+                }
+            }
+
+            // Hint 2 — первый активный drag (пока dragging != null и флаг ещё не выставлен)
+            item {
+                val showHint2 = (dragging != null) && !firstDragHintShown
+                if (showHint2) {
+                    Text(
+                        text = "Отпустите палец на нужной фазе.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -364,6 +440,9 @@ fun PhaseLoadContent(
                     isDropTargetHighlighted = (dragging != null && hoveredPhase == item.phase),
 
                     onRegisterDropZone = { phase, rect ->
+                        // ВАЖНО: во время drag drop-зоны задаёт панель, а не большие карточки фаз
+                        if (showDropTargetsPanel) return@PhaseGroupTableItem
+
                         if (phase == Phase.A || phase == Phase.B || phase == Phase.C) {
                             dropZones[phase] = rect
                         }
@@ -376,9 +455,9 @@ fun PhaseLoadContent(
                         dragPosLocal = startRoot - overlayContainerTopLeft
 
                         when {
-                            !canDrag -> onPaywall()                 // Free: capability=false → модалка (коммит 3)
+                            !canDrag -> onPaywall()                      // Free: capability=false → модалка (коммит 5)
                             phaseLoadMode != PhaseLoadMode.MANUAL -> Unit // PRO+AUTO: игнор
-                            else -> dragging = payload              // PRO+MANUAL: стартуем
+                            else -> dragging = payload                   // PRO+MANUAL: стартуем
                         }
                     },
 
@@ -401,10 +480,20 @@ fun PhaseLoadContent(
                             rect.contains(dragPosRoot)
                         }?.key
 
-                        val success = (target != null && target != payload.fromPhase)
-                        if (success) {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onGroupDropped(payload.groupId, target!!)
+                        when {
+                            target == null -> {
+                                // ✅ Hint 3: промах мимо панельных целей
+                                onDropMissed()
+                            }
+                            target == payload.fromPhase -> {
+                                // disabled-drop (своя фаза) — ничего, и без snackbar (по спекам "мимо фаз")
+                            }
+                            else -> {
+                                // ✅ успешный drop — как и раньше
+                                if (!firstDragHintShown) markFirstDragHintShown()
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onGroupDropped(payload.groupId, target)
+                            }
                         }
 
                         dragging = null
@@ -461,6 +550,100 @@ fun PhaseLoadContent(
                     overflow = TextOverflow.Ellipsis
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun PhaseDropTargetsPanel(
+    fromPhase: Phase,
+    highlightedPhase: Phase?,
+    onRegisterDropZone: (phase: Phase, rect: Rect) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        PhaseDropTargetChip(
+            phase = Phase.A,
+            disabled = (fromPhase == Phase.A),
+            highlighted = (highlightedPhase == Phase.A),
+            modifier = Modifier.weight(1f),
+            onRegisterDropZone = onRegisterDropZone
+        )
+        PhaseDropTargetChip(
+            phase = Phase.B,
+            disabled = (fromPhase == Phase.B),
+            highlighted = (highlightedPhase == Phase.B),
+            modifier = Modifier.weight(1f),
+            onRegisterDropZone = onRegisterDropZone
+        )
+        PhaseDropTargetChip(
+            phase = Phase.C,
+            disabled = (fromPhase == Phase.C),
+            highlighted = (highlightedPhase == Phase.C),
+            modifier = Modifier.weight(1f),
+            onRegisterDropZone = onRegisterDropZone
+        )
+    }
+}
+
+@Composable
+private fun PhaseDropTargetChip(
+    phase: Phase,
+    disabled: Boolean,
+    highlighted: Boolean,
+    onRegisterDropZone: (phase: Phase, rect: Rect) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val containerColor = when {
+        disabled -> MaterialTheme.colorScheme.surfaceVariant
+        highlighted -> MaterialTheme.colorScheme.primaryContainer
+        else -> MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+
+    val contentColor = when {
+        disabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
+        highlighted -> MaterialTheme.colorScheme.onPrimaryContainer
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+
+    val border = when {
+        disabled -> null
+        highlighted -> CardDefaults.outlinedCardBorder()
+        else -> null
+    }
+
+    Card(
+        modifier = modifier
+            .height(44.dp)
+            .onGloballyPositioned { coords ->
+                // dropZones всегда в ROOT координатах
+                onRegisterDropZone(phase, coords.boundsInRoot())
+            },
+        colors = CardDefaults.cardColors(
+            containerColor = containerColor,
+            contentColor = contentColor
+        ),
+        border = border,
+        shape = MaterialTheme.shapes.large,
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = if (highlighted) 4.dp else 1.dp
+        )
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                text = when (phase) {
+                    Phase.A -> "Фаза A"
+                    Phase.B -> "Фаза B"
+                    Phase.C -> "Фаза C"
+                    else -> "Фаза"
+                },
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold
+            )
         }
     }
 }
@@ -576,11 +759,7 @@ private fun AdviceCardSinglePhase(
 
             if (top1PctTotal >= 35.0) {
                 add(
-                    "${top1.first} даёт ${fmt0(top1PctTotal)}% общей нагрузки (${fmt1(top1.second)} A, ${
-                        fmt0(
-                            top1PctIncomer
-                        )
-                    }% вводного). Разносите мощные приборы по времени/группам."
+                    "${top1.first} даёт ${fmt0(top1PctTotal)}% общей нагрузки (${fmt1(top1.second)} A, ${fmt0(top1PctIncomer)}% вводного). Разносите мощные приборы по времени/группам."
                 )
             }
 
@@ -591,11 +770,7 @@ private fun AdviceCardSinglePhase(
                 val pairPctIncomer = if (incomer > 0) (pairSum / incomer) * 100.0 else 0.0
                 if (pairPctTotal >= 60.0) {
                     add(
-                        "Две зоны лидируют: ${top1.first} + ${top2.first} = ${fmt0(pairPctTotal)}% нагрузки (${
-                            fmt0(
-                                pairPctIncomer
-                            )
-                        }% вводного). Сведите одновременную работу к минимуму."
+                        "Две зоны лидируют: ${top1.first} + ${top2.first} = ${fmt0(pairPctTotal)}% нагрузки (${fmt0(pairPctIncomer)}% вводного). Сведите одновременную работу к минимуму."
                     )
                 }
             }

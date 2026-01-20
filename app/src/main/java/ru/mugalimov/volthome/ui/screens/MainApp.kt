@@ -99,19 +99,26 @@ fun MainApp(
         }
     }
 
+    // -----------------------------
+    // ✅ Paywall dialogs
+    // -----------------------------
     if (paywallFeature != null) {
         val feature = paywallFeature!!
 
         when (feature) {
+            // ✅ Коммит 5: объясняем механику (как это работает), а не "PRO ради PRO"
             ProFeature.PHASE_DND_TEASER -> {
                 AlertDialog(
                     onDismissRequest = { paywallFeature = null },
                     title = { Text("Ручное управление фазами") },
                     text = {
                         Text(
-                            "В PRO можно вручную переносить группы между фазами.\n\n" +
-                                    "Это вмешательство в распределение: после каждого переноса сразу меняются токи по фазам и ΔI.\n\n" +
-                                    "Используйте ручной режим, чтобы быстро выровнять баланс под реальный сценарий нагрузок."
+                            "Как это работает:\n" +
+                                    "1) Включите «Ручной режим».\n" +
+                                    "2) Зажмите значок ⠿ у группы.\n" +
+                                    "3) Перетащите и отпустите на фазе A/B/C сверху.\n\n" +
+                                    "После каждого переноса сразу меняются токи по фазам и ΔI.\n\n" +
+                                    "Функция доступна в PRO."
                         )
                     },
                     confirmButton = {
@@ -223,7 +230,6 @@ fun MainApp(
     CompositionLocalProvider(LocalUserPlan provides userPlan) {
         // ✅ КЛЮЧ: DebugProPanel должен быть внутри BoxScope, иначе align не существует
         Box(Modifier.fillMaxSize()) {
-
             AppScaffoldWithDrawer(
                 title = appBarTitle,
                 profileFlow = profileFlow,
@@ -233,9 +239,7 @@ fun MainApp(
                 onSelectProject = { id ->
                     projectsVm.selectProject(id)
                     appNavController.navigate(Screens.RoomsList.route) {
-                        popUpTo(appNavController.graph.findStartDestination().id) {
-                            saveState = true
-                        }
+                        popUpTo(appNavController.graph.findStartDestination().id) { saveState = true }
                         launchSingleTop = true
                         restoreState = true
                     }
@@ -243,9 +247,7 @@ fun MainApp(
                 onCreateProject = {
                     projectsVm.createNewProject()
                     appNavController.navigate(Screens.RoomsList.route) {
-                        popUpTo(appNavController.graph.findStartDestination().id) {
-                            saveState = true
-                        }
+                        popUpTo(appNavController.graph.findStartDestination().id) { saveState = true }
                         launchSingleTop = true
                         restoreState = true
                     }
@@ -305,8 +307,7 @@ private fun isFeatureAllowed(feature: ProFeature, caps: PlanCapabilities): Boole
         ProFeature.CALC_EXPLANATIONS -> caps.professionalReportSections
         ProFeature.CALC_WARNINGS -> caps.professionalReportSections
 
-        // ✅ Коммит 3: техподробности выбора фазы (уровень C)
-        // Пока вяжем на professionalReportSections (строго через PlanCapabilities).
+        // ✅ техподробности выбора фазы (уровень C)
         ProFeature.DECISION_DETAILS -> caps.professionalReportSections
     }
 }

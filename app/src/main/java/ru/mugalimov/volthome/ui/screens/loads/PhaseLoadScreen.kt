@@ -1,13 +1,8 @@
 package ru.mugalimov.volthome.ui.screens.loads
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -19,20 +14,29 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
-import ru.mugalimov.volthome.domain.model.ProFeature
+import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.launch
+import ru.mugalimov.volthome.data.local.datastore.AppPreferences
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseGroupItem
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.paywall.PaywallEntryPoint
 import ru.mugalimov.volthome.ui.viewmodel.ExplicationViewModel
 import ru.mugalimov.volthome.ui.viewmodel.PhaseLoadViewModel
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface AppPreferencesEntryPoint {
+    fun appPreferences(): AppPreferences
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -46,6 +50,8 @@ fun PhaseLoadScreen(
     }
 
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
     val paywallBus = remember {
         EntryPointAccessors.fromApplication(
             context.applicationContext,
@@ -53,10 +59,22 @@ fun PhaseLoadScreen(
         ).paywallBus()
     }
 
+    val appPreferences = remember {
+        EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            AppPreferencesEntryPoint::class.java
+        ).appPreferences()
+    }
+
+    val manualModeHintShown =
+        appPreferences.manualModeHintShown.collectAsStateWithLifecycle(initialValue = false).value
+    val firstDragHintShown =
+        appPreferences.firstDragHintShown.collectAsStateWithLifecycle(initialValue = false).value
+
     val canDrag = LocalUserPlan.current.capabilities.phaseDragAndDrop
     val uiState = viewModel.uiState.collectAsStateWithLifecycle().value
-    val snackbarHostState = remember { SnackbarHostState() }
 
+    val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(Unit) {
         viewModel.events.collect { msg ->
             snackbarHostState.showSnackbar(msg)
@@ -109,7 +127,24 @@ fun PhaseLoadScreen(
                     onPaywall = { viewModel.onDnDLockedTapped() },
                     onGroupDropped = { groupId, phase -> viewModel.onGroupDragged(groupId, phase) },
                     onReset = { viewModel.onResetOverrides() },
-                    onDecisionDetailsClick = { _ -> Unit }
+                    onDecisionDetailsClick = { _ -> Unit },
+
+                    // Hints (commit 2)
+                    manualModeHintShown = manualModeHintShown,
+                    firstDragHintShown = firstDragHintShown,
+                    markManualModeHintShown = {
+                        coroutineScope.launch { appPreferences.setManualModeHintShown() }
+                    },
+                    markFirstDragHintShown = {
+                        coroutineScope.launch { appPreferences.setFirstDragHintShown() }
+                    },
+                    onDropMissed = {
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar(
+                                "Не попали в фазу. Перетащите группу на карточку A/B/C сверху."
+                            )
+                        }
+                    }
                 )
             }
         }

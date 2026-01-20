@@ -65,7 +65,6 @@ fun PhaseGroupTableItem(
     onDragEndAttempt: (payload: PhaseLoadContentKt_DragPayload) -> Unit,
     isDropTargetHighlighted: Boolean,
     onDragCancel: () -> Unit,
-
     // ✅ теперь не используется (оставлено для совместимости с вызовами)
     onDecisionDetailsClick: (groupNumber: Int) -> Unit = {}
 ) {
@@ -78,7 +77,6 @@ fun PhaseGroupTableItem(
     } else {
         MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
     }
-
     val borderWidth = if (isDropTargetHighlighted) 2.dp else 1.dp
 
     Card(
@@ -95,6 +93,7 @@ fun PhaseGroupTableItem(
     ) {
         Column(Modifier.fillMaxWidth()) {
 
+            // Header (фаза)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -119,159 +118,164 @@ fun PhaseGroupTableItem(
                 )
             }
 
+            // Body (группы)
             AnimatedVisibility(
                 visible = expanded,
                 enter = fadeIn() + expandVertically(),
                 exit = shrinkVertically() + fadeOut()
             ) {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+
+                    val lastIndex = item.groups.lastIndex
+
                     item.groups.forEachIndexed { index, group ->
-                        var handleCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
 
-                        Column(Modifier.padding(vertical = 8.dp)) {
+                        // ✅ КРИТИЧНО: ключуем весь блок группы, чтобы remember не “переехали”
+                        key(group.groupId) {
 
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "Группа №${group.groupNumber} (${group.roomName})",
-                                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                                    modifier = Modifier.weight(1f)
-                                )
+                            // ✅ handleCoords теперь устойчиво привязаны к groupId
+                            var handleCoords by remember(group.groupId) { mutableStateOf<LayoutCoordinates?>(null) }
 
-                                val payload = PhaseLoadContentKt_DragPayload(
-                                    groupId = group.groupId,
-                                    fromPhase = item.phase,
-                                    title = "Группа №${group.groupNumber} (${group.roomName})"
-                                )
+                            Column(Modifier.padding(vertical = 8.dp)) {
 
-                                IconButton(
-                                    onClick = { /* drag only */ },
-                                    modifier = Modifier
-                                        .onGloballyPositioned { handleCoords = it }
-                                        .pointerInput(group.groupId) {
-                                            detectDragGestures(
-                                                onDragStart = { startLocal ->
-                                                    val c = handleCoords ?: return@detectDragGestures
-                                                    val startRoot = c.localToRoot(startLocal)
-                                                    onDragStartAttempt(payload, startRoot)
-                                                },
-                                                onDrag = { change, _ ->
-                                                    change.consume()
-                                                    val c = handleCoords ?: return@detectDragGestures
-                                                    onDragMove(c.localToRoot(change.position))
-                                                },
-                                                onDragCancel = { onDragCancel() },
-                                                onDragEnd = { onDragEndAttempt(payload) }
-                                            )
-                                        }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Outlined.DragIndicator,
-                                        contentDescription = "Перетащить группу"
+                                    Text(
+                                        text = "Группа №${group.groupNumber} (${group.roomName})",
+                                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                                        modifier = Modifier.weight(1f)
                                     )
-                                }
-                            }
 
-                            Spacer(Modifier.height(8.dp))
+                                    val payload = PhaseLoadContentKt_DragPayload(
+                                        groupId = group.groupId,
+                                        fromPhase = item.phase,
+                                        title = "Группа №${group.groupNumber} (${group.roomName})"
+                                    )
 
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                group.devices.forEach { deviceItem ->
-                                    key(deviceItem.deviceId) {
-                                        AssistChip(
-                                            onClick = {},
-                                            label = { Text(deviceItem.name) },
-                                            border = AssistChipDefaults.assistChipBorder(false)
+                                    IconButton(
+                                        onClick = { /* drag only */ },
+                                        modifier = Modifier
+                                            .onGloballyPositioned { handleCoords = it }
+                                            .pointerInput(group.groupId) {
+                                                detectDragGestures(
+                                                    onDragStart = { startLocal ->
+                                                        val c = handleCoords ?: return@detectDragGestures
+                                                        val startRoot = c.localToRoot(startLocal)
+                                                        onDragStartAttempt(payload, startRoot)
+                                                    },
+                                                    onDrag = { change, _ ->
+                                                        change.consume()
+                                                        val c = handleCoords ?: return@detectDragGestures
+                                                        onDragMove(c.localToRoot(change.position))
+                                                    },
+                                                    onDragCancel = { onDragCancel() },
+                                                    onDragEnd = { onDragEndAttempt(payload) }
+                                                )
+                                            }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.DragIndicator,
+                                            contentDescription = "Перетащить группу"
                                         )
                                     }
                                 }
-                            }
 
-                            Spacer(Modifier.height(8.dp))
+                                Spacer(Modifier.height(8.dp))
 
-                            Text(
-                                text = "${group.totalPower.toInt()} Вт • ${"%.2f".format(group.totalCurrent)} A",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    group.devices.forEach { deviceItem ->
+                                        key(deviceItem.deviceId) {
+                                            AssistChip(
+                                                onClick = {},
+                                                label = { Text(deviceItem.name) },
+                                                border = AssistChipDefaults.assistChipBorder(false)
+                                            )
+                                        }
+                                    }
+                                }
 
-                            val events = decisionsByGroupNumber[group.groupNumber].orEmpty()
-                            val decision = events.lastOrNull()
+                                Spacer(Modifier.height(8.dp))
 
-                            if (decision != null) {
-                                val ui = decision.toDecisionExplanationUi()
-
-                                // ✅ Локальное состояние раскрытия "Подробнее" (теперь это B)
-                                var detailsExpanded by remember(group.groupId) { mutableStateOf(false) }
-
-                                Spacer(Modifier.height(6.dp))
-
-                                // A: заголовок (всегда)
                                 Text(
-                                    text = ui.levelA_title,
-                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                    text = "${group.totalPower.toInt()} Вт • ${"%.2f".format(group.totalCurrent)} A",
+                                    style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
 
-                                // A: метрика (всегда, если есть)
-                                if (ui.levelA_metric.isNotBlank()) {
+                                val events = decisionsByGroupNumber[group.groupNumber].orEmpty()
+                                val decision = events.lastOrNull()
+
+                                if (decision != null) {
+                                    val ui = decision.toDecisionExplanationUi()
+
+                                    // ✅ detailsExpanded тоже стабильно привязан к groupId
+                                    var detailsExpanded by remember(group.groupId) { mutableStateOf(false) }
+
+                                    Spacer(Modifier.height(6.dp))
+
+                                    // A: заголовок (всегда)
                                     Text(
-                                        text = ui.levelA_metric,
-                                        style = MaterialTheme.typography.bodySmall,
+                                        text = ui.levelA_title,
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
-                                }
 
-                                Spacer(Modifier.height(6.dp))
+                                    // A: метрика (всегда, если есть)
+                                    if (ui.levelA_metric.isNotBlank()) {
+                                        Text(
+                                            text = ui.levelA_metric,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
 
-                                // ✅ "Подробнее" → раскрывает/скрывает уровень B
-                                Text(
-                                    text = if (detailsExpanded) "Скрыть" else "Подробнее",
-                                    modifier = Modifier.clickable { detailsExpanded = !detailsExpanded },
-                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                                    color = MaterialTheme.colorScheme.primary
-                                )
+                                    Spacer(Modifier.height(6.dp))
 
-                                // ✅ Уровень B показываем только при detailsExpanded
-                                AnimatedVisibility(
-                                    visible = detailsExpanded,
-                                    enter = fadeIn() + expandVertically(),
-                                    exit = shrinkVertically() + fadeOut()
-                                ) {
-                                    Column(Modifier.padding(top = 6.dp)) {
+                                    // "Подробнее" → раскрывает/скрывает уровень B
+                                    Text(
+                                        text = if (detailsExpanded) "Скрыть" else "Подробнее",
+                                        modifier = Modifier.clickable { detailsExpanded = !detailsExpanded },
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
 
-                                        // B: причина
-                                        if (ui.levelB_reason.isNotBlank()) {
+                                    AnimatedVisibility(
+                                        visible = detailsExpanded,
+                                        enter = fadeIn() + expandVertically(),
+                                        exit = shrinkVertically() + fadeOut()
+                                    ) {
+                                        Column(Modifier.padding(top = 6.dp)) {
+                                            if (ui.levelB_reason.isNotBlank()) {
+                                                Text(
+                                                    text = ui.levelB_reason,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
                                             Text(
-                                                text = ui.levelB_reason,
+                                                text = ui.levelB_before,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Text(
+                                                text = ui.levelB_after,
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
-
-                                        // B: до/после
-                                        Text(
-                                            text = ui.levelB_before,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Text(
-                                            text = ui.levelB_after,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
                                     }
                                 }
-                            }
 
-                            if (index != item.groups.lastIndex) {
-                                Spacer(Modifier.height(12.dp))
-                                Divider()
+                                if (index != lastIndex) {
+                                    Spacer(Modifier.height(12.dp))
+                                    Divider()
+                                }
                             }
                         }
                     }
