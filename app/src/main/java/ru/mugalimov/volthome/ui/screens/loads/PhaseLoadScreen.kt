@@ -26,9 +26,11 @@ import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.local.datastore.AppPreferences
+import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseGroupItem
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.paywall.PaywallEntryPoint
+import ru.mugalimov.volthome.ui.screens.loads.single.PhaseLoadSingleReportContent
 import ru.mugalimov.volthome.ui.viewmodel.ExplicationViewModel
 import ru.mugalimov.volthome.ui.viewmodel.PhaseLoadViewModel
 
@@ -84,7 +86,13 @@ fun PhaseLoadScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Распределение по фазам") }
+                title = {
+                    val title = when (uiState.mode) {
+                        PhaseMode.SINGLE -> "Состояние вводного аппарата"
+                        PhaseMode.THREE -> "Распределение по фазам"
+                    }
+                    Text(title)
+                }
             )
         },
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
@@ -112,40 +120,48 @@ fun PhaseLoadScreen(
             }
 
             else -> {
-                PhaseLoadContent(
-                    phaseLoads = uiState.data,
-                    decisions = uiState.decisions,
-                    mode = uiState.mode,
-                    phaseLoadMode = uiState.phaseLoadMode,
-                    incomerRating = uiState.incomer?.mcbRating,
-                    thresholds = uiState.thresholds,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                    canDrag = canDrag,
-                    onEnterManualMode = { viewModel.onEnterManualMode() },
-                    onPaywall = { viewModel.onDnDLockedTapped() },
-                    onGroupDropped = { groupId, phase -> viewModel.onGroupDragged(groupId, phase) },
-                    onReset = { viewModel.onResetOverrides() },
-                    onDecisionDetailsClick = { _ -> Unit },
-
-                    // Hints (commit 2)
-                    manualModeHintShown = manualModeHintShown,
-                    firstDragHintShown = firstDragHintShown,
-                    markManualModeHintShown = {
-                        coroutineScope.launch { appPreferences.setManualModeHintShown() }
-                    },
-                    markFirstDragHintShown = {
-                        coroutineScope.launch { appPreferences.setFirstDragHintShown() }
-                    },
-                    onDropMissed = {
-                        coroutineScope.launch {
-                            snackbarHostState.showSnackbar(
-                                "Не попали в фазу. Перетащите группу на карточку A/B/C сверху."
-                            )
-                        }
+                when (uiState.mode) {
+                    PhaseMode.SINGLE -> {
+                        // ✅ Коммит 1: в SINGLE PhaseLoadContent НЕ вызывается вообще
+                        PhaseLoadSingleReportContent(
+                            uiState = uiState,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(padding)
+                        )
                     }
-                )
+
+                    PhaseMode.THREE -> {
+                        PhaseLoadContent(
+                            phaseLoads = uiState.data,
+                            decisions = uiState.decisions,
+                            phaseLoadMode = uiState.phaseLoadMode,
+                            incomerRating = uiState.incomer?.mcbRating,
+                            thresholds = uiState.thresholds,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(padding),
+                            canDrag = canDrag,
+                            onEnterManualMode = { viewModel.onEnterManualMode() },
+                            onPaywall = { viewModel.onDnDLockedTapped() },
+                            onGroupDropped = { groupId, phase -> viewModel.onGroupDragged(groupId, phase) },
+                            onReset = { viewModel.onResetOverrides() },
+                            onDecisionDetailsClick = { _ -> Unit },
+
+                            manualModeHintShown = manualModeHintShown,
+                            firstDragHintShown = firstDragHintShown,
+                            markManualModeHintShown = { coroutineScope.launch { appPreferences.setManualModeHintShown() } },
+                            markFirstDragHintShown = { coroutineScope.launch { appPreferences.setFirstDragHintShown() } },
+                            onDropMissed = {
+                                coroutineScope.launch {
+                                    snackbarHostState.showSnackbar(
+                                        "Не попали в фазу. Перетащите группу на карточку A/B/C сверху."
+                                    )
+                                }
+                            }
+                        )
+                    }
+                }
             }
         }
     }

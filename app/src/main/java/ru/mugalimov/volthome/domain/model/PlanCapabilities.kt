@@ -1,5 +1,7 @@
 package ru.mugalimov.volthome.domain.model
 
+import ru.mugalimov.volthome.domain.model.report.ReportModel.ReportProfile
+
 /**
  * Capabilities — это единственный источник правды:
  * что пользователь реально имеет право видеть/генерировать.
@@ -29,6 +31,13 @@ data class PlanCapabilities(
     /** Отсутствие лимита проектов (FREE лимит снят) */
     val unlimitedProjects: Boolean,
 ) {
+    /**
+     * Контентный профиль документа (Free/Pro).
+     * Не зависит от способа получения (превью/печать), зависит только от прав контента.
+     */
+    fun reportProfile(): ReportProfile =
+        if (professionalReportSections) ReportProfile.PRO else ReportProfile.FREE
+
     companion object {
         fun fromPlan(plan: UserPlan): PlanCapabilities {
             val pro = plan.isPro

@@ -1,51 +1,65 @@
 package ru.mugalimov.volthome.ui.screens.explication.export_pdf
 
 import android.app.Activity
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.ComponentActivity
+import androidx.annotation.RequiresApi
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.domain.model.CalcAssumption
+import ru.mugalimov.volthome.domain.model.CalcStep
 import ru.mugalimov.volthome.domain.model.CalcWarning
 import ru.mugalimov.volthome.domain.model.PlanCapabilities
 import ru.mugalimov.volthome.domain.model.report.ReportModel
+import ru.mugalimov.volthome.domain.model.report.ReportModel.ReportProfile
+import ru.mugalimov.volthome.domain.model.report.ReportModel.PhaseMode as ReportPhaseMode
 import ru.mugalimov.volthome.domain.use_case.report.BuildProfessionalSectionsUseCase
 import ru.mugalimov.volthome.ui.utilities.HtmlReportBuilder
 import ru.mugalimov.volthome.ui.utilities.PdfPrinter
 import ru.mugalimov.volthome.ui.viewmodel.ExplicationViewModel
 import ru.mugalimov.volthome.ui.viewmodel.GroupScreenState
-import ru.mugalimov.volthome.ui.viewmodel.buildReportData
 
-/**
- * Строит HTML отчёта для превью/экспорта.
- *
- * ВАЖНО:
- * - Эта функция НЕ проверяет pdfExport.
- * - Preview доступен в Free и PRO.
- * - Ограничения экспорта должны применяться выше, в export-actions path.
- */
+@RequiresApi(Build.VERSION_CODES.P)
 fun buildExplicationReportHtml(
     activity: Activity,
     vm: ExplicationViewModel,
     caps: PlanCapabilities
 ): String? {
-    // Данные отчёта: доступны в Free и PRO (gate по pdfExport тут запрещён).
-    val legacy = vm.buildReportData() ?: return null
-    val (meta, phases) = legacy
+    val profile: ReportProfile = caps.reportProfile()
+
+    // ✅ ЕДИНЫЙ ИСТОЧНИК ДАННЫХ ДЛЯ PDF:
+    // meta/phases + kpi (installed/calculated) берём из слепка ViewModel, а не собираем “альтернативно”.
+    val snapshot = vm.buildReportSnapshotForPdf() ?: return null
+    val meta = snapshot.meta
+    val phases = snapshot.phases
+
+    // phaseMode — из VM (и маппим в enum отчёта)
+    val phaseMode: ReportPhaseMode =
+        when (vm.phaseMode.value) {
+            ru.mugalimov.volthome.domain.model.PhaseMode.SINGLE -> ReportPhaseMode.SINGLE
+            ru.mugalimov.volthome.domain.model.PhaseMode.THREE -> ReportPhaseMode.THREE
+        }
+
+    val appVersion = resolveAppVersion(activity)
 
     val reportBase = ReportModel.fromLegacy(
         meta = meta,
-        phases = phases
+        phases = phases,
+        profile = profile,
+        phaseMode = phaseMode,
+        appVersion = appVersion
     )
 
-    // Берём живые данные из uiState (они у тебя уже считаются)
     val s = vm.uiState.value as? GroupScreenState.Success
 
-    val professional = if (caps.professionalReportSections && s != null) {
+    // ✅ Professional sections: строим из тех же meta/phases + предупреждений/допущений из UI state
+    val professional = if (profile == ReportProfile.PRO && s != null) {
         val assumptions: List<CalcAssumption> = buildList {
             addAll(s.installedPowerW.assumptions)
             addAll(s.calculatedPowerW.assumptions)
             addAll(s.shieldTotalsAssumptions)
-        }.distinctBy { it.toString() }
+        }.distinctBy { "${it.kind}|${it.source}|${it.subject}|${it.message}|${it.original}|${it.applied}" }
 
         val warnings: List<CalcWarning> = buildList {
             addAll(s.calcWarnings)
@@ -58,48 +72,74 @@ fun buildExplicationReportHtml(
                 phaseMode = vm.phaseMode.value,
                 meta = meta,
                 phases = phases,
-                distributionDecisions = emptyList(), // decisions подключим позже, если нужно
+                distributionDecisions = emptyList(),
                 calcWarnings = warnings,
                 assumptions = assumptions
             )
         )
-    } else {
-        null
-    }
+    } else null
 
-    val reportBase2 = if (s != null) {
-        reportBase.copy(
-            kpis = reportBase.kpis.copy(
-                installedPowerW = s.installedPowerW.value,
-                calculatedPowerW = s.calculatedPowerW.value
-            )
+    // ✅ KPI: installed/calculated строго из snapshot (== UI state)
+    val reportBase2 = reportBase.copy(
+        kpis = reportBase.kpis.copy(
+            installedPowerW = snapshot.installedPowerW,
+            calculatedPowerW = snapshot.calculatedPowerW
         )
-    } else {
-        reportBase
-    }
+    )
+
+    // ✅ Шаги расчёта — из UI state (если PRO)
+    val steps: List<CalcStep> = if (profile == ReportProfile.PRO && s != null) {
+        buildList {
+            addAll(s.installedPowerW.steps)
+            addAll(s.calculatedPowerW.steps)
+        }
+    } else emptyList()
+
+    // ✅ Assumptions — из UI state (если PRO)
+    val assumptionsForReport: List<CalcAssumption> =
+        if (profile == ReportProfile.PRO && s != null) {
+            buildList {
+                addAll(s.installedPowerW.assumptions)
+                addAll(s.calculatedPowerW.assumptions)
+                addAll(s.shieldTotalsAssumptions)
+            }.distinctBy { "${it.kind}|${it.source}|${it.subject}|${it.message}|${it.original}|${it.applied}" }
+        } else emptyList()
 
     val reportModel = reportBase2.copy(
         professional = professional,
-        assumptions = emptyList(),
+        steps = steps,
+        assumptions = assumptionsForReport,
         warnings = emptyList(),
-        steps = emptyList(),
         normRefs = emptyList()
     )
 
-    // HTML: inline-нормативы только в PRO (это про содержание, а не про доступность preview).
+    val safeModel = ReportModel.sanitizeForProfile(reportModel)
+
     return HtmlReportBuilder(activity).build(
-        model = reportModel,
-        includeInlineNormatives = caps.professionalReportSections
+        model = safeModel,
+        includeInlineNormatives = (profile == ReportProfile.PRO)
     )
 }
 
-/**
- * Временный экспорт через системный Print UI.
- *
- * ВАЖНО:
- * - Этот метод делает печать/экспорт (то есть действия).
- * - Gate по pdfExport должен жить ВЫШЕ (в VM / export-actions path), не здесь.
- */
+@RequiresApi(Build.VERSION_CODES.P)
+private fun resolveAppVersion(activity: Activity): String {
+    return try {
+        val pm: PackageManager = activity.packageManager
+        val pkg = activity.packageName
+        val pi = pm.getPackageInfo(pkg, 0)
+        val name = pi.versionName ?: ""
+        val code = runCatching { pi.longVersionCode.toString() }.getOrElse { "" }
+        when {
+            name.isNotBlank() && code.isNotBlank() -> "$name ($code)"
+            name.isNotBlank() -> name
+            else -> code
+        }
+    } catch (_: Throwable) {
+        ""
+    }
+}
+
+@RequiresApi(Build.VERSION_CODES.P)
 fun exportExplicationPdf(
     activity: Activity,
     vm: ExplicationViewModel,
@@ -108,16 +148,7 @@ fun exportExplicationPdf(
     val html = buildExplicationReportHtml(activity, vm, caps) ?: return
 
     when (activity) {
-        is ComponentActivity -> {
-            activity.lifecycleScope.launch {
-                PdfPrinter(activity).printHtml(html)
-            }
-        }
-
-        else -> {
-            activity.runOnUiThread {
-                PdfPrinter(activity).printHtml(html)
-            }
-        }
+        is ComponentActivity -> activity.lifecycleScope.launch { PdfPrinter(activity).printHtml(html) }
+        else -> activity.runOnUiThread { PdfPrinter(activity).printHtml(html) }
     }
 }

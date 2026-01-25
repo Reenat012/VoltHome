@@ -20,6 +20,9 @@
         .header__logo{width:42pt;height:42pt;object-fit:contain}
         .header__title{font-size:18pt;font-weight:700;line-height:1.1}
 
+        <!-- ТИТУЛ (генерируется в билдере) -->
+{{titleBlock}}
+
         /* Заголовки + секции */
         h2{font-size:13.5pt;margin:14pt 0 6pt; position:relative; z-index:1;}
         .h2-tight{margin-top:6pt;margin-bottom:6pt; break-after: avoid; page-break-after: avoid;}
@@ -112,6 +115,11 @@
     <div class="donut-col">{{donutSection}}</div>
     <div class="legend-col">{{legendSection}}</div>
 </div>
+
+<div class="divider"></div>
+
+<!-- ШАГИ РАСЧЁТА (PRO-only, генерируется в билдере) -->
+{{stepsHtml}}
 
 <div class="divider"></div>
 

@@ -14,13 +14,19 @@ import java.io.InputStreamReader
 import java.text.DecimalFormat
 import java.text.DecimalFormatSymbols
 import java.util.Locale
-import kotlin.math.*
+import kotlin.math.cos
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
+import kotlin.math.sin
 
 class HtmlReportBuilder(private val context: Context) {
+
     private val ruSymbols = DecimalFormatSymbols(Locale("ru", "RU")).apply {
         decimalSeparator = ','
         groupingSeparator = ' '
     }
+
     private val df2 = DecimalFormat("#,##0.00", ruSymbols)
     private val df1 = DecimalFormat("#,##0.0", ruSymbols)
     private val df0 = DecimalFormat("#,##0", ruSymbols)
@@ -29,6 +35,8 @@ class HtmlReportBuilder(private val context: Context) {
     private val VOLTAGE_DEFAULT = 230.0
     private val eps = 1e-6
 
+    // Legacy/fallback: если ReportDevice в какой-то ветке приходит без полей powerW/currentA,
+    // пытаемся вытащить числа из spec (но это *не* основной путь).
     private val powerFieldAliases = listOf("powerW", "power", "watt", "pW")
     private val currentFieldAliases = listOf("currentA", "amp", "a")
 
@@ -39,7 +47,7 @@ class HtmlReportBuilder(private val context: Context) {
     private val groupCableAliases =
         listOf("cableLabel", "lineLabel", "wireLabel", "cableInfo", "lineInfo")
 
-    // —— ТОЛЬКО CSS изменён: добавлены жёсткие запреты разрыва и префиксы ——
+    // —— Стили (как у тебя было) ——
     private val INLINE_STYLE = """
         <style>
           body { padding-bottom: 96px; }
@@ -93,45 +101,90 @@ class HtmlReportBuilder(private val context: Context) {
           tr.group-start { page-break-after: avoid !important; }
 
           .h2-tight { margin: 0 0 8px 0; }
-          
+
           /* ————— Новые секции: расчёт/предупреждения/нормы ————— */
-                   
-                    .explain .block h3 { margin: 0 0 8px 0; font-size: 13px; font-weight: 700; }
-                    .explain .muted { color: #6B7280; font-size: 12px; }
-                    .explain ul { margin: 6px 0 0 18px; padding: 0; }
-                    .explain li { margin: 4px 0; }
-          
-                    .step-title {
-                      display:flex;
-                      align-items:baseline;
-                      gap:8px;
-                      font-weight:700;
-                      font-size:12.5px;
-                      margin: 0 0 6px 0;
-                    }
-                    .pill {
-                      display:inline-block;
-                      padding: 2px 8px;
-                      border-radius: 9999px;
-                      font-size: 11px;
-                      font-weight: 700;
-                      background: #F3F4F6;
-                      color: #111827;
-                    }
-                    .pill.warn { background:#FEF3C7; color:#92400E; }
-                    .pill.err  { background:#FEE2E2; color:#991B1B; }
-                    .pill.info { background:#E5E7EB; color:#374151; }
-          
-                    .warn-item { border-left: 4px solid #D1D5DB; padding-left: 10px; margin: 10px 0; }
-                    .warn-item.warn { border-left-color: #F59E0B; }
-                    .warn-item.err { border-left-color: #EF4444; }
-                    .warn-item .t { font-weight:700; }
-                    .warn-item .m { margin-top: 2px; color:#374151; font-size:12px; }
-          
-                    .norm-list .code { font-weight: 800; }
-                 
+          .explain .block h3 { margin: 0 0 8px 0; font-size: 13px; font-weight: 700; }
+          .explain .muted { color: #6B7280; font-size: 12px; }
+          .explain ul { margin: 6px 0 0 18px; padding: 0; }
+          .explain li { margin: 4px 0; }
+
+          .step-title {
+            display:flex;
+            align-items:baseline;
+            gap:8px;
+            font-weight:700;
+            font-size:12.5px;
+            margin: 0 0 6px 0;
+          }
+          .pill {
+            display:inline-block;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            font-size: 11px;
+            font-weight: 700;
+            background: #F3F4F6;
+            color: #111827;
+          }
+          .pill.warn { background:#FEF3C7; color:#92400E; }
+          .pill.err  { background:#FEE2E2; color:#991B1B; }
+          .pill.info { background:#E5E7EB; color:#374151; }
+
+          .warn-item { border-left: 4px solid #D1D5DB; padding-left: 10px; margin: 10px 0; }
+          .warn-item.warn { border-left-color: #F59E0B; }
+          .warn-item.err { border-left-color: #EF4444; }
+          .warn-item .t { font-weight:700; }
+          .warn-item .m { margin-top: 2px; color:#374151; font-size:12px; }
+
+          .norm-list .code { font-weight: 800; }
+
+          /* ————— Шаги расчёта (PRO) ————— */
+          .steps { margin-top: 10pt; }
+
+          .calc-step {
+            border: 1px solid #E5E7EB;
+            border-radius: 10px;
+            padding: 10pt 12pt;
+            margin: 10pt 0;
+            background: #FFFFFF;
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+
+          .calc-step .rows {
+            margin-top: 8pt;
+            display: grid;
+            grid-template-columns: 120px 1fr;
+            gap: 6pt 10pt;
+          }
+
+          .calc-step .lbl {
+            color: #6B7280;
+            font-size: 12px;
+            font-weight: 700;
+          }
+
+          .calc-step .val {
+            font-size: 12.5px;
+            color: #111827;
+          }
+
+          .mono {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-variant-numeric: tabular-nums;
+          }
+
+          .subst-list { margin: 0; padding-left: 16px; }
+          .subst-list li { margin: 2px 0; }
+
+          .assumptions { margin-top: 12pt; break-inside: avoid; page-break-inside: avoid; }
+          .assumption-list { margin: 6pt 0 0 18px; padding: 0; }
+          .assumption-list li { margin: 8pt 0; }
+          .assump-title { font-size: 12.5px; color:#111827; }
+          .assump-meta { font-size: 11.5px; color:#6B7280; margin-top:2pt; }
         </style>
     """.trimIndent()
+
+    // region Public API
 
     fun build(
         model: ReportModel,
@@ -146,25 +199,34 @@ class HtmlReportBuilder(private val context: Context) {
             "$INLINE_STYLE$htmlTemplate"
         }
 
-        html = html.replace("{{projectName}}", escape(model.header.projectName))
-            .replace("{{date}}", escape(model.header.date))
-            .replace("{{kpiBlock}}", buildKpiBlock(model, includeInlineNormatives))
+        html = html
+            .replace("{{projectName}}", escapeHtml(model.header.projectName))
+            .replace("{{date}}", escapeHtml(model.header.date))
+            .replace("{{titleBlock}}", buildTitleBlock(model))
+            // ✅ FREE: даже если флаг true — inline-нормативы не должны прорваться
+            .replace(
+                "{{kpiBlock}}",
+                buildKpiBlock(
+                    model = model,
+                    includeInlineNormatives = includeInlineNormatives && model.profile == ReportModel.ReportProfile.PRO
+                )
+            )
             .replace("{{donutSection}}", buildDonutSection(model.donut))
             .replace("{{legendSection}}", buildLegend(model.donut))
 
-        val phasesHtml = buildPhasesTables(model.phases)
+        // ✅ Контентный контракт: buildSectionsHtml решает, что рендерим
+        val sectionsHtml = buildSectionsHtml(model)
 
-        // подставляем только таблицы фаз (никаких explain секций)
-        html = if (html.contains("{{explainHtml}}")) {
-            html.replace("{{explainHtml}}", "")
-                .replace("{{phasesHtml}}", phasesHtml)
-                .replace("{{phases}}", phasesHtml)
-        } else {
-            html.replace("{{phasesHtml}}", phasesHtml)
-                .replace("{{phases}}", phasesHtml)
-        }
+        html = html
+            .replace("{{stepsHtml}}", "") // ✅ steps никогда напрямую не вставляем тут
+            .let { base ->
+                if (base.contains("{{explainHtml}}")) base.replace("{{explainHtml}}", "")
+                else base
+            }
+            .replace("{{phasesHtml}}", sectionsHtml)
+            .replace("{{phases}}", sectionsHtml)
 
-        // watermark теперь всегда один (как было в Free-режиме)
+        // watermark один
         html = html.replace(
             "{{watermark}}",
             """<div class="watermark"><img src="img/logo.png" alt="VoltHome" onerror="this.outerHTML='VoltHome'"/></div>"""
@@ -174,6 +236,123 @@ class HtmlReportBuilder(private val context: Context) {
         return html
     }
 
+    // endregion
+
+    // region Sections
+
+    private fun buildSectionsHtml(model: ReportModel): String {
+        val phasesHtml = buildPhasesTables(model.phases)
+
+        return when (model.profile) {
+            ReportModel.ReportProfile.FREE -> {
+                // ✅ FREE: есть экспликация по фазам, но нет PRO-секций
+                phasesHtml
+            }
+
+            ReportModel.ReportProfile.PRO -> {
+                val stepsHtml = buildStepsSection(model)
+                val assumptionsHtml = buildAssumptionsSection(model)
+                phasesHtml + stepsHtml + assumptionsHtml
+            }
+        }
+    }
+
+    private fun buildStepsSection(model: ReportModel): String {
+        if (model.profile != ReportModel.ReportProfile.PRO) return ""
+        val steps = model.steps
+        if (steps.isEmpty()) return ""
+
+        return buildString {
+            appendLine("""<div class="steps">""")
+            appendLine("""<h2 class="h2-tight">Шаги расчёта</h2>""")
+            steps.forEachIndexed { idx, step ->
+                appendLine(renderStep(idx + 1, step))
+            }
+            appendLine("""</div>""")
+        }
+    }
+
+    private fun renderStep(index: Int, step: ru.mugalimov.volthome.domain.model.CalcStep): String {
+        val stepName = escapeHtml(step.name)
+        val formula = escapeHtml(step.formula)
+
+        val substitutionHtml = if (step.inputs.isEmpty()) {
+            """<span class="muted">—</span>"""
+        } else {
+            buildString {
+                append("""<ul class="subst-list">""")
+                step.inputs.forEach { inp ->
+                    val name = escapeHtml(inp.name)
+                    val v = formatValue(inp.value, inp.unit)
+                    val unit = escapeHtml(inp.unit)
+                    val tail = if (unit.isBlank()) "" else " $unit"
+                    append("""<li><span class="mono">$name = $v$tail</span></li>""")
+                }
+                append("""</ul>""")
+            }
+        }
+
+        val outV = formatValue(step.output.value, step.output.unit)
+        val outUnit = escapeHtml(step.output.unit)
+        val outTail = if (outUnit.isBlank()) "" else " $outUnit"
+
+        return """
+          <div class="calc-step">
+            <div class="step-title">
+              <span class="pill info">Шаг $index</span>
+              <span>$stepName</span>
+            </div>
+            <div class="rows">
+              <div class="lbl">Формула</div>
+              <div class="val mono">$formula</div>
+
+              <div class="lbl">Подстановка</div>
+              <div class="val">$substitutionHtml</div>
+
+              <div class="lbl">Результат</div>
+              <div class="val mono"><b>$outV$outTail</b></div>
+            </div>
+          </div>
+        """.trimIndent()
+    }
+
+    private fun buildAssumptionsSection(model: ReportModel): String {
+        if (model.profile != ReportModel.ReportProfile.PRO) return ""
+        val list = model.assumptions
+        if (list.isEmpty()) return ""
+
+        fun fmtNum(v: Double?): String = v?.let { df2.format(it) } ?: "—"
+
+        return buildString {
+            appendLine("""<div class="assumptions">""")
+            appendLine("""<h2 class="h2-tight">Принятые инженерные допущения</h2>""")
+            appendLine("""<ul class="assumption-list">""")
+            list.forEach { a ->
+                appendLine(
+                    """
+                    <li>
+                      <div class="assump-title"><b>${escapeHtml(a.subject)}</b> — ${escapeHtml(a.message)}</div>
+                      <div class="assump-meta muted">
+                        ${escapeHtml(a.kind.name)}${
+                        a.source?.let { " • ${escapeHtml(it.name)}" } ?: ""
+                    }${
+                        if (a.original != null || a.applied != null)
+                            " • ${fmtNum(a.original)} → ${fmtNum(a.applied)}"
+                        else ""
+                    }
+                      </div>
+                    </li>
+                    """.trimIndent()
+                )
+            }
+            appendLine("""</ul></div>""")
+        }
+    }
+
+    // endregion
+
+    // region KPI / Title
+
     private fun buildKpiBlock(model: ReportModel, includeInlineNormatives: Boolean): String {
         val currents = model.kpis.headlineCurrents
 
@@ -182,16 +361,13 @@ class HtmlReportBuilder(private val context: Context) {
         val iC = formatA(currents["C"])
 
         val isSingle = model.donut is DonutModel.IncomerLoad
-
         val incomerHuman = humanizeIncomer(model.header.incomerLabel)
 
-        // commit 3: inline-нормативы в KPI (только если includeInlineNormatives = true)
         fun inlineNorm(key: InlineNormatives.FactKey): String =
-            InlineNormatives.forFact(key)?.let { " — ${escape(it)}" }.orEmpty()
+            InlineNormatives.forFact(key)?.let { " — ${escapeHtml(it)}" }.orEmpty()
 
         fun hasMainRcdLabel(raw: String): Boolean {
             val s = raw.lowercase(Locale.getDefault())
-            // достаточно грубо: если явно упоминается rcd / узо / rcbo — считаем, что ввод с утечкой
             return s.contains("rcd") || s.contains("узо") || s.contains("rcbo")
         }
 
@@ -203,16 +379,14 @@ class HtmlReportBuilder(private val context: Context) {
 
         return buildString {
             append("""<div class="kpi">""")
-            append("""<div>Дата: <b>${escape(model.header.date)}</b></div>""")
+            append("""<div>Дата: <b>${escapeHtml(model.header.date)}</b></div>""")
 
-            // Вводной аппарат + норматив (PRO only)
             append(
-                """<div>Вводной аппарат: <b>${escape(incomerHuman)}</b>${
+                """<div>Вводной аппарат: <b>${escapeHtml(incomerHuman)}</b>${
                     if (includeInlineNormatives) inlineNorm(incomerNormKey) else ""
                 }</div>"""
             )
 
-            // Мощности (если пришли из ExportPdf)
             model.kpis.installedPowerW?.let { w ->
                 val kw = w / 1000.0
                 append(
@@ -221,6 +395,7 @@ class HtmlReportBuilder(private val context: Context) {
                     }</div>"""
                 )
             }
+
             model.kpis.calculatedPowerW?.let { w ->
                 val kw = w / 1000.0
                 append(
@@ -247,88 +422,109 @@ class HtmlReportBuilder(private val context: Context) {
         }
     }
 
-    private fun buildLegend(donut: DonutModel): String {
-        if (donut !is DonutModel.PhaseDistribution) return ""
-        val a = donut.valuesA[Phase.A] ?: 0.0
-        val b = donut.valuesA[Phase.B] ?: 0.0
-        val c = donut.valuesA[Phase.C] ?: 0.0
-        val total = max(a + b + c, eps)
-        val pa = a / total * 100.0
-        val pb = b / total * 100.0
-        val pc = 100.0 - pa - pb
-        val maxVal = max(a, max(b, c))
-        val em = 1e-3
+    private fun buildTitleBlock(model: ReportModel): String {
+        val modeLabel = when (model.header.phaseMode) {
+            ReportModel.PhaseMode.SINGLE -> "1ф"
+            ReportModel.PhaseMode.THREE -> "3ф"
+        }
 
-        fun row(label: String, cls: String, amp: Double, pct: Double, bold: Boolean): String {
-            val strongOpen = if (bold) "<span class=\"val\">" else ""
-            val strongClose = if (bold) "</span>" else ""
+        if (model.profile == ReportModel.ReportProfile.FREE) {
             return """
-              <div class="row">
-                <div><span class="dot $cls"></span>$label</div>
-                <div class="num">$strongOpen${df2.format(amp)} $UNIT_A$strongClose • ${
-                df0.format(
-                    pct
-                )
-            }%</div>
-              </div>
+                <div class="doc-title">
+                  <h2 class="h2-tight">Титул</h2>
+                  <div class="kpi">
+                    <div>Дата: <b>${escapeHtml(model.header.date)}</b></div>
+                    <div>Режим: <b>$modeLabel</b></div>
+                  </div>
+                </div>
             """.trimIndent()
         }
 
+        val profileLabel = "PRO"
+        val version = model.header.appVersion.takeIf { it.isNotBlank() } ?: "—"
+
         return """
-          <div class="legend">
-            ${row("Фаза A", "a", a, pa, a >= maxVal - em)}
-            ${row("Фаза B", "b", b, pb, b >= maxVal - em)}
-            ${row("Фаза C", "c", c, pc, c >= maxVal - em)}
-          </div>
+            <div class="doc-title">
+              <h2 class="h2-tight">Титул</h2>
+              <div class="kpi">
+                <div>Дата: <b>${escapeHtml(model.header.date)}</b></div>
+                <div>Режим: <b>$modeLabel</b></div>
+                <div>Профиль: <b>$profileLabel</b></div>
+                <div>Версия приложения: <b>${escapeHtml(version)}</b></div>
+              </div>
+            </div>
         """.trimIndent()
     }
 
+    // endregion
+
+    // region Tables (phases / groups / devices)
+
     private fun buildPhasesTables(phases: List<ReportPhase>): String {
         if (phases.isEmpty()) return ""
+
+        // ✅ Детерминируем порядок фаз на всякий случай:
+        // "Фаза A", "Фаза B", "Фаза C" — в таком порядке.
+        val ordered = phases.sortedWith(compareBy({ phaseOrderKey(it.name) }, { it.name }))
+
         return buildString {
-            phases.forEach { phase ->
+            ordered.forEach { phase ->
                 appendLine("""<div class="section">""")
-                appendLine("""<h2 class="h2-tight phase-title">${escape(phase.name)}</h2>""")
+                appendLine("""<h2 class="h2-tight phase-title">${escapeHtml(phase.name)}</h2>""")
+
                 if (phase.groups.isEmpty()) {
                     appendLine("""<div class="group empty">—</div>""")
                 } else {
                     appendLine("""<table class="phase-table">""")
-                    appendLine("""<thead class="phase-head"><tr><th class="center">Устройство</th><th class="num">Мощность</th><th class="num">Ток</th></tr></thead>""")
-                    phase.groups.forEach { g: ReportGroup ->
+                    appendLine(
+                        """<thead class="phase-head"><tr><th class="center">Устройство</th><th class="num">Мощность</th><th class="num">Ток</th></tr></thead>"""
+                    )
+
+                    // ✅ если где-то пришли неотсортированные группы — страхуемся:
+                    val groups = phase.groups.sortedBy { extractGroupNumber(it.title) ?: Int.MAX_VALUE }
+
+                    groups.forEach { g: ReportGroup ->
                         val metaLine = buildGroupMeta(g)
                         appendLine("""<tbody class="group-block">""")
                         appendLine(
                             """
                             <tr class="group-start">
                               <td class="center" colspan="3">
-                                <span class="chip">${escape(g.title)}</span>
+                                <span class="chip">${escapeHtml(g.title)}</span>
                                 ${
-                                if (metaLine.isNotEmpty()) """<span class="meta-inline">${
-                                    escape(
-                                        metaLine
-                                    )
-                                }</span>""" else ""
+                                if (metaLine.isNotEmpty()) """<span class="meta-inline">${escapeHtml(metaLine)}</span>""" else ""
                             }
                               </td>
                             </tr>
                             """.trimIndent()
                         )
-                        g.devices.forEach { d ->
+
+                        // ✅ детерминируем устройства: по имени (и вторично по мощности/току, если имена одинаковые)
+                        val devices = g.devices.sortedWith(
+                            compareBy<ReportDevice>({ it.name.lowercase(Locale.getDefault()) })
+                                .thenBy { (it.powerW ?: 0.0) }
+                                .thenBy { (it.currentA ?: 0.0) }
+                        )
+
+                        devices.forEach { d ->
                             val (p, c) = pickDeviceNumbers(d)
                             appendLine(
                                 """
                                 <tr class="dev">
-                                  <td class="center">${escape(d.name)}</td>
+                                  <td class="center">${escapeHtml(d.name)}</td>
                                   <td class="num">${p ?: ""}</td>
                                   <td class="num">${c ?: ""}</td>
                                 </tr>
                                 """.trimIndent()
                             )
                         }
+
                         appendLine("</tbody>")
                     }
+
                     appendLine("</table>")
                 }
+
                 appendLine("""</div>""")
             }
         }
@@ -352,34 +548,47 @@ class HtmlReportBuilder(private val context: Context) {
         return listOfNotNull(sw, cable).joinToString(" • ")
     }
 
+    /**
+     * ✅ Главный путь:
+     * Берём d.powerW / d.currentA как “истину”, без парсинга строк и reflection.
+     *
+     * Fallback остаётся только ради совместимости со старыми моделями,
+     * если где-то ещё прилетает ReportDevice без этих полей.
+     */
     private fun pickDeviceNumbers(d: ReportDevice): Pair<String?, String?> {
-        fun getNumber(obj: Any, names: List<String>): Number? {
-            for (n in names) {
-                val num = runCatching {
-                    val f = obj.javaClass.getDeclaredField(n).apply { isAccessible = true }
-                    when (val v = f.get(obj)) {
-                        is Int -> v
-                        is Long -> v.toInt()
-                        is Float -> v.toDouble()
-                        is Double -> v
-                        else -> null
-                    }
-                }.getOrNull()
-                if (num != null) return num
+        var pw: Double? = d.powerW?.toDouble()
+        var ia: Double? = d.currentA
+
+        // --- Fallback: reflection по алиасам (если поля вдруг по-другому назвали/старый класс) ---
+        if (pw == null || ia == null) {
+            fun getNumber(obj: Any, names: List<String>): Number? {
+                for (n in names) {
+                    val num = runCatching {
+                        val f = obj.javaClass.getDeclaredField(n).apply { isAccessible = true }
+                        when (val v = f.get(obj)) {
+                            is Int -> v
+                            is Long -> v.toInt()
+                            is Float -> v.toDouble()
+                            is Double -> v
+                            else -> null
+                        }
+                    }.getOrNull()
+                    if (num != null) return num
+                }
+                return null
             }
-            return null
+
+            if (pw == null) pw = getNumber(d, powerFieldAliases)?.toDouble()
+            if (ia == null) ia = getNumber(d, currentFieldAliases)?.toDouble()
+
+            if ((pw == null || ia == null) && d.spec.isNotBlank()) {
+                val parsed = parseSpec(d.spec)
+                if (pw == null) pw = parsed.first?.toDouble()
+                if (ia == null) ia = parsed.second
+            }
+
+            if (ia == null && pw != null) ia = pw / VOLTAGE_DEFAULT
         }
-
-        var pw: Double? = (getNumber(d, powerFieldAliases))?.toDouble()
-        var ia: Double? = (getNumber(d, currentFieldAliases))?.toDouble()
-
-        if ((pw == null || ia == null) && d.spec.isNotBlank()) {
-            val parsed = parseSpec(d.spec)
-            if (pw == null) pw = parsed.first?.toDouble()
-            if (ia == null) ia = parsed.second
-        }
-
-        if (ia == null && pw != null) ia = pw / VOLTAGE_DEFAULT
 
         val pStr = pw?.let { "${df0.format(it)} Вт" }
         val cStr = ia?.let { "${df2.format(it)} $UNIT_A" }
@@ -391,6 +600,7 @@ class HtmlReportBuilder(private val context: Context) {
             .lowercase(Locale.getDefault())
             .replace(',', '.')
         val num = Regex("""\d+(?:\.\d+)?""")
+
         var pW: Int? = null
         var cA: Double? = null
 
@@ -412,12 +622,52 @@ class HtmlReportBuilder(private val context: Context) {
         return pW to cA
     }
 
+    // endregion
+
+    // region Donut / Legend
+
+    private fun buildLegend(donut: DonutModel): String {
+        if (donut !is DonutModel.PhaseDistribution) return ""
+
+        val a = donut.valuesA[Phase.A] ?: 0.0
+        val b = donut.valuesA[Phase.B] ?: 0.0
+        val c = donut.valuesA[Phase.C] ?: 0.0
+
+        val total = max(a + b + c, eps)
+        val pa = a / total * 100.0
+        val pb = b / total * 100.0
+        val pc = 100.0 - pa - pb
+
+        val maxVal = max(a, max(b, c))
+        val em = 1e-3
+
+        fun row(label: String, cls: String, amp: Double, pct: Double, bold: Boolean): String {
+            val strongOpen = if (bold) "<span class=\"val\">" else ""
+            val strongClose = if (bold) "</span>" else ""
+            return """
+              <div class="row">
+                <div><span class="dot $cls"></span>$label</div>
+                <div class="num">$strongOpen${df2.format(amp)} $UNIT_A$strongClose • ${df0.format(pct)}%</div>
+              </div>
+            """.trimIndent()
+        }
+
+        return """
+          <div class="legend">
+            ${row("Фаза A", "a", a, pa, a >= maxVal - em)}
+            ${row("Фаза B", "b", b, pb, b >= maxVal - em)}
+            ${row("Фаза C", "c", c, pc, c >= maxVal - em)}
+          </div>
+        """.trimIndent()
+    }
+
     private fun buildDonutSection(model: DonutModel): String {
         return when (model) {
             is DonutModel.PhaseDistribution -> {
                 val a = model.valuesA[Phase.A] ?: 0.0
                 val b = model.valuesA[Phase.B] ?: 0.0
                 val c = model.valuesA[Phase.C] ?: 0.0
+
                 val total = max(a + b + c, eps)
                 val pa = a / total * 100.0
                 val pb = b / total * 100.0
@@ -436,11 +686,7 @@ class HtmlReportBuilder(private val context: Context) {
                     val sy = cy + r * sin(Math.toRadians(startDeg))
                     val ex = cx + r * cos(Math.toRadians(endDeg))
                     val ey = cy + r * sin(Math.toRadians(endDeg))
-                    return "M ${fmtUS(sx)} ${fmtUS(sy)} A ${fmtUS(r)} ${fmtUS(r)} 0 $large 1 ${
-                        fmtUS(
-                            ex
-                        )
-                    } ${fmtUS(ey)}"
+                    return "M ${fmtUS(sx)} ${fmtUS(sy)} A ${fmtUS(r)} ${fmtUS(r)} 0 $large 1 ${fmtUS(ex)} ${fmtUS(ey)}"
                 }
 
                 val pathA = arcPath(start, pa / 100.0 * 360.0).also { start += pa / 100.0 * 360.0 }
@@ -475,43 +721,96 @@ class HtmlReportBuilder(private val context: Context) {
                       stroke-dasharray="${fmtUS(pct)} ${fmtUS(100.0 - pct)}" stroke-dashoffset="25"/>
                   </svg>
                   <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:4px;">
-                    <div style="font-weight:700;font-size:13px;">${df2.format(used)} $UNIT_A из ${
-                    df0.format(
-                        limit
-                    )
-                } $UNIT_A</div>
-                    <div style="font-size:12px;color:#666;">${df0.format(pct)}% • Запас: ${
-                    df2.format(
-                        reserve
-                    )
-                } $UNIT_A</div>
+                    <div style="font-weight:700;font-size:13px;">${df2.format(used)} $UNIT_A из ${df0.format(limit)} $UNIT_A</div>
+                    <div style="font-size:12px;color:#666;">${df0.format(pct)}% • Запас: ${df2.format(reserve)} $UNIT_A</div>
                   </div>
                 </div>
                 <div class="donut-caption">Загрузка вводного автомата</div>
-                <div class="donut-sub muted">Всего: ${df2.format(used)} $UNIT_A из ${
-                    df0.format(
-                        limit
-                    )
-                } $UNIT_A • ${df0.format(pct)}% • Запас ${df2.format(reserve)} $UNIT_A</div>
+                <div class="donut-sub muted">Всего: ${df2.format(used)} $UNIT_A из ${df0.format(limit)} $UNIT_A • ${df0.format(pct)}% • Запас ${df2.format(reserve)} $UNIT_A</div>
                 """.trimIndent()
             }
         }
     }
 
+    // endregion
+
+    // region Formatting / Helpers
+
+    /**
+     * Форматирование чисел под PDF:
+     * - по умолчанию df2
+     * - для "Вт" ближе к df0 (без дробей)
+     * - для "кВт" df1
+     */
+    private fun formatValue(value: Double, unitRaw: String): String {
+        val u = unitRaw.trim().lowercase(Locale.getDefault())
+        return when {
+            u.contains("вт") && !u.contains("квт") -> df0.format(value)
+            u.contains("квт") -> df1.format(value)
+            else -> df2.format(value)
+        }
+    }
+
+    private fun formatA(v: Double?): String =
+        when (v) {
+            null -> ""
+            else -> "${df2.format(v)} $UNIT_A"
+        }
+
+    private fun fmtUS(v: Double): String = String.format(Locale.US, "%.6f", v)
+
+    private fun escapeHtml(s: String): String =
+        s.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+
+    private fun loadTemplate(path: String): String {
+        context.assets.open(path).use { ins ->
+            BufferedReader(InputStreamReader(ins)).use { br ->
+                return br.readText()
+            }
+        }
+    }
+
+    /**
+     * Детерминируем порядок фаз даже если пришли "Фаза B" раньше "Фаза A".
+     */
+    private fun phaseOrderKey(name: String): Int {
+        val n = name.uppercase(Locale.getDefault())
+        return when {
+            n.contains("A") -> 0
+            n.contains("B") -> 1
+            n.contains("C") -> 2
+            else -> 99
+        }
+    }
+
+    /**
+     * Пытаемся вытащить номер из "Группа #12 — ..."
+     * Нужно только для страховки порядка, если в какой-то ветке группы пришли неотсортированные.
+     */
+    private fun extractGroupNumber(title: String): Int? {
+        val m = Regex("""#\s*(\d+)""").find(title) ?: return null
+        return m.groupValues.getOrNull(1)?.toIntOrNull()
+    }
+
     private fun humanizeIncomer(raw0: String): String {
         if (raw0.isBlank()) return ""
         val parts = raw0.replace('•', ',').replace('·', ',')
-            .split(',').map { it.trim() }.filter { it.isNotEmpty() }
+            .split(',')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
 
         val out = mutableListOf<String>()
         for (p in parts) {
             val lower = p.lowercase(Locale.getDefault())
+
             if (p.equals("MCB_ONLY", true) || lower.contains("mcb only")) {
                 out += "Автомат"; continue
-            } else if (p.equals(
-                    "MCB_PLUS_RCD",
-                    true
-                ) || lower.contains("mcb+rcd") || lower.contains("mcb_plus_rcd")
+            } else if (
+                p.equals("MCB_PLUS_RCD", true) ||
+                lower.contains("mcb+rcd") ||
+                lower.contains("mcb_plus_rcd")
             ) {
                 out += "Автомат + УЗО"; continue
             } else if (p.equals("RCBO", true) || lower.contains("rcbo")) {
@@ -541,22 +840,21 @@ class HtmlReportBuilder(private val context: Context) {
                 val ka = Regex("""(\d+(?:[\.,]\d+)?)\s*k?a""", RegexOption.IGNORE_CASE)
                     .find(p)?.groupValues?.getOrNull(1)
                 val onlyNum = Regex("""\d+""").find(p)?.value
-                val amps = if (ka != null) (ka.replace(',', '.').toDoubleOrNull()
-                    ?: 0.0) * 1000.0 else onlyNum?.toDoubleOrNull()
+                val amps = if (ka != null) {
+                    (ka.replace(',', '.').toDoubleOrNull() ?: 0.0) * 1000.0
+                } else {
+                    onlyNum?.toDoubleOrNull()
+                }
                 if (amps != null) {
                     out += "отключающая способность ${df0.format(amps)} $UNIT_A"; continue
                 }
             }
 
             if (lower.contains("rcd")) {
-                val type = Regex(
-                    """rcd\s*([A-Z]+)""",
-                    RegexOption.IGNORE_CASE
-                ).find(p)?.groupValues?.getOrNull(1)?.uppercase()
-                val sens = Regex(
-                    """(\d+)\s*mA""",
-                    RegexOption.IGNORE_CASE
-                ).find(p)?.groupValues?.getOrNull(1)
+                val type = Regex("""rcd\s*([A-Z]+)""", RegexOption.IGNORE_CASE)
+                    .find(p)?.groupValues?.getOrNull(1)?.uppercase()
+                val sens = Regex("""(\d+)\s*mA""", RegexOption.IGNORE_CASE)
+                    .find(p)?.groupValues?.getOrNull(1)
                 out += buildString {
                     append("тип УЗО")
                     if (!type.isNullOrBlank()) append(" $type")
@@ -567,27 +865,11 @@ class HtmlReportBuilder(private val context: Context) {
 
             out += p
         }
+
         return out.joinToString(" • ").ifBlank { raw0 }
     }
 
-    private fun loadTemplate(path: String): String {
-        context.assets.open(path).use { ins ->
-            BufferedReader(InputStreamReader(ins)).use { br ->
-                return br.readText()
-            }
-        }
-    }
-
-    private fun escape(s: String): String =
-        s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-    private fun fmtUS(v: Double): String = String.format(Locale.US, "%.6f", v)
-
-    private fun formatA(v: Double?): String =
-        when (v) {
-            null -> ""
-            else -> "${df2.format(v)} $UNIT_A"
-        }
+    // endregion
 
     private val FALLBACK_TEMPLATE = """
         <!doctype html>
@@ -595,12 +877,22 @@ class HtmlReportBuilder(private val context: Context) {
         <head><meta charset="utf-8"/><title>VoltHome — Экспликация</title>$INLINE_STYLE</head>
         <body style="padding-bottom:24mm;">
           <h2>VoltHome — Экспликация</h2>
+
+          <!-- ТИТУЛ (генерируется в билдере) -->
+          {{titleBlock}}
+
+          <!-- KPI (генерируется в билдере) -->
           {{kpiBlock}}
-          <div class="donut-wrap"><div class="donut-col">{{donutSection}}</div><div class="legend-col">{{legendSection}}</div></div>
+
+          <div class="donut-wrap">
+            <div class="donut-col">{{donutSection}}</div>
+            <div class="legend-col">{{legendSection}}</div>
+          </div>
+
           <hr/>
           <div>{{phasesHtml}}</div>
           {{watermark}}
           {{footerSpacer}}
-        </body></html>
+        </body>
     """.trimIndent()
 }

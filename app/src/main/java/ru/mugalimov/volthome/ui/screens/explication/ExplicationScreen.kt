@@ -1,6 +1,8 @@
 package ru.mugalimov.volthome.ui.screens.explication
 
+import android.os.Build
 import androidx.activity.ComponentActivity
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -40,13 +42,12 @@ import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
-import ru.mugalimov.volthome.ui.navigation.ReportPreviewNav
-import ru.mugalimov.volthome.ui.navigation.Screens
 import ru.mugalimov.volthome.ui.screens.explication.export_pdf.exportExplicationPdf
 import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetContent
 import ru.mugalimov.volthome.ui.viewmodel.ExplicationViewModel
 import ru.mugalimov.volthome.ui.viewmodel.GroupScreenState
 
+@RequiresApi(Build.VERSION_CODES.P)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExplicationScreen(
@@ -60,14 +61,16 @@ fun ExplicationScreen(
     val state by viewModel.uiState.collectAsState()
     val ctx = LocalContext.current
 
-// события от VM (one-shot)
+    // события от VM (one-shot)
     val event by viewModel.events.collectAsState(initial = null)
 
     val plan = LocalUserPlan.current
     val caps = plan.capabilities
-    val canExportPdf = caps.pdfExport
     val canShowProSections = caps.professionalReportSections
 
+    // ✅ НОВЫЙ КОНТРАКТ:
+    // - PDF можно всегда (FREE + PRO)
+    // - разница только в профиле отчёта (FREE/PRO) внутри buildExplicationReportHtml (caps.reportProfile())
     LaunchedEffect(event) {
         if (event != ExplicationViewModel.UiEvent.ExportPdfRequested) return@LaunchedEffect
 
@@ -77,26 +80,11 @@ fun ExplicationScreen(
             return@LaunchedEffect
         }
 
-        if (caps.pdfExport) {
-            // ✅ PRO: сразу полный PDF (Print UI / экспорт)
-            exportExplicationPdf(
-                activity = activity,
-                vm = viewModel,
-                caps = caps
-            )
-            viewModel.consumeEvent()
-            return@LaunchedEffect
-        }
-
-        // ✅ FREE: только preview
-        val html = viewModel.buildReportPreviewHtml(activity, caps)
-        if (!html.isNullOrBlank()) {
-            navController.currentBackStackEntry
-                ?.savedStateHandle
-                ?.set(ReportPreviewNav.HTML_KEY, html)
-
-            navController.navigate(Screens.ReportPreview.route)
-        }
+        exportExplicationPdf(
+            activity = activity,
+            vm = viewModel,
+            caps = caps
+        )
 
         viewModel.consumeEvent()
     }
@@ -135,8 +123,10 @@ fun ExplicationScreen(
                             installedPowerW = s.installedPowerW,
                             calculatedPowerW = s.calculatedPowerW,
                             showProfessionalEvidence = canShowProSections,
+                            // ✅ если это был “замок PRO”, логичнее вести в PRO-действия/пейволл,
+                            // а не в “скачать PDF” (который теперь доступен всем).
                             onProfessionalLockedClick = {
-                                viewModel.onExportPdfClick()
+                                viewModel.onPdfExportActionsClick()
                             },
                             onOpenInfoSheet = { payload ->
                                 viewModel.openInfoSheet(payload)
@@ -183,7 +173,8 @@ fun ExplicationScreen(
                 }
 
                 FloatingActionButton(
-                    onClick = { viewModel.onExportPdfClick() }, // preview (Free + PRO)
+                    // ✅ теперь это всегда “скачать/распечатать PDF”, без превью
+                    onClick = { viewModel.onExportPdfClick() },
                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                     modifier = Modifier
@@ -210,8 +201,6 @@ fun ExplicationScreen(
                     )
                 }
 
-
-
                 if (sheetPayload != null) {
                     ModalBottomSheet(
                         onDismissRequest = {
@@ -228,7 +217,6 @@ fun ExplicationScreen(
         }
     }
 }
-
 
 private fun stableGroupKey(phase: Phase, g: CircuitGroup): String =
     "ph-${phase.name}__grp-${g.groupNumber}-${g.roomName}-${g.breakerType}${g.circuitBreaker}"

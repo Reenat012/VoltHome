@@ -49,11 +49,6 @@ class PhaseLoadViewModel @Inject constructor(
             explicationRepository.observeDistributionDecisions(),
             phaseLoadMode
         ) { items, mode, groups, decisions, phaseLoadMode ->
-            val data = if (mode == PhaseMode.SINGLE) {
-                items.filter { it.phase == Phase.A }
-            } else {
-                items
-            }
 
             val hasGroupRcds = groups.any { it.rcdRequired }
             val incomer = incomerSelector.select(
@@ -65,7 +60,7 @@ class PhaseLoadViewModel @Inject constructor(
             )
 
             PhaseLoadUiState(
-                data = data,
+                data = items,
                 mode = mode,
                 phaseLoadMode = phaseLoadMode,
                 incomer = incomer,

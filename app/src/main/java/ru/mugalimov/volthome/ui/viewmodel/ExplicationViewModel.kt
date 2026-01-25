@@ -1,6 +1,8 @@
 package ru.mugalimov.volthome.ui.viewmodel
 
 import android.app.Activity
+import android.os.Build
+import androidx.annotation.RequiresApi
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -76,7 +78,7 @@ class ExplicationViewModel @Inject constructor(
     private val _isRecalculating = MutableStateFlow(false)
     val isRecalculating: StateFlow<Boolean> = _isRecalculating
 
-    // последний известный режим фаз (для buildReportData)
+    // последний известный режим фаз (для buildReportSnapshotForPdf)
     private val _phaseMode = MutableStateFlow(PhaseMode.THREE)
     val phaseMode: StateFlow<PhaseMode> = _phaseMode.asStateFlow()
 
@@ -106,8 +108,7 @@ class ExplicationViewModel @Inject constructor(
 
         val breakdown = calculateGroupBreakdownUseCase.execute(group)
 
-        // ✅ Sheet "Мощность группы" теперь показывает расчётную мощность (с kспроса),
-        // а не установленную.
+        // ✅ Sheet "Мощность группы" показывает расчётную мощность (с kспроса)
         val calculated = breakdown.calculatedPower
 
         val steps = calculated.steps
@@ -124,7 +125,6 @@ class ExplicationViewModel @Inject constructor(
                 sheetType = InfoSheetType.CALCULATION,
                 calcDetailsState = calcDetailsState,
                 currentValueText = "%.2f кВт".format(calculated.value / 1000.0),
-                // Важно: LOCKED решаем по real steps, а в Free блоки можно не отдавать
                 calcBlocks = if (hasAccess) CalcBlocksMapper.mapSteps(steps) else emptyList(),
                 normRefs = emptyList()
             )
@@ -158,20 +158,17 @@ class ExplicationViewModel @Inject constructor(
     }
 
     // --- UI events (one-shot) ---
-    // --- UI events (one-shot) ---
     sealed class UiEvent {
         /**
          * Открыть превью отчёта (доступно в Free и PRO).
          *
          * ВАЖНО: оставляем имя ExportPdfRequested ради совместимости с текущим UI,
          * который уже слушает именно это событие.
-         * На уровне поведения теперь это "PDF Preview Requested".
          */
         object ExportPdfRequested : UiEvent()
 
         /**
          * Запрос на экспортные действия (save/share/export/брендинг и т.п.) — только PRO.
-         * UI/слой обработки должен сам решить, какие именно действия доступны и как их выполнять.
          */
         object PdfExportActionsRequested : UiEvent()
     }
@@ -179,7 +176,6 @@ class ExplicationViewModel @Inject constructor(
     private val _events = MutableStateFlow<UiEvent?>(null)
     val events: StateFlow<UiEvent?> = _events.asStateFlow()
 
-    // Необязательное авто-пересчитывание при смене режима:
     init {
         viewModelScope.launch(dispatchers) {
             preferencesRepository.phaseMode.collect { mode ->
@@ -191,7 +187,6 @@ class ExplicationViewModel @Inject constructor(
 
     /**
      * Клик по "Отчёт PDF" = ОТКРЫТЬ ПРЕВЬЮ (Free + PRO).
-     * Никаких проверок pdfExport тут быть не должно.
      */
     fun onExportPdfClick() {
         _events.value = UiEvent.ExportPdfRequested
@@ -199,7 +194,6 @@ class ExplicationViewModel @Inject constructor(
 
     /**
      * Экспортные действия (save/share/export/брендинг и т.п.) = только PRO.
-     * Здесь и только здесь проверяем pdfExport и ведём на paywall.
      */
     fun onPdfExportActionsClick() {
         val plan = userPlanRepository.planFlow.value
@@ -292,7 +286,11 @@ class ExplicationViewModel @Inject constructor(
         )
     }
 
-    fun onIncomerFieldClick(field: InfoSheetPayloadFactory.IncomerField, incomer: IncomerSpec, hasGroupRcds: Boolean) {
+    fun onIncomerFieldClick(
+        field: InfoSheetPayloadFactory.IncomerField,
+        incomer: IncomerSpec,
+        hasGroupRcds: Boolean
+    ) {
         val payload = InfoSheetPayloadFactory.incomerField(
             field = field,
             incomer = incomer,
@@ -304,6 +302,7 @@ class ExplicationViewModel @Inject constructor(
 
     fun recalcAndSaveGroups() {
         viewModelScope.launch(dispatchers) {
+            _isRecalculating.value = true
             _uiState.value = GroupScreenState.Loading
             try {
                 val mode: PhaseMode = preferencesRepository.phaseMode.first()
@@ -349,16 +348,11 @@ class ExplicationViewModel @Inject constructor(
                             emptyList()
                         }
 
-                        // ✅ ВАЖНО (Коммит 2):
-                        // totals (installed/calculated) всегда приходят в uiState с реальными steps.
-                        // Доступность решается через calcDetailsState/hasAccess при открытии sheet.
                         val installedPower: CalculatedValue = totals.installedPowerW
                         val calculatedPower: CalculatedValue = totals.calculatedPowerW
 
                         val shieldTotalsAssumptions: List<CalcAssumption> =
                             if (isProReport) calculatedPower.assumptions else emptyList()
-
-                        // === ProfessionalSections: собираем из фактов (без чтения uiState) ===
 
                         val proAssumptions: List<CalcAssumption> =
                             if (isProReport) {
@@ -378,11 +372,17 @@ class ExplicationViewModel @Inject constructor(
                                 }.distinctBy { "${it.severity}|${it.scope}|${it.title}|${it.message}" }
                             } else emptyList()
 
-                        val (meta, phases) = buildReportDataFrom(
+                        // ✅ Важно: для PRO-секций используем детерминированные данные отчёта
+                        val reportDate =
+                            SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
+                                .format(System.currentTimeMillis())
+
+                        val (meta, phases) = buildReportDataFromDeterministic(
                             groups = groups,
                             incomer = incomer,
                             totalGroups = totalGroups,
-                            mode = mode
+                            mode = mode,
+                            date = reportDate
                         )
 
                         val professionalSections: ProfessionalSections? =
@@ -409,18 +409,45 @@ class ExplicationViewModel @Inject constructor(
                             calculatedPowerW = calculatedPower,
                             shieldTotalsAssumptions = shieldTotalsAssumptions,
                             calcWarnings = calcWarningsFromGroups,
-                            professionalSections = professionalSections
+                            professionalSections = professionalSections,
+                            reportDate = reportDate
                         )
                     }
                 }
             } catch (t: Throwable) {
                 _uiState.value = GroupScreenState.Error(t.message ?: "Неизвестная ошибка")
+            } finally {
+                _isRecalculating.value = false
             }
         }
     }
 
-    fun buildReportPreviewHtml(activity: Activity, caps: PlanCapabilities): String? {
-        return buildExplicationReportHtml(activity = activity, vm = this, caps = caps)
+    // --- PDF snapshot (единый источник данных для PDF) ---
+
+    /**
+     * Единый слепок для PDF: KPI (installed/calculated) строго из UI state,
+     * а фазы/группы/устройства — из детерминированной сборки (фиксированный порядок).
+     *
+     * ВАЖНО: date берём из state (одна и та же на весь цикл пересчёта), чтобы HTML был стабильнее.
+     */
+    fun buildReportSnapshotForPdf(): PdfReportSnapshot? {
+        val s = uiState.value as? GroupScreenState.Success ?: return null
+        val mode = phaseMode.value
+
+        val (meta, phases) = buildReportDataFromDeterministic(
+            groups = s.groups,
+            incomer = s.incomer,
+            totalGroups = s.totalGroups,
+            mode = mode,
+            date = s.reportDate
+        )
+
+        return PdfReportSnapshot(
+            meta = meta,
+            phases = phases,
+            installedPowerW = s.installedPowerW.value,
+            calculatedPowerW = s.calculatedPowerW.value
+        )
     }
 }
 
@@ -437,7 +464,10 @@ sealed class GroupScreenState {
         val calculatedPowerW: CalculatedValue,
         val shieldTotalsAssumptions: List<CalcAssumption> = emptyList(),
         val calcWarnings: List<CalcWarning> = emptyList(),
-        val professionalSections: ProfessionalSections? = null
+        val professionalSections: ProfessionalSections? = null,
+
+        // ✅ фиксируем дату, чтобы превью/экспорт в рамках одной сессии были детерминированнее
+        val reportDate: String
     ) : GroupScreenState()
 
     data class Error(val message: String) : GroupScreenState()
@@ -462,14 +492,21 @@ private fun buildWarningsFromGroups(groups: List<CircuitGroup>): List<CalcWarnin
     return warnings
 }
 
-private fun buildReportDataFrom(
+/**
+ * Детерминированная сборка данных отчёта:
+ * - порядок фаз строго A/B/C (или только A в SINGLE)
+ * - группы по номеру
+ * - устройства по имени (lowercase) — чтобы PDF не “плавал”
+ *
+ * date передаётся извне — никаких System.currentTimeMillis() внутри.
+ */
+private fun buildReportDataFromDeterministic(
     groups: List<CircuitGroup>,
     incomer: IncomerSpec,
     totalGroups: Int,
-    mode: PhaseMode
+    mode: PhaseMode,
+    date: String
 ): Pair<ReportMeta, List<ReportPhase>> {
-    val date =
-        SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(System.currentTimeMillis())
 
     val perPhase = phaseCurrents(groups)
 
@@ -510,54 +547,59 @@ private fun buildReportDataFrom(
         totalGroups = totalGroups
     )
 
-    val phases = groups
-        .groupBy { it.phase }
-        .toSortedMap(compareBy { it.name })
-        .map { (phase, phaseGroups) ->
-            ReportPhase(
-                name = "Фаза ${phase.name}",
-                groups = phaseGroups.sortedBy { it.groupNumber }.map { g ->
+    fun phaseKeys(mode: PhaseMode): List<Phase> = when (mode) {
+        PhaseMode.THREE -> listOf(Phase.A, Phase.B, Phase.C)
+        PhaseMode.SINGLE -> listOf(Phase.A)
+    }
+
+    fun deviceKey(d: Device): String =
+        d.name.trim().lowercase(Locale.getDefault())
+
+    val groupedByPhase: Map<Phase, List<CircuitGroup>> = groups.groupBy { it.phase }
+
+    val phases = phaseKeys(mode).map { phase ->
+        val phaseGroups = groupedByPhase[phase].orEmpty()
+
+        ReportPhase(
+            name = "Фаза ${phase.name}",
+            groups = phaseGroups
+                .sortedBy { it.groupNumber }
+                .map { g ->
                     ReportGroup(
                         title = "Группа #${g.groupNumber} — ${g.roomName}",
                         switchLabel = GroupMetaFormatter.buildSwitchLabel(g),
                         cableLabel = GroupMetaFormatter.buildCableLabel(g),
-                        devices = g.devices.map { d ->
-                            val normalized = PowerCurrentNormalizer.ensurePAndI(
-                                powerW = d.power.takeIf { it > 0 },
-                                currentA = d.calculateCurrent().takeIf { it > 0.0 },
-                                voltage = d.voltage,
-                                powerFactor = d.powerFactor
-                            )
-                            ReportDevice(
-                                name = d.name,
-                                powerW = normalized.powerW,
-                                currentA = normalized.currentA
-                            )
-                        }
+                        devices = g.devices
+                            .sortedBy { deviceKey(it) }
+                            .map { d ->
+                                val normalized = PowerCurrentNormalizer.ensurePAndI(
+                                    powerW = d.power.takeIf { it > 0 },
+                                    currentA = d.calculateCurrent().takeIf { it > 0.0 },
+                                    voltage = d.voltage,
+                                    powerFactor = d.powerFactor
+                                )
+                                ReportDevice(
+                                    name = d.name,
+                                    powerW = normalized.powerW,
+                                    currentA = normalized.currentA
+                                )
+                            }
                     )
                 }
-            )
-        }
+        )
+    }
 
     return meta to phases
 }
 
 /**
- * Формирование данных отчёта для PDF/превью.
- * Поддерживает оба режима:
- *  - THREE: донат распределения по фазам, headline A/B/C
- *  - SINGLE: донат загрузки вводного, headline только A
+ * Слепок данных для PDF:
+ * - meta + phases (детерминированные)
+ * - installed/calculated — строго из uiState
  */
-fun ExplicationViewModel.buildReportData(): Pair<ReportMeta, List<ReportPhase>>? {
-    // ВАЖНО: данные отчёта для превью доступны в Free и PRO.
-    // Gate по pdfExport применяется только к экспортным действиям.
-    val s = uiState.value as? GroupScreenState.Success ?: return null
-
-    return buildReportDataFrom(
-        groups = s.groups,
-        incomer = s.incomer,
-        totalGroups = s.totalGroups,
-        mode = phaseMode.value
-    )
-}
-
+data class PdfReportSnapshot(
+    val meta: ReportMeta,
+    val phases: List<ReportPhase>,
+    val installedPowerW: Double,
+    val calculatedPowerW: Double
+)
