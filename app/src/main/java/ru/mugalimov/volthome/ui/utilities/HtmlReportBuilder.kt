@@ -1,7 +1,6 @@
 package ru.mugalimov.volthome.ui.utilities
 
 import android.content.Context
-import androidx.annotation.WorkerThread
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.report.DonutModel
 import ru.mugalimov.volthome.domain.model.report.ReportDevice
@@ -16,7 +15,6 @@ import java.text.DecimalFormatSymbols
 import java.util.Locale
 import kotlin.math.cos
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
@@ -47,11 +45,88 @@ class HtmlReportBuilder(private val context: Context) {
     private val groupCableAliases =
         listOf("cableLabel", "lineLabel", "wireLabel", "cableInfo", "lineInfo")
 
-    // —— Стили (как у тебя было) ——
-    private val INLINE_STYLE = """
-        <style>
-          body { padding-bottom: 96px; }
+    /**
+     * ✅ “По-взрослому”:
+     * 1) Template.html — единственный источник основной вёрстки и CSS.
+     * 2) В рантайме мы инжектим ТОЛЬКО маленький “runtime override”:
+     *    - выставляем классы профиля на <body> (vh-free / vh-pro)
+     *    - жёстко гейтим антиорфаны: PRO = avoid, FREE = auto
+     *    - принудительно прибиваем выравнивание к левому краю (donut-wrap + text-align)
+     * 3) Большой FALLBACK_STYLE оставляем только для FALLBACK_TEMPLATE (если шаблон не загрузился).
+     *
+     * Это убирает дрейф стилей и гарантирует, что FREE не уезжает на следующую страницу
+     * из-за глобального break-inside: avoid.
+     */
+    private val RUNTIME_OVERRIDES_STYLE = """
+        <style id="vh-runtime-overrides">
+          /* Профиль навешиваем на body: vh-free / vh-pro */
+          body.vh-free tbody.group-block,
+          body.vh-free tr.group-start,
+          body.vh-free tr.dev {
+            break-inside: auto !important;
+            page-break-inside: auto !important;
+            -webkit-column-break-inside: auto !important;
+            -webkit-region-break-inside: auto !important;
+          }
+          body.vh-free tr.group-start { page-break-after: auto !important; }
 
+          /* Антиорфаны разрешены ТОЛЬКО в PRO */
+          body.vh-pro tbody.group-block {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+            -webkit-column-break-inside: avoid !important;
+            -webkit-region-break-inside: avoid !important;
+          }
+          body.vh-pro tr.group-start,
+          body.vh-pro tr.dev {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+            -webkit-column-break-inside: avoid !important;
+            -webkit-region-break-inside: avoid !important;
+          }
+          body.vh-pro tr.group-start { page-break-after: avoid !important; }
+
+                    /* ✅ Жёстко прибиваем общий лэйаут влево */
+          html, body { text-align: left !important; }
+
+          /* 1) Если шаблон использует flex-контейнеры и выравнивает контент вправо/по центру */
+          body.vh .container,
+          body.vh .page,
+          body.vh .content,
+          body.vh .sheet,
+          body.vh .root,
+          body.vh .wrapper {
+            justify-content: flex-start !important;
+            align-items: flex-start !important;
+            text-align: left !important;
+          }
+
+          /* 2) Если шаблон “прижимает” блок вправо через auto-margin слева */
+          body.vh .container,
+          body.vh .page,
+          body.vh .content,
+          body.vh .sheet,
+          body.vh .root,
+          body.vh .wrapper {
+            margin-left: 0 !important;
+            margin-right: auto !important;
+          }
+
+          /* 3) Donut-ряд тоже строго влево */
+          body.vh .donut-wrap {
+            justify-content: flex-start !important;
+            align-items: flex-start !important;
+            text-align: left !important;
+          }
+        </style>
+    """.trimIndent()
+
+    /**
+     * FALLBACK CSS: используется ТОЛЬКО если template.html не найден или сломан.
+     * Не должен “подмешиваться” к нормальному шаблону.
+     */
+    private val FALLBACK_STYLE = """
+        <style>
           .footer {
             margin-top: 24px;
             padding-top: 8px;
@@ -59,12 +134,16 @@ class HtmlReportBuilder(private val context: Context) {
             font-size: 11px;
             color: #6B7280;
           }
-          .footer-spacer { height: 72px; }
 
           table.phase-table { width: 100%; border-collapse: collapse; margin: 0 0 12px 0; }
           table.phase-table th, table.phase-table td { padding: 10px 0; }
           table.phase-table th.center, table.phase-table td.center { text-align: left; }
           table.phase-table th.num, table.phase-table td.num { text-align: right; white-space: nowrap; }
+
+          /* FREE: компактная таблица */
+          table.phase-table.free { margin: 0 0 8px 0; }
+          table.phase-table.free th, table.phase-table.free td { padding: 6px 0; }
+          table.phase-table.free tr.group-start td { border-top-width: 1px; }
 
           thead.phase-head th { border-bottom: 1px solid #E5E7EB; }
           thead.phase-head { display: table-header-group; }
@@ -83,61 +162,9 @@ class HtmlReportBuilder(private val context: Context) {
           }
           .meta-inline { display:inline-block; font-size:12px; color:#6B7280; vertical-align:middle; }
 
-          /* ————— Антиорфаны: запираем разрывы везде, где это возможно ————— */
-          tbody.group-block {
-            break-inside: avoid !important;
-            page-break-inside: avoid !important;
-            -webkit-column-break-inside: avoid !important;
-            -webkit-region-break-inside: avoid !important;
-          }
-          tr.group-start,
-          tr.dev {
-            break-inside: avoid !important;
-            page-break-inside: avoid !important;
-            -webkit-column-break-inside: avoid !important;
-            -webkit-region-break-inside: avoid !important;
-          }
-          /* сцепляем чип с первой строкой устройств */
-          tr.group-start { page-break-after: avoid !important; }
-
           .h2-tight { margin: 0 0 8px 0; }
 
-          /* ————— Новые секции: расчёт/предупреждения/нормы ————— */
-          .explain .block h3 { margin: 0 0 8px 0; font-size: 13px; font-weight: 700; }
-          .explain .muted { color: #6B7280; font-size: 12px; }
-          .explain ul { margin: 6px 0 0 18px; padding: 0; }
-          .explain li { margin: 4px 0; }
-
-          .step-title {
-            display:flex;
-            align-items:baseline;
-            gap:8px;
-            font-weight:700;
-            font-size:12.5px;
-            margin: 0 0 6px 0;
-          }
-          .pill {
-            display:inline-block;
-            padding: 2px 8px;
-            border-radius: 9999px;
-            font-size: 11px;
-            font-weight: 700;
-            background: #F3F4F6;
-            color: #111827;
-          }
-          .pill.warn { background:#FEF3C7; color:#92400E; }
-          .pill.err  { background:#FEE2E2; color:#991B1B; }
-          .pill.info { background:#E5E7EB; color:#374151; }
-
-          .warn-item { border-left: 4px solid #D1D5DB; padding-left: 10px; margin: 10px 0; }
-          .warn-item.warn { border-left-color: #F59E0B; }
-          .warn-item.err { border-left-color: #EF4444; }
-          .warn-item .t { font-weight:700; }
-          .warn-item .m { margin-top: 2px; color:#374151; font-size:12px; }
-
-          .norm-list .code { font-weight: 800; }
-
-          /* ————— Шаги расчёта (PRO) ————— */
+          /* Шаги расчёта (PRO) */
           .steps { margin-top: 10pt; }
 
           .calc-step {
@@ -146,8 +173,6 @@ class HtmlReportBuilder(private val context: Context) {
             padding: 10pt 12pt;
             margin: 10pt 0;
             background: #FFFFFF;
-            break-inside: avoid !important;
-            page-break-inside: avoid !important;
           }
 
           .calc-step .rows {
@@ -176,7 +201,7 @@ class HtmlReportBuilder(private val context: Context) {
           .subst-list { margin: 0; padding-left: 16px; }
           .subst-list li { margin: 2px 0; }
 
-          .assumptions { margin-top: 12pt; break-inside: avoid; page-break-inside: avoid; }
+          .assumptions { margin-top: 12pt; }
           .assumption-list { margin: 6pt 0 0 18px; padding: 0; }
           .assumption-list li { margin: 8pt 0; }
           .assump-title { font-size: 12.5px; color:#111827; }
@@ -184,26 +209,33 @@ class HtmlReportBuilder(private val context: Context) {
         </style>
     """.trimIndent()
 
-    // region Public API
-
     fun build(
         model: ReportModel,
         includeInlineNormatives: Boolean = false
     ): String {
-        val htmlTemplate = runCatching { loadTemplate("report_pdf/template.html") }
-            .getOrElse { FALLBACK_TEMPLATE }
+        val htmlTemplate = runCatching { loadTemplate("report_pdf/template.html") }.getOrNull()
 
-        var html = if (htmlTemplate.contains("</head>", ignoreCase = true)) {
-            htmlTemplate.replace(Regex("</head>", RegexOption.IGNORE_CASE), "$INLINE_STYLE</head>")
-        } else {
-            "$INLINE_STYLE$htmlTemplate"
+        val profileClass = when (model.profile) {
+            ReportModel.ReportProfile.FREE -> "vh-free"
+            ReportModel.ReportProfile.PRO -> "vh-pro"
         }
 
-        html = html
+        val base = if (htmlTemplate.isNullOrBlank()) {
+            // fallback уже содержит FALLBACK_STYLE, к нему докидываем runtime overrides
+            FALLBACK_TEMPLATE
+                .let { injectIntoHead(it, RUNTIME_OVERRIDES_STYLE) }
+                .let { ensureBodyHasClass(it, "vh $profileClass") }
+        } else {
+            // нормальный путь: template.html + минимальные runtime overrides
+            htmlTemplate
+                .let { injectIntoHead(it, RUNTIME_OVERRIDES_STYLE) }
+                .let { ensureBodyHasClass(it, "vh $profileClass") }
+        }
+
+        var html = base
             .replace("{{projectName}}", escapeHtml(model.header.projectName))
             .replace("{{date}}", escapeHtml(model.header.date))
             .replace("{{titleBlock}}", buildTitleBlock(model))
-            // ✅ FREE: даже если флаг true — inline-нормативы не должны прорваться
             .replace(
                 "{{kpiBlock}}",
                 buildKpiBlock(
@@ -214,41 +246,29 @@ class HtmlReportBuilder(private val context: Context) {
             .replace("{{donutSection}}", buildDonutSection(model.donut))
             .replace("{{legendSection}}", buildLegend(model.donut))
 
-        // ✅ Контентный контракт: buildSectionsHtml решает, что рендерим
         val sectionsHtml = buildSectionsHtml(model)
 
         html = html
-            .replace("{{stepsHtml}}", "") // ✅ steps никогда напрямую не вставляем тут
-            .let { base ->
-                if (base.contains("{{explainHtml}}")) base.replace("{{explainHtml}}", "")
-                else base
+            // steps вставляем через phasesHtml/sectionsHtml (см. buildSectionsHtml), чтобы порядок был предсказуем.
+            .replace("{{stepsHtml}}", "")
+            .let { base2 ->
+                if (base2.contains("{{explainHtml}}")) base2.replace("{{explainHtml}}", "")
+                else base2
             }
             .replace("{{phasesHtml}}", sectionsHtml)
             .replace("{{phases}}", sectionsHtml)
 
-        // watermark один
-        html = html.replace(
-            "{{watermark}}",
-            """<div class="watermark"><img src="img/logo.png" alt="VoltHome" onerror="this.outerHTML='VoltHome'"/></div>"""
-        )
-
-        html = html.replace("{{footerSpacer}}", """<div class="footer-spacer"></div>""")
         return html
     }
 
-    // endregion
-
-    // region Sections
-
     private fun buildSectionsHtml(model: ReportModel): String {
-        val phasesHtml = buildPhasesTables(model.phases)
+        val phasesHtml = buildPhasesTables(
+            phases = model.phases,
+            showDevices = model.profile == ReportModel.ReportProfile.PRO
+        )
 
         return when (model.profile) {
-            ReportModel.ReportProfile.FREE -> {
-                // ✅ FREE: есть экспликация по фазам, но нет PRO-секций
-                phasesHtml
-            }
-
+            ReportModel.ReportProfile.FREE -> phasesHtml
             ReportModel.ReportProfile.PRO -> {
                 val stepsHtml = buildStepsSection(model)
                 val assumptionsHtml = buildAssumptionsSection(model)
@@ -348,10 +368,6 @@ class HtmlReportBuilder(private val context: Context) {
             appendLine("""</ul></div>""")
         }
     }
-
-    // endregion
-
-    // region KPI / Title
 
     private fun buildKpiBlock(model: ReportModel, includeInlineNormatives: Boolean): String {
         val currents = model.kpis.headlineCurrents
@@ -456,15 +472,12 @@ class HtmlReportBuilder(private val context: Context) {
         """.trimIndent()
     }
 
-    // endregion
-
-    // region Tables (phases / groups / devices)
-
-    private fun buildPhasesTables(phases: List<ReportPhase>): String {
+    private fun buildPhasesTables(
+        phases: List<ReportPhase>,
+        showDevices: Boolean
+    ): String {
         if (phases.isEmpty()) return ""
 
-        // ✅ Детерминируем порядок фаз на всякий случай:
-        // "Фаза A", "Фаза B", "Фаза C" — в таком порядке.
         val ordered = phases.sortedWith(compareBy({ phaseOrderKey(it.name) }, { it.name }))
 
         return buildString {
@@ -474,32 +487,66 @@ class HtmlReportBuilder(private val context: Context) {
 
                 if (phase.groups.isEmpty()) {
                     appendLine("""<div class="group empty">—</div>""")
-                } else {
-                    appendLine("""<table class="phase-table">""")
+                    appendLine("""</div>""")
+                    return@forEach
+                }
+
+                val tableClass = if (showDevices) "phase-table" else "phase-table free"
+                appendLine("""<table class="$tableClass">""")
+
+                if (showDevices) {
                     appendLine(
                         """<thead class="phase-head"><tr><th class="center">Устройство</th><th class="num">Мощность</th><th class="num">Ток</th></tr></thead>"""
                     )
+                } else {
+                    appendLine("""<thead class="phase-head"><tr><th class="center">Группа</th></tr></thead>""")
+                }
 
-                    // ✅ если где-то пришли неотсортированные группы — страхуемся:
-                    val groups = phase.groups.sortedBy { extractGroupNumber(it.title) ?: Int.MAX_VALUE }
+                val groups = phase.groups.sortedBy { extractGroupNumber(it.title) ?: Int.MAX_VALUE }
 
+                if (!showDevices) {
+                    // ✅ FREE “по-взрослому”: один tbody, никаких group-block.
+                    // Это снимает капризы Android PDF по разрывам + убирает неделимые блоки.
+                    appendLine("<tbody>")
+                    groups.forEach { g ->
+                        val metaLine = buildGroupMeta(g)
+                        appendLine(
+                            """
+                            <tr class="group-start">
+                              <td class="center">
+                                <span class="chip">${escapeHtml(g.title)}</span>
+                                ${
+                                if (metaLine.isNotEmpty())
+                                    """<span class="meta-inline">${escapeHtml(metaLine)}</span>"""
+                                else ""
+                            }
+                              </td>
+                            </tr>
+                            """.trimIndent()
+                        )
+                    }
+                    appendLine("</tbody>")
+                } else {
+                    // ✅ PRO: group-block сохраняем (и только тут он реально нужен).
                     groups.forEach { g: ReportGroup ->
                         val metaLine = buildGroupMeta(g)
                         appendLine("""<tbody class="group-block">""")
+
                         appendLine(
                             """
                             <tr class="group-start">
                               <td class="center" colspan="3">
                                 <span class="chip">${escapeHtml(g.title)}</span>
                                 ${
-                                if (metaLine.isNotEmpty()) """<span class="meta-inline">${escapeHtml(metaLine)}</span>""" else ""
+                                if (metaLine.isNotEmpty())
+                                    """<span class="meta-inline">${escapeHtml(metaLine)}</span>"""
+                                else ""
                             }
                               </td>
                             </tr>
                             """.trimIndent()
                         )
 
-                        // ✅ детерминируем устройства: по имени (и вторично по мощности/току, если имена одинаковые)
                         val devices = g.devices.sortedWith(
                             compareBy<ReportDevice>({ it.name.lowercase(Locale.getDefault()) })
                                 .thenBy { (it.powerW ?: 0.0) }
@@ -521,10 +568,9 @@ class HtmlReportBuilder(private val context: Context) {
 
                         appendLine("</tbody>")
                     }
-
-                    appendLine("</table>")
                 }
 
+                appendLine("</table>")
                 appendLine("""</div>""")
             }
         }
@@ -548,18 +594,10 @@ class HtmlReportBuilder(private val context: Context) {
         return listOfNotNull(sw, cable).joinToString(" • ")
     }
 
-    /**
-     * ✅ Главный путь:
-     * Берём d.powerW / d.currentA как “истину”, без парсинга строк и reflection.
-     *
-     * Fallback остаётся только ради совместимости со старыми моделями,
-     * если где-то ещё прилетает ReportDevice без этих полей.
-     */
     private fun pickDeviceNumbers(d: ReportDevice): Pair<String?, String?> {
         var pw: Double? = d.powerW?.toDouble()
         var ia: Double? = d.currentA
 
-        // --- Fallback: reflection по алиасам (если поля вдруг по-другому назвали/старый класс) ---
         if (pw == null || ia == null) {
             fun getNumber(obj: Any, names: List<String>): Number? {
                 for (n in names) {
@@ -621,10 +659,6 @@ class HtmlReportBuilder(private val context: Context) {
 
         return pW to cA
     }
-
-    // endregion
-
-    // region Donut / Legend
 
     private fun buildLegend(donut: DonutModel): String {
         if (donut !is DonutModel.PhaseDistribution) return ""
@@ -693,15 +727,16 @@ class HtmlReportBuilder(private val context: Context) {
                 val pathB = arcPath(start, pb / 100.0 * 360.0).also { start += pb / 100.0 * 360.0 }
                 val pathC = arcPath(start, pc / 100.0 * 360.0)
 
+                // ✅ Слева, без align-items:center
                 """
-                <div style="display:flex;flex-direction:column;align-items:center;margin-top:6pt;">
+                <div style="display:flex;flex-direction:column;align-items:flex-start;margin-top:6pt;">
                   <svg viewBox="0 0 42 42" width="210" height="210" role="img" aria-label="Баланс фаз">
                     <circle cx="21" cy="21" r="$r" fill="none" stroke="#eeeeee" stroke-width="5"/>
                     <path d="$pathA" fill="none" stroke="#f2cc66" stroke-width="5" stroke-linecap="butt"/>
                     <path d="$pathB" fill="none" stroke="#5bbf72" stroke-width="5" stroke-linecap="butt"/>
                     <path d="$pathC" fill="none" stroke="#f26d6d" stroke-width="5" stroke-linecap="butt"/>
                   </svg>
-                  <div class="donut-caption">Баланс фаз</div>
+                  <div class="donut-caption" style="align-self:flex-start;">Баланс фаз</div>
                 </div>
                 """.trimIndent()
             }
@@ -712,8 +747,9 @@ class HtmlReportBuilder(private val context: Context) {
                 val pct = (used / limit * 100.0).coerceIn(0.0, 100.0)
                 val reserve = max(limit - used, 0.0)
 
+                // ✅ Слева: margin без auto + подписи text-align:left
                 """
-                <div style="position:relative;width:240px;height:240px;margin:8pt auto 0;">
+                <div style="position:relative;width:240px;height:240px;margin:8pt 0 0;">
                   <svg viewBox="0 0 42 42" width="240" height="240" role="img" aria-label="Загрузка вводного автомата">
                     <circle cx="21" cy="21" r="15.915" fill="none" stroke="#eeeeee" stroke-width="7"/>
                     <circle cx="21" cy="21" r="15.915" fill="none"
@@ -725,23 +761,13 @@ class HtmlReportBuilder(private val context: Context) {
                     <div style="font-size:12px;color:#666;">${df0.format(pct)}% • Запас: ${df2.format(reserve)} $UNIT_A</div>
                   </div>
                 </div>
-                <div class="donut-caption">Загрузка вводного автомата</div>
-                <div class="donut-sub muted">Всего: ${df2.format(used)} $UNIT_A из ${df0.format(limit)} $UNIT_A • ${df0.format(pct)}% • Запас ${df2.format(reserve)} $UNIT_A</div>
+                <div class="donut-caption" style="text-align:left;">Загрузка вводного автомата</div>
+                <div class="donut-sub muted" style="text-align:left;">Всего: ${df2.format(used)} $UNIT_A из ${df0.format(limit)} $UNIT_A • ${df0.format(pct)}% • Запас ${df2.format(reserve)} $UNIT_A</div>
                 """.trimIndent()
             }
         }
     }
 
-    // endregion
-
-    // region Formatting / Helpers
-
-    /**
-     * Форматирование чисел под PDF:
-     * - по умолчанию df2
-     * - для "Вт" ближе к df0 (без дробей)
-     * - для "кВт" df1
-     */
     private fun formatValue(value: Double, unitRaw: String): String {
         val u = unitRaw.trim().lowercase(Locale.getDefault())
         return when {
@@ -772,9 +798,6 @@ class HtmlReportBuilder(private val context: Context) {
         }
     }
 
-    /**
-     * Детерминируем порядок фаз даже если пришли "Фаза B" раньше "Фаза A".
-     */
     private fun phaseOrderKey(name: String): Int {
         val n = name.uppercase(Locale.getDefault())
         return when {
@@ -785,10 +808,6 @@ class HtmlReportBuilder(private val context: Context) {
         }
     }
 
-    /**
-     * Пытаемся вытащить номер из "Группа #12 — ..."
-     * Нужно только для страховки порядка, если в какой-то ветке группы пришли неотсортированные.
-     */
     private fun extractGroupNumber(title: String): Int? {
         val m = Regex("""#\s*(\d+)""").find(title) ?: return null
         return m.groupValues.getOrNull(1)?.toIntOrNull()
@@ -869,30 +888,65 @@ class HtmlReportBuilder(private val context: Context) {
         return out.joinToString(" • ").ifBlank { raw0 }
     }
 
-    // endregion
+    private fun injectIntoHead(html: String, styleBlock: String): String {
+        if (html.contains("id=\"vh-runtime-overrides\"")) return html
+        return if (html.contains("</head>", ignoreCase = true)) {
+            html.replace(Regex("</head>", RegexOption.IGNORE_CASE), "$styleBlock</head>")
+        } else {
+            // если head сломан — просто прицепим в начало
+            "$styleBlock$html"
+        }
+    }
+
+    private fun ensureBodyHasClass(html: String, classesToAdd: String): String {
+        // 1) если body с class уже есть — дописываем туда
+        val bodyWithClass = Regex(
+            """<body\b([^>]*)\bclass\s*=\s*["']([^"']*)["']([^>]*)>""",
+            RegexOption.IGNORE_CASE
+        )
+        val m = bodyWithClass.find(html)
+        if (m != null) {
+            val before = m.groupValues[1]
+            val existing = m.groupValues[2]
+            val after = m.groupValues[3]
+            val merged = mergeClasses(existing, classesToAdd)
+            val replaced = """<body$before class="$merged"$after>"""
+            return html.replaceRange(m.range, replaced)
+        }
+
+        // 2) иначе — добавляем class атрибут
+        val bodyNoClass = Regex("""<body\b([^>]*)>""", RegexOption.IGNORE_CASE)
+        val m2 = bodyNoClass.find(html) ?: return html
+        val attrs = m2.groupValues[1]
+        val replaced = """<body$attrs class="${escapeAttr(classesToAdd)}">"""
+        return html.replaceRange(m2.range, replaced)
+    }
+
+    private fun mergeClasses(existing: String, toAdd: String): String {
+        val set = linkedSetOf<String>()
+        existing.split(' ').map { it.trim() }.filter { it.isNotEmpty() }.forEach { set += it }
+        toAdd.split(' ').map { it.trim() }.filter { it.isNotEmpty() }.forEach { set += it }
+        return set.joinToString(" ")
+    }
+
+    private fun escapeAttr(s: String): String = s.replace("\"", "&quot;")
 
     private val FALLBACK_TEMPLATE = """
         <!doctype html>
         <html lang="ru">
-        <head><meta charset="utf-8"/><title>VoltHome — Экспликация</title>$INLINE_STYLE</head>
-        <body style="padding-bottom:24mm;">
+        <head><meta charset="utf-8"/><title>VoltHome — Экспликация</title>$FALLBACK_STYLE</head>
+        <body>
           <h2>VoltHome — Экспликация</h2>
-
-          <!-- ТИТУЛ (генерируется в билдере) -->
           {{titleBlock}}
-
-          <!-- KPI (генерируется в билдере) -->
           {{kpiBlock}}
-
           <div class="donut-wrap">
             <div class="donut-col">{{donutSection}}</div>
             <div class="legend-col">{{legendSection}}</div>
           </div>
-
           <hr/>
           <div>{{phasesHtml}}</div>
           {{watermark}}
-          {{footerSpacer}}
         </body>
+        </html>
     """.trimIndent()
 }
