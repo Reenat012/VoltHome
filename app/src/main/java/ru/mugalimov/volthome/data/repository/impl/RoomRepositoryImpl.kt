@@ -55,6 +55,8 @@ import ru.mugalimov.volthome.data.sync.outbox.DeviceCreatePayload
 import ru.mugalimov.volthome.data.sync.outbox.DeviceDeletePayload
 import ru.mugalimov.volthome.data.sync.outbox.OutboxPushWorker
 import ru.mugalimov.volthome.data.sync.outbox.toJson
+import ru.mugalimov.volthome.domain.model.DevicePreview
+import ru.mugalimov.volthome.domain.model.RoomWithDevicesPreview
 
 class RoomRepositoryImpl @Inject constructor(
     private val roomDao: RoomDao,
@@ -86,6 +88,39 @@ class RoomRepositoryImpl @Inject constructor(
                 }
             }
             .map { entities -> entities.mapToDomainRooms() }
+            .flowOn(dispatchers)
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    override fun observeRoomsWithDevicesPreview(): Flow<List<RoomWithDevicesPreview>> {
+        return activeProjectDs.activeProjectId
+            .flatMapLatest { projectId ->
+                if (projectId.isNullOrBlank()) {
+                    flowOf(emptyList())
+                } else {
+                    roomDao.observeRoomsWithDevicesPreviewByProject(projectId)
+                }
+            }
+            .map { rows ->
+                rows.map { r ->
+                    val names = listOfNotNull(r.previewName1, r.previewName2, r.previewName3)
+
+                    RoomWithDevicesPreview(
+                        roomId = r.roomId,
+                        name = r.roomName,
+                        roomType = r.roomType,
+                        devicesCount = r.devicesCount,
+                        // На Коммите 2 можно пока без id (если тебе важно именно id — скажи,
+                        // но для карточки комнат обычно достаточно имени)
+                        devicesPreview = names.mapIndexed { idx, name ->
+                            DevicePreview(
+                                id = -1L - idx, // временный стабильный placeholder, до Коммита 3/4 можно не использовать
+                                name = name
+                            )
+                        }
+                    )
+                }
+            }
             .flowOn(dispatchers)
     }
 
