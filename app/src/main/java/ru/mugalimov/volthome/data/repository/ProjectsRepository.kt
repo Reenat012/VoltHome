@@ -6,6 +6,12 @@ import ru.mugalimov.volthome.domain.model.Project
 interface ProjectsRepository {
     fun listProjects(): Flow<List<Project>>
 
+    /**
+     * Количество активных проектов (is_deleted = 0).
+     * Источник истины: локальная Room БД.
+     */
+    suspend fun countActiveProjects(): Int
+
     /** Гарантирует, что активный проект выбран; если нет — создаёт локальный “черновик”. Возвращает id активного. */
     suspend fun ensureActiveDraft(): String
 

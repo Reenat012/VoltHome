@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Info
@@ -46,7 +45,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -68,6 +66,7 @@ import coil.compose.rememberAsyncImagePainter
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.R
 import ru.mugalimov.volthome.core.theme.VhColors
+import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.model.ProjectUi
 import ru.mugalimov.volthome.ui.model.UserProfileUi
 import ru.mugalimov.volthome.ui.utilities.TelegramConsultationDialog
@@ -98,6 +97,9 @@ fun StartDrawer(
     var showConsultDialog by remember { mutableStateOf(false) }
 
     val t = VhColors.tokens
+
+    val userPlan = LocalUserPlan.current
+    val caps = userPlan.capabilities
 
     val context = LocalContext.current
     fun openUrl(url: String) {
@@ -206,32 +208,54 @@ fun StartDrawer(
                         }
 
                         item {
-                            val disabled = projects.size >= 3
-                            val disabledText = t.textDisabled
-                            val enabledText = t.textPrimary
-                            val enabledIcon = t.textSecondary
+                            // UI не "вратарь": onClick всегда идёт в VM → UseCase решает.
+                            val count = projects.count { !it.isDeleted }
 
-                            NavigationDrawerItem(
-                                label = { Text(if (!disabled) "+ Добавить проект" else "Лимит: 3 проекта") },
-                                selected = false,
-                                onClick = {
-                                    if (!disabled) {
-                                        scope.launch { drawerState.close(); onCreateProject() }
-                                    }
-                                },
-                                icon = { Icon(Icons.Default.Shield, contentDescription = null) },
-                                colors = NavigationDrawerItemDefaults.colors(
-                                    selectedContainerColor = t.surfaceAlt,
-                                    unselectedContainerColor = t.bg,
+                            // Только отображение. Истина по лимиту — в домене/usecase.
+                            val freeLimit = 3
+                            val isUnlimited = caps.unlimitedProjects
 
-                                    selectedTextColor = if (disabled) disabledText else enabledText,
-                                    unselectedTextColor = if (disabled) disabledText else enabledText,
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(NavigationDrawerItemDefaults.ItemPadding)
+                            ) {
+                                NavigationDrawerItem(
+                                    label = { Text("+ Добавить проект", color = t.textPrimary) },
+                                    selected = false,
+                                    onClick = {
+                                        scope.launch {
+                                            drawerState.close()
+                                            onCreateProject()
+                                        }
+                                    },
+                                    icon = { Icon(Icons.Default.Shield, contentDescription = null, tint = t.textSecondary) },
+                                    colors = NavigationDrawerItemDefaults.colors(
+                                        selectedContainerColor = t.surfaceAlt,
+                                        unselectedContainerColor = t.bg,
+                                        selectedTextColor = t.textPrimary,
+                                        unselectedTextColor = t.textPrimary,
+                                        selectedIconColor = t.textSecondary,
+                                        unselectedIconColor = t.textSecondary
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
 
-                                    selectedIconColor = if (disabled) disabledText else enabledIcon,
-                                    unselectedIconColor = if (disabled) disabledText else enabledIcon
-                                ),
-                                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-                            )
+                                // Инфо-строка: реактивно меняется при смене плана
+                                val info = if (isUnlimited) {
+                                    "PRO: без лимита • Проекты: $count"
+                                } else {
+                                    val capped = minOf(count, freeLimit)
+                                    "Free: $capped/$freeLimit • Проекты: $count"
+                                }
+
+                                Text(
+                                    text = info,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = t.textSecondary,
+                                    modifier = Modifier.padding(start = 16.dp, top = 4.dp)
+                                )
+                            }
                         }
 
                         item { Divider(modifier = Modifier.padding(vertical = 8.dp), color = t.divider) }

@@ -63,6 +63,10 @@ class ProjectsRepositoryImpl @Inject constructor(
             .observeAll()
             .map { list -> list.map { it.toDomainProject() } }
 
+    override suspend fun countActiveProjects(): Int = withContext(Dispatchers.IO) {
+        db.projectDao().countActive()
+    }
+
     override suspend fun ensureActiveDraft(): String = withContext(Dispatchers.IO) {
         val current = activeProjectDataStore.activeProjectId.firstOrNull()
         if (!current.isNullOrBlank()) {

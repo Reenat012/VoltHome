@@ -3,8 +3,8 @@ package ru.mugalimov.volthome.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import javax.inject.Inject
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -14,23 +14,28 @@ import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.local.dao.OutboxDao
 import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
 import ru.mugalimov.volthome.data.repository.ProjectsRepository
-import ru.mugalimov.volthome.data.repository.UserPlanRepository
+import ru.mugalimov.volthome.domain.errors.ProjectLimitError.ProjectLimitReached
 import ru.mugalimov.volthome.domain.model.ProFeature
 import ru.mugalimov.volthome.domain.model.Project
+import ru.mugalimov.volthome.domain.use_case.CreateProjectUseCase
 import ru.mugalimov.volthome.ui.model.ProjectUi
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
-
-private const val FREE_PROJECTS_LIMIT = 3
-private const val ERR_PRO_REQUIRED_PROJECTS_LIMIT = "pro_required_projects_limit"
+import javax.inject.Inject
 
 @HiltViewModel
 class ProjectsViewModel @Inject constructor(
     private val repo: ProjectsRepository,
     private val activeDs: ActiveProjectDataStore,
-    private val userPlanRepository: UserPlanRepository,
     private val paywallBus: PaywallBus,
-    private val outboxDao: OutboxDao
+    private val outboxDao: OutboxDao,
+    private val createProjectUseCase: CreateProjectUseCase,
 ) : ViewModel() {
+
+    /**
+     * UI-одноразовые сообщения (без привязки к конкретному UI-виджету).
+     * Подключение покроем на следующем шаге/если уже есть инфраструктура.
+     */
+    val messages = MutableSharedFlow<String>(extraBufferCapacity = 1)
 
     // Публичный поток активного проекта (важно для навигации из любых экранов)
     val activeProjectId: Flow<String?> = activeDs.activeProjectId.distinctUntilChanged()
@@ -63,29 +68,30 @@ class ProjectsViewModel @Inject constructor(
         // Теперь init не инициирует paywall вообще.
         //
         // outboxDao остаётся в зависимостях (может использоваться в других сценариях / будущем),
-        // но paywall показываем только из пользовательских действий (например createNewProject()).
+        // но paywall показываем только из пользовательских действий.
     }
 
     fun createNewProject(name: String? = null) {
         viewModelScope.launch {
-            val plan = userPlanRepository.planFlow.value
             val existing = repo.listProjects().first()
-            val aliveCount = existing.count { !it.isDeleted }
-
-            // 1.1: ранняя проверка ДО создания (никаких draft, никаких запросов)
-            if (!plan.capabilities.unlimitedProjects && aliveCount >= FREE_PROJECTS_LIMIT) {
-                paywallBus.request(ProFeature.PROJECTS_LIMIT)
-                return@launch
-            }
-
             val title = name?.takeIf { it.isNotBlank() } ?: nextSequentialProjectName(existing)
-            repo.createProject(title, note = null)
 
-            // Активным делаем "самый новый"
-            val newest: Project? = repo.listProjects().first().maxByOrNull { it.updatedAt }
-            newest?.let {
-                activeDs.setActiveProjectId(it.id)
-                repo.openProject(it.id)
+            when (val outcome = createProjectUseCase(name = title, note = null)) {
+                is CreateProjectUseCase.Outcome.Success -> {
+                    // "Как раньше": активируем и открываем (openProject запускает синк/подгрузки).
+                    activeDs.setActiveProjectId(outcome.projectId)
+                    repo.openProject(outcome.projectId)
+                }
+
+                is CreateProjectUseCase.Outcome.Failure -> {
+                    when (outcome.error) {
+                        is ProjectLimitReached -> {
+                            // PRO CTA + короткое объяснение (текст можно отточить позже)
+                            messages.tryEmit("Достигнут лимит Free по проектам. Для снятия лимита нужен PRO.")
+                            paywallBus.request(ProFeature.PROJECTS_LIMIT)
+                        }
+                    }
+                }
             }
         }
     }
