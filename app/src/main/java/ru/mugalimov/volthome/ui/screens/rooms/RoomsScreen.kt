@@ -45,7 +45,6 @@ fun RoomsScreen(
     val uiState by viewModel.uiState.collectAsState()
     val defaultDevices by addViewModel.defaultDevices.collectAsState()
     val isBusy by addViewModel.isBusy.collectAsState()
-    val deviceCounts by viewModel.deviceCounts.collectAsState()
     val phaseMode by viewModel.phaseMode.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -74,7 +73,6 @@ fun RoomsScreen(
         }
     }
 
-    // ✅ Новый сбор событий от RoomViewModel (сообщение про запрет 3φ→1φ)
     LaunchedEffect(Unit) {
         viewModel.actions.collect { action: RoomsAction ->
             when (action) {
@@ -119,8 +117,7 @@ fun RoomsScreen(
             uiState.isLoading -> LoadingView()
             uiState.error != null -> ErrorView(uiState.error!!)
             else -> RoomList(
-                rooms = uiState.rooms,
-                deviceCounts = deviceCounts,
+                rooms = uiState.roomsPreview,
                 onDelete = viewModel::deleteRoom,
                 modifier = Modifier.padding(padding),
                 onClickRoom = onClickRoom

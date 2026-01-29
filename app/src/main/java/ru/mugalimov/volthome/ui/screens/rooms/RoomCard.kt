@@ -34,23 +34,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ru.mugalimov.volthome.core.theme.VhColors
-import ru.mugalimov.volthome.domain.model.Room
 import ru.mugalimov.volthome.domain.model.RoomType
 
 @Composable
 fun RoomCard(
-    room: Room,
+    room: RoomWithDevicesPreviewUi,
     modifier: Modifier = Modifier,
-    devicesCount: Int? = null,
     onClick: () -> Unit = {},
     onDelete: (() -> Unit)? = null
 ) {
     val needsRcd = room.roomType in setOf(RoomType.BATHROOM, RoomType.KITCHEN, RoomType.OUTDOOR)
-    val count = devicesCount ?: room.devices.size
-
     val t = VhColors.tokens
-
-    // Нейтральная индустриальная карточка (без “раскраски по типам”)
     val cardBg = t.surfaceAlt
 
     ElevatedCard(
@@ -108,13 +102,15 @@ fun RoomCard(
                     }
                 }
 
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(10.dp))
 
+                // ✅ Старое поведение: на карточке НЕТ списка устройств.
+                // Только счётчик + флаг "Требуется УЗО".
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    SoftChip("$count устройств(а)")
+                    SoftChip("${room.devicesCount} устройств(а)")
                     if (needsRcd) UzoChip()
                 }
             }
@@ -134,8 +130,6 @@ private fun RoomTypeAvatar(type: RoomType, modifier: Modifier = Modifier) {
     }
 
     val t = VhColors.tokens
-
-    // Нейтральный avatar: без цветных пятен
     val bg: Color = t.surface
     val fg: Color = t.textSecondary
 
@@ -164,7 +158,9 @@ private fun SoftChip(text: String) {
             text = text,
             style = MaterialTheme.typography.labelMedium,
             color = t.textSecondary,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }

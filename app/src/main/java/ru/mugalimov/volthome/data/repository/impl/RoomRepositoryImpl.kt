@@ -6,6 +6,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -80,12 +81,10 @@ class RoomRepositoryImpl @Inject constructor(
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     override fun observeRooms(): Flow<List<Room>> {
         return activeProjectDs.activeProjectId
+            .distinctUntilChanged() // ✅ не залипаем/не пересобираем один и тот же проект
             .flatMapLatest { projectId ->
-                if (projectId.isNullOrBlank()) {
-                    flowOf(emptyList())
-                } else {
-                    roomDao.observeAllRoomsByProject(projectId)
-                }
+                if (projectId.isNullOrBlank()) flowOf(emptyList())
+                else roomDao.observeAllRoomsByProject(projectId)
             }
             .map { entities -> entities.mapToDomainRooms() }
             .flowOn(dispatchers)
@@ -94,12 +93,10 @@ class RoomRepositoryImpl @Inject constructor(
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     override fun observeRoomsWithDevicesPreview(): Flow<List<RoomWithDevicesPreview>> {
         return activeProjectDs.activeProjectId
+            .distinctUntilChanged() // ✅ переключение проекта = новый flow, тот же проект = без дубликатов
             .flatMapLatest { projectId ->
-                if (projectId.isNullOrBlank()) {
-                    flowOf(emptyList())
-                } else {
-                    roomDao.observeRoomsWithDevicesPreviewByProject(projectId)
-                }
+                if (projectId.isNullOrBlank()) flowOf(emptyList())
+                else roomDao.observeRoomsWithDevicesPreviewByProject(projectId)
             }
             .map { rows ->
                 rows.map { r ->
@@ -110,11 +107,9 @@ class RoomRepositoryImpl @Inject constructor(
                         name = r.roomName,
                         roomType = r.roomType,
                         devicesCount = r.devicesCount,
-                        // На Коммите 2 можно пока без id (если тебе важно именно id — скажи,
-                        // но для карточки комнат обычно достаточно имени)
                         devicesPreview = names.mapIndexed { idx, name ->
                             DevicePreview(
-                                id = -1L - idx, // временный стабильный placeholder, до Коммита 3/4 можно не использовать
+                                id = -1L - idx,
                                 name = name
                             )
                         }

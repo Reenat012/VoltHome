@@ -7,20 +7,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import ru.mugalimov.volthome.domain.model.Room
 
 /**
- * Список комнат.
- * deviceCounts позволяет передать реальное количество устройств по id комнаты,
- * если Room.devices не загружены (ленивая загрузка).
+ * Список комнат (реактивная витрина RoomsList).
+ * Единственный источник истины для карточки — RoomWithDevicesPreviewUi.
  */
 @Composable
 fun RoomList(
-    rooms: List<Room>,
+    rooms: List<RoomWithDevicesPreviewUi>,
     onClickRoom: (Long) -> Unit,
     onDelete: (Long) -> Unit,
-    onAddDevice: (Long) -> Unit = {},              // на будущее, сейчас карточка его не использует
-    deviceCounts: Map<Long, Int> = emptyMap(),     // id комнаты -> число устройств
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -28,14 +24,15 @@ fun RoomList(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
     ) {
-        items(rooms, key = { it.id }) { room ->
-            val count = deviceCounts[room.id] ?: room.devices.size
-
+        items(
+            items = rooms,
+            key = { it.roomId },
+            contentType = { "room_card" } // ✅ стабилизируем реюз/измерения айтемов
+        ) { room ->
             RoomCard(
                 room = room,
-                devicesCount = deviceCounts[room.id] ?: room.devices.size, // ← ВАЖНО
-                onClick = { onClickRoom(room.id) },
-                onDelete = { onDelete(room.id) }
+                onClick = { onClickRoom(room.roomId) },
+                onDelete = { onDelete(room.roomId) }
             )
         }
     }
