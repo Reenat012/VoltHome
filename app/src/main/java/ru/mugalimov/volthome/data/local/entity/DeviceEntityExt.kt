@@ -6,11 +6,11 @@ import androidx.room.PrimaryKey
 import java.time.Instant
 
 @Entity(
-    tableName = "devices",
+    tableName = "devices_ext",
     indices = [
         Index("project_id"),
-        Index(value = ["project_id","updated_at"]),
-        Index(value = ["project_id","is_deleted"])
+        Index(value = ["project_id", "updated_at"]),
+        Index(value = ["project_id", "is_deleted"])
     ]
 )
 data class DeviceEntityExt(
