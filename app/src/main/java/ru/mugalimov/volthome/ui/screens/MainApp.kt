@@ -33,6 +33,10 @@ import kotlinx.coroutines.flow.map
 import ru.mugalimov.volthome.BuildConfig
 import ru.mugalimov.volthome.domain.model.PlanCapabilities
 import ru.mugalimov.volthome.domain.model.ProFeature
+import ru.mugalimov.volthome.ui.manual.ForbiddenAction
+import ru.mugalimov.volthome.ui.manual.LocalManualModeGuard
+import ru.mugalimov.volthome.ui.manual.ManualModeGuard
+import ru.mugalimov.volthome.ui.manual.ManualModeGuardDialog
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.model.ProjectUi
 import ru.mugalimov.volthome.ui.model.UserProfileUi
@@ -71,6 +75,12 @@ fun MainApp(
     // ✅ Глобальный paywall (capabilities-aware)
     // -----------------------------
     val context = LocalContext.current
+    val appContext = context.applicationContext
+
+    val manualGuard = remember {
+        ManualModeGuard.fromApp(appContext)
+    }
+
     val paywallBus = remember {
         EntryPointAccessors.fromApplication(
             context.applicationContext,
@@ -227,9 +237,13 @@ fun MainApp(
     val currentRoute = navBackStackEntry?.destination?.route
 
     // Пробрасываем тариф в UI через CompositionLocal
-    CompositionLocalProvider(LocalUserPlan provides userPlan) {
-        // ✅ КЛЮЧ: DebugProPanel должен быть внутри BoxScope, иначе align не существует
+    CompositionLocalProvider(
+        LocalUserPlan provides userPlan,
+        LocalManualModeGuard provides manualGuard
+    ) {
         Box(Modifier.fillMaxSize()) {
+            ManualModeGuardDialog(guard = manualGuard)
+
             AppScaffoldWithDrawer(
                 title = appBarTitle,
                 profileFlow = profileFlow,
@@ -237,12 +251,23 @@ fun MainApp(
                 drawerState = drawerState,
                 onLogout = { authVm.signOut() },
                 onSelectProject = { id ->
-                    projectsVm.selectProject(id)
-                    appNavController.navigate(Screens.RoomsList.route) {
-                        popUpTo(appNavController.graph.findStartDestination().id) { saveState = true }
-                        launchSingleTop = true
-                        restoreState = true
-                    }
+                    manualGuard.request(
+                        action = ForbiddenAction.SWITCH_PROJECT,
+                        onProceed = {
+                            projectsVm.selectProject(id)
+                            appNavController.navigate(Screens.RoomsList.route) {
+                                popUpTo(appNavController.graph.findStartDestination().id) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
+                        onSave = {
+                            // Коммит 9: реальный Save manual-сессии
+                        },
+                        onCancel = {
+                            // Коммит 9: реальный Cancel manual-сессии + полный авто-пересчёт
+                        }
+                    )
                 },
                 onCreateProject = {
                     projectsVm.createNewProject()

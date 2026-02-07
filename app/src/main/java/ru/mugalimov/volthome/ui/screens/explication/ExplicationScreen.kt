@@ -5,11 +5,14 @@ import androidx.activity.ComponentActivity
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
@@ -25,6 +28,8 @@ import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -41,8 +46,11 @@ import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Phase
+import ru.mugalimov.volthome.ui.manual.ForbiddenAction
+import ru.mugalimov.volthome.ui.manual.LocalManualModeGuard
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.screens.explication.export_pdf.exportExplicationPdf
+import ru.mugalimov.volthome.ui.screens.explication.manual.MoveDeviceTargetsBar
 import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetContent
 import ru.mugalimov.volthome.ui.viewmodel.ExplicationViewModel
 import ru.mugalimov.volthome.ui.viewmodel.GroupScreenState
@@ -61,16 +69,32 @@ fun ExplicationScreen(
     val state by viewModel.uiState.collectAsState()
     val ctx = LocalContext.current
 
-    // события от VM (one-shot)
+    val manualSession by viewModel.manualSession.collectAsState(initial = null)
+    val isManual = manualSession?.manualModeActive == true
+
+    val unassignedIds = manualSession?.draftState?.unassignedDeviceIds.orEmpty()
+    val unassignedDevices by viewModel.unassignedDevices.collectAsState()
+
+    LaunchedEffect(isManual, unassignedIds) {
+        if (isManual) {
+            viewModel.refreshUnassignedDevices(unassignedIds)
+        } else {
+            viewModel.clearUnassignedDevices()
+        }
+    }
+
+    val moveUi by viewModel.moveDeviceUi.collectAsState(initial = null)
+
+    val manualGuard = LocalManualModeGuard.current
+
+    // one-shot события от VM
     val event by viewModel.events.collectAsState(initial = null)
 
     val plan = LocalUserPlan.current
     val caps = plan.capabilities
     val canShowProSections = caps.professionalReportSections
 
-    // ✅ НОВЫЙ КОНТРАКТ:
-    // - PDF можно всегда (FREE + PRO)
-    // - разница только в профиле отчёта (FREE/PRO) внутри buildExplicationReportHtml (caps.reportProfile())
+    // PDF: доступно всем, различается профиль отчёта внутри HTML-сборки
     LaunchedEffect(event) {
         if (event != ExplicationViewModel.UiEvent.ExportPdfRequested) return@LaunchedEffect
 
@@ -105,32 +129,87 @@ fun ExplicationScreen(
             val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             val scope = rememberCoroutineScope()
 
+            // высота верхней панели целей (чтобы контент не уезжал под неё)
+            val moveBarHeight = 112.dp
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(bg)
             ) {
+                // Панель переноса устройства (оверлей сверху)
+                if (isManual && moveUi != null) {
+                    val draftGroups = manualSession?.draftState?.groups.orEmpty()
+
+                    MoveDeviceTargetsBar(
+                        title = "Перенос устройства",
+                        fromGroupId = moveUi!!.fromGroupId,
+                        groups = draftGroups,
+                        onDismiss = { viewModel.dismissMoveDevice() },
+                        onMoveToGroup = { targetGroupId ->
+                            viewModel.onMoveDeviceTargetGroupSelected(
+                                deviceId = moveUi!!.deviceId,
+                                targetGroupId = targetGroupId
+                            )
+                        },
+                        onMoveToNewGroup = {
+                            viewModel.onMoveDeviceToNewGroupSelected(
+                                deviceId = moveUi!!.deviceId
+                            )
+                        },
+                        onMoveToUnassigned = {
+                            viewModel.onMoveDeviceToUnassignedSelected(
+                                deviceId = moveUi!!.deviceId
+                            )
+                        }
+                    )
+                }
+
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp)
                 ) {
+                    // ✅ если панель переноса активна — резервируем сверху место, иначе она перекроет контент
+                    if (isManual && moveUi != null) {
+                        item { Spacer(Modifier.height(moveBarHeight)) }
+                    }
+
+                    // Шапка: вход в manual / статус
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (!isManual) {
+                                TextButton(onClick = { viewModel.onEnterManualModeClick() }) {
+                                    Text("Ручной режим")
+                                }
+                            } else {
+                                Text(
+                                    text = "Ручной режим активен",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                    }
+
+                    // Карточка “Щит в целом”
                     item {
                         ShieldOverviewCard(
                             incomer = s.incomer,
                             groups = groups,
                             hasGroupRcds = s.hasGroupRcds,
-                            modifier = Modifier.fillMaxSize(),
+                            modifier = Modifier.fillMaxWidth(),
                             installedPowerW = s.installedPowerW,
                             calculatedPowerW = s.calculatedPowerW,
                             showProfessionalEvidence = canShowProSections,
-                            // ✅ если это был “замок PRO”, логичнее вести в PRO-действия/пейволл,
-                            // а не в “скачать PDF” (который теперь доступен всем).
                             onProfessionalLockedClick = {
                                 viewModel.onPdfExportActionsClick()
                             },
-                            onOpenInfoSheet = { payload ->
-                                viewModel.openInfoSheet(payload)
-                            },
+                            onOpenInfoSheet = { payload -> viewModel.openInfoSheet(payload) },
                             onIncomerFieldClick = { field ->
                                 viewModel.onIncomerFieldClick(
                                     field = field,
@@ -144,6 +223,19 @@ fun ExplicationScreen(
                         Spacer(Modifier.height(12.dp))
                     }
 
+                    // ✅ Коммит 5: контейнер "Нераспределённые" — только в manual, между щитом и фазой A
+                    if (isManual) {
+                        item {
+                            UnassignedDevicesBlock(
+                                devices = unassignedDevices,
+                                onAutoAssignClick = { viewModel.onAutoAssignUnassignedClick() },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(Modifier.height(12.dp))
+                        }
+                    }
+
+                    // Группы по фазам
                     Phase.values().forEach { ph ->
                         val list = sections[ph].orEmpty()
                         if (list.isNotEmpty()) {
@@ -151,30 +243,50 @@ fun ExplicationScreen(
                                 PhaseHeader(phase = ph)
                                 Spacer(Modifier.height(8.dp))
                             }
+
                             items(
-                                list,
+                                items = list,
                                 key = { stableGroupKey(ph, it) }
                             ) { g ->
                                 GroupCardCompact(
                                     group = g,
-                                    onDeviceClick = { deviceId -> viewModel.onDeviceClick(deviceId) },
+                                    isManualMode = isManual,
+                                    onDeviceLongPress = { deviceId, fromGroupId ->
+                                        viewModel.onDeviceLongPressed(
+                                            deviceId = deviceId,
+                                            fromGroupId = fromGroupId
+                                        )
+                                    },
+                                    onDeviceClick = { deviceId ->
+                                        viewModel.onDeviceClick(deviceId)
+                                    },
                                     selectedDeviceBreakdown = selectedBreakdown,
                                     onGroupPowerClick = { viewModel.onGroupPowerClick(it) },
                                     onGroupCurrentClick = { viewModel.onGroupCurrentClick(it) },
-                                    onOpenInfoSheet = { payload ->
-                                        viewModel.openInfoSheet(payload)
-                                    }
+                                    onOpenInfoSheet = { payload -> viewModel.openInfoSheet(payload) }
                                 )
                                 Spacer(Modifier.height(12.dp))
                             }
+
                             item { Spacer(Modifier.height(8.dp)) }
                         }
                     }
                 }
 
+                // FAB: PDF (всегда доступно)
                 FloatingActionButton(
-                    // ✅ теперь это всегда “скачать/распечатать PDF”, без превью
-                    onClick = { viewModel.onExportPdfClick() },
+                    onClick = {
+                        manualGuard.request(
+                            action = ForbiddenAction.EXPORT_PDF,
+                            onProceed = { viewModel.onExportPdfClick() },
+                            onSave = {
+                                // Коммит 9: Save manual-сессии
+                            },
+                            onCancel = {
+                                // Коммит 9: Cancel manual-сессии
+                            }
+                        )
+                    },
                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                     modifier = Modifier
@@ -201,6 +313,7 @@ fun ExplicationScreen(
                     )
                 }
 
+                // BottomSheet: Info
                 if (sheetPayload != null) {
                     ModalBottomSheet(
                         onDismissRequest = {

@@ -54,6 +54,8 @@ import kotlin.math.roundToInt
 @Composable
 fun GroupCardCompact(
     group: CircuitGroup,
+    isManualMode: Boolean,
+    onDeviceLongPress: (deviceId: Long, fromGroupId: Long) -> Unit,
     onEdit: (() -> Unit)? = null,
     onDeviceClick: (Long) -> Unit,
     selectedDeviceBreakdown: DeviceCalcBreakdown?,
@@ -157,6 +159,10 @@ fun GroupCardCompact(
                         }
                         onDeviceClick(id)
                     },
+                    onDeviceLongPress = { id ->
+                        if (isManualMode) onDeviceLongPress(id, group.groupId)
+                    },
+                    enableLongPress = isManualMode,
                     maxVisible = 3,
                     groupKey = group.groupNumber
                 )

@@ -27,6 +27,7 @@ import ru.mugalimov.volthome.data.local.entity.UuidMapRoom
 import ru.mugalimov.volthome.data.remote.api.ProjectsApi
 import ru.mugalimov.volthome.data.remote.dto.ProjectDeltaResponse
 import ru.mugalimov.volthome.data.remote.dto.ProjectTreeDto
+import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
 import ru.mugalimov.volthome.data.sync.outbox.OutboxPusher
 import ru.mugalimov.volthome.di.database.AppDatabase
 import ru.mugalimov.volthome.domain.model.DeviceType
@@ -51,12 +52,22 @@ class SyncManager @Inject constructor(
     private val activeProjectDataStore: ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore,
     private val outboxPusher: OutboxPusher,
     @ApplicationContext private val appContext: Context,
+    private val manualEditSessionRepository: ManualEditSessionRepository,
 ) {
     private val uuidDao get() = appDb.uuidMapDao()
 
     // per-project лок
     private val projectLocks = ConcurrentHashMap<String, Mutex>()
     private fun lockFor(projectId: String) = projectLocks.getOrPut(projectId) { Mutex() }
+
+    private val pendingIncomingSyncProjects = ConcurrentHashMap.newKeySet<String>()
+
+    fun hasPendingIncoming(projectId: String): Boolean =
+        pendingIncomingSyncProjects.contains(projectId)
+
+    suspend fun clearPendingIncoming(projectId: String) {
+        pendingIncomingSyncProjects.remove(projectId)
+    }
 
     // ограничиваем параллелизм синков
     private val syncSemaphore = Semaphore(1)
@@ -80,14 +91,24 @@ class SyncManager @Inject constructor(
     suspend fun syncProject(projectId: String) = withContext(Dispatchers.IO) {
         syncSemaphore.withPermit {
             lockFor(projectId).withLock {
-                Log.i("Sync", "syncProject START project=$projectId thread=${Thread.currentThread().name}")
+
+                Log.i(
+                    "Sync",
+                    "syncProject START project=$projectId thread=${Thread.currentThread().name} pending=${hasPendingIncoming(projectId)}"
+                )
                 val tStart = System.currentTimeMillis()
+
                 try {
                     val project = projectDao.getById(projectId)
                     if (project == null) {
                         Log.w("Sync", "Project $projectId not found locally — skip")
                         return@withLock
                     }
+
+                    Log.d(
+                        "Sync",
+                        "local project: id=$projectId version=${project.version} updated_at='${project.updated_at}'"
+                    )
 
                     if (isDraftId(projectId)) {
                         Log.i("Sync", "Project $projectId is DRAFT — skip network sync")
@@ -96,24 +117,56 @@ class SyncManager @Inject constructor(
 
                     if (!isOnline()) {
                         Log.i("Sync", "Offline detected — skip network phases for project=$projectId")
+                        Log.i("Sync", "network gate: OFFLINE -> skip PULL/APPLY")
                         return@withLock
                     }
 
                     // Улучшенная эвристика «первая загрузка»: нет ни одной комнаты в локальной БД
                     val localRoomsCount = roomDao.countByProjectId(projectId)
-                    val isFirstLoad = (project.version == 0) || project.updated_at.isBlank() || (localRoomsCount == 0)
+                    val isFirstLoad =
+                        (project.version == 0) || project.updated_at.isBlank() || (localRoomsCount == 0)
                     val stage = if (isFirstLoad) "snapshot" else "delta"
                     Log.i("Sync", "Sync[project=$projectId] stage=$stage (localRooms=$localRoomsCount)")
 
-                    // -------- PUSH --------
+                    // ------------------------------------------------
+                    // ✅ PUSH — делаем ВСЕГДА, даже если manual-mode активен
+                    // ------------------------------------------------
+                    Log.d("Sync", "PUSH begin project=$projectId")
+                    val tPush = System.currentTimeMillis()
+
                     try {
                         val stats = outboxPusher.pushProject(projectId)
-                        Log.i("Sync", "push phase done: total=${stats.total} ok=${stats.done} failed=${stats.failed}")
+                        Log.i(
+                            "Sync",
+                            "push phase done: total=${stats.total} ok=${stats.done} failed=${stats.failed}"
+                        )
                     } catch (t: Throwable) {
-                        Log.w("Sync", "push phase failed (will still try pull): ${t.message}", t)
+                        Log.w("Sync", "push phase failed (will still try pull if allowed): ${t.message}", t)
                     }
 
-                    // -------- PULL --------
+                    Log.d("Sync", "PUSH end project=$projectId in ${System.currentTimeMillis() - tPush}ms")
+
+                    // ------------------------------------------------
+                    // ✅ MANUAL GUARD — блокируем только входящий PULL/APPLY
+                    // ------------------------------------------------
+                    val active = manualEditSessionRepository.getActiveSession()
+                    Log.d("Sync", "manual session: active=${active != null} manualModeActive=${active?.manualModeActive}")
+                    if (active?.manualModeActive == true) {
+                        val wasPending = hasPendingIncoming(projectId)
+                        pendingIncomingSyncProjects.add(projectId)
+                        Log.w(
+                            "Sync",
+                            "manual-mode active -> PULL/APPLY BUFFERED project=$projectId pending: $wasPending -> ${hasPendingIncoming(projectId)}"
+                        )
+                        return@withLock
+                    }
+
+                    // ------------------------------------------------
+                    // ✅ PULL
+                    // ------------------------------------------------
+                    Log.d("Sync", "PULL begin project=$projectId stage=$stage since='${project.updated_at}'")
+                    val tPull = System.currentTimeMillis()
+
                     if (isFirstLoad) {
                         // SNAPSHOT
                         val tree: ProjectTreeDto = try {
@@ -125,7 +178,10 @@ class SyncManager @Inject constructor(
                             } else throw e
                         }
 
-                        Log.i("Sync", "snapshot pull: rooms=${tree.rooms.size}, groups=${tree.groups.size}, devices=${tree.devices.size}")
+                        Log.i(
+                            "Sync",
+                            "snapshot pull: rooms=${tree.rooms.size}, groups=${tree.groups.size}, devices=${tree.devices.size}"
+                        )
 
                         val toMapRooms = mutableListOf<Pair<String, Long>>()
                         val toMapGroups = mutableListOf<Pair<String, Long>>()
@@ -140,6 +196,7 @@ class SyncManager @Inject constructor(
                                 toMapGroups = toMapGroups,
                                 toMapDevices = toMapDevices
                             )
+
                             // фиксируем «истину сервера»
                             projectDao.upsert(
                                 ProjectEntity(
@@ -155,6 +212,11 @@ class SyncManager @Inject constructor(
                         Log.i("SyncTx", "snapshot tx ms=${System.currentTimeMillis() - t0}")
 
                         putUuidMappings(toMapRooms, toMapGroups, toMapDevices)
+
+                        Log.d(
+                            "Sync",
+                            "PULL end project=$projectId stage=$stage in ${System.currentTimeMillis() - tPull}ms"
+                        )
                     } else {
                         // DELTA
                         val since = project.updated_at.ifBlank { "1970-01-01T00:00:00Z" }
@@ -183,7 +245,13 @@ class SyncManager @Inject constructor(
                         val unresolvedRooms1: Set<String> = appDb.withTransaction {
                             applyRoomsDeltaTx(projectId, delta, toMapRooms, freshRoomMappings)
                             applyGroupsDeltaTx(projectId, delta, toMapGroups)
-                            applyDevicesDeltaTx(projectId, delta, toMapDevices, freshRoomMappings, /*collectUnresolved=*/true)
+                            applyDevicesDeltaTx(
+                                projectId = projectId,
+                                delta = delta,
+                                toMapDevices = toMapDevices,
+                                freshRoomMappings = freshRoomMappings,
+                                collectUnresolved = true
+                            )
                         }
 
                         // Не меняем версию; updated_at локально не ставим isoNow()
@@ -192,6 +260,10 @@ class SyncManager @Inject constructor(
                         // Если есть устройства с room_uuid, которых ещё нет локально — подтягиваем комнаты снапшотом и повторяем устройства
                         if (unresolvedRooms1.isNotEmpty()) {
                             Log.w("Sync", "delta backfill: need rooms for uuids=$unresolvedRooms1")
+
+                            Log.d("Sync", "BACKFILL snapshot begin project=$projectId unresolvedRooms=${unresolvedRooms1.size}")
+                            val tBackfill = System.currentTimeMillis()
+
                             val tree: ProjectTreeDto = try {
                                 projectsApi.getProjectTree(projectId)
                             } catch (e: retrofit2.HttpException) {
@@ -201,6 +273,11 @@ class SyncManager @Inject constructor(
                                 } else throw e
                             }
 
+                            Log.d(
+                                "Sync",
+                                "BACKFILL snapshot fetched in ${System.currentTimeMillis() - tBackfill}ms rooms=${tree.rooms.size}"
+                            )
+
                             val toMapRoomsBackfill = mutableListOf<Pair<String, Long>>()
                             appDb.withTransaction {
                                 for (r in tree.rooms) {
@@ -208,10 +285,12 @@ class SyncManager @Inject constructor(
                                     if (r.is_deleted) continue
 
                                     val createdAt = parseDate(r.meta?.get("created_at_iso") as? String)
-                                    val roomType = (r.meta?.get("room_type") as? String)?.let { safeRoomType(it) } ?: RoomType.STANDARD
+                                    val roomType =
+                                        (r.meta?.get("room_type") as? String)?.let { safeRoomType(it) }
+                                            ?: RoomType.STANDARD
 
-                                    val existingId = uuidDao.getRoomLocal(r.id)
-                                        ?: roomDao.findIdByProjectAndName(projectId, r.name)
+                                    val existingId =
+                                        uuidDao.getRoomLocal(r.id) ?: roomDao.findIdByProjectAndName(projectId, r.name)
 
                                     val localId: Long = if (existingId != null) {
                                         existingId
@@ -228,6 +307,7 @@ class SyncManager @Inject constructor(
                                             ?: roomDao.findIdByProjectAndName(projectId, r.name)
                                             ?: continue
                                     }
+
                                     toMapRoomsBackfill += r.id to localId
                                 }
 
@@ -242,6 +322,7 @@ class SyncManager @Inject constructor(
                                     )
                                 )
                             }
+
                             putUuidMappings(toMapRoomsBackfill, emptyList(), emptyList())
 
                             // Второй проход по тем же devices (идемпотентно)
@@ -256,13 +337,18 @@ class SyncManager @Inject constructor(
                                 )
                             }
                             if (toMapDevicesRetry.isNotEmpty()) {
-                                uuidDao.putDevices(toMapDevicesRetry.map { (u, l) -> UuidMapDevice(deviceUuid = u, localId = l) })
+                                uuidDao.putDevices(
+                                    toMapDevicesRetry.map { (u, l) -> UuidMapDevice(deviceUuid = u, localId = l) }
+                                )
                             }
 
                             // 🔹 Safety backfill: если после дельты не осталось локальных комнат — подтянем комнаты снапшотом
                             val roomsAfterDelta = roomDao.countByProjectId(projectId)
                             if (roomsAfterDelta == 0) {
-                                Log.w("Sync", "delta safety-backfill: no local rooms; pulling snapshot rooms for project=$projectId")
+                                Log.w(
+                                    "Sync",
+                                    "delta safety-backfill: no local rooms; pulling snapshot rooms for project=$projectId"
+                                )
                                 val treeForRooms = try {
                                     projectsApi.getProjectTree(projectId)
                                 } catch (e: retrofit2.HttpException) {
@@ -277,11 +363,14 @@ class SyncManager @Inject constructor(
                                     appDb.withTransaction {
                                         for (r in tree2.rooms) {
                                             if (r.is_deleted) continue
-                                            val createdAt = parseDate(r.meta?.get("created_at_iso") as? String)
-                                            val roomType = (r.meta?.get("room_type") as? String)?.let { safeRoomType(it) } ?: RoomType.STANDARD
 
-                                            val existingId = uuidDao.getRoomLocal(r.id)
-                                                ?: roomDao.findIdByProjectAndName(projectId, r.name)
+                                            val createdAt = parseDate(r.meta?.get("created_at_iso") as? String)
+                                            val roomType =
+                                                (r.meta?.get("room_type") as? String)?.let { safeRoomType(it) }
+                                                    ?: RoomType.STANDARD
+
+                                            val existingId =
+                                                uuidDao.getRoomLocal(r.id) ?: roomDao.findIdByProjectAndName(projectId, r.name)
 
                                             val localId: Long = if (existingId != null) {
                                                 existingId
@@ -298,6 +387,7 @@ class SyncManager @Inject constructor(
                                                     ?: roomDao.findIdByProjectAndName(projectId, r.name)
                                                     ?: continue
                                             }
+
                                             toMapRoomsBackfill2 += r.id to localId
                                         }
 
@@ -312,14 +402,23 @@ class SyncManager @Inject constructor(
                                             )
                                         )
                                     }
+
                                     putUuidMappings(toMapRoomsBackfill2, emptyList(), emptyList())
                                 }
                             }
                         }
+
+                        Log.d(
+                            "Sync",
+                            "PULL end project=$projectId stage=$stage in ${System.currentTimeMillis() - tPull}ms"
+                        )
                     }
                 } finally {
                     val ms = System.currentTimeMillis() - tStart
-                    Log.i("Sync", "syncProject END project=$projectId in ${ms}ms")
+                    Log.i(
+                        "Sync",
+                        "syncProject END project=$projectId in ${ms}ms pending=${hasPendingIncoming(projectId)}"
+                    )
                 }
             }
         }
@@ -408,7 +507,10 @@ class SyncManager @Inject constructor(
 
             // 4) иначе — пропускаем группу, никаких плейсхолдеров
             if (ensuredRoomId == null) {
-                Log.w("Sync", "snapshot groups.skip: cannot resolve room for group '${g.id}' name='${g.name}' roomUuid=$roomUuid roomName='$roomName'")
+                Log.w(
+                    "Sync",
+                    "snapshot groups.skip: cannot resolve room for group '${g.id}' name='${g.name}' roomUuid=$roomUuid roomName='$roomName'"
+                )
                 continue
             }
 
@@ -468,7 +570,10 @@ class SyncManager @Inject constructor(
 
             // 5) иначе — пропускаем устройство (никаких "Room")
             if (ensuredRoomId == null) {
-                Log.w("Sync", "snapshot devices.skip: room unresolved for device='${d.name}' roomUuid=$roomUuid roomName='$roomNameMeta' (avoid placeholder)")
+                Log.w(
+                    "Sync",
+                    "snapshot devices.skip: room unresolved for device='${d.name}' roomUuid=$roomUuid roomName='$roomNameMeta' (avoid placeholder)"
+                )
                 continue
             }
 
@@ -489,7 +594,10 @@ class SyncManager @Inject constructor(
             )
             val newLocal = deviceDao.insert(entity)
             if (newLocal <= 0) {
-                Log.w("Sync", "snapshot devices.skip: failed to insert device uuid=${d.id} name='${d.name}' roomId=$ensuredRoomId")
+                Log.w(
+                    "Sync",
+                    "snapshot devices.skip: failed to insert device uuid=${d.id} name='${d.name}' roomId=$ensuredRoomId"
+                )
                 continue
             }
             toMapDevices += d.id to newLocal
@@ -678,7 +786,10 @@ class SyncManager @Inject constructor(
                 if (collectUnresolved && !roomUuid.isNullOrBlank()) {
                     unresolvedRoomUuids += roomUuid
                 }
-                Log.w("Sync", "devices.upsert skip: cannot resolve room for device='${d.name}' roomUuid=$roomUuid roomName='$roomName' project=$projectId")
+                Log.w(
+                    "Sync",
+                    "devices.upsert skip: cannot resolve room for device='${d.name}' roomUuid=$roomUuid roomName='$roomName' project=$projectId"
+                )
                 continue
             }
 
@@ -701,7 +812,7 @@ class SyncManager @Inject constructor(
                     voltage = voltage,
                     demandRatio = demandRatio,
                     createdAt = createdAt,
-                    roomId = ensuredRoomId!!,
+                    roomId = ensuredRoomId,
                     deviceType = deviceType,
                     powerFactor = powerFactor,
                     hasMotor = hasMotor,
@@ -729,7 +840,7 @@ class SyncManager @Inject constructor(
                         voltage = voltage,
                         demandRatio = demandRatio,
                         createdAt = createdAt,
-                        roomId = ensuredRoomId!!,
+                        roomId = ensuredRoomId,
                         deviceType = deviceType,
                         powerFactor = powerFactor,
                         hasMotor = hasMotor,

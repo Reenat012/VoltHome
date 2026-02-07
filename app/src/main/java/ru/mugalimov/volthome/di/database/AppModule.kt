@@ -22,6 +22,8 @@ import ru.mugalimov.volthome.data.local.dao.RoomsTxDao
 import ru.mugalimov.volthome.data.local.dao.TombstoneDao
 import ru.mugalimov.volthome.data.local.dao.UuidMapDao
 import ru.mugalimov.volthome.data.local.datastore.AppPreferences
+import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
+import ru.mugalimov.volthome.data.repository.impl.ManualEditSessionRepositoryImpl
 import ru.mugalimov.volthome.domain.model.provider.DeviceDefaultsProvider
 import ru.mugalimov.volthome.domain.model.provider.StaticDeviceDefaultsProvider
 import javax.inject.Singleton
@@ -127,4 +129,19 @@ object PrefsModule {
     fun provideAppPreferences(
         @ApplicationContext context: Context
     ): AppPreferences = AppPreferences(context)
+}
+
+/**
+ * Commit 1: Manual edit session DI
+ * Хранение in-memory, singleton на процесс.
+ */
+@Module
+@InstallIn(SingletonComponent::class)
+abstract class ManualEditSessionModule {
+
+    @Binds
+    @Singleton
+    abstract fun bindManualEditSessionRepository(
+        impl: ManualEditSessionRepositoryImpl
+    ): ManualEditSessionRepository
 }

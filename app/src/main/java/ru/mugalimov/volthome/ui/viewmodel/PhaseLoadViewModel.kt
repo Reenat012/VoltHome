@@ -6,15 +6,15 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import ru.mugalimov.volthome.data.local.dao.GroupPhaseOverrideDao
 import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
-import ru.mugalimov.volthome.data.local.entity.GroupPhaseOverrideEntity
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
+import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
 import ru.mugalimov.volthome.data.repository.PreferencesRepository
 import ru.mugalimov.volthome.data.repository.UserPlanRepository
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.ProFeature
+import ru.mugalimov.volthome.domain.model.manual.ManualEditAction
 import ru.mugalimov.volthome.domain.model.phase_load.LoadThresholds
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadMode
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadUiState
@@ -29,13 +29,20 @@ class PhaseLoadViewModel @Inject constructor(
     private val explicationRepository: ExplicationRepository,
     private val incomerSelector: IncomerSelector,
 
-    private val overrideDao: GroupPhaseOverrideDao,
+    private val manualRepo: ManualEditSessionRepository,
     private val activeProjectDs: ActiveProjectDataStore,
     private val userPlanRepository: UserPlanRepository,
     private val paywallBus: PaywallBus
 ) : ViewModel() {
 
-    private val phaseLoadMode = MutableStateFlow(PhaseLoadMode.AUTO)
+    // ✅ manual/auto режим экрана теперь зависит от факта активной manual-сессии
+    private val phaseLoadMode: StateFlow<PhaseLoadMode> =
+        activeProjectDs.activeProjectId
+            .filterNotNull()
+            .distinctUntilChanged()
+            .flatMapLatest { projectId -> manualRepo.observeSession(projectId) }
+            .map { s -> if (s?.manualModeActive == true) PhaseLoadMode.MANUAL else PhaseLoadMode.AUTO }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PhaseLoadMode.AUTO)
 
     // ✅ события для snackbar
     private val _events = MutableSharedFlow<String>(extraBufferCapacity = 1)
@@ -85,7 +92,10 @@ class PhaseLoadViewModel @Inject constructor(
             paywallBus.request(ProFeature.PHASE_DND_TEASER)
             return
         }
-        phaseLoadMode.value = PhaseLoadMode.MANUAL
+
+        // Commit 3: здесь не создаём draft-сессию.
+        // Ручной режим считается активным только при наличии ManualEditSession (общий draft).
+        _events.tryEmit("Ручной режим включается в проекте. Откройте Экспликацию и включите его там.")
     }
 
     // =========================
@@ -93,7 +103,7 @@ class PhaseLoadViewModel @Inject constructor(
     // =========================
 
     fun onGroupDragged(groupId: Long, targetPhase: Phase) {
-        // DnD возможен ТОЛЬКО в MANUAL (даже у PRO)
+        // DnD возможен ТОЛЬКО в MANUAL
         if (phaseLoadMode.value != PhaseLoadMode.MANUAL) return
 
         if (!isUserPro()) {
@@ -114,20 +124,17 @@ class PhaseLoadViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            try {
-                val projectId = activeProjectDs.activeProjectId.firstOrNull()
-                if (projectId.isNullOrBlank()) {
-                    _events.tryEmit("Не выбран проект")
-                    return@launch
-                }
+            val session = manualRepo.getActiveSession()
+            if (session?.manualModeActive != true) {
+                _events.tryEmit("Ручной режим не активен")
+                return@launch
+            }
 
-                overrideDao.upsert(
-                    GroupPhaseOverrideEntity(
-                        id = 0,
-                        projectId = projectId,
+            try {
+                manualRepo.apply(
+                    ManualEditAction.SetGroupPhase(
                         groupId = groupId,
-                        phase = targetPhase,
-                        updatedAt = System.currentTimeMillis()
+                        phase = targetPhase
                     )
                 )
             } catch (t: Throwable) {
@@ -137,26 +144,22 @@ class PhaseLoadViewModel @Inject constructor(
     }
 
     fun onResetOverrides() {
-        // В Free — объясняющая модалка (коммит 3), без “Купить PRO?”
         if (!isUserPro()) {
             paywallBus.request(ProFeature.PHASE_DND_TEASER)
             return
         }
 
         viewModelScope.launch {
+            val session = manualRepo.getActiveSession()
+            if (session?.manualModeActive != true) {
+                _events.tryEmit("Ручной режим не активен")
+                return@launch
+            }
+
             try {
-                val projectId = activeProjectDs.activeProjectId.firstOrNull()
-                if (projectId.isNullOrBlank()) {
-                    _events.tryEmit("Не выбран проект")
-                    return@launch
-                }
-
-                // 1) Очищаем ручные overrides
-                overrideDao.deleteByProject(projectId)
-
-                // 2) Возвращаем режим в AUTO (безопасный откат к baseline)
-                phaseLoadMode.value = PhaseLoadMode.AUTO
-
+                // Commit 3: “сбросить изменения и вернуться в авто” = выйти из manual,
+                // draft целиком отбрасывается (политика Cancel+auto-recalc будет в Коммите 8)
+                manualRepo.exitManualMode(session.projectId)
                 _events.tryEmit("Ручные изменения сброшены")
             } catch (t: Throwable) {
                 _events.tryEmit("Не удалось сбросить изменения фаз.")

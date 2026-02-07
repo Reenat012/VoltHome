@@ -28,6 +28,7 @@ import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.local.datastore.AppPreferences
 import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseGroupItem
+import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadMode
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.paywall.PaywallEntryPoint
 import ru.mugalimov.volthome.ui.screens.loads.single.PhaseLoadSingleReportContent
@@ -47,10 +48,6 @@ fun PhaseLoadScreen(
     explicationViewModel: ExplicationViewModel = hiltViewModel(),
     onGroupAction: (PhaseGroupItem) -> Unit = {},
 ) {
-    LaunchedEffect(Unit) {
-        explicationViewModel.recalcAndSaveGroups()
-    }
-
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
@@ -75,6 +72,13 @@ fun PhaseLoadScreen(
 
     val canDrag = LocalUserPlan.current.capabilities.phaseDragAndDrop
     val uiState = viewModel.uiState.collectAsStateWithLifecycle().value
+
+    // ✅ Auto-recalc запускаем только в AUTO (в manual не трогаем проект)
+    LaunchedEffect(uiState.phaseLoadMode) {
+        if (uiState.phaseLoadMode == PhaseLoadMode.AUTO) {
+            explicationViewModel.recalcAndSaveGroups()
+        }
+    }
 
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(Unit) {
@@ -122,7 +126,6 @@ fun PhaseLoadScreen(
             else -> {
                 when (uiState.mode) {
                     PhaseMode.SINGLE -> {
-                        // ✅ Коммит 1: в SINGLE PhaseLoadContent НЕ вызывается вообще
                         PhaseLoadSingleReportContent(
                             uiState = uiState,
                             modifier = Modifier
