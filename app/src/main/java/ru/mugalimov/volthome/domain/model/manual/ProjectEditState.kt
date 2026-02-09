@@ -25,12 +25,26 @@ data class ProjectEditState(
     }
 }
 
+/**
+ * Состав группы с точки зрения "правил смешения".
+ * NORMAL — состав однородный (по типу группы/ожидаемому назначению).
+ * MIXED_MANUAL — пользователь вручную смешал типы (допустимо, но помечаем и предупреждаем).
+ */
+enum class ManualGroupComposition {
+    NORMAL,
+    MIXED_MANUAL
+}
+
 data class ManualGroupDraft(
     val groupId: Long,
     val groupNumber: Int,
     val roomId: Long,
     val roomName: String,
     val groupType: DeviceType,
+
+    // Пометка смешанного состава (не меняет groupType)
+    val composition: ManualGroupComposition = ManualGroupComposition.NORMAL,
+
     val phase: Phase,
     val deviceIds: List<Long>,
 

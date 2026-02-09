@@ -12,9 +12,12 @@ interface ManualEditSessionRepository {
     /** Текущая сессия (если есть) — для синхронных guard/check в VM/Sync слоях. */
     fun getActiveSession(): ManualEditSession?
 
+    /** Вход в manual: создаём in-memory base/draft и включаем manualModeActive. */
     suspend fun enterManualMode(projectId: String, baseState: ProjectEditState)
 
+    /** Выход из manual: сессия удаляется. */
     suspend fun exitManualMode(projectId: String)
 
+    /** Применение действия к draftState (reduce + пост-обработка). */
     suspend fun apply(action: ManualEditAction)
 }

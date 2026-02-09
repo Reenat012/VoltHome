@@ -186,11 +186,13 @@ fun ExplicationScreen(
                                     Text("Ручной режим")
                                 }
                             } else {
-                                Text(
-                                    text = "Ручной режим активен",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                // ✅ В manual показываем Save/Cancel прямо в UI (а не только через guard)
+                                TextButton(onClick = { viewModel.onManualSaveRequested() }) {
+                                    Text("Сохранить")
+                                }
+                                TextButton(onClick = { viewModel.onManualCancelRequested() }) {
+                                    Text("Отменить")
+                                }
                             }
                         }
                         Spacer(Modifier.height(8.dp))
@@ -279,12 +281,8 @@ fun ExplicationScreen(
                         manualGuard.request(
                             action = ForbiddenAction.EXPORT_PDF,
                             onProceed = { viewModel.onExportPdfClick() },
-                            onSave = {
-                                // Коммит 9: Save manual-сессии
-                            },
-                            onCancel = {
-                                // Коммит 9: Cancel manual-сессии
-                            }
+                            onSave = { viewModel.onManualSaveRequested() },
+                            onCancel = { viewModel.onManualCancelRequested() }
                         )
                     },
                     containerColor = MaterialTheme.colorScheme.secondaryContainer,

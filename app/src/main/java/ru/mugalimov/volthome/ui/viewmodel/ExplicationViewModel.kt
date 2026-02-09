@@ -39,6 +39,7 @@ import ru.mugalimov.volthome.domain.model.ProFeature
 import ru.mugalimov.volthome.domain.model.VoltageType
 import ru.mugalimov.volthome.domain.model.incomer.IncomerSpec
 import ru.mugalimov.volthome.domain.model.manual.ManualDeviceDraft
+import ru.mugalimov.volthome.domain.model.manual.ManualEditAction
 import ru.mugalimov.volthome.domain.model.manual.ManualGroupDraft
 import ru.mugalimov.volthome.domain.model.manual.ProjectEditState
 import ru.mugalimov.volthome.domain.model.report.DonutModel
@@ -55,12 +56,15 @@ import ru.mugalimov.volthome.domain.use_case.IncomerSelector
 import ru.mugalimov.volthome.domain.use_case.getOrZero
 import ru.mugalimov.volthome.domain.use_case.phaseCurrents
 import ru.mugalimov.volthome.domain.use_case.report.BuildProfessionalSectionsUseCase
+import ru.mugalimov.volthome.domain.use_case.manual.CancelManualAndAutoRecalcUseCase
+import ru.mugalimov.volthome.domain.use_case.manual.CommitManualDraftToLocalDbUseCase
 import ru.mugalimov.volthome.domain.util.PowerCurrentNormalizer
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
 import ru.mugalimov.volthome.ui.screens.explication.sheets.CalcBlocksMapper
 import ru.mugalimov.volthome.ui.screens.explication.sheets.CalcDetailsState
 import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetPayload
 import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetType
+import ru.mugalimov.volthome.ui.utilities.ManualDraftResetNotifier
 import ru.mugalimov.volthome.ui.viewmodel.explication.InfoSheetPayloadFactory
 
 @HiltViewModel
@@ -77,7 +81,18 @@ class ExplicationViewModel @Inject constructor(
     private val paywallBus: PaywallBus,
     private val activeProjectDs: ActiveProjectDataStore,
     private val manualRepo: ManualEditSessionRepository,
+
+    // ✅ Коммит 8: Save/Cancel usecase
+    private val commitManualDraftToLocalDbUseCase: CommitManualDraftToLocalDbUseCase,
+    private val cancelManualAndAutoRecalcUseCase: CancelManualAndAutoRecalcUseCase,
+
+    // ✅ Коммит 8: kill-process UX маркер
+    private val manualDraftResetNotifier: ManualDraftResetNotifier,
 ) : ViewModel() {
+
+    // =========================
+    // UI state
+    // =========================
 
     private val _uiState = MutableStateFlow<GroupScreenState>(GroupScreenState.Loading)
     val uiState: StateFlow<GroupScreenState> = _uiState.asStateFlow()
@@ -94,21 +109,29 @@ class ExplicationViewModel @Inject constructor(
     val selectedDevice: StateFlow<Device?> = _selectedDevice.asStateFlow()
 
     private val _selectedDeviceBreakdown = MutableStateFlow<DeviceCalcBreakdown?>(null)
-    val selectedDeviceBreakdown: StateFlow<DeviceCalcBreakdown?> =
-        _selectedDeviceBreakdown.asStateFlow()
+    val selectedDeviceBreakdown: StateFlow<DeviceCalcBreakdown?> = _selectedDeviceBreakdown.asStateFlow()
 
-    // --- Unassigned devices (для блока "Нераспределённые") ---
+    // =========================
+    // Unassigned devices (manual)
+    // =========================
+
     private val _unassignedDevices = MutableStateFlow<List<Device>>(emptyList())
     val unassignedDevices: StateFlow<List<Device>> = _unassignedDevices.asStateFlow()
 
     // версия запроса, чтобы старые результаты не перезатирали новые (гонки при быстрых изменениях)
     private val _unassignedRequestVersion = MutableStateFlow(0)
 
-    // --- BottomSheet payload (единый для подсказок/расчётов) ---
+    // =========================
+    // BottomSheet payload
+    // =========================
+
     private val _infoSheetPayload = MutableStateFlow<InfoSheetPayload?>(null)
     val infoSheetPayload: StateFlow<InfoSheetPayload?> = _infoSheetPayload.asStateFlow()
 
-    // --- Manual session ---
+    // =========================
+    // Manual session (scoped by activeProjectId)
+    // =========================
+
     val manualSession = activeProjectDs.activeProjectId
         .distinctUntilChanged()
         .filterNotNull()
@@ -123,44 +146,73 @@ class ExplicationViewModel @Inject constructor(
     private val _moveDeviceUi = MutableStateFlow<MoveDeviceUi?>(null)
     val moveDeviceUi: StateFlow<MoveDeviceUi?> = _moveDeviceUi.asStateFlow()
 
-    // --- UI events (one-shot) ---
-    sealed class UiEvent {
-        /**
-         * Запрос на PDF (Free + PRO).
-         * Имя оставляем ради совместимости с текущим UI.
-         */
-        data object ExportPdfRequested : UiEvent()
-
-        /**
-         * Запрос на экспортные действия (save/share/брендинг и т.п.) — только PRO.
-         */
-        data object PdfExportActionsRequested : UiEvent()
-
-        /**
-         * Нажатие на кнопку "Распределить автоматически…" в блоке нераспределённых.
-         * Реализация auto-assign — в следующем коммите, тут только событие.
-         */
-        data object AutoAssignUnassignedRequested : UiEvent()
-    }
+    // =========================
+    // Events (one-shot)
+    // =========================
 
     private val _events = MutableStateFlow<UiEvent?>(null)
     val events: StateFlow<UiEvent?> = _events.asStateFlow()
 
-    init {
-        // ВАЖНО: здесь НЕ дергаем recalcAndSaveGroups(), чтобы не получить двойной пересчёт,
-        // если экран сам вызывает recalcAndSaveGroups() в LaunchedEffect(Unit).
-        viewModelScope.launch(ioDispatcher) {
-            preferencesRepository.phaseMode.collect { mode ->
-                _phaseMode.value = mode
-            }
-        }
+    sealed class UiEvent {
+        data object ExportPdfRequested : UiEvent()
+        data object PdfExportActionsRequested : UiEvent()
+        data object AutoAssignUnassignedRequested : UiEvent()
+        data class ShowSnackbar(val message: String) : UiEvent()
     }
 
     fun consumeEvent() {
         _events.value = null
     }
 
-    // ---- Unassigned: refresh/clear ----
+    // =========================
+    // MIXED_MANUAL warning state (сессионно)
+    // =========================
+
+    private val _mixedWarningBlocked = MutableStateFlow(false)
+    val mixedWarningBlocked: StateFlow<Boolean> = _mixedWarningBlocked.asStateFlow()
+
+    private val _mixedWarningDontShowAgain = MutableStateFlow(false)
+
+    // Диалог показываем через отдельный state (StateFlow надёжнее для Compose)
+    private val _showMixedWarningDialog = MutableStateFlow(false)
+    val showMixedWarningDialog: StateFlow<Boolean> = _showMixedWarningDialog.asStateFlow()
+
+    // Если пользователь подтвердил перенос после блок-диалога — сохраняем pending-операцию
+    private val _pendingMixedMove = MutableStateFlow<Pair<Long, Long>?>(null)
+    // Pair(deviceId, targetGroupId)
+
+    // =========================
+    // Init
+    // =========================
+
+    init {
+        // 1) Следим за phaseMode из preferences
+        viewModelScope.launch(ioDispatcher) {
+            preferencesRepository.phaseMode.collect { mode ->
+                _phaseMode.value = mode
+            }
+        }
+
+        // 2) Kill-process UX:
+        // Если manual ожидался (маркер стоит), но сессии нет => процесс был убит => показываем уведомление.
+        viewModelScope.launch(ioDispatcher) {
+            activeProjectDs.activeProjectId
+                .filterNotNull()
+                .distinctUntilChanged()
+                .collect { projectId ->
+                    val s = manualRepo.getActiveSession()
+                    val hasSession = (s?.projectId == projectId) && (s.manualModeActive)
+
+                    if (manualDraftResetNotifier.consumeResetIfNeeded(projectId, hasActiveSession = hasSession)) {
+                        _events.value = UiEvent.ShowSnackbar("Черновик ручного режима был сброшен")
+                    }
+                }
+        }
+    }
+
+    // =========================
+    // Unassigned: refresh/clear
+    // =========================
 
     /**
      * Обновляет список Device для блока "Нераспределённые".
@@ -180,7 +232,7 @@ class ExplicationViewModel @Inject constructor(
 
             val devices = buildList {
                 for (id in unassignedIds) {
-                    // Если у тебя когда-то будут id > Int.MAX_VALUE — надо будет менять репозиторий.
+                    // Если когда-то будут id > Int.MAX_VALUE — надо менять репозиторий.
                     val d = deviceRepository.getDeviceById(id.toInt())
                     if (d != null) add(d)
                 }
@@ -198,22 +250,33 @@ class ExplicationViewModel @Inject constructor(
         _unassignedDevices.value = emptyList()
     }
 
+    /**
+     * В UI может быть кнопка "Авто-распределить" для нераспределённых.
+     * В этом VM делаем сразу применение action к draft (без внешнего обработчика).
+     */
     fun onAutoAssignUnassignedClick() {
-        _events.value = UiEvent.AutoAssignUnassignedRequested
+        viewModelScope.launch(ioDispatcher) {
+            val session = manualSession.value
+            if (session?.manualModeActive != true) return@launch
+            try {
+                manualRepo.apply(ManualEditAction.AutoAssignUnassigned)
+                _events.value = UiEvent.ShowSnackbar("Нераспределённые устройства распределены")
+            } catch (_: Throwable) {
+                _events.value = UiEvent.ShowSnackbar("Не удалось распределить устройства")
+            }
+        }
     }
 
-    // ---- PDF ----
+    // =========================
+    // PDF
+    // =========================
 
-    /**
-     * Клик по PDF (Free + PRO).
-     */
+    /** Клик по PDF (Free + PRO). */
     fun onExportPdfClick() {
         _events.value = UiEvent.ExportPdfRequested
     }
 
-    /**
-     * Экспортные действия (save/share/брендинг и т.п.) = только PRO.
-     */
+    /** Экспортные действия (save/share/брендинг и т.п.) = только PRO. */
     fun onPdfExportActionsClick() {
         val plan = userPlanRepository.planFlow.value
         if (!plan.capabilities.pdfExport) {
@@ -223,7 +286,9 @@ class ExplicationViewModel @Inject constructor(
         _events.value = UiEvent.PdfExportActionsRequested
     }
 
-    // ---- Manual mode entry ----
+    // =========================
+    // Manual mode entry
+    // =========================
 
     fun onEnterManualModeClick() {
         val plan = userPlanRepository.planFlow.value
@@ -239,6 +304,11 @@ class ExplicationViewModel @Inject constructor(
 
             val base = buildBaseEditState(projectId = projectId, groups = s.groups)
             manualRepo.enterManualMode(projectId = projectId, baseState = base)
+
+            // ✅ ставим маркер: manual ожидается (нужен для kill-process UX)
+            manualDraftResetNotifier.markExpected(projectId)
+
+            _events.value = UiEvent.ShowSnackbar("Ручной режим включён")
         }
     }
 
@@ -268,6 +338,7 @@ class ExplicationViewModel @Inject constructor(
                 roomId = g.roomId ?: 0L,
                 roomName = g.roomName.orEmpty(),
                 groupType = g.groupType,
+                composition = ru.mugalimov.volthome.domain.model.manual.ManualGroupComposition.NORMAL,
                 phase = g.phase ?: Phase.A,
                 deviceIds = g.devices.map { it.id },
                 nominalCurrent = g.nominalCurrent,
@@ -290,7 +361,113 @@ class ExplicationViewModel @Inject constructor(
         )
     }
 
-    // ---- Move device UI ----
+    // =========================
+    // Manual Save / Cancel (Коммит 8)
+    // =========================
+
+    /**
+     * Save:
+     * - commit draft -> локальная БД (groups + joins)
+     * - exit manual
+     * - обновить uiState на закоммиченный результат (без авто-recalc)
+     */
+    fun onManualSaveRequested() {
+        viewModelScope.launch(ioDispatcher) {
+            val session = manualSession.value ?: return@launch
+            if (!session.manualModeActive) return@launch
+
+            val projectId = session.projectId
+
+            try {
+                // 1) коммитим draft в БД
+                val committedGroups = commitManualDraftToLocalDbUseCase.execute(
+                    CommitManualDraftToLocalDbUseCase.Params(draft = session.draftState)
+                )
+
+                // 2) выходим из manual
+                manualRepo.exitManualMode(projectId)
+                manualDraftResetNotifier.clearExpected(projectId)
+
+                // 3) обновляем UI сразу (не делаем авто-recalc, иначе ручное затрётся)
+                applyGroupsToUiAfterExternalCommit(committedGroups)
+
+                _events.value = UiEvent.ShowSnackbar("Изменения сохранены")
+            } catch (_: Throwable) {
+                _events.value = UiEvent.ShowSnackbar("Не удалось сохранить изменения")
+            }
+        }
+    }
+
+    /**
+     * Cancel:
+     * - exit manual (черновик отброшен)
+     * - полный авто-пересчёт и сохранение результата в БД
+     * - вернуть UI в AUTO pipeline
+     */
+    fun onManualCancelRequested() {
+        viewModelScope.launch(ioDispatcher) {
+            val session = manualSession.value
+            val projectId = session?.projectId
+
+            try {
+                // 1) выходим из manual сразу
+                if (projectId != null) {
+                    manualRepo.exitManualMode(projectId)
+                    manualDraftResetNotifier.clearExpected(projectId)
+                }
+
+                // 2) полный авто-recalc + commit в БД
+                cancelManualAndAutoRecalcUseCase.execute()
+
+                // 3) возвращаем UI в стандартный pipeline (чтобы totals/sections совпали на 100%)
+                recalcAndSaveGroups()
+
+                _events.value = UiEvent.ShowSnackbar("Ручные изменения отменены")
+            } catch (_: Throwable) {
+                _events.value = UiEvent.ShowSnackbar("Не удалось отменить изменения")
+            }
+        }
+    }
+
+    /**
+     * Обновление UI после того, как группы уже сохранены "снаружи" (Save manual).
+     * Мы НЕ делаем авто-пересчёт (иначе затрём ручные правки).
+     */
+    private fun applyGroupsToUiAfterExternalCommit(groups: List<CircuitGroup>) {
+        val current = uiState.value as? GroupScreenState.Success ?: return
+
+        val totalGroups = groups.size
+        val totalCurrent = groups.sumOf { it.nominalCurrent }
+        val hasGroupRcds = groups.any { it.rcdRequired }
+
+        val incomer = IncomerSelector().select(
+            IncomerSelector.Params(
+                groups = groups,
+                preferRcbo = false,
+                hasGroupRcds = hasGroupRcds,
+                voltageTypeOverride = when (phaseMode.value) {
+                    PhaseMode.SINGLE -> VoltageType.AC_1PHASE
+                    PhaseMode.THREE -> VoltageType.AC_3PHASE
+                }
+            )
+        )
+
+        val totals = calculateShieldOverviewUseCase.execute(groups)
+
+        _uiState.value = current.copy(
+            groups = groups,
+            totalGroups = totalGroups,
+            totalCurrent = totalCurrent,
+            incomer = incomer,
+            hasGroupRcds = hasGroupRcds,
+            installedPowerW = totals.installedPowerW,
+            calculatedPowerW = totals.calculatedPowerW,
+        )
+    }
+
+    // =========================
+    // Move device UI (manual)
+    // =========================
 
     fun onDeviceLongPressed(deviceId: Long, fromGroupId: Long) {
         _moveDeviceUi.value = MoveDeviceUi(deviceId = deviceId, fromGroupId = fromGroupId)
@@ -301,22 +478,154 @@ class ExplicationViewModel @Inject constructor(
     }
 
     fun onMoveDeviceTargetGroupSelected(deviceId: Long, targetGroupId: Long) {
-        // Коммит 7/8: доменная операция + пересчёт линии
+        val fromGroupId = _moveDeviceUi.value?.fromGroupId // может быть null, если UI уже сбросил
         _moveDeviceUi.value = null
+
+        viewModelScope.launch(ioDispatcher) {
+            val session = manualSession.value ?: return@launch
+            if (!session.manualModeActive) return@launch
+
+            val state = session.draftState
+
+            val devicesById = state.devices.associateBy { it.deviceId }
+            val device = devicesById[deviceId] ?: return@launch
+            val targetGroup = state.groups.firstOrNull { it.groupId == targetGroupId } ?: return@launch
+
+            // Смешение = тип устройства не совпадает с типом группы
+            val isMixed = device.deviceType != targetGroup.groupType
+
+            if (!isMixed) {
+                // ✅ нормальный перенос: применяем action (пересчёт линии делает repo внутри apply)
+                val from = fromGroupId ?: run {
+                    _events.value = UiEvent.ShowSnackbar("Не удалось определить исходную группу")
+                    return@launch
+                }
+                try {
+                    manualRepo.apply(
+                        ManualEditAction.MoveDevice(
+                            deviceId = deviceId,
+                            fromGroupId = from,
+                            toGroupId = targetGroupId
+                        )
+                    )
+                } catch (_: Throwable) {
+                    _events.value = UiEvent.ShowSnackbar("Не удалось перенести устройство")
+                }
+                return@launch
+            }
+
+            // MIXED_MANUAL разрешён, но предупреждаем:
+            // 1) первый раз — блокирующий диалог (если не отключили)
+            // 2) дальше — snackbar
+            if (!_mixedWarningDontShowAgain.value && !_mixedWarningBlocked.value) {
+                _pendingMixedMove.value = deviceId to targetGroupId
+                _showMixedWarningDialog.value = true
+                return@launch
+            }
+
+            // Дальше — просто snackbar + выполняем перенос
+            _events.value = UiEvent.ShowSnackbar("Группа помечена как MIXED (ручное смешение типов)")
+            val from = fromGroupId ?: return@launch
+            try {
+                manualRepo.apply(
+                    ManualEditAction.MoveDevice(
+                        deviceId = deviceId,
+                        fromGroupId = from,
+                        toGroupId = targetGroupId
+                    )
+                )
+            } catch (_: Throwable) {
+                // не спамим вторым снеком
+            }
+        }
+    }
+
+    fun onMixedWarningConfirm(dontShowAgainInSession: Boolean) {
+        _showMixedWarningDialog.value = false
+        _mixedWarningBlocked.value = true
+        if (dontShowAgainInSession) _mixedWarningDontShowAgain.value = true
+
+        val pending = _pendingMixedMove.value
+        _pendingMixedMove.value = null
+
+        if (pending != null) {
+            val deviceId = pending.first
+            val targetGroupId = pending.second
+            val fromGroupId = _moveDeviceUi.value?.fromGroupId // может быть null, если UI уже сбросил
+
+            viewModelScope.launch(ioDispatcher) {
+                val session = manualSession.value ?: return@launch
+                if (!session.manualModeActive) return@launch
+
+                val from = fromGroupId ?: run {
+                    _events.value = UiEvent.ShowSnackbar("Не удалось определить исходную группу")
+                    return@launch
+                }
+
+                // ✅ перенос + уведомление. Пометку composition=MIXED_MANUAL добавишь отдельным action позже.
+                _events.value = UiEvent.ShowSnackbar("Группа помечена как MIXED (ручное смешение типов)")
+                try {
+                    manualRepo.apply(
+                        ManualEditAction.MoveDevice(
+                            deviceId = deviceId,
+                            fromGroupId = from,
+                            toGroupId = targetGroupId
+                        )
+                    )
+                } catch (_: Throwable) {
+                    // пропускаем
+                }
+            }
+        }
+    }
+
+    fun onMixedWarningDismiss() {
+        _showMixedWarningDialog.value = false
+        _pendingMixedMove.value = null
     }
 
     fun onMoveDeviceToNewGroupSelected(deviceId: Long) {
-        // Коммит 6: создание новой группы + tie-break
         _moveDeviceUi.value = null
+        viewModelScope.launch(ioDispatcher) {
+            val session = manualSession.value ?: return@launch
+            if (!session.manualModeActive) return@launch
+            try {
+                manualRepo.apply(ManualEditAction.CreateNewGroupAndMove(deviceId = deviceId))
+            } catch (_: Throwable) {
+                _events.value = UiEvent.ShowSnackbar("Не удалось создать новую группу")
+            }
+        }
     }
 
     fun onMoveDeviceToUnassignedSelected(deviceId: Long) {
-        // Коммит 5: контейнер "Нераспределённые"
-        // В ЭТОМ КОММИТЕ - только UI/hook. Реальная операция должна менять draftState.unassignedDeviceIds.
+        val fromGroupId = _moveDeviceUi.value?.fromGroupId
         _moveDeviceUi.value = null
+
+        viewModelScope.launch(ioDispatcher) {
+            val session = manualSession.value ?: return@launch
+            if (!session.manualModeActive) return@launch
+
+            val from = fromGroupId ?: run {
+                _events.value = UiEvent.ShowSnackbar("Не удалось определить исходную группу")
+                return@launch
+            }
+
+            try {
+                manualRepo.apply(
+                    ManualEditAction.MoveToUnassigned(
+                        deviceId = deviceId,
+                        fromGroupId = from
+                    )
+                )
+            } catch (_: Throwable) {
+                _events.value = UiEvent.ShowSnackbar("Не удалось переместить в нераспределённые")
+            }
+        }
     }
 
-    // ---- BottomSheet ----
+    // =========================
+    // BottomSheet
+    // =========================
 
     fun openInfoSheet(payload: InfoSheetPayload) {
         _infoSheetPayload.value = payload
@@ -326,7 +635,9 @@ class ExplicationViewModel @Inject constructor(
         _infoSheetPayload.value = null
     }
 
-    // ---- Group/Shield clicks ----
+    // =========================
+    // Group/Shield clicks
+    // =========================
 
     fun onGroupPowerClick(group: CircuitGroup) {
         val plan = userPlanRepository.planFlow.value
@@ -466,7 +777,9 @@ class ExplicationViewModel @Inject constructor(
         else -> CalcDetailsState.LOCKED
     }
 
-    // ---- Recalc ----
+    // =========================
+    // Recalc (auto)
+    // =========================
 
     fun recalcAndSaveGroups() {
         viewModelScope.launch(ioDispatcher) {
@@ -584,7 +897,9 @@ class ExplicationViewModel @Inject constructor(
         }
     }
 
-    // ---- PDF snapshot ----
+    // =========================
+    // PDF snapshot
+    // =========================
 
     /**
      * Единый слепок для PDF:
@@ -612,6 +927,10 @@ class ExplicationViewModel @Inject constructor(
     }
 }
 
+// =========================
+// Screen state
+// =========================
+
 sealed class GroupScreenState {
     data object Loading : GroupScreenState()
 
@@ -632,6 +951,10 @@ sealed class GroupScreenState {
     data class Error(val message: String) : GroupScreenState()
 }
 
+// =========================
+// Helpers: warnings
+// =========================
+
 private fun buildWarningsFromGroups(groups: List<CircuitGroup>): List<CalcWarning> {
     val warnings = mutableListOf<CalcWarning>()
 
@@ -650,6 +973,10 @@ private fun buildWarningsFromGroups(groups: List<CircuitGroup>): List<CalcWarnin
 
     return warnings
 }
+
+// =========================
+// Helpers: deterministic report build
+// =========================
 
 /**
  * Детерминированная сборка данных отчёта:
@@ -750,6 +1077,10 @@ private fun buildReportDataFromDeterministic(
 
     return meta to phases
 }
+
+// =========================
+// PDF snapshot model
+// =========================
 
 /**
  * Слепок данных для PDF:

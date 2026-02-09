@@ -20,7 +20,9 @@ import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadMode
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadUiState
 import ru.mugalimov.volthome.domain.use_case.GetPhaseLoadUiUseCase
 import ru.mugalimov.volthome.domain.use_case.IncomerSelector
+import ru.mugalimov.volthome.domain.use_case.manual.CancelManualAndAutoRecalcUseCase
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
+import ru.mugalimov.volthome.ui.utilities.ManualDraftResetNotifier
 
 @HiltViewModel
 class PhaseLoadViewModel @Inject constructor(
@@ -32,7 +34,9 @@ class PhaseLoadViewModel @Inject constructor(
     private val manualRepo: ManualEditSessionRepository,
     private val activeProjectDs: ActiveProjectDataStore,
     private val userPlanRepository: UserPlanRepository,
-    private val paywallBus: PaywallBus
+    private val paywallBus: PaywallBus,
+    private val cancelManualAndAutoRecalcUseCase: CancelManualAndAutoRecalcUseCase,
+    private val manualDraftResetNotifier: ManualDraftResetNotifier,
 ) : ViewModel() {
 
     // ✅ manual/auto режим экрана теперь зависит от факта активной manual-сессии
@@ -157,12 +161,16 @@ class PhaseLoadViewModel @Inject constructor(
             }
 
             try {
-                // Commit 3: “сбросить изменения и вернуться в авто” = выйти из manual,
-                // draft целиком отбрасывается (политика Cancel+auto-recalc будет в Коммите 8)
+                // 1) выходим из manual сразу (черновик отброшен)
                 manualRepo.exitManualMode(session.projectId)
-                _events.tryEmit("Ручные изменения сброшены")
+                manualDraftResetNotifier.clearExpected(session.projectId)
+
+                // 2) полный авто-пересчёт и сохранение в БД
+                cancelManualAndAutoRecalcUseCase.execute()
+
+                _events.tryEmit("Ручные изменения сброшены, вернулись в авто-режим")
             } catch (t: Throwable) {
-                _events.tryEmit("Не удалось сбросить изменения фаз.")
+                _events.tryEmit("Не удалось сбросить ручные изменения")
             }
         }
     }
