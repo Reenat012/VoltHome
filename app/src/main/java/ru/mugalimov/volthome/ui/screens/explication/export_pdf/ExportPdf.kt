@@ -15,6 +15,8 @@ import ru.mugalimov.volthome.domain.model.report.ReportModel
 import ru.mugalimov.volthome.domain.model.report.ReportModel.ReportProfile
 import ru.mugalimov.volthome.domain.model.report.ReportModel.PhaseMode as ReportPhaseMode
 import ru.mugalimov.volthome.domain.use_case.report.BuildProfessionalSectionsUseCase
+import ru.mugalimov.volthome.ui.manual.ForbiddenAction
+import ru.mugalimov.volthome.ui.manual.ManualModeGuard
 import ru.mugalimov.volthome.ui.utilities.HtmlReportBuilder
 import ru.mugalimov.volthome.ui.utilities.PdfPrinter
 import ru.mugalimov.volthome.ui.viewmodel.ExplicationViewModel
@@ -143,10 +145,26 @@ private fun resolveAppVersion(activity: Activity): String {
 fun exportExplicationPdf(
     activity: Activity,
     vm: ExplicationViewModel,
-    caps: PlanCapabilities
+    caps: PlanCapabilities,
+    manualGuard: ManualModeGuard? = null
 ) {
-    val html = buildExplicationReportHtml(activity, vm, caps) ?: return
+    // ✅ Guard: в manual нельзя инициировать PDF без Save/Cancel/Stay
+    if (manualGuard != null) {
+        manualGuard.request(
+            action = ForbiddenAction.EXPORT_PDF,
+            onProceed = {
+                val html = buildExplicationReportHtml(activity, vm, caps) ?: return@request
+                when (activity) {
+                    is ComponentActivity -> activity.lifecycleScope.launch { PdfPrinter(activity).printHtml(html) }
+                    else -> activity.runOnUiThread { PdfPrinter(activity).printHtml(html) }
+                }
+            }
+        )
+        return
+    }
 
+    // fallback (если guard не передали)
+    val html = buildExplicationReportHtml(activity, vm, caps) ?: return
     when (activity) {
         is ComponentActivity -> activity.lifecycleScope.launch { PdfPrinter(activity).printHtml(html) }
         else -> activity.runOnUiThread { PdfPrinter(activity).printHtml(html) }

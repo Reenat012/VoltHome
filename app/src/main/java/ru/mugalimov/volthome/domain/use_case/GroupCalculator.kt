@@ -265,9 +265,19 @@ class GroupCalculator(
         )
     }
 
-    private suspend fun saveGroupsWithDevices(groups: List<CircuitGroup>) {
-        // РЕКОМЕНДАЦИЯ: реализовать транзакционный метод в репозитории (replaceAll)
-        groupRepository.replaceAllGroupsTransactional(groups)
+    /**
+     * ⚠️ ВАЖНО:
+     * Группы сохраняем только с ЯВНЫМ projectId.
+     * Этот метод оставлен как утилита, но без projectId он запрещён.
+     *
+     * Сейчас GroupCalculator по твоему же комменту “не сохраняет тут” — и это правильно.
+     * Поэтому:
+     * - либо удаляешь этот метод вообще,
+     * - либо используешь только если снаружи передаёшь projectId.
+     */
+    private suspend fun saveGroupsWithDevices(projectId: String, groups: List<CircuitGroup>) {
+        require(projectId.isNotBlank()) { "projectId must be non-blank" }
+        groupRepository.replaceAllGroupsTransactional(projectId = projectId, groups = groups)
     }
 
     private fun validateBeforeSave(groups: List<CircuitGroup>) {

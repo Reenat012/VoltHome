@@ -1,32 +1,27 @@
 package ru.mugalimov.volthome.domain.use_case
 
-import ru.mugalimov.volthome.domain.model.*
 import javax.inject.Inject
+import ru.mugalimov.volthome.domain.model.CalcAssumption
+import ru.mugalimov.volthome.domain.model.CalcInput
+import ru.mugalimov.volthome.domain.model.CalcOutput
+import ru.mugalimov.volthome.domain.model.CalcStep
+import ru.mugalimov.volthome.domain.model.CalculatedValue
+import ru.mugalimov.volthome.domain.model.CoefficientSource
+import ru.mugalimov.volthome.domain.model.Device
+import ru.mugalimov.volthome.domain.model.DeviceCalcBreakdown
 
 class CalculateDeviceBreakdownUseCase @Inject constructor() {
 
     fun execute(device: Device): DeviceCalcBreakdown {
-        val power = device.power ?: 0
-        val demand = device.demandRatio ?: 1.0
-        val pf = device.powerFactor ?: 1.0
+        // Важно: в домене power/demandRatio/powerFactor — non-null
+        val powerW = device.power
+        val appliedDemand = device.demandRatio
 
-        val appliedDemand = device.demandRatio ?: 1.0
+        // В этом проекте demandRatio в доменной модели non-null,
+        // значит допущение "не задан" тут больше не актуально.
+        val assumptions = emptyList<CalcAssumption>()
 
-        val assumptions = buildList {
-            if (device.demandRatio == null) {
-                add(
-                    CalcAssumption(
-                        kind = CalcAssumption.Kind.DEFAULT_USED,
-                        source = CoefficientSource.DEFAULT,
-                        subject = "demandRatio",
-                        message = "Коэффициент спроса не задан — использовано значение 1.0",
-                        applied = 1.0
-                    )
-                )
-            }
-        }
-
-        val calcPowerW: Double = power.toDouble() * appliedDemand
+        val calcPowerW: Double = powerW.toDouble() * appliedDemand
 
         val calculatedPower = CalculatedValue(
             value = calcPowerW,
@@ -37,7 +32,7 @@ class CalculateDeviceBreakdownUseCase @Inject constructor() {
                     name = "Учет коэффициента спроса",
                     formula = "Pрасч = Pуст × kспроса",
                     inputs = listOf(
-                        CalcInput("Pуст", power.toDouble(), "Вт"),
+                        CalcInput("Pуст", powerW.toDouble(), "Вт"),
                         CalcInput("kспроса", appliedDemand)
                     ),
                     output = CalcOutput(calcPowerW, "Вт"),

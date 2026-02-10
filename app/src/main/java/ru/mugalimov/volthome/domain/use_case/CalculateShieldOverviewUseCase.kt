@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.domain.use_case
 
+import javax.inject.Inject
 import ru.mugalimov.volthome.domain.model.CalcAssumption
 import ru.mugalimov.volthome.domain.model.CalcInput
 import ru.mugalimov.volthome.domain.model.CalcOutput
@@ -7,7 +8,6 @@ import ru.mugalimov.volthome.domain.model.CalcStep
 import ru.mugalimov.volthome.domain.model.CalculatedValue
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.CoefficientSource
-import javax.inject.Inject
 
 data class ShieldOverviewTotals(
     val installedPowerW: CalculatedValue,
@@ -20,8 +20,9 @@ class CalculateShieldOverviewUseCase @Inject constructor() {
         // -----------------------------
         // Installed power (паспортная)
         // -----------------------------
+        // Важно: Device.power в домене = Int (non-null)
         val installedPowerW: Int = groups.sumOf { g ->
-            g.devices.sumOf { d -> (d.power ?: 0) }
+            g.devices.sumOf { d -> d.power }
         }
 
         val installedInputs: List<CalcInput> = groups
@@ -30,7 +31,7 @@ class CalculateShieldOverviewUseCase @Inject constructor() {
                 val key = "deviceId=${d.id};label=${d.name}"
                 CalcInput(
                     name = "$key / base",
-                    value = (d.power ?: 0).toDouble(),
+                    value = d.power.toDouble(),
                     unit = "Вт"
                 )
             }
@@ -49,44 +50,26 @@ class CalculateShieldOverviewUseCase @Inject constructor() {
         // -----------------------------
         // Calculated power (с учётом demandRatio)
         // -----------------------------
-        var defaultDemandRatioCount = 0
-        var userDemandRatioCount = 0
+        // Важно: demandRatio в доменной модели Device = Double (non-null),
+        // поэтому ветки "k == null" здесь быть не должно.
+        val totalDevices = groups.sumOf { it.devices.size }
 
         val calculatedPowerW: Int = groups.sumOf { g ->
             g.devices.sumOf { d ->
-                val p = (d.power ?: 0)
+                val p = d.power
                 val k = d.demandRatio
-                val applied = if (k == null) {
-                    defaultDemandRatioCount++
-                    1.0
-                } else {
-                    userDemandRatioCount++
-                    k
-                }
-                (p * applied).toInt()
+                (p * k).toInt()
             }
         }
 
         val calculatedAssumptions: List<CalcAssumption> = buildList {
-            if (defaultDemandRatioCount > 0) {
-                add(
-                    CalcAssumption(
-                        kind = CalcAssumption.Kind.DEFAULT_USED,
-                        source = CoefficientSource.DEFAULT,
-                        subject = "demandRatio",
-                        message = "Коэффициент спроса не задан для $defaultDemandRatioCount устройств — применено значение по умолчанию.",
-                        original = null,
-                        applied = 1.0
-                    )
-                )
-            }
-            if (userDemandRatioCount > 0) {
+            if (totalDevices > 0) {
                 add(
                     CalcAssumption(
                         kind = CalcAssumption.Kind.OTHER,
                         source = CoefficientSource.USER,
                         subject = "demandRatio",
-                        message = "Коэффициент спроса задан вручную для $userDemandRatioCount устройств — использован в расчёте.",
+                        message = "Коэффициент спроса задан для всех устройств и использован в расчёте.",
                         original = null,
                         applied = null
                     )
@@ -97,10 +80,9 @@ class CalculateShieldOverviewUseCase @Inject constructor() {
         val calculatedInputs: List<CalcInput> = groups
             .flatMap { it.devices }
             .flatMap { d ->
-                val p = (d.power ?: 0)
+                val p = d.power
                 val k = d.demandRatio
-                val appliedK = if (k == null) 1.0 else k
-                val result = (p * appliedK).toInt()
+                val result = (p * k).toInt()
 
                 val key = "deviceId=${d.id};label=${d.name}"
 
@@ -112,7 +94,7 @@ class CalculateShieldOverviewUseCase @Inject constructor() {
                     ),
                     CalcInput(
                         name = "$key / k",
-                        value = appliedK,
+                        value = k,
                         unit = ""
                     ),
                     CalcInput(

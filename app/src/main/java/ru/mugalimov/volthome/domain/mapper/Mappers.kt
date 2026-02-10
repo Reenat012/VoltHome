@@ -91,8 +91,9 @@ fun CircuitGroupEntity.toDomainGroup(devices: List<Device> = emptyList()): Circu
         breakerType = breakerType,
         rcdRequired = rcdRequired,
         rcdCurrent = rcdCurrent,
-        installedPowerW = devices.sumOf { it.power ?: 0 },
-        phase = phase.toPhaseOrDefaultA()                    // String → enum
+        // Важно: Device.power в домене = Int (non-null)
+        installedPowerW = devices.sumOf { it.power },
+        phase = phase.toPhaseOrDefaultA()                // String → enum
     )
 
 fun CircuitGroup.toEntityGroup(): CircuitGroupEntity =

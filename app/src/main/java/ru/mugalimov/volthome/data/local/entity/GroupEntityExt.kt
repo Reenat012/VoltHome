@@ -6,7 +6,7 @@ import androidx.room.PrimaryKey
 import java.time.Instant
 
 @Entity(
-    tableName = "groups",
+    tableName = "groups_ext",
     indices = [
         Index("project_id"),
         Index(value = ["project_id","updated_at"]),

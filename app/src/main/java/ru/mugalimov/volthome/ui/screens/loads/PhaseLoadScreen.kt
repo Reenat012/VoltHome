@@ -145,7 +145,6 @@ fun PhaseLoadScreen(
                                 .fillMaxSize()
                                 .padding(padding),
                             canDrag = canDrag,
-                            onEnterManualMode = { viewModel.onEnterManualMode() },
                             onPaywall = { viewModel.onDnDLockedTapped() },
                             onGroupDropped = { groupId, phase -> viewModel.onGroupDragged(groupId, phase) },
                             onReset = { viewModel.onResetOverrides() },

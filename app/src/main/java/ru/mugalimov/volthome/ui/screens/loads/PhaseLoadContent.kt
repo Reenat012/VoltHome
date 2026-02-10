@@ -71,7 +71,6 @@ fun PhaseLoadContent(
     modifier: Modifier = Modifier,
     canDrag: Boolean,
     onPaywall: () -> Unit,
-    onEnterManualMode: () -> Unit,
     onGroupDropped: (groupId: Long, target: Phase) -> Unit,
     onDecisionDetailsClick: (groupNumber: Int) -> Unit,
     onReset: () -> Unit,
@@ -233,20 +232,6 @@ fun PhaseLoadContent(
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-
-                    // ✅ Точка входа в MANUAL (явное действие)
-                    if (phaseLoadMode == PhaseLoadMode.AUTO) {
-                        Text(
-                            text = "Перейти в ручной режим",
-                            modifier = Modifier
-                                .clickable {
-                                    if (canDrag) onEnterManualMode() else onPaywall()
-                                }
-                                .padding(vertical = 6.dp),
-                            color = MaterialTheme.colorScheme.primary,
-                            style = MaterialTheme.typography.labelLarge
-                        )
-                    }
                 }
             }
 

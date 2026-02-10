@@ -58,6 +58,7 @@ import ru.mugalimov.volthome.domain.use_case.phaseCurrents
 import ru.mugalimov.volthome.domain.use_case.report.BuildProfessionalSectionsUseCase
 import ru.mugalimov.volthome.domain.use_case.manual.CancelManualAndAutoRecalcUseCase
 import ru.mugalimov.volthome.domain.use_case.manual.CommitManualDraftToLocalDbUseCase
+import ru.mugalimov.volthome.domain.use_case.manual.ProjectBaseStateBuilder
 import ru.mugalimov.volthome.domain.util.PowerCurrentNormalizer
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
 import ru.mugalimov.volthome.ui.screens.explication.sheets.CalcBlocksMapper
@@ -82,7 +83,6 @@ class ExplicationViewModel @Inject constructor(
     private val activeProjectDs: ActiveProjectDataStore,
     private val manualRepo: ManualEditSessionRepository,
 
-    // ✅ Коммит 8: Save/Cancel usecase
     private val commitManualDraftToLocalDbUseCase: CommitManualDraftToLocalDbUseCase,
     private val cancelManualAndAutoRecalcUseCase: CancelManualAndAutoRecalcUseCase,
 
@@ -287,81 +287,6 @@ class ExplicationViewModel @Inject constructor(
     }
 
     // =========================
-    // Manual mode entry
-    // =========================
-
-    fun onEnterManualModeClick() {
-        val plan = userPlanRepository.planFlow.value
-        if (!plan.capabilities.phaseDragAndDrop) {
-            paywallBus.request(ProFeature.PHASE_DND_TEASER)
-            return
-        }
-
-        viewModelScope.launch(ioDispatcher) {
-            val projectId = activeProjectDs.activeProjectId.first().orEmpty()
-            val s = uiState.value as? GroupScreenState.Success ?: return@launch
-            if (projectId.isBlank()) return@launch
-
-            val base = buildBaseEditState(projectId = projectId, groups = s.groups)
-            manualRepo.enterManualMode(projectId = projectId, baseState = base)
-
-            // ✅ ставим маркер: manual ожидается (нужен для kill-process UX)
-            manualDraftResetNotifier.markExpected(projectId)
-
-            _events.value = UiEvent.ShowSnackbar("Ручной режим включён")
-        }
-    }
-
-    private fun buildBaseEditState(projectId: String, groups: List<CircuitGroup>): ProjectEditState {
-        val deviceInstances = groups
-            .flatMap { it.devices }
-            .distinctBy { it.id }
-
-        val manualDevices = deviceInstances.map { d ->
-            ManualDeviceDraft(
-                deviceId = d.id,
-                roomId = d.roomId ?: 0L,
-                deviceType = d.deviceType,
-                powerW = d.power,
-                voltageType = d.voltage.type,
-                demandRatio = d.demandRatio,
-                powerFactor = d.powerFactor,
-                hasMotor = d.hasMotor,
-                requiresDedicatedCircuit = d.requiresDedicatedCircuit
-            )
-        }
-
-        val manualGroups = groups.map { g ->
-            ManualGroupDraft(
-                groupId = g.groupId,
-                groupNumber = g.groupNumber,
-                roomId = g.roomId ?: 0L,
-                roomName = g.roomName.orEmpty(),
-                groupType = g.groupType,
-                composition = ru.mugalimov.volthome.domain.model.manual.ManualGroupComposition.NORMAL,
-                phase = g.phase ?: Phase.A,
-                deviceIds = g.devices.map { it.id },
-                nominalCurrent = g.nominalCurrent,
-                circuitBreaker = g.circuitBreaker,
-                cableSection = g.cableSection,
-                breakerType = g.breakerType,
-                rcdRequired = g.rcdRequired,
-                rcdCurrent = g.rcdCurrent
-            )
-        }
-
-        val nextNum = (groups.maxOfOrNull { it.groupNumber } ?: 0) + 1
-
-        return ProjectEditState(
-            projectId = projectId,
-            groups = manualGroups,
-            devices = manualDevices,
-            unassignedDeviceIds = emptySet(),
-            nextGroupNumber = nextNum
-        )
-    }
-
-    // =========================
     // Manual Save / Cancel (Коммит 8)
     // =========================
 
@@ -379,16 +304,19 @@ class ExplicationViewModel @Inject constructor(
             val projectId = session.projectId
 
             try {
-                // 1) коммитим draft в БД
+                // 1) Коммитим draft в БД строго в projectId сессии (а не "активного проекта")
                 val committedGroups = commitManualDraftToLocalDbUseCase.execute(
-                    CommitManualDraftToLocalDbUseCase.Params(draft = session.draftState)
+                    CommitManualDraftToLocalDbUseCase.Params(
+                        projectId = projectId,
+                        draft = session.draftState
+                    )
                 )
 
-                // 2) выходим из manual
+                // 2) Выходим из manual
                 manualRepo.exitManualMode(projectId)
                 manualDraftResetNotifier.clearExpected(projectId)
 
-                // 3) обновляем UI сразу (не делаем авто-recalc, иначе ручное затрётся)
+                // 3) Обновляем UI сразу (НЕ делаем авто-recalc, иначе затрём ручные правки)
                 applyGroupsToUiAfterExternalCommit(committedGroups)
 
                 _events.value = UiEvent.ShowSnackbar("Изменения сохранены")
@@ -416,8 +344,11 @@ class ExplicationViewModel @Inject constructor(
                     manualDraftResetNotifier.clearExpected(projectId)
                 }
 
-                // 2) полный авто-recalc + commit в БД
-                cancelManualAndAutoRecalcUseCase.execute()
+                // 2) полный авто-recalc + commit в БД (строго по projectId)
+                val pid = projectId ?: return@launch // если нет projectId — значит и отменять нечего
+                cancelManualAndAutoRecalcUseCase.execute(
+                    CancelManualAndAutoRecalcUseCase.Params(projectId = pid)
+                )
 
                 // 3) возвращаем UI в стандартный pipeline (чтобы totals/sections совпали на 100%)
                 recalcAndSaveGroups()
@@ -783,6 +714,15 @@ class ExplicationViewModel @Inject constructor(
 
     fun recalcAndSaveGroups() {
         viewModelScope.launch(ioDispatcher) {
+
+            // ✅ Защита: в ручном режиме полный auto-recalc запрещён.
+            // Иначе можно затереть черновик/ручные правки и/или рассинхронизировать UI.
+            val session = manualSession.value
+            if (session?.manualModeActive == true) {
+                _events.value = UiEvent.ShowSnackbar("Сейчас включён ручной режим. Пересчёт недоступен.")
+                return@launch
+            }
+
             _isRecalculating.value = true
             _uiState.value = GroupScreenState.Loading
 
@@ -798,7 +738,18 @@ class ExplicationViewModel @Inject constructor(
                     is GroupingResult.Success -> {
                         val groups = res.system.groups
 
-                        repo.replaceAllGroupsTransactional(groups)
+                        // Важно: сохраняем результат пересчёта строго в активный проект
+                        val projectId = activeProjectDs.activeProjectId.first().orEmpty()
+                        if (projectId.isBlank()) {
+                            _uiState.value = GroupScreenState.Error("Не выбран проект")
+                            return@launch
+                        }
+
+                        repo.replaceAllGroupsTransactional(
+                            projectId = projectId,
+                            groups = groups
+                        )
+
                         repo.setLastDistributionDecisions(res.distributionDecisions)
 
                         val totalGroups = groups.size
@@ -960,12 +911,13 @@ private fun buildWarningsFromGroups(groups: List<CircuitGroup>): List<CalcWarnin
 
     groups.forEach { g ->
         g.devices.forEach { d ->
-            if (d.deviceType == DeviceType.LIGHTING && (d.power ?: 0) >= 1000) {
+            // Важно: Device.power в доменной модели = Int (non-null)
+            if (d.deviceType == DeviceType.LIGHTING && d.power >= 1000) {
                 warnings += CalcWarning(
                     severity = CalcWarning.Severity.WARNING,
                     scope = "device:${d.id}",
                     title = "Аномальная мощность освещения",
-                    message = "Освещение '${d.name}': ${(d.power ?: 0)}W"
+                    message = "Освещение '${d.name}': ${d.power}W"
                 )
             }
         }

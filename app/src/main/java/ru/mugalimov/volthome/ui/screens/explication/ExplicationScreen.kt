@@ -62,8 +62,6 @@ fun ExplicationScreen(
     navController: NavHostController,
     viewModel: ExplicationViewModel = hiltViewModel()
 ) {
-    LaunchedEffect(Unit) { viewModel.recalcAndSaveGroups() }
-
     val selectedBreakdown by viewModel.selectedDeviceBreakdown.collectAsState()
     val sheetPayload by viewModel.infoSheetPayload.collectAsState()
     val state by viewModel.uiState.collectAsState()
@@ -72,9 +70,16 @@ fun ExplicationScreen(
     val manualSession by viewModel.manualSession.collectAsState(initial = null)
     val isManual = manualSession?.manualModeActive == true
 
+    // ✅ Auto-recalc запускаем только в AUTO.
+    // В manual пересчёт запрещён: иначе можно затереть черновик/ручные правки.
+    LaunchedEffect(isManual) {
+        if (!isManual) viewModel.recalcAndSaveGroups()
+    }
+
     val unassignedIds = manualSession?.draftState?.unassignedDeviceIds.orEmpty()
     val unassignedDevices by viewModel.unassignedDevices.collectAsState()
 
+    // ✅ Подтягиваем "Нераспределённые" только в manual (и чистим при выходе)
     LaunchedEffect(isManual, unassignedIds) {
         if (isManual) {
             viewModel.refreshUnassignedDevices(unassignedIds)
@@ -85,6 +90,7 @@ fun ExplicationScreen(
 
     val moveUi by viewModel.moveDeviceUi.collectAsState(initial = null)
 
+    // ✅ Guard доступен глобально из MainApp через CompositionLocal
     val manualGuard = LocalManualModeGuard.current
 
     // one-shot события от VM
@@ -94,7 +100,7 @@ fun ExplicationScreen(
     val caps = plan.capabilities
     val canShowProSections = caps.professionalReportSections
 
-    // PDF: доступно всем, различается профиль отчёта внутри HTML-сборки
+    // ✅ PDF: для всех, но в manual инициировать нельзя без Save/Cancel/Stay (guard)
     LaunchedEffect(event) {
         if (event != ExplicationViewModel.UiEvent.ExportPdfRequested) return@LaunchedEffect
 
@@ -107,7 +113,8 @@ fun ExplicationScreen(
         exportExplicationPdf(
             activity = activity,
             vm = viewModel,
-            caps = caps
+            caps = caps,
+            manualGuard = manualGuard // ✅ EXPORT_PDF блокируется единым Guard-диалогом
         )
 
         viewModel.consumeEvent()
@@ -129,7 +136,7 @@ fun ExplicationScreen(
             val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             val scope = rememberCoroutineScope()
 
-            // высота верхней панели целей (чтобы контент не уезжал под неё)
+            // Высота верхней панели целей (чтобы контент не уезжал под неё)
             val moveBarHeight = 112.dp
 
             Box(
@@ -169,33 +176,10 @@ fun ExplicationScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp)
                 ) {
-                    // ✅ если панель переноса активна — резервируем сверху место, иначе она перекроет контент
+                    // ✅ Если панель переноса активна — резервируем сверху место,
+                    // иначе она перекроет контент списка.
                     if (isManual && moveUi != null) {
                         item { Spacer(Modifier.height(moveBarHeight)) }
-                    }
-
-                    // Шапка: вход в manual / статус
-                    item {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            if (!isManual) {
-                                TextButton(onClick = { viewModel.onEnterManualModeClick() }) {
-                                    Text("Ручной режим")
-                                }
-                            } else {
-                                // ✅ В manual показываем Save/Cancel прямо в UI (а не только через guard)
-                                TextButton(onClick = { viewModel.onManualSaveRequested() }) {
-                                    Text("Сохранить")
-                                }
-                                TextButton(onClick = { viewModel.onManualCancelRequested() }) {
-                                    Text("Отменить")
-                                }
-                            }
-                        }
-                        Spacer(Modifier.height(8.dp))
                     }
 
                     // Карточка “Щит в целом”
@@ -225,7 +209,8 @@ fun ExplicationScreen(
                         Spacer(Modifier.height(12.dp))
                     }
 
-                    // ✅ Коммит 5: контейнер "Нераспределённые" — только в manual, между щитом и фазой A
+                    // ✅ Коммит 5: контейнер "Нераспределённые" — только в manual,
+                    // между щитом и фазой A
                     if (isManual) {
                         item {
                             UnassignedDevicesBlock(
@@ -278,12 +263,9 @@ fun ExplicationScreen(
                 // FAB: PDF (всегда доступно)
                 FloatingActionButton(
                     onClick = {
-                        manualGuard.request(
-                            action = ForbiddenAction.EXPORT_PDF,
-                            onProceed = { viewModel.onExportPdfClick() },
-                            onSave = { viewModel.onManualSaveRequested() },
-                            onCancel = { viewModel.onManualCancelRequested() }
-                        )
+                        // ✅ Всегда просим экспорт через VM.
+                        // Guard сработает внутри exportExplicationPdf (через параметр manualGuard).
+                        viewModel.onExportPdfClick()
                     },
                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,

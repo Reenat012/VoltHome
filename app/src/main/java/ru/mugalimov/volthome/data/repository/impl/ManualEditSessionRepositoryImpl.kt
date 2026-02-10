@@ -16,11 +16,14 @@ import ru.mugalimov.volthome.domain.model.manual.ProjectEditState
 import ru.mugalimov.volthome.domain.use_case.manual.DeleteGroupCascadeUseCase
 import ru.mugalimov.volthome.domain.use_case.manual.ManualDraftSelectors
 import ru.mugalimov.volthome.domain.use_case.manual.RecalculateGroupLineUseCase
+import ru.mugalimov.volthome.ui.utilities.ManualDraftResetNotifier
+
 
 @Singleton
 class ManualEditSessionRepositoryImpl @Inject constructor(
     private val recalculateGroupLineUseCase: RecalculateGroupLineUseCase,
     private val deleteGroupCascadeUseCase: DeleteGroupCascadeUseCase,
+    private val manualDraftResetNotifier: ManualDraftResetNotifier, // ✅ kill-process UX маркер
 ) : ManualEditSessionRepository {
     private val sessionFlow = MutableStateFlow<ManualEditSession?>(null)
 
@@ -37,6 +40,11 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
         val base = baseState.deepCopy()
         val draft = baseState.deepCopy()
 
+        // ✅ Kill-process UX:
+        // ставим маркер "manual ожидается" на уровне проекта.
+        // Если процесс убьют — сессия пропадёт, маркер останется, и на старте покажем snackbar.
+        manualDraftResetNotifier.markExpected(projectId)
+
         sessionFlow.value = ManualEditSession(
             projectId = projectId,
             manualModeActive = true,
@@ -50,6 +58,11 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
     override suspend fun exitManualMode(projectId: String) {
         val current = sessionFlow.value
         if (current?.projectId != projectId) return
+
+        // ✅ Kill-process UX:
+        // нормальное завершение manual (Save/Cancel) => снимаем маркер.
+        manualDraftResetNotifier.clearExpected(projectId)
+
         sessionFlow.value = null
     }
 

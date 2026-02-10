@@ -1,123 +1,184 @@
 package ru.mugalimov.volthome.ui.manual
 
 import android.content.Context
-import dagger.hilt.EntryPoint
-import dagger.hilt.InstallIn
-import dagger.hilt.android.qualifiers.ApplicationContext
-import dagger.hilt.components.SingletonComponent
 import dagger.hilt.android.EntryPointAccessors
+import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
+import ru.mugalimov.volthome.domain.use_case.manual.CancelManualAndAutoRecalcUseCase
+import ru.mugalimov.volthome.domain.use_case.manual.CommitManualDraftToLocalDbUseCase
 
 /**
- * Единый guard для запретных действий во время manual-mode.
+ * ManualModeGuard — единая точка запрета "опасных" действий в manual.
  *
- * Политика:
- * - если manual не активен -> действие выполняется сразу
- * - если manual активен -> показываем диалог Save/Cancel/Stay
- *   - Stay: ничего не делаем
- *   - Save: вызываем onSave (позже — реальный Save), затем выполняем действие
- *   - Cancel: вызываем onCancel (позже — реальный Cancel), затем выполняем действие
+ * Задачи:
+ * - Если manual НЕ активен: выполняем действие сразу.
+ * - Если manual активен: показываем единый диалог Save / Cancel / Stay.
+ *
+ * Важно:
+ * - request() НЕ должен блокировать UI: проверка manual-сессии делается в фоне.
+ * - Добавлена защита от повторных нажатий (isProcessing) — иначе гонки и двойные execute().
  */
-class ManualModeGuard(
-    private val manualRepo: ManualEditSessionRepository
+@Singleton
+class ManualModeGuard private constructor(
+    private val manualRepo: ManualEditSessionRepository,
+    private val commitManualDraftToLocalDb: CommitManualDraftToLocalDbUseCase,
+    private val cancelManualAndAutoRecalc: CancelManualAndAutoRecalcUseCase,
 ) {
-    private val _state = MutableStateFlow(ManualModeGuardState())
-    val state: StateFlow<ManualModeGuardState> = _state.asStateFlow()
 
-    fun isManualActive(): Boolean {
-        return manualRepo.getActiveSession()?.manualModeActive == true
-    }
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    fun request(
-        action: ForbiddenAction,
-        onProceed: () -> Unit,
-        onSave: (() -> Unit)? = null,
-        onCancel: (() -> Unit)? = null
-    ) {
-        if (!isManualActive()) {
-            onProceed()
-            return
-        }
+    private val _dialogState = MutableStateFlow<DialogState?>(null)
+    val dialogState: StateFlow<DialogState?> = _dialogState.asStateFlow()
 
-        val (title, message) = buildDialogText(action)
-
-        _state.value = ManualModeGuardState(
-            isDialogVisible = true,
-            action = action,
-            title = title,
-            message = message,
-            onProceed = onProceed,
-            onSave = onSave,
-            onCancel = onCancel
-        )
-    }
+    data class DialogState(
+        val action: ForbiddenAction,
+        val onProceed: () -> Unit,
+        val isProcessing: Boolean = false,
+    )
 
     fun dismiss() {
-        _state.value = ManualModeGuardState()
-    }
-
-    fun onStay() {
-        dismiss()
-    }
-
-    fun onSave() {
-        val st = _state.value
-        dismiss()
-        st.onSave?.invoke()
-        st.onProceed?.invoke()
-    }
-
-    fun onCancel() {
-        val st = _state.value
-        dismiss()
-        st.onCancel?.invoke()
-        st.onProceed?.invoke()
-    }
-
-    private fun buildDialogText(action: ForbiddenAction): Pair<String, String> {
-        return when (action) {
-            ForbiddenAction.SWITCH_PROJECT -> {
-                "Ручные изменения не сохранены" to
-                        "Сейчас активен ручной режим проекта.\n\n" +
-                        "Если переключить проект, несохранённые изменения будут потеряны или приведут к рассинхронизации.\n\n" +
-                        "Выберите действие:"
-            }
-
-            ForbiddenAction.EXPORT_PDF -> {
-                "Ручные изменения не сохранены" to
-                        "Сейчас активен ручной режим проекта.\n\n" +
-                        "Экспорт/отчёт должен строиться из зафиксированного состояния.\n\n" +
-                        "Выберите действие:"
-            }
-
-            ForbiddenAction.APPLY_INCOMING_SYNC -> {
-                "Ручные изменения не сохранены" to
-                        "Сейчас активен ручной режим проекта.\n\n" +
-                        "Входящий sync может перезаписать данные и сделать черновик недействительным.\n\n" +
-                        "Выберите действие:"
+        // Важно: UI-стейт трогаем на Main, чтобы не ловить “мелькание”/гонки в Compose.
+        scope.launch {
+            withContext(Dispatchers.Main.immediate) {
+                _dialogState.value = null
             }
         }
     }
 
     /**
-     * EntryPoint, чтобы получить ManualEditSessionRepository из Composable без правок DI модулей.
+     * Главная точка входа.
+     *
+     * @param forceDialog true = показать диалог без проверки getActiveSession().
+     * Нужен, когда UI уже ТОЧНО знает, что manual включён (observeSession(projectId)).
      */
-    @EntryPoint
-    @InstallIn(SingletonComponent::class)
-    interface ManualEditEntryPoint {
-        fun manualEditSessionRepository(): ManualEditSessionRepository
+    fun request(
+        action: ForbiddenAction,
+        onProceed: () -> Unit,
+        forceDialog: Boolean = false,
+    ) {
+        if (forceDialog) {
+            // Вызывающая сторона гарантирует, что manual включён — сразу показываем диалог.
+            scope.launch {
+                withContext(Dispatchers.Main.immediate) {
+                    _dialogState.value = DialogState(action = action, onProceed = onProceed)
+                }
+            }
+            return
+        }
+
+        // ✅ Никаких синхронных запросов на UI-потоке — проверяем в фоне.
+        scope.launch {
+            val s = runCatching { manualRepo.getActiveSession() }.getOrNull()
+            val manualActive = (s?.manualModeActive == true)
+
+            withContext(Dispatchers.Main.immediate) {
+                if (!manualActive) {
+                    // Manual выключен — выполняем действие сразу.
+                    onProceed()
+                } else {
+                    // Manual включён — показываем диалог.
+                    _dialogState.value = DialogState(action = action, onProceed = onProceed)
+                }
+            }
+        }
+    }
+
+    fun onSaveClicked() {
+        val state = _dialogState.value ?: return
+        if (state.isProcessing) return
+
+        // Блокируем повторные нажатия.
+        _dialogState.value = state.copy(isProcessing = true)
+
+        scope.launch {
+            val session = runCatching { manualRepo.getActiveSession() }.getOrNull()
+            if (session == null) {
+                // Сессии уже нет — просто закрываем и выполняем действие.
+                withContext(Dispatchers.Main.immediate) {
+                    _dialogState.value = null
+                    state.onProceed()
+                }
+                return@launch
+            }
+
+            val ok = runCatching {
+                commitManualDraftToLocalDb.execute(
+                    CommitManualDraftToLocalDbUseCase.Params(
+                        projectId = session.projectId,
+                        draft = session.draftState
+                    )
+                )
+                manualRepo.exitManualMode(session.projectId)
+            }.isSuccess
+
+            withContext(Dispatchers.Main.immediate) {
+                if (ok) {
+                    _dialogState.value = null
+                    state.onProceed()
+                } else {
+                    // Ошибка — остаёмся в manual, возвращаем кнопки.
+                    _dialogState.value = state.copy(isProcessing = false)
+                }
+            }
+        }
+    }
+
+    fun onCancelClicked() {
+        val state = _dialogState.value ?: return
+        if (state.isProcessing) return
+
+        // Блокируем повторные нажатия.
+        _dialogState.value = state.copy(isProcessing = true)
+
+        scope.launch {
+            val session = runCatching { manualRepo.getActiveSession() }.getOrNull()
+
+            val ok = runCatching {
+                if (session != null) {
+                    // ✅ Сначала выходим из manual для этого проекта
+                    manualRepo.exitManualMode(session.projectId)
+
+                    // ✅ Затем запускаем авто-пересчёт именно по этому projectId
+                    cancelManualAndAutoRecalc.execute(
+                        CancelManualAndAutoRecalcUseCase.Params(projectId = session.projectId)
+                    )
+                }
+                // Если session == null — manual уже не активен (или kill-process),
+                // тут просто считаем "cancel" успешным (действие можно продолжать).
+            }.isSuccess
+
+            withContext(Dispatchers.Main.immediate) {
+                if (ok) {
+                    _dialogState.value = null
+                    state.onProceed()
+                } else {
+                    // Ошибка — диалог оставляем, чтобы пользователь мог нажать "Остаться".
+                    _dialogState.value = state.copy(isProcessing = false)
+                }
+            }
+        }
     }
 
     companion object {
-        fun fromApp(context: Context): ManualModeGuard {
+        fun fromApp(appContext: Context): ManualModeGuard {
             val ep = EntryPointAccessors.fromApplication(
-                context.applicationContext,
-                ManualEditEntryPoint::class.java
+                appContext,
+                ManualModeGuardEntryPoint::class.java
             )
-            return ManualModeGuard(ep.manualEditSessionRepository())
+
+            return ManualModeGuard(
+                manualRepo = ep.manualRepo(),
+                commitManualDraftToLocalDb = ep.commitManualDraftToLocalDb(),
+                cancelManualAndAutoRecalc = ep.cancelManualAndAutoRecalc()
+            )
         }
     }
 }

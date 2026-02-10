@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +34,7 @@ import androidx.compose.material3.DrawerState
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -64,12 +66,22 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.compose.rememberAsyncImagePainter
 import kotlinx.coroutines.launch
+import ru.mugalimov.volthome.BuildConfig
 import ru.mugalimov.volthome.R
 import ru.mugalimov.volthome.core.theme.VhColors
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.model.ProjectUi
 import ru.mugalimov.volthome.ui.model.UserProfileUi
+import ru.mugalimov.volthome.ui.screens.debug.DebugProPanel
 import ru.mugalimov.volthome.ui.utilities.TelegramConsultationDialog
+
+// ✅ Состояние кнопки "Ручной режим" в AppBar.
+// AUTO  — ручной режим выключен
+// MANUAL — ручной режим включен, без несохранённых правок
+// DIRTY — ручной режим включен, есть несохранённые правки (черновик отличается)
+enum class ManualModeChipState {
+    AUTO, MANUAL, DIRTY
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -87,6 +99,17 @@ fun StartDrawer(
     onOpenAbout: () -> Unit,
     onRenameProject: (id: String, newName: String) -> Unit = { _, _ -> },
     onDeleteProject: (id: String) -> Unit = {},
+
+    // ✅ клик по чипу (AUTO -> enter, MANUAL/DIRTY -> открыть диалог — решает MainApp)
+    onManualModeClick: (() -> Unit)? = null,
+    manualChipState: ManualModeChipState = ManualModeChipState.AUTO,
+
+    // ✅ единый диалог Save/Cancel/Stay (контроль снаружи)
+    manualExitDialogVisible: Boolean = false,
+    onManualExitDialogDismiss: () -> Unit = {},
+    onManualSaveClick: () -> Unit = {},
+    onManualCancelClick: () -> Unit = {},
+
     bottomBar: @Composable () -> Unit = {},
     content: @Composable (openDrawer: () -> Unit) -> Unit
 ) {
@@ -258,7 +281,7 @@ fun StartDrawer(
                             }
                         }
 
-                        item { Divider(modifier = Modifier.padding(vertical = 8.dp), color = t.divider) }
+                        item { HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = t.divider) }
                         item { DrawerSectionTitle("Разделы") }
 
                         item {
@@ -336,6 +359,19 @@ fun StartDrawer(
                             )
                         }
                     }
+
+                    if (BuildConfig.DEBUG) {
+                        Divider(
+                            modifier = Modifier.padding(vertical = 8.dp),
+                            color = t.divider
+                        )
+
+                        DebugProPanel(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                        )
+                    }
                 }
             }
         }
@@ -343,7 +379,30 @@ fun StartDrawer(
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text(title, color = t.textPrimary) },
+                    title = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            // ✅ Название проекта занимает всё свободное место слева
+                            Text(
+                                text = title,
+                                color = t.textPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            // ✅ Чип "Ручной режим" справа, прижат к правому краю AppBar
+                            if (onManualModeClick != null) {
+                                Spacer(Modifier.width(8.dp))
+                                ManualModeChip(
+                                    state = manualChipState,
+                                    onClick = { onManualModeClick.invoke() }
+                                )
+                            }
+                        }
+                    },
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
                             Icon(
@@ -368,6 +427,41 @@ fun StartDrawer(
             botName = "VoltHomeBot",
             startPayloadBase64 = null,
             onDismiss = { showConsultDialog = false }
+        )
+    }
+
+    // -----------------------------
+    // ✅ Единый диалог Save/Cancel/Stay для ручного режима (AppBar уровень)
+    // -----------------------------
+    if (manualExitDialogVisible) {
+        AlertDialog(
+            onDismissRequest = onManualExitDialogDismiss,
+            title = { Text("Ручной режим", color = t.textPrimary) },
+            text = {
+                Text(
+                    text = when (manualChipState) {
+                        ManualModeChipState.DIRTY ->
+                            "Есть несохранённые изменения. Сохранить изменения или отменить и пересчитать автоматически?"
+                        ManualModeChipState.MANUAL ->
+                            "Завершить ручной режим? Можно сохранить текущее распределение или отменить и пересчитать автоматически."
+                        ManualModeChipState.AUTO ->
+                            "Ручной режим не активен."
+                    },
+                    color = t.textSecondary
+                )
+            },
+            confirmButton = {
+                // ✅ Save
+                TextButton(onClick = onManualSaveClick) { Text("Сохранить") }
+            },
+            dismissButton = {
+                Row {
+                    // ✅ Cancel
+                    TextButton(onClick = onManualCancelClick) { Text("Отменить") }
+                    // ✅ Stay
+                    TextButton(onClick = onManualExitDialogDismiss) { Text("Остаться") }
+                }
+            }
         )
     }
 
@@ -492,4 +586,71 @@ private fun DrawerSectionTitle(text: String) {
         style = MaterialTheme.typography.labelLarge,
         color = t.primary
     )
+}
+
+@Composable
+private fun ManualModeChip(
+    state: ManualModeChipState,
+    onClick: () -> Unit
+) {
+    val t = VhColors.tokens
+
+    // ✅ Текст и “грязность” черновика
+    val label = when (state) {
+        ManualModeChipState.AUTO -> "Авто"
+        ManualModeChipState.MANUAL -> "Ручной"
+        ManualModeChipState.DIRTY -> "Ручной"
+    }
+
+    val showDirtyDot = (state == ManualModeChipState.DIRTY)
+
+    // ✅ Простая визуальная логика:
+    // - AUTO: нейтрально
+    // - MANUAL: подсвечено primary
+    // - DIRTY: как MANUAL + точка
+    val container = when (state) {
+        ManualModeChipState.AUTO -> t.surfaceAlt
+        ManualModeChipState.MANUAL -> t.primary.copy(alpha = 0.14f)
+        ManualModeChipState.DIRTY -> t.primary.copy(alpha = 0.14f)
+    }
+
+    val content = when (state) {
+        ManualModeChipState.AUTO -> t.textPrimary
+        ManualModeChipState.MANUAL -> t.primary
+        ManualModeChipState.DIRTY -> t.primary
+    }
+
+    TextButton(
+        onClick = onClick,
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .clip(MaterialTheme.shapes.small)
+                    .background(container)
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = label,
+                        color = content,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    if (showDirtyDot) {
+                        Spacer(Modifier.width(6.dp))
+                        // ✅ “DIRTY” индикатор: маленькая точка
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(MaterialTheme.shapes.small)
+                                .background(t.error)
+                        )
+                    }
+                }
+            }
+        }
+    }
 }

@@ -16,7 +16,11 @@ import ru.mugalimov.volthome.ui.model.UserProfileUi
 
 /**
  * Обёртка для интеграции Drawer в основной контейнер.
- * Теперь поддерживает [bottomBar] и меню проекта (переименовать/удалить).
+ *
+ * ВАЖНО:
+ * - content ДОЛЖЕН быть ПОСЛЕДНИМ параметром, чтобы работал trailing lambda:
+ *   AppScaffoldWithDrawer(...) { ... }
+ * - Диалог Save/Cancel/Stay управляется из MainApp и пробрасывается вниз до StartDrawer.
  */
 @Composable
 fun AppScaffoldWithDrawer(
@@ -24,6 +28,7 @@ fun AppScaffoldWithDrawer(
     profileFlow: Flow<UserProfileUi?> = emptyFlow(),
     projectsFlow: Flow<List<ProjectUi>> = emptyFlow(),
     drawerState: DrawerState = rememberDrawerState(initialValue = DrawerValue.Closed),
+
     onLogout: () -> Unit,
     onSelectProject: (String) -> Unit,
     onCreateProject: () -> Unit,
@@ -31,12 +36,26 @@ fun AppScaffoldWithDrawer(
     onOpenProfile: () -> Unit,
     onOpenSubscription: () -> Unit,
     onOpenAbout: () -> Unit,
-    // ↓↓↓ новое
+
     onRenameProject: (id: String, newName: String) -> Unit = { _, _ -> },
     onDeleteProject: (id: String) -> Unit = {},
-    // ↑↑↑ новое
+
+    // ✅ единый триггер: вся логика в MainApp (enter/guard/save/cancel)
+    onManualModeClick: (() -> Unit)? = null,
+
+    // ✅ визуальный стейт чипа (AUTO/MANUAL/DIRTY)
+    manualChipState: ManualModeChipState = ManualModeChipState.AUTO,
+
     bottomBar: @Composable () -> Unit = {},
-    content: @Composable () -> Unit
+
+    // ✅ диалог Save/Cancel/Stay (управляется из MainApp)
+    manualExitDialogVisible: Boolean = false,
+    onManualExitDialogDismiss: () -> Unit = {},
+    onManualSaveClick: () -> Unit = {},
+    onManualCancelClick: () -> Unit = {},
+
+    // ✅ content ПОСЛЕДНИМ — чтобы trailing lambda работала корректно
+    content: @Composable () -> Unit,
 ) {
     val profile by profileFlow.collectAsState(initial = null)
     val projects by projectsFlow.collectAsState(initial = emptyList())
@@ -53,9 +72,20 @@ fun AppScaffoldWithDrawer(
         onOpenProfile = onOpenProfile,
         onOpenSubscription = onOpenSubscription,
         onOpenAbout = onOpenAbout,
-        onRenameProject = onRenameProject,   // проброс
-        onDeleteProject = onDeleteProject,   // проброс
-        bottomBar = bottomBar
+        onRenameProject = onRenameProject,
+        onDeleteProject = onDeleteProject,
+
+        // ✅ ручной режим в AppBar
+        onManualModeClick = onManualModeClick,
+        manualChipState = manualChipState,
+
+        bottomBar = bottomBar,
+
+        // ✅ единый диалог Save/Cancel/Stay
+        manualExitDialogVisible = manualExitDialogVisible,
+        onManualExitDialogDismiss = onManualExitDialogDismiss,
+        onManualSaveClick = onManualSaveClick,
+        onManualCancelClick = onManualCancelClick,
     ) { _ ->
         Box(Modifier.fillMaxSize()) {
             content()

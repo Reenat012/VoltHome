@@ -88,21 +88,6 @@ class PhaseLoadViewModel @Inject constructor(
             )
 
     // =========================
-    // ✅ Режимы экрана
-    // =========================
-
-    fun onEnterManualMode() {
-        if (!isUserPro()) {
-            paywallBus.request(ProFeature.PHASE_DND_TEASER)
-            return
-        }
-
-        // Commit 3: здесь не создаём draft-сессию.
-        // Ручной режим считается активным только при наличии ManualEditSession (общий draft).
-        _events.tryEmit("Ручной режим включается в проекте. Откройте Экспликацию и включите его там.")
-    }
-
-    // =========================
     // ✅ DnD API
     // =========================
 
@@ -165,8 +150,10 @@ class PhaseLoadViewModel @Inject constructor(
                 manualRepo.exitManualMode(session.projectId)
                 manualDraftResetNotifier.clearExpected(session.projectId)
 
-                // 2) полный авто-пересчёт и сохранение в БД
-                cancelManualAndAutoRecalcUseCase.execute()
+                // 2) полный авто-recalc + commit в БД (строго по projectId)
+                cancelManualAndAutoRecalcUseCase.execute(
+                    CancelManualAndAutoRecalcUseCase.Params(projectId = session.projectId)
+                )
 
                 _events.tryEmit("Ручные изменения сброшены, вернулись в авто-режим")
             } catch (t: Throwable) {

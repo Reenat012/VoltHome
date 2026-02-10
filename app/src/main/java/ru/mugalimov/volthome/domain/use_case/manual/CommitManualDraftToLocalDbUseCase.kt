@@ -1,6 +1,7 @@
 package ru.mugalimov.volthome.domain.use_case.manual
 
 import javax.inject.Inject
+import ru.mugalimov.volthome.data.local.dao.GroupPhaseOverrideDao
 import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.domain.model.CircuitGroup
@@ -12,20 +13,23 @@ import ru.mugalimov.volthome.domain.model.manual.ProjectEditState
  *
  * ВАЖНО:
  * - НЕ трогаем сервер/outbox.
- * - Пишем группы + joins транзакционно через ExplicationRepository.replaceAllGroupsTransactional(...)
+ * - Пишем группы + joins транзакционно через ExplicationRepository.replaceAllGroupsTransactional(projectId,...)
  * - Для joins нужны реальные Device (хотя бы по id). Берём из DeviceRepository.
  *
- * Проблема nullability:
- * - Draft-модель может содержать nullable поля (после ручных операций / новых групп).
- * - CircuitGroup в домене требует non-null.
- * Поэтому здесь делаем нормализацию null -> безопасные дефолты.
+ * КРИТИЧНО ДЛЯ "Save откатывает":
+ * - В AUTO режиме фазы могут форситься через group_phase_overrides.
+ * - При replaceAllGroupsTransactional() group_id может переиспользоваться (SQLite без AUTOINCREMENT),
+ *   поэтому старые overrides могут снова "попасть" на новые группы.
+ * => после Save мы обязаны очистить overrides по проекту.
  */
 class CommitManualDraftToLocalDbUseCase @Inject constructor(
     private val explicationRepository: ExplicationRepository,
     private val deviceRepository: DeviceRepository,
+    private val groupPhaseOverrideDao: GroupPhaseOverrideDao,
 ) {
 
     data class Params(
+        val projectId: String,
         val draft: ProjectEditState
     )
 
@@ -33,6 +37,9 @@ class CommitManualDraftToLocalDbUseCase @Inject constructor(
      * @return доменные CircuitGroup, которые были закоммичены (удобно для обновления UI).
      */
     suspend fun execute(params: Params): List<CircuitGroup> {
+        val projectId = params.projectId
+        require(projectId.isNotBlank()) { "projectId must be non-blank" }
+
         val draft = params.draft
 
         // Собираем реальные devicesById из БД.
@@ -55,24 +62,18 @@ class CommitManualDraftToLocalDbUseCase @Inject constructor(
                 val devices = g.deviceIds.mapNotNull { id -> devicesById[id] }
 
                 // Установленная мощность: суммарная мощность устройств.
-                // Если где-то power == null -> считаем как 0.
-                val installedPowerW = devices.sumOf { it.power ?: 0 }
+                // Важно: в доменной модели Device.power = Int (non-null).
+                val installedPowerW = devices.sumOf { it.power }
 
-                // Нормализация nullable полей в draft:
-                // - nominalCurrent: если null -> 0.0 (чтобы не падало)
-                // - circuitBreaker: если null -> 16 (дефолт, как у тебя в newGroup)
-                // - cableSection: если null -> 2.5 (дефолт)
-                // - breakerType: если null -> "C" (самый частый, но можешь поменять)
-                // - rcdRequired: если null -> false
-                // - rcdCurrent: если null -> 30 (у тебя в CircuitGroup дефолт 30)
                 CircuitGroup(
                     groupId = g.groupId,               // репо всё равно переинсертит с groupId=0
                     groupNumber = g.groupNumber,
-                    roomName = g.roomName,             // в CircuitGroup non-null String
+                    roomName = g.roomName,
                     roomId = g.roomId,
                     groupType = g.groupType,
                     devices = devices,
 
+                    // Нормализация nullable полей в draft:
                     nominalCurrent = g.nominalCurrent ?: 0.0,
                     installedPowerW = installedPowerW,
                     circuitBreaker = g.circuitBreaker ?: 16,
@@ -82,12 +83,21 @@ class CommitManualDraftToLocalDbUseCase @Inject constructor(
                     rcdRequired = g.rcdRequired ?: false,
                     rcdCurrent = g.rcdCurrent ?: 30,
 
-                    phase = g.phase                    // phase в CircuitGroup non-null, в draft тоже должен быть задан
+                    // phase в draft non-null
+                    phase = g.phase
                 )
             }
 
-        // Транзакционно заменяем группы проекта.
-        explicationRepository.replaceAllGroupsTransactional(groups)
+        // 1) Транзакционно заменяем группы ТОЛЬКО этого проекта.
+        explicationRepository.replaceAllGroupsTransactional(
+            projectId = projectId,
+            groups = groups
+        )
+
+        // 2) КРИТИЧНО: чистим overrides, иначе AUTO-ветка может "накрыть" сохранённые фазы.
+        // Даже если у Entity стоит FK CASCADE, это не гарантирует отсутствие переиспользования group_id,
+        // а также не гарантирует, что у пользователя не останутся overrides в таблице по проекту.
+        groupPhaseOverrideDao.deleteByProject(projectId)
 
         return groups
     }

@@ -1,7 +1,13 @@
 package ru.mugalimov.volthome.domain.use_case
 
-import ru.mugalimov.volthome.domain.model.*
 import javax.inject.Inject
+import ru.mugalimov.volthome.domain.model.CalcAssumption
+import ru.mugalimov.volthome.domain.model.CalcInput
+import ru.mugalimov.volthome.domain.model.CalcOutput
+import ru.mugalimov.volthome.domain.model.CalcStep
+import ru.mugalimov.volthome.domain.model.CalculatedValue
+import ru.mugalimov.volthome.domain.model.CircuitGroup
+import ru.mugalimov.volthome.domain.model.CoefficientSource
 
 class CalculateGroupBreakdownUseCase @Inject constructor() {
 
@@ -12,7 +18,7 @@ class CalculateGroupBreakdownUseCase @Inject constructor() {
     )
 
     fun execute(group: CircuitGroup): Result {
-        // 1) Installed power (ΣPуст) — как было: без спроса
+        // 1) Installed power (ΣPуст) — паспортная
         val installedPW = group.installedPowerW.toDouble()
 
         val installedPowerSteps = listOf(
@@ -22,7 +28,7 @@ class CalculateGroupBreakdownUseCase @Inject constructor() {
                 inputs = group.devices.map { d ->
                     CalcInput(
                         name = d.name,
-                        value = (d.power ?: 0).toDouble(),
+                        value = d.power.toDouble(), // power в домене non-null
                         unit = "Вт"
                     )
                 },
@@ -40,7 +46,7 @@ class CalculateGroupBreakdownUseCase @Inject constructor() {
         // 2) Calculated power (Σ(Pуст × kспроса)) — прозрачный шаг по устройствам
         val calculatedPowerInputs = buildList {
             group.devices.forEach { d ->
-                val basePW = (d.power ?: 0).toDouble()
+                val basePW = d.power.toDouble()
                 val k = d.demandRatio
                 val resultPW = basePW * k
 
@@ -51,7 +57,7 @@ class CalculateGroupBreakdownUseCase @Inject constructor() {
         }
 
         val calculatedPW = group.devices.sumOf { d ->
-            val basePW = (d.power ?: 0).toDouble()
+            val basePW = d.power.toDouble()
             val k = d.demandRatio
             basePW * k
         }
@@ -73,9 +79,6 @@ class CalculateGroupBreakdownUseCase @Inject constructor() {
         )
 
         // 3) Calculated current (Σ(Iном × kспроса)) — прозрачный шаг по устройствам
-        // base: ток устройства без спроса (через P/U/cosφ)
-        // k: demandRatio
-        // result: вклад тока устройства с учётом спроса
         val calculatedCurrentInputs = buildList {
             group.devices.forEach { d ->
                 val baseIA = d.calculateCurrent()
