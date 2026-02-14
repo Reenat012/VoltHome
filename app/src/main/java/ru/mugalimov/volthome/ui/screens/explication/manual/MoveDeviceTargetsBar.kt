@@ -2,6 +2,7 @@ package ru.mugalimov.volthome.ui.screens.explication.manual
 
 import android.util.Log
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.AssistChip
@@ -22,14 +24,22 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import ru.mugalimov.volthome.domain.model.manual.ManualGroupDraft
 import ru.mugalimov.volthome.ui.viewmodel.ExplicationViewModel
+import kotlin.math.abs
 
 @Composable
 fun MoveDeviceTargetsBar(
@@ -42,17 +52,85 @@ fun MoveDeviceTargetsBar(
     onMoveToUnassigned: () -> Unit,
     activeTarget: ExplicationViewModel.DragTarget?,
     onTargetBounds: (target: ExplicationViewModel.DragTarget, boundsInRoot: Rect) -> Unit,
+
+    // ✅ Текущая позиция пальца + флаг drag
+    pointerRoot: Offset?,
+    isDragging: Boolean,
+
     modifier: Modifier = Modifier
 ) {
-    // ✅ Диагностика: бар реально рекомпозится при смене activeTarget
     SideEffect {
-        Log.d("DRAG_UI", "TargetsBar recompose activeTarget=$activeTarget fromGroupId=$fromGroupId")
+        Log.d(
+            "DRAG_UI",
+            "TargetsBar recompose activeTarget=$activeTarget fromGroupId=$fromGroupId isDragging=$isDragging pointer=$pointerRoot"
+        )
     }
 
     val cs = MaterialTheme.colorScheme
+    val listState = rememberLazyListState()
+
+    // bounds бара (в root)
+    var barBounds by remember { mutableStateOf<Rect?>(null) }
+
+    // свежие значения для корутины
+    val pointerLatest = rememberUpdatedState(pointerRoot)
+    val boundsLatest = rememberUpdatedState(barBounds)
+    val draggingLatest = rememberUpdatedState(isDragging)
+
+    /**
+     * ✅ Edge-autoscroll без ANR:
+     * - НИКАКИХ busy-loop/yield
+     * - максимум 1 раз на кадр через withFrameNanos
+     */
+    androidx.compose.runtime.LaunchedEffect(isDragging) {
+        if (!isDragging) return@LaunchedEffect
+
+        // Чувствительность:
+        val edgePx = 48f     // зона у края
+        val maxSpeedPx = 28f // px/кадр (мягко, но заметно)
+
+        while (draggingLatest.value) {
+            // ждём следующий кадр -> не блокируем обработку input
+            withFrameNanos { /* frame tick */ }
+
+            val p = pointerLatest.value
+            val b = boundsLatest.value
+            if (p == null || b == null) continue
+
+            val left = b.left
+            val right = b.right
+
+            val distToLeft = p.x - left
+            val distToRight = right - p.x
+
+            val inLeft = distToLeft in 0f..edgePx
+            val inRight = distToRight in 0f..edgePx
+
+            val scrollDelta = when {
+                inLeft -> {
+                    val k = (edgePx - distToLeft) / edgePx // 0..1
+                    -maxSpeedPx * k
+                }
+                inRight -> {
+                    val k = (edgePx - distToRight) / edgePx // 0..1
+                    +maxSpeedPx * k
+                }
+                else -> 0f
+            }
+
+            if (abs(scrollDelta) >= 0.5f) {
+                listState.scrollBy(scrollDelta)
+            }
+        }
+    }
 
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .onGloballyPositioned { coords ->
+                barBounds = coords.boundsInRoot()
+                Log.d("DRAG_BOUNDS", "BAR boundsRoot=$barBounds")
+            },
         color = cs.surfaceContainerHigh,
         tonalElevation = 2.dp
     ) {
@@ -75,6 +153,7 @@ fun MoveDeviceTargetsBar(
             }
 
             LazyRow(
+                state = listState,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
@@ -87,9 +166,6 @@ fun MoveDeviceTargetsBar(
                 ) { g ->
                     val disabled = g.groupId == fromGroupId
                     val target = ExplicationViewModel.DragTarget.Group(g.groupId)
-
-                    // ✅ Важно: подсветку делаем НЕ через фон (он может быть визуально “тот же”),
-                    // а через отчётливый контур (его не “съест” тональный слой AssistChip).
                     val isActive = activeTarget == target
 
                     Box(
@@ -103,8 +179,6 @@ fun MoveDeviceTargetsBar(
                             onClick = { if (!disabled) onMoveToGroup(g.groupId) },
                             enabled = !disabled,
                             label = { Text("Группа ${g.groupNumber}") },
-
-                            // ✅ Контур — главный индикатор подсветки
                             border = when {
                                 isActive -> BorderStroke(2.dp, cs.secondary)
                                 else -> AssistChipDefaults.assistChipBorder(
@@ -112,8 +186,6 @@ fun MoveDeviceTargetsBar(
                                     borderColor = cs.outlineVariant
                                 )
                             },
-
-                            // ✅ Фон тоже оставляем, но он теперь вторичен
                             colors = AssistChipDefaults.assistChipColors(
                                 containerColor = if (isActive) cs.secondaryContainer else cs.surface,
                                 labelColor = if (isActive) cs.onSecondaryContainer else cs.onSurface,

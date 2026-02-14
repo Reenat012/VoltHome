@@ -148,6 +148,11 @@ class ExplicationViewModel @Inject constructor(
     private val _moveDeviceUi = MutableStateFlow<MoveDeviceUi?>(null)
     val moveDeviceUi: StateFlow<MoveDeviceUi?> = _moveDeviceUi.asStateFlow()
 
+    companion object {
+        // Виртуальный fromGroupId для устройств из "Нераспределённых"
+        const val FROM_UNASSIGNED: Long = -1L
+    }
+
     // =========================
     // Drag state (manual) — Коммит 1
     // =========================
@@ -605,14 +610,26 @@ class ExplicationViewModel @Inject constructor(
                     _events.value = UiEvent.ShowSnackbar("Не удалось определить исходную группу")
                     return@launch
                 }
+
                 try {
-                    manualRepo.apply(
-                        ManualEditAction.MoveDevice(
-                            deviceId = deviceId,
-                            fromGroupId = from,
-                            toGroupId = targetGroupId
+                    if (from == FROM_UNASSIGNED) {
+                        // ✅ перенос из unassigned в группу
+                        manualRepo.apply(
+                            ManualEditAction.MoveFromUnassigned(
+                                deviceId = deviceId,
+                                toGroupId = targetGroupId
+                            )
                         )
-                    )
+                    } else {
+                        // ✅ перенос из группы в группу
+                        manualRepo.apply(
+                            ManualEditAction.MoveDevice(
+                                deviceId = deviceId,
+                                fromGroupId = from,
+                                toGroupId = targetGroupId
+                            )
+                        )
+                    }
                 } catch (_: Throwable) {
                     _events.value = UiEvent.ShowSnackbar("Не удалось перенести устройство")
                 }
@@ -656,7 +673,8 @@ class ExplicationViewModel @Inject constructor(
         if (pending != null) {
             val deviceId = pending.first
             val targetGroupId = pending.second
-            val fromGroupId = _moveDeviceUi.value?.fromGroupId // может быть null, если UI уже сбросил
+            val fromGroupId = _moveDeviceUi.value?.fromGroupId
+            _moveDeviceUi.value = null
 
             viewModelScope.launch(ioDispatcher) {
                 val session = manualSession.value ?: return@launch
@@ -667,18 +685,18 @@ class ExplicationViewModel @Inject constructor(
                     return@launch
                 }
 
-                // ✅ перенос + уведомление. Пометку composition=MIXED_MANUAL добавишь отдельным action позже.
-                _events.value = UiEvent.ShowSnackbar("Группа помечена как MIXED (ручное смешение типов)")
+                // ✅ Если устройство уже из unassigned — это NOP (просто закрываем панель/drag)
+                if (from == FROM_UNASSIGNED) return@launch
+
                 try {
                     manualRepo.apply(
-                        ManualEditAction.MoveDevice(
+                        ManualEditAction.MoveToUnassigned(
                             deviceId = deviceId,
-                            fromGroupId = from,
-                            toGroupId = targetGroupId
+                            fromGroupId = from
                         )
                     )
                 } catch (_: Throwable) {
-                    // пропускаем
+                    _events.value = UiEvent.ShowSnackbar("Не удалось переместить в нераспределённые")
                 }
             }
         }

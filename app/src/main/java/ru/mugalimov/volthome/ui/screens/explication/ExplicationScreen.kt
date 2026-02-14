@@ -6,10 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,8 +26,6 @@ import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -39,6 +34,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -51,7 +47,6 @@ import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Phase
-import ru.mugalimov.volthome.ui.manual.ForbiddenAction
 import ru.mugalimov.volthome.ui.manual.LocalManualModeGuard
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.screens.explication.export_pdf.exportExplicationPdf
@@ -69,9 +64,9 @@ fun ExplicationScreen(
     viewModel: ExplicationViewModel = hiltViewModel()
 ) {
     // ВАЖНО: НЕЛЬЗЯ склеивать baseGroups и draft по groupId.
-// groupId может "переиспользоваться"/меняться после пересчётов/реинсертов,
-// из-за чего UI может стать пустым (draft есть, а match по id — нет).
-// Поэтому используем стабильный ключ, который не зависит от БД id.
+    // groupId может "переиспользоваться"/меняться после пересчётов/реинсертов,
+    // из-за чего UI может стать пустым (draft есть, а match по id — нет).
+    // Поэтому используем стабильный ключ, который не зависит от БД id.
     data class DraftKey(
         val groupNumber: Int,
         val roomId: Long
@@ -105,8 +100,9 @@ fun ExplicationScreen(
 
     val moveUi by viewModel.moveDeviceUi.collectAsState(initial = null)
 
-    // ✅ Drag-state (Коммит 3): нужен для ghost overlay
+    // ✅ Drag-state: нужен для ghost overlay и для edge-autoscroll
     val dragState by viewModel.dragState.collectAsState()
+    val dragStateLatest = rememberUpdatedState(dragState)
 
     // ✅ Guard доступен глобально из MainApp через CompositionLocal
     val manualGuard = LocalManualModeGuard.current
@@ -132,7 +128,7 @@ fun ExplicationScreen(
             activity = activity,
             vm = viewModel,
             caps = caps,
-            manualGuard = manualGuard // ✅ EXPORT_PDF блокируется единым Guard-диалогом
+            manualGuard = manualGuard
         )
 
         viewModel.consumeEvent()
@@ -151,17 +147,17 @@ fun ExplicationScreen(
             val draft = manualSession?.draftState
 
             // Временная диагностика: поможет увидеть, что baseGroups и draft живут с разными groupId.
-// Удалить после проверки.
             if (isManual && draft != null) {
                 Log.d("MANUAL_UI", "baseGroups ids=${baseGroups.map { it.groupId }}")
                 Log.d("MANUAL_UI", "draft ids=${draft.groups.map { it.groupId }}")
             }
 
-            val displayGroups = remember(isManual, baseGroups, draft, unassignedDevices) {
-                if (!isManual || draft == null) {
+            val displayGroups =
+                if (!isManual || manualSession?.draftState == null) {
                     baseGroups
                 } else {
-                    // Карта устройств по id берём из того, что у нас уже есть в UI
+                    val draftLocal = manualSession!!.draftState
+
                     val deviceById = buildMap<Long, ru.mugalimov.volthome.domain.model.Device> {
                         baseGroups.asSequence()
                             .flatMap { it.devices.asSequence() }
@@ -169,38 +165,22 @@ fun ExplicationScreen(
                         unassignedDevices.forEach { put(it.id, it) }
                     }
 
-// Собираем draft по стабильному ключу.
-// Если в проекте groupNumber уникален глобально — roomId можно было бы убрать,
-// но roomId добавляем для надёжности (меньше шанс коллизий).
-                    val draftByKey =
-                        draft.groups.associateBy { DraftKey(it.groupNumber, it.roomId) }
+                    val draftByKey = draftLocal.groups.associateBy { DraftKey(it.groupNumber, it.roomId) }
 
                     baseGroups.mapNotNull { g ->
-                        val dg = draftByKey[DraftKey(g.groupNumber, g.roomId)]
-                            ?: return@mapNotNull null // ✅ если группы нет в draft — не показываем
-
-                        // Пересобираем список устройств строго по draft.deviceIds
+                        val dg = draftByKey[DraftKey(g.groupNumber, g.roomId)] ?: return@mapNotNull null
                         val newDevices = dg.deviceIds.mapNotNull { deviceById[it] }
-
-                        g.copy(
-                            groupId = dg.groupId,   // ✅ КРИТИЧНО: из draft, иначе fromGroupId=0 и перенос = NoOp
-                            phase = dg.phase,       // ✅ фаза из draft — источник истины в manual
-                            devices = newDevices
-                        )
+                        g.copy(groupId = dg.groupId, phase = dg.phase, devices = newDevices)
                     }
-                    // ⚠️ Если draft умеет создавать новые группы, которых нет в baseGroups:
-                    // их нужно дополнительно добавить сюда (через конструктор CircuitGroup или mapper).
                 }
-            }
 
             val sections = remember(displayGroups) { displayGroups.groupBy { it.phase ?: Phase.A } }
 
             // Bounds целей drop (в root-координатах)
-            val targetBounds =
-                remember { mutableStateMapOf<ExplicationViewModel.DragTarget, Rect>() }
+            val targetBounds = remember { mutableStateMapOf<ExplicationViewModel.DragTarget, Rect>() }
 
             // ✅ ВАЖНО: когда панель целей скрылась — чистим bounds,
-// иначе остаются "старые" прямоугольники и activeTarget может врать.
+            // иначе остаются "старые" прямоугольники и activeTarget может врать.
             LaunchedEffect(isManual, moveUi) {
                 if (!isManual || moveUi == null) {
                     Log.d("DRAG_BOUNDS", "CLEAR (isManual=$isManual moveUi=$moveUi) sizeBefore=${targetBounds.size}")
@@ -215,8 +195,8 @@ fun ExplicationScreen(
                 }
                 return hit
             }
+
             // Имя перетаскиваемого устройства (для ghost).
-            // Берём из текущих групп в UI (CircuitGroup.devices).
             val draggedDeviceName = remember(dragState.draggingDeviceId, displayGroups) {
                 val id = dragState.draggingDeviceId ?: return@remember null
                 displayGroups.asSequence()
@@ -226,18 +206,15 @@ fun ExplicationScreen(
             }
 
             val bg = MaterialTheme.colorScheme.background
-
-
             val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             val scope = rememberCoroutineScope()
 
-            Box(
+            androidx.compose.foundation.layout.Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(bg)
             ) {
                 // Панель переноса устройства (оверлей сверху)
-                // Панель переноса устройства (НАСТОЯЩИЙ overlay поверх экрана)
                 if (isManual && moveUi != null) {
                     val draftGroups = manualSession?.draftState?.groups.orEmpty()
 
@@ -246,29 +223,20 @@ fun ExplicationScreen(
                         fromGroupId = moveUi!!.fromGroupId,
                         groups = draftGroups,
                         onDismiss = { viewModel.dismissMoveDevice() },
+                        onMoveToGroup = { targetGroupId -> viewModel.dropToGroup(targetGroupId) },
+                        onMoveToNewGroup = { viewModel.dropToNewGroup() },
+                        onMoveToUnassigned = { viewModel.dropToUnassigned() },
 
-                        // ✅ tap по цели = drop (и так было)
-                        onMoveToGroup = { targetGroupId ->
-                            viewModel.dropToGroup(targetGroupId)
-                        },
-                        onMoveToNewGroup = {
-                            viewModel.dropToNewGroup()
-                        },
-                        onMoveToUnassigned = {
-                            viewModel.dropToUnassigned()
-                        },
-
-                        // ✅ подсветка activeTarget
                         activeTarget = dragState.activeTarget,
 
-                        // ✅ сбор bounds целей
                         onTargetBounds = { target, rect ->
                             targetBounds[target] = rect
-                            Log.d(
-                                "DRAG_BOUNDS",
-                                "SET target=$target rectRoot=$rect total=${targetBounds.size} fromGroupId=${moveUi?.fromGroupId}"
-                            )
+                            Log.d("DRAG_BOUNDS", "SET target=$target rectRoot=$rect total=${targetBounds.size} fromGroupId=${moveUi?.fromGroupId}")
                         },
+
+                        // ✅ НОВОЕ: для edge-autoscroll
+                        pointerRoot = dragState.pointerCurrentRoot,
+                        isDragging = dragState.isActive,
 
                         modifier = Modifier
                             .align(Alignment.TopCenter)
@@ -276,14 +244,10 @@ fun ExplicationScreen(
                     )
                 }
 
-
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp)
                 ) {
-                    // ❌ УБРАЛИ Spacer. Он и был причиной "всё уезжает вниз".
-
-                    // Карточка “Щит в целом”
                     item {
                         ShieldOverviewCard(
                             incomer = s.incomer,
@@ -308,13 +272,47 @@ fun ExplicationScreen(
                         Spacer(Modifier.height(12.dp))
                     }
 
-                    // ✅ Коммит 5: контейнер "Нераспределённые" — только в manual,
-                    // между щитом и фазой A
+                    // Нераспределённые — только в manual
                     if (isManual) {
                         item {
                             UnassignedDevicesBlock(
                                 devices = unassignedDevices,
                                 onAutoAssignClick = { viewModel.onAutoAssignUnassignedClick() },
+
+                                // ✅ Drag из unassigned: fromGroupId виртуальный
+                                onDeviceDragStart = { deviceId, itemStartRoot, pointerStartRoot ->
+                                    // 1) включаем панель целей
+                                    viewModel.onDeviceLongPressed(deviceId, ExplicationViewModel.FROM_UNASSIGNED)
+
+                                    // 2) запускаем dragState
+                                    viewModel.startDrag(
+                                        deviceId = deviceId,
+                                        fromGroupId = ExplicationViewModel.FROM_UNASSIGNED,
+                                        itemStartRoot = itemStartRoot,
+                                        pointerStartRoot = pointerStartRoot
+                                    )
+                                },
+                                onDeviceDragMove = { pointerRoot ->
+                                    viewModel.updateDrag(pointerRoot)
+                                    val active = resolveActiveTarget(pointerRoot)
+                                    viewModel.setActiveDragTarget(active)
+                                },
+                                onDeviceDragEnd = {
+                                    val latest = dragStateLatest.value
+                                    when (val t = latest.activeTarget) {
+                                        is ExplicationViewModel.DragTarget.Group -> viewModel.dropToGroup(t.groupId)
+                                        ExplicationViewModel.DragTarget.Unassigned -> viewModel.dropToUnassigned()
+                                        ExplicationViewModel.DragTarget.NewGroup -> viewModel.dropToNewGroup()
+                                        null -> viewModel.dropCancel()
+                                    }
+                                },
+                                onDeviceDragCancel = {
+                                    viewModel.cancelDrag()
+                                },
+
+                                // (опционально) клик
+                                onDeviceClick = { deviceId -> viewModel.onDeviceClick(deviceId) },
+
                                 modifier = Modifier.fillMaxWidth()
                             )
                             Spacer(Modifier.height(12.dp))
@@ -338,29 +336,14 @@ fun ExplicationScreen(
                                     group = g,
                                     isManualMode = isManual,
 
-                                    // ✅ Старое: включаем текущий move-mode (панель целей)
                                     onDeviceLongPress = { deviceId, fromGroupId ->
-                                        viewModel.onDeviceLongPressed(
-                                            deviceId = deviceId,
-                                            fromGroupId = fromGroupId
-                                        )
+                                        viewModel.onDeviceLongPressed(deviceId, fromGroupId)
                                     },
 
-                                    // ✅ Новое: drag-цепочка событий
                                     onDeviceDragStart = { deviceId, fromGroupId, itemStartRoot, pointerStartRoot ->
-                                        // ВАЖНО: в этом коммите сохраняем текущее UI-поведение:
-                                        // панель целей как раньше живёт от moveDeviceUi.
-                                        viewModel.onDeviceLongPressed(
-                                            deviceId = deviceId,
-                                            fromGroupId = fromGroupId
-                                        )
+                                        // Сохраняем старое поведение: панель целей живёт от moveDeviceUi
+                                        viewModel.onDeviceLongPressed(deviceId, fromGroupId)
 
-                                        Log.d(
-                                            "DRAG",
-                                            "START screen deviceId=$deviceId fromGroupId=$fromGroupId itemStartRoot=$itemStartRoot pointerStartRoot=$pointerStartRoot"
-                                        )
-
-                                        // Новый контракт: старт drag-state
                                         viewModel.startDrag(
                                             deviceId = deviceId,
                                             fromGroupId = fromGroupId,
@@ -368,39 +351,29 @@ fun ExplicationScreen(
                                             pointerStartRoot = pointerStartRoot
                                         )
                                     },
-                                    onDeviceDragMove = { pointerRoot: Offset ->
+                                    onDeviceDragMove = { pointerRoot ->
                                         viewModel.updateDrag(pointerRoot)
-
-                                        // ✅ определяем активную цель и подсвечиваем её
                                         val active = resolveActiveTarget(pointerRoot)
-                                        Log.d(
-                                            "DRAG_HIT",
-                                            "MOVE pointerRoot=$pointerRoot active=$active targets=${targetBounds.size} moveUi=${moveUi != null}"
-                                        )
-                                        if (active == null && targetBounds.isNotEmpty()) {
-                                            // Временно: покажем один любой прямоугольник для ориентира
-                                            val any = targetBounds.entries.first()
-                                            Log.d("DRAG_HIT", "NO_HIT sampleTarget=${any.key} rectRoot=${any.value}")
-                                        }
                                         viewModel.setActiveDragTarget(active)
                                     },
                                     onDeviceDragEnd = {
-                                        Log.d("DRAG_DROP", "END activeTarget=${dragState.activeTarget} targets=${targetBounds.size}")
-
-                                        when (val t = dragState.activeTarget) {
+                                        val latest = dragStateLatest.value
+                                        when (val t = latest.activeTarget) {
                                             is ExplicationViewModel.DragTarget.Group -> viewModel.dropToGroup(t.groupId)
                                             ExplicationViewModel.DragTarget.Unassigned -> viewModel.dropToUnassigned()
                                             ExplicationViewModel.DragTarget.NewGroup -> viewModel.dropToNewGroup()
-                                            null -> viewModel.dropCancel()
+                                            null -> viewModel.dropCancel() // палец подняли “в никуда” — можно закрыть панель
                                         }
                                     },
                                     onDeviceDragCancel = {
-                                        viewModel.dropCancel()
+                                        // ✅ КРИТИЧНО:
+                                        // Cancel (особенно у края экрана) НЕ должен гасить панель целей,
+                                        // иначе edge-scroll невозможно использовать.
+                                        // Сбрасываем только dragState (ghost/activeTarget), панель остаётся.
+                                        viewModel.cancelDrag()
                                     },
 
-                                    onDeviceClick = { deviceId ->
-                                        viewModel.onDeviceClick(deviceId)
-                                    },
+                                    onDeviceClick = { deviceId -> viewModel.onDeviceClick(deviceId) },
                                     selectedDeviceBreakdown = selectedBreakdown,
                                     onGroupPowerClick = { viewModel.onGroupPowerClick(it) },
                                     onGroupCurrentClick = { viewModel.onGroupCurrentClick(it) },
@@ -414,8 +387,7 @@ fun ExplicationScreen(
                     }
                 }
 
-                // ✅ Ghost overlay (Коммит 3):
-                // Рисуем только в manual и только когда drag активен.
+                // Ghost overlay
                 val ghostPos = dragState.ghostPositionRoot
                 if (isManual && dragState.draggingDeviceId != null && ghostPos != null) {
                     DragGhostOverlay(
@@ -427,13 +399,9 @@ fun ExplicationScreen(
                     )
                 }
 
-                // FAB: PDF (всегда доступно)
+                // FAB: PDF
                 FloatingActionButton(
-                    onClick = {
-                        // ✅ Всегда просим экспорт через VM.
-                        // Guard сработает внутри exportExplicationPdf (через параметр manualGuard).
-                        viewModel.onExportPdfClick()
-                    },
+                    onClick = { viewModel.onExportPdfClick() },
                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                     modifier = Modifier
