@@ -1,7 +1,10 @@
 package ru.mugalimov.volthome.ui.screens.explication.manual
 
+import android.util.Log
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,11 +21,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import ru.mugalimov.volthome.domain.model.manual.ManualGroupDraft
@@ -34,139 +37,137 @@ fun MoveDeviceTargetsBar(
     fromGroupId: Long,
     groups: List<ManualGroupDraft>,
     onDismiss: () -> Unit,
-
-    // ✅ Тап по цели = drop (как и раньше, просто явно фиксируем контракт)
     onMoveToGroup: (targetGroupId: Long) -> Unit,
     onMoveToNewGroup: () -> Unit,
     onMoveToUnassigned: () -> Unit,
-
-    // ✅ Drag contract:
     activeTarget: ExplicationViewModel.DragTarget?,
     onTargetBounds: (target: ExplicationViewModel.DragTarget, boundsInRoot: Rect) -> Unit,
-
-    // ✅ Контракт для overlay
     modifier: Modifier = Modifier
 ) {
+    // ✅ Диагностика: бар реально рекомпозится при смене activeTarget
+    SideEffect {
+        Log.d("DRAG_UI", "TargetsBar recompose activeTarget=$activeTarget fromGroupId=$fromGroupId")
+    }
+
+    val cs = MaterialTheme.colorScheme
+
     Surface(
-        // ВАЖНО: modifier приходит снаружи (экран решает, это overlay или нет).
         modifier = modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = cs.surfaceContainerHigh,
         tonalElevation = 2.dp
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Spacer(Modifier.weight(1f))
-            IconButton(onClick = onDismiss) {
-                Icon(Icons.Outlined.Close, contentDescription = "Закрыть")
-            }
-        }
-
-        LazyRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            items(
-                items = groups.sortedBy { it.groupNumber },
-                key = { it.groupId }
-            ) { g ->
-                val disabled = g.groupId == fromGroupId
-                val target = ExplicationViewModel.DragTarget.Group(g.groupId)
-                val isActive = activeTarget == target
-
-                // Box нужен, чтобы снять boundsInRoot не с внутренностей AssistChip, а стабильно сверху.
-                Box(
-                    modifier = Modifier.onGloballyPositioned { coords ->
-                        onTargetBounds(target, coords.boundsInWindow())
-                    }
-                ) {
-                    AssistChip(
-                        onClick = { if (!disabled) onMoveToGroup(g.groupId) },
-                        enabled = !disabled,
-                        label = { Text("Группа ${g.groupNumber}") },
-                        colors = AssistChipDefaults.assistChipColors(
-                            // ✅ Подсветка activeTarget (hover)
-                            containerColor = if (isActive) {
-                                MaterialTheme.colorScheme.secondaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.surface
-                            },
-                            labelColor = if (isActive) {
-                                MaterialTheme.colorScheme.onSecondaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
-                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    )
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = cs.onSurface
+                )
+                Spacer(Modifier.weight(1f))
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Outlined.Close, contentDescription = "Закрыть")
                 }
             }
 
-            item {
-                val target = ExplicationViewModel.DragTarget.NewGroup
-                val isActive = activeTarget == target
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                items(
+                    items = groups.sortedBy { it.groupNumber },
+                    key = { it.groupId }
+                ) { g ->
+                    val disabled = g.groupId == fromGroupId
+                    val target = ExplicationViewModel.DragTarget.Group(g.groupId)
 
-                Box(
-                    modifier = Modifier.onGloballyPositioned { coords ->
-                        onTargetBounds(target, coords.boundsInRoot())
-                    }
-                ) {
-                    AssistChip(
-                        onClick = onMoveToNewGroup,
-                        label = { Text("В новую группу") },
-                        colors = AssistChipDefaults.assistChipColors(
-                            containerColor = if (isActive) {
-                                MaterialTheme.colorScheme.secondaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.surface
+                    // ✅ Важно: подсветку делаем НЕ через фон (он может быть визуально “тот же”),
+                    // а через отчётливый контур (его не “съест” тональный слой AssistChip).
+                    val isActive = activeTarget == target
+
+                    Box(
+                        modifier = Modifier.onGloballyPositioned { coords ->
+                            val r = coords.boundsInRoot()
+                            Log.d("DRAG_BOUNDS", "BAR group target=$target rectRoot=$r disabled=$disabled isActive=$isActive")
+                            onTargetBounds(target, r)
+                        }
+                    ) {
+                        AssistChip(
+                            onClick = { if (!disabled) onMoveToGroup(g.groupId) },
+                            enabled = !disabled,
+                            label = { Text("Группа ${g.groupNumber}") },
+
+                            // ✅ Контур — главный индикатор подсветки
+                            border = when {
+                                isActive -> BorderStroke(2.dp, cs.secondary)
+                                else -> AssistChipDefaults.assistChipBorder(
+                                    enabled = !disabled,
+                                    borderColor = cs.outlineVariant
+                                )
                             },
-                            labelColor = if (isActive) {
-                                MaterialTheme.colorScheme.onSecondaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            }
+
+                            // ✅ Фон тоже оставляем, но он теперь вторичен
+                            colors = AssistChipDefaults.assistChipColors(
+                                containerColor = if (isActive) cs.secondaryContainer else cs.surface,
+                                labelColor = if (isActive) cs.onSecondaryContainer else cs.onSurface,
+                                disabledContainerColor = cs.surfaceVariant,
+                                disabledLabelColor = cs.onSurfaceVariant
+                            )
                         )
-                    )
+                    }
                 }
-            }
 
-            item {
-                val target = ExplicationViewModel.DragTarget.Unassigned
-                val isActive = activeTarget == target
+                item {
+                    val target = ExplicationViewModel.DragTarget.NewGroup
+                    val isActive = activeTarget == target
 
-                Box(
-                    modifier = Modifier.onGloballyPositioned { coords ->
-                        onTargetBounds(target, coords.boundsInRoot())
-                    }
-                ) {
-                    AssistChip(
-                        onClick = onMoveToUnassigned,
-                        label = { Text("В нераспределённые") },
-                        colors = AssistChipDefaults.assistChipColors(
-                            containerColor = if (isActive) {
-                                MaterialTheme.colorScheme.secondaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.surface
-                            },
-                            labelColor = if (isActive) {
-                                MaterialTheme.colorScheme.onSecondaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            }
+                    Box(
+                        modifier = Modifier.onGloballyPositioned { coords ->
+                            val r = coords.boundsInRoot()
+                            Log.d("DRAG_BOUNDS", "BAR newGroup target=$target rectRoot=$r isActive=$isActive")
+                            onTargetBounds(target, r)
+                        }
+                    ) {
+                        AssistChip(
+                            onClick = onMoveToNewGroup,
+                            label = { Text("В новую группу") },
+                            border = if (isActive) BorderStroke(2.dp, cs.secondary) else null,
+                            colors = AssistChipDefaults.assistChipColors(
+                                containerColor = if (isActive) cs.secondaryContainer else cs.surface,
+                                labelColor = if (isActive) cs.onSecondaryContainer else cs.onSurface
+                            )
                         )
-                    )
+                    }
+                }
+
+                item {
+                    val target = ExplicationViewModel.DragTarget.Unassigned
+                    val isActive = activeTarget == target
+
+                    Box(
+                        modifier = Modifier.onGloballyPositioned { coords ->
+                            val r = coords.boundsInRoot()
+                            Log.d("DRAG_BOUNDS", "BAR unassigned target=$target rectRoot=$r isActive=$isActive")
+                            onTargetBounds(target, r)
+                        }
+                    ) {
+                        AssistChip(
+                            onClick = onMoveToUnassigned,
+                            label = { Text("В нераспределённые") },
+                            border = if (isActive) BorderStroke(2.dp, cs.secondary) else null,
+                            colors = AssistChipDefaults.assistChipColors(
+                                containerColor = if (isActive) cs.secondaryContainer else cs.surface,
+                                labelColor = if (isActive) cs.onSecondaryContainer else cs.onSurface
+                            )
+                        )
+                    }
                 }
             }
         }

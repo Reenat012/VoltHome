@@ -183,7 +183,8 @@ fun ExplicationScreen(
                         val newDevices = dg.deviceIds.mapNotNull { deviceById[it] }
 
                         g.copy(
-                            phase = dg.phase,   // ✅ фаза из draft — источник истины в manual
+                            groupId = dg.groupId,   // ✅ КРИТИЧНО: из draft, иначе fromGroupId=0 и перенос = NoOp
+                            phase = dg.phase,       // ✅ фаза из draft — источник истины в manual
                             devices = newDevices
                         )
                     }
@@ -198,9 +199,22 @@ fun ExplicationScreen(
             val targetBounds =
                 remember { mutableStateMapOf<ExplicationViewModel.DragTarget, Rect>() }
 
-            fun resolveActiveTarget(pointerWindow: Offset): ExplicationViewModel.DragTarget? =
-                targetBounds.entries.firstOrNull { (_, rect) -> rect.contains(pointerWindow) }?.key
+            // ✅ ВАЖНО: когда панель целей скрылась — чистим bounds,
+// иначе остаются "старые" прямоугольники и activeTarget может врать.
+            LaunchedEffect(isManual, moveUi) {
+                if (!isManual || moveUi == null) {
+                    Log.d("DRAG_BOUNDS", "CLEAR (isManual=$isManual moveUi=$moveUi) sizeBefore=${targetBounds.size}")
+                    targetBounds.clear()
+                }
+            }
 
+            fun resolveActiveTarget(pointerRoot: Offset): ExplicationViewModel.DragTarget? {
+                val hit = targetBounds.entries.firstOrNull { (_, rect) -> rect.contains(pointerRoot) }?.key
+                if (hit != null) {
+                    Log.d("DRAG_HIT", "HIT pointerRoot=$pointerRoot -> $hit")
+                }
+                return hit
+            }
             // Имя перетаскиваемого устройства (для ghost).
             // Берём из текущих групп в UI (CircuitGroup.devices).
             val draggedDeviceName = remember(dragState.draggingDeviceId, displayGroups) {
@@ -253,7 +267,10 @@ fun ExplicationScreen(
                         // ✅ сбор bounds целей
                         onTargetBounds = { target, rect ->
                             targetBounds[target] = rect
-                            Log.d("DRAG_BOUNDS", "target=$target rect=$rect")
+                            Log.d(
+                                "DRAG_BOUNDS",
+                                "SET target=$target rectRoot=$rect total=${targetBounds.size} fromGroupId=${moveUi?.fromGroupId}"
+                            )
                         },
 
                         modifier = Modifier
@@ -346,6 +363,11 @@ fun ExplicationScreen(
                                             fromGroupId = fromGroupId
                                         )
 
+                                        Log.d(
+                                            "DRAG",
+                                            "START screen deviceId=$deviceId fromGroupId=$fromGroupId itemStartRoot=$itemStartRoot pointerStartRoot=$pointerStartRoot"
+                                        )
+
                                         // Новый контракт: старт drag-state
                                         viewModel.startDrag(
                                             deviceId = deviceId,
@@ -360,18 +382,21 @@ fun ExplicationScreen(
                                         // ✅ определяем активную цель и подсвечиваем её
                                         val active = resolveActiveTarget(pointerRoot)
                                         Log.d(
-                                            "DRAG_MOVE",
-                                            "pointer=$pointerRoot active=$active boundsCount=${targetBounds.size}"
+                                            "DRAG_HIT",
+                                            "MOVE pointerRoot=$pointerRoot active=$active targets=${targetBounds.size} moveUi=${moveUi != null}"
                                         )
+                                        if (active == null && targetBounds.isNotEmpty()) {
+                                            // Временно: покажем один любой прямоугольник для ориентира
+                                            val any = targetBounds.entries.first()
+                                            Log.d("DRAG_HIT", "NO_HIT sampleTarget=${any.key} rectRoot=${any.value}")
+                                        }
                                         viewModel.setActiveDragTarget(active)
                                     },
                                     onDeviceDragEnd = {
-                                        // ✅ release: если есть активная цель — drop туда, иначе cancel
-                                        when (val t = dragState.activeTarget) {
-                                            is ExplicationViewModel.DragTarget.Group -> viewModel.dropToGroup(
-                                                t.groupId
-                                            )
+                                        Log.d("DRAG_DROP", "END activeTarget=${dragState.activeTarget} targets=${targetBounds.size}")
 
+                                        when (val t = dragState.activeTarget) {
+                                            is ExplicationViewModel.DragTarget.Group -> viewModel.dropToGroup(t.groupId)
                                             ExplicationViewModel.DragTarget.Unassigned -> viewModel.dropToUnassigned()
                                             ExplicationViewModel.DragTarget.NewGroup -> viewModel.dropToNewGroup()
                                             null -> viewModel.dropCancel()

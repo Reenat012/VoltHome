@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.ui.screens.explication
 
+import android.util.Log
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -146,24 +147,26 @@ private fun DeviceChip(
                 detectDragGesturesAfterLongPress(
                     onDragStart = { startLocal ->
                         val coords = coordsState.value ?: return@detectDragGesturesAfterLongPress
-                        val itemStartWindow = coords.positionInWindow()
-                        val pointerStartWindow = coords.localToWindow(startLocal)
+                        val itemStartRoot = coords.positionInRoot()
+                        val pointerStartRoot = coords.localToRoot(startLocal)
 
-                        onDragStart?.invoke(itemStartWindow, pointerStartWindow)
+                        Log.d("DRAG", "START text=$text itemStartRoot=$itemStartRoot pointerStartRoot=$pointerStartRoot")
+                        onDragStart?.invoke(itemStartRoot, pointerStartRoot)
                     },
                     onDrag = { change, _ ->
-                        // В drag нам важна позиция пальца в root координатах
                         val coords = coordsState.value ?: return@detectDragGesturesAfterLongPress
-                        val pointerWindow = coords.localToWindow(change.position)
-                        onDragMove?.invoke(pointerWindow)
+                        val pointerRoot = coords.localToRoot(change.position)
 
-                        // Потребляем изменение, чтобы drag не дрался со scroll после long-press
+                        Log.d("DRAG", "MOVE text=$text pointerRoot=$pointerRoot")
+                        onDragMove?.invoke(pointerRoot)
                         change.consume()
                     },
                     onDragEnd = {
+                        Log.d("DRAG", "END text=$text")
                         onDragEnd?.invoke()
                     },
                     onDragCancel = {
+                        Log.d("DRAG", "CANCEL text=$text")
                         onDragCancel?.invoke()
                     }
                 )
