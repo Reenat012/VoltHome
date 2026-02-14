@@ -231,9 +231,6 @@ fun ExplicationScreen(
             val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             val scope = rememberCoroutineScope()
 
-            // Высота верхней панели целей (чтобы контент не уезжал под неё)
-            val moveBarHeight = 112.dp
-
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -275,20 +272,17 @@ fun ExplicationScreen(
 
                         modifier = Modifier
                             .align(Alignment.TopCenter)
-                            .zIndex(10f)
+                            .zIndex(20f)
                     )
                 }
+
 
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp)
                 ) {
-                    // ✅ Отступ под overlay-панель.
-                    // Панель рисуется ВНЕ списка (в Box), а этот Spacer нужен только,
-                    // чтобы верхний контент не оказался под ней.
-                    if (isManual && moveUi != null) {
-                        item { Spacer(Modifier.height(moveBarHeight)) }
-                    }
+                    // ❌ УБРАЛИ Spacer. Он и был причиной "всё уезжает вниз".
+
                     // Карточка “Щит в целом”
                     item {
                         ShieldOverviewCard(
@@ -299,9 +293,7 @@ fun ExplicationScreen(
                             installedPowerW = s.installedPowerW,
                             calculatedPowerW = s.calculatedPowerW,
                             showProfessionalEvidence = canShowProSections,
-                            onProfessionalLockedClick = {
-                                viewModel.onPdfExportActionsClick()
-                            },
+                            onProfessionalLockedClick = { viewModel.onPdfExportActionsClick() },
                             onOpenInfoSheet = { payload -> viewModel.openInfoSheet(payload) },
                             onIncomerFieldClick = { field ->
                                 viewModel.onIncomerFieldClick(
@@ -429,7 +421,9 @@ fun ExplicationScreen(
                     DragGhostOverlay(
                         text = draggedDeviceName ?: "Устройство",
                         positionRoot = ghostPos,
-                        modifier = Modifier.align(Alignment.TopStart) // позиционирование через graphicsLayer.translation
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .zIndex(30f)
                     )
                 }
 
