@@ -1,6 +1,7 @@
 package ru.mugalimov.volthome.ui.screens.explication.manual
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,8 +20,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import ru.mugalimov.volthome.domain.model.manual.ManualGroupDraft
+import ru.mugalimov.volthome.ui.viewmodel.ExplicationViewModel
 
 @Composable
 fun MoveDeviceTargetsBar(
@@ -28,12 +33,21 @@ fun MoveDeviceTargetsBar(
     fromGroupId: Long,
     groups: List<ManualGroupDraft>,
     onDismiss: () -> Unit,
+
+    // ✅ Тап по цели = drop (как и раньше, просто явно фиксируем контракт)
     onMoveToGroup: (targetGroupId: Long) -> Unit,
     onMoveToNewGroup: () -> Unit,
     onMoveToUnassigned: () -> Unit,
+
+    // ✅ Drag contract:
+    activeTarget: ExplicationViewModel.DragTarget?,
+    onTargetBounds: (target: ExplicationViewModel.DragTarget, boundsInRoot: Rect) -> Unit,
+
+    // ✅ Контракт для overlay
     modifier: Modifier = Modifier
 ) {
     Surface(
+        // ВАЖНО: modifier приходит снаружи (экран решает, это overlay или нет).
         modifier = modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 2.dp
@@ -67,29 +81,92 @@ fun MoveDeviceTargetsBar(
                 key = { it.groupId }
             ) { g ->
                 val disabled = g.groupId == fromGroupId
-                AssistChip(
-                    onClick = { if (!disabled) onMoveToGroup(g.groupId) },
-                    enabled = !disabled,
-                    label = { Text("Группа ${g.groupNumber}") },
-                    colors = AssistChipDefaults.assistChipColors(
-                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                val target = ExplicationViewModel.DragTarget.Group(g.groupId)
+                val isActive = activeTarget == target
+
+                // Box нужен, чтобы снять boundsInRoot не с внутренностей AssistChip, а стабильно сверху.
+                Box(
+                    modifier = Modifier.onGloballyPositioned { coords ->
+                        onTargetBounds(target, coords.boundsInRoot())
+                    }
+                ) {
+                    AssistChip(
+                        onClick = { if (!disabled) onMoveToGroup(g.groupId) },
+                        enabled = !disabled,
+                        label = { Text("Группа ${g.groupNumber}") },
+                        colors = AssistChipDefaults.assistChipColors(
+                            // ✅ Подсветка activeTarget (hover)
+                            containerColor = if (isActive) {
+                                MaterialTheme.colorScheme.secondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surface
+                            },
+                            labelColor = if (isActive) {
+                                MaterialTheme.colorScheme.onSecondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     )
-                )
+                }
             }
 
             item {
-                AssistChip(
-                    onClick = onMoveToNewGroup,
-                    label = { Text("В новую группу") }
-                )
+                val target = ExplicationViewModel.DragTarget.NewGroup
+                val isActive = activeTarget == target
+
+                Box(
+                    modifier = Modifier.onGloballyPositioned { coords ->
+                        onTargetBounds(target, coords.boundsInRoot())
+                    }
+                ) {
+                    AssistChip(
+                        onClick = onMoveToNewGroup,
+                        label = { Text("В новую группу") },
+                        colors = AssistChipDefaults.assistChipColors(
+                            containerColor = if (isActive) {
+                                MaterialTheme.colorScheme.secondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surface
+                            },
+                            labelColor = if (isActive) {
+                                MaterialTheme.colorScheme.onSecondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            }
+                        )
+                    )
+                }
             }
 
             item {
-                AssistChip(
-                    onClick = onMoveToUnassigned,
-                    label = { Text("В нераспределённые") }
-                )
+                val target = ExplicationViewModel.DragTarget.Unassigned
+                val isActive = activeTarget == target
+
+                Box(
+                    modifier = Modifier.onGloballyPositioned { coords ->
+                        onTargetBounds(target, coords.boundsInRoot())
+                    }
+                ) {
+                    AssistChip(
+                        onClick = onMoveToUnassigned,
+                        label = { Text("В нераспределённые") },
+                        colors = AssistChipDefaults.assistChipColors(
+                            containerColor = if (isActive) {
+                                MaterialTheme.colorScheme.secondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surface
+                            },
+                            labelColor = if (isActive) {
+                                MaterialTheme.colorScheme.onSecondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            }
+                        )
+                    )
+                }
             }
         }
     }

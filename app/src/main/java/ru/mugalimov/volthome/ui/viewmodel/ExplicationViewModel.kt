@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.ui.viewmodel
 
+import androidx.compose.ui.geometry.Offset
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -147,6 +148,48 @@ class ExplicationViewModel @Inject constructor(
     val moveDeviceUi: StateFlow<MoveDeviceUi?> = _moveDeviceUi.asStateFlow()
 
     // =========================
+    // Drag state (manual) — Коммит 1
+    // =========================
+
+    /**
+     * Цель перетаскивания (куда хотим "дропнуть").
+     * В этом коммите это только состояние (UI пока не использует).
+     */
+    sealed class DragTarget {
+        data class Group(val groupId: Long) : DragTarget()
+        data object Unassigned : DragTarget()
+        data object NewGroup : DragTarget()
+    }
+
+    /**
+     * Полное состояние drag для manual-переноса устройств на Экспликации.
+     * ВАЖНО: в этом коммите это контракт для следующих коммитов, UI пока не использует.
+     */
+    data class DragState(
+        val draggingDeviceId: Long? = null,
+        val fromGroupId: Long? = null,
+
+        // Стартовые координаты (в координатах root-контейнера экрана)
+        val pointerStartRoot: Offset? = null,
+        val itemStartRoot: Offset? = null,
+
+        // Текущая позиция пальца (в координатах root)
+        val pointerCurrentRoot: Offset? = null,
+
+        // Текущая позиция ghost (в координатах root). Можно хранить вычисленную позицию.
+        val ghostPositionRoot: Offset? = null,
+
+        // Активная цель (hover/selected) — определяется UI на следующих коммитах
+        val activeTarget: DragTarget? = null
+    ) {
+        /** Drag активен, если мы знаем устройство. */
+        val isActive: Boolean get() = draggingDeviceId != null
+    }
+
+    private val _dragState = MutableStateFlow(DragState())
+    val dragState: StateFlow<DragState> = _dragState.asStateFlow()
+
+    // =========================
     // Events (one-shot)
     // =========================
 
@@ -284,6 +327,129 @@ class ExplicationViewModel @Inject constructor(
             return
         }
         _events.value = UiEvent.PdfExportActionsRequested
+    }
+
+    // =========================
+    // Drag actions (manual) — Коммит 1
+    // =========================
+
+    /**
+     * Старт drag-переноса. UI в следующих коммитах будет вызывать это после long-press.
+     * В этом коммите только фиксируем состояние — без сайд-эффектов.
+     */
+    fun startDrag(
+        deviceId: Long,
+        fromGroupId: Long,
+        itemStartRoot: Offset,
+        pointerStartRoot: Offset
+    ) {
+        _dragState.value = DragState(
+            draggingDeviceId = deviceId,
+            fromGroupId = fromGroupId,
+            itemStartRoot = itemStartRoot,
+            pointerStartRoot = pointerStartRoot,
+            pointerCurrentRoot = pointerStartRoot,
+            ghostPositionRoot = itemStartRoot,
+            activeTarget = null
+        )
+    }
+
+    /**
+     * UI сообщает активную цель (hover) на основании pointerRoot и bounds целей.
+     * Никаких сайд-эффектов — чисто состояние для подсветки/решения drop.
+     */
+    fun setActiveDragTarget(target: DragTarget?) {
+        val s = _dragState.value
+        if (!s.isActive) return
+        if (s.activeTarget == target) return
+        _dragState.value = s.copy(activeTarget = target)
+    }
+
+    /**
+     * Обновление позиции пальца во время drag.
+     * В этом коммите считаем ghostPositionRoot прямо здесь, чтобы UI мог просто рисовать.
+     */
+    fun updateDrag(pointerRoot: Offset) {
+        val s = _dragState.value
+        if (!s.isActive) return
+
+        val startPointer = s.pointerStartRoot ?: return
+        val startItem = s.itemStartRoot ?: return
+
+        val delta = pointerRoot - startPointer
+        val ghostPos = startItem + delta
+
+        _dragState.value = s.copy(
+            pointerCurrentRoot = pointerRoot,
+            ghostPositionRoot = ghostPos
+        )
+    }
+
+    /**
+     * Отмена drag — сбрасываем состояние.
+     * В этом коммите не трогаем _moveDeviceUi, чтобы не менять текущее поведение UI.
+     */
+    fun cancelDrag() {
+        _dragState.value = DragState()
+    }
+
+    /**
+     * Drop в группу: пока только фиксируем target и завершаем drag.
+     * Реальный перенос (manualRepo.apply) подключим в коммите с drop-логикой (позже).
+     */
+    fun dropToGroup(targetGroupId: Long) {
+        val s = _dragState.value
+        val deviceId = s.draggingDeviceId ?: return
+        val fromGroupId = s.fromGroupId ?: return
+
+        // ✅ Чтобы переиспользовать текущую логику переносов (включая MIXED warning),
+        // делаем вид, что перенос инициирован через панель целей.
+        _moveDeviceUi.value = MoveDeviceUi(deviceId = deviceId, fromGroupId = fromGroupId)
+
+        // Реальный перенос
+        onMoveDeviceTargetGroupSelected(deviceId = deviceId, targetGroupId = targetGroupId)
+
+        // Завершаем drag
+        _dragState.value = DragState()
+    }
+
+    /**
+     * Drop в "Нераспределённые": контракт под следующий коммит.
+     */
+
+    fun dropToUnassigned() {
+        val s = _dragState.value
+        val deviceId = s.draggingDeviceId ?: return
+        val fromGroupId = s.fromGroupId ?: return
+
+        _moveDeviceUi.value = MoveDeviceUi(deviceId = deviceId, fromGroupId = fromGroupId)
+        onMoveDeviceToUnassignedSelected(deviceId = deviceId)
+
+        _dragState.value = DragState()
+    }
+
+
+    /**
+     * Drop "в никуда" = отмена. Сбрасываем и drag, и панель целей (чтобы UI был чистый).
+     */
+    fun dropCancel() {
+        _dragState.value = DragState()
+        _moveDeviceUi.value = null
+    }
+
+    /**
+     * Drop в "Новая группа": контракт под следующий коммит.
+     */
+
+    fun dropToNewGroup() {
+        val s = _dragState.value
+        val deviceId = s.draggingDeviceId ?: return
+        val fromGroupId = s.fromGroupId ?: return
+
+        _moveDeviceUi.value = MoveDeviceUi(deviceId = deviceId, fromGroupId = fromGroupId)
+        onMoveDeviceToNewGroupSelected(deviceId = deviceId)
+
+        _dragState.value = DragState()
     }
 
     // =========================
@@ -1045,3 +1211,4 @@ data class PdfReportSnapshot(
     val installedPowerW: Double,
     val calculatedPowerW: Double
 )
+

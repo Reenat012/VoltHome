@@ -36,6 +36,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -50,12 +51,21 @@ import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetPayload
 import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetType
 import kotlin.math.roundToInt
 
-@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GroupCardCompact(
     group: CircuitGroup,
     isManualMode: Boolean,
+
+    // Старое: включает "move-mode" (панель целей)
     onDeviceLongPress: (deviceId: Long, fromGroupId: Long) -> Unit,
+
+    // Новое: drag-цепочка событий
+    onDeviceDragStart: (deviceId: Long, fromGroupId: Long, itemStartRoot: Offset, pointerStartRoot: Offset) -> Unit,
+    onDeviceDragMove: (pointerRoot: Offset) -> Unit,
+    onDeviceDragEnd: () -> Unit,
+    onDeviceDragCancel: () -> Unit,
+
     onEdit: (() -> Unit)? = null,
     onDeviceClick: (Long) -> Unit,
     selectedDeviceBreakdown: DeviceCalcBreakdown?,
@@ -82,6 +92,10 @@ fun GroupCardCompact(
     Surface(shape = MaterialTheme.shapes.large, tonalElevation = 3.dp) {
         Column(
             modifier = Modifier
+                // ВАЖНО:
+                // Возвращаем кликабельность всей карточки (как было по UX),
+                // но теперь устройства внутри имеют свои жесты и будут "съедать" клики,
+                // поэтому нажатия по устройствам НЕ должны раскрывать группу.
                 .clickable { expanded.value = !expanded.value }
                 .padding(16.dp)
         ) {
@@ -100,6 +114,7 @@ fun GroupCardCompact(
                 )
                 Spacer(modifier = Modifier.weight(1f))
                 IconButton(
+                    // IconButton сам обрабатывает клик
                     onClick = { onOpenInfoSheet(buildGroupHeaderPayload(group)) }
                 ) {
                     Icon(Icons.Outlined.Info, contentDescription = null)
@@ -124,14 +139,14 @@ fun GroupCardCompact(
                     icon = Icons.Outlined.Bolt,
                     text = "${F.kwFromW(calculatedPowerW, decimals = 2)} кВт"
                 ) {
-                    onGroupPowerClick(group) // VM формирует InfoSheetPayload
+                    onGroupPowerClick(group)
                 }
 
                 ParamBadge(
                     icon = Icons.Outlined.ElectricBolt,
                     text = "${F.a(group.nominalCurrent, decimals = 2)} А"
                 ) {
-                    onGroupCurrentClick(group) // VM формирует InfoSheetPayload
+                    onGroupCurrentClick(group)
                 }
             }
 
@@ -159,9 +174,30 @@ fun GroupCardCompact(
                         }
                         onDeviceClick(id)
                     },
+
+                    // Старое поведение сохраняем: long-press включает панель целей
                     onDeviceLongPress = { id ->
                         if (isManualMode) onDeviceLongPress(id, group.groupId)
                     },
+
+                    // Новое: drag-цепочка (manual-only)
+                    onDeviceDragStart = { deviceId, itemStartRoot, pointerStartRoot ->
+                        if (!isManualMode) return@DeviceChips
+                        onDeviceDragStart(deviceId, group.groupId, itemStartRoot, pointerStartRoot)
+                    },
+                    onDeviceDragMove = { pointerRoot ->
+                        if (!isManualMode) return@DeviceChips
+                        onDeviceDragMove(pointerRoot)
+                    },
+                    onDeviceDragEnd = {
+                        if (!isManualMode) return@DeviceChips
+                        onDeviceDragEnd()
+                    },
+                    onDeviceDragCancel = {
+                        if (!isManualMode) return@DeviceChips
+                        onDeviceDragCancel()
+                    },
+
                     enableLongPress = isManualMode,
                     maxVisible = 3,
                     groupKey = group.groupNumber
@@ -277,7 +313,7 @@ private fun ParamBadge(icon: ImageVector, text: String, onClick: () -> Unit) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Payload builders (замена legacy groupHintContent)
+// Payload builders
 // ──────────────────────────────────────────────────────────────────────────────
 
 private fun buildGroupHeaderPayload(group: CircuitGroup): InfoSheetPayload =
