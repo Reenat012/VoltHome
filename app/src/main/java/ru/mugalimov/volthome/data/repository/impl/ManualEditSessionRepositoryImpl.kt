@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.data.repository.impl
 
+import android.util.Log
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
@@ -39,6 +40,11 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
         val now = System.currentTimeMillis()
         val base = baseState.deepCopy()
         val draft = baseState.deepCopy()
+
+        val TAG = "MANUAL_REPO"
+
+        Log.d(TAG, "enterManualMode pid=$projectId baseGroups=${baseState.groups.size} baseDevices=${baseState.devices.size}")
+        Log.d(TAG, "session set: groups=${draft.groups.size}")
 
         // ✅ Kill-process UX:
         // ставим маркер "manual ожидается" на уровне проекта.

@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.ui.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -93,7 +94,16 @@ class ManualModeAppBarViewModel @Inject constructor(
                 // ✅ baseState строим строго из репозитория/БД (детерминированный вход)
                 val base = projectBaseStateBuilder.build(projectId)
 
+                val TAG = "MANUAL_TOGGLE"
+
+                Log.d(TAG, "click projectId=$projectId, activeSession=${manualRepo.getActiveSession()?.projectId}")
+
                 manualRepo.enterManualMode(projectId = projectId, baseState = base)
+
+                Log.d(TAG, "base built: groups=${base.groups.size} devices=${base.devices.size}")
+
+                val s = manualRepo.getActiveSession()
+                Log.d(TAG, "entered: sessionPid=${s?.projectId} active=${s?.manualModeActive} groups=${s?.draftState?.groups?.size}")
 
                 // ✅ kill-process UX: ставим маркер "manual ожидается"
                 manualDraftResetNotifier.markExpected(projectId)

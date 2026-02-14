@@ -1,5 +1,7 @@
 package ru.mugalimov.volthome.domain.use_case.manual
 
+import android.content.ContentValues.TAG
+import android.util.Log
 import javax.inject.Inject
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.domain.model.Phase
@@ -26,9 +28,18 @@ class ProjectBaseStateBuilder @Inject constructor(
      * Никаких UI-данных, только снимок из репозитория.
      */
     suspend fun build(projectId: String): ProjectEditState {
+        Log.d(TAG, "build() projectId=$projectId")
         // Важно: берём группы с устройствами по конкретному projectId,
         // чтобы вход в manual был строго проектным, а не "что где сейчас отображается".
         val groupsWithDevices = explicationRepository.getGroupsWithDevicesByProject(projectId)
+        Log.d(TAG, "db snapshot: groups=${groupsWithDevices.size}")
+
+        groupsWithDevices.take(10).forEach { gw ->
+            Log.d(
+                TAG,
+                "g id=${gw.group.groupId} num=${gw.group.groupNumber} roomId=${gw.group.roomId} devs=${gw.devices.size}"
+            )
+        }
 
         // Детерминированный порядок групп:
         // 1) groupNumber
@@ -89,7 +100,7 @@ class ProjectBaseStateBuilder @Inject constructor(
 
         val nextGroupNumber = (sortedGroups.maxOfOrNull { it.group.groupNumber } ?: 0) + 1
 
-        return ProjectEditState(
+        val state = ProjectEditState(
             projectId = projectId,
             groups = manualGroups,
             devices = manualDevices,
@@ -97,5 +108,12 @@ class ProjectBaseStateBuilder @Inject constructor(
             unassignedDeviceIds = emptySet(),
             nextGroupNumber = nextGroupNumber
         )
+
+        Log.d(
+            TAG,
+            "built: groups=${state.groups.size} devices=${state.devices.size} nextGroupNumber=${state.nextGroupNumber}"
+        )
+
+        return state
     }
 }

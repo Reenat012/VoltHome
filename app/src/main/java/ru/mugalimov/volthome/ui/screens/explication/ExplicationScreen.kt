@@ -1,6 +1,7 @@
 package ru.mugalimov.volthome.ui.screens.explication
 
 import android.os.Build
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
@@ -67,6 +68,15 @@ fun ExplicationScreen(
     navController: NavHostController,
     viewModel: ExplicationViewModel = hiltViewModel()
 ) {
+    // ВАЖНО: НЕЛЬЗЯ склеивать baseGroups и draft по groupId.
+// groupId может "переиспользоваться"/меняться после пересчётов/реинсертов,
+// из-за чего UI может стать пустым (draft есть, а match по id — нет).
+// Поэтому используем стабильный ключ, который не зависит от БД id.
+    data class DraftKey(
+        val groupNumber: Int,
+        val roomId: Long
+    )
+
     val selectedBreakdown by viewModel.selectedDeviceBreakdown.collectAsState()
     val sheetPayload by viewModel.infoSheetPayload.collectAsState()
     val state by viewModel.uiState.collectAsState()
@@ -140,6 +150,13 @@ fun ExplicationScreen(
             val baseGroups = s.groups
             val draft = manualSession?.draftState
 
+            // Временная диагностика: поможет увидеть, что baseGroups и draft живут с разными groupId.
+// Удалить после проверки.
+            if (isManual && draft != null) {
+                Log.d("MANUAL_UI", "baseGroups ids=${baseGroups.map { it.groupId }}")
+                Log.d("MANUAL_UI", "draft ids=${draft.groups.map { it.groupId }}")
+            }
+
             val displayGroups = remember(isManual, baseGroups, draft, unassignedDevices) {
                 if (!isManual || draft == null) {
                     baseGroups
@@ -152,18 +169,23 @@ fun ExplicationScreen(
                         unassignedDevices.forEach { put(it.id, it) }
                     }
 
-                    // ВАЖНО: тут мы “пересобираем” группы по draft.deviceIds.
-                    // Если у тебя есть готовый mapper draft->CircuitGroup в проекте — лучше использовать его.
-                    baseGroups.map { g ->
-                        val dg = draft.groups.firstOrNull { it.groupId == g.groupId }
-                        if (dg == null) g
-                        else {
-                            val newDevices = dg.deviceIds.mapNotNull { deviceById[it] }
-                            g.copy(
-                                phase = dg.phase,
-                                devices = newDevices
-                            )
-                        }
+// Собираем draft по стабильному ключу.
+// Если в проекте groupNumber уникален глобально — roomId можно было бы убрать,
+// но roomId добавляем для надёжности (меньше шанс коллизий).
+                    val draftByKey =
+                        draft.groups.associateBy { DraftKey(it.groupNumber, it.roomId) }
+
+                    baseGroups.mapNotNull { g ->
+                        val dg = draftByKey[DraftKey(g.groupNumber, g.roomId)]
+                            ?: return@mapNotNull null // ✅ если группы нет в draft — не показываем
+
+                        // Пересобираем список устройств строго по draft.deviceIds
+                        val newDevices = dg.deviceIds.mapNotNull { deviceById[it] }
+
+                        g.copy(
+                            phase = dg.phase,   // ✅ фаза из draft — источник истины в manual
+                            devices = newDevices
+                        )
                     }
                     // ⚠️ Если draft умеет создавать новые группы, которых нет в baseGroups:
                     // их нужно дополнительно добавить сюда (через конструктор CircuitGroup или mapper).
@@ -176,13 +198,8 @@ fun ExplicationScreen(
             val targetBounds =
                 remember { mutableStateMapOf<ExplicationViewModel.DragTarget, Rect>() }
 
-            fun resolveActiveTarget(pointerRoot: Offset): ExplicationViewModel.DragTarget? {
-                // Простой приоритет: сначала группы, потом спец-цели.
-                // (Если перекрытия нет — порядок не важен.)
-                return targetBounds.entries
-                    .firstOrNull { (_, rect) -> rect.contains(pointerRoot) }
-                    ?.key
-            }
+            fun resolveActiveTarget(pointerWindow: Offset): ExplicationViewModel.DragTarget? =
+                targetBounds.entries.firstOrNull { (_, rect) -> rect.contains(pointerWindow) }?.key
 
             // Имя перетаскиваемого устройства (для ghost).
             // Берём из текущих групп в UI (CircuitGroup.devices).
@@ -236,6 +253,7 @@ fun ExplicationScreen(
                         // ✅ сбор bounds целей
                         onTargetBounds = { target, rect ->
                             targetBounds[target] = rect
+                            Log.d("DRAG_BOUNDS", "target=$target rect=$rect")
                         },
 
                         modifier = Modifier
@@ -341,6 +359,10 @@ fun ExplicationScreen(
 
                                         // ✅ определяем активную цель и подсвечиваем её
                                         val active = resolveActiveTarget(pointerRoot)
+                                        Log.d(
+                                            "DRAG_MOVE",
+                                            "pointer=$pointerRoot active=$active boundsCount=${targetBounds.size}"
+                                        )
                                         viewModel.setActiveDragTarget(active)
                                     },
                                     onDeviceDragEnd = {

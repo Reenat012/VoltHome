@@ -22,6 +22,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.unit.dp
 import ru.mugalimov.volthome.domain.model.Device
 
@@ -145,15 +146,16 @@ private fun DeviceChip(
                 detectDragGesturesAfterLongPress(
                     onDragStart = { startLocal ->
                         val coords = coordsState.value ?: return@detectDragGesturesAfterLongPress
-                        val itemStartRoot = coords.positionInRoot()
-                        val pointerStartRoot = coords.localToRoot(startLocal)
-                        onDragStart?.invoke(itemStartRoot, pointerStartRoot)
+                        val itemStartWindow = coords.positionInWindow()
+                        val pointerStartWindow = coords.localToWindow(startLocal)
+
+                        onDragStart?.invoke(itemStartWindow, pointerStartWindow)
                     },
                     onDrag = { change, _ ->
                         // В drag нам важна позиция пальца в root координатах
                         val coords = coordsState.value ?: return@detectDragGesturesAfterLongPress
-                        val pointerRoot = coords.localToRoot(change.position)
-                        onDragMove?.invoke(pointerRoot)
+                        val pointerWindow = coords.localToWindow(change.position)
+                        onDragMove?.invoke(pointerWindow)
 
                         // Потребляем изменение, чтобы drag не дрался со scroll после long-press
                         change.consume()

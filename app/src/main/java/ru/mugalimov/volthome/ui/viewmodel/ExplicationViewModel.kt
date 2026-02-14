@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.ui.viewmodel
 
+import android.util.Log
 import androidx.compose.ui.geometry.Offset
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -398,6 +399,8 @@ class ExplicationViewModel @Inject constructor(
      * Реальный перенос (manualRepo.apply) подключим в коммите с drop-логикой (позже).
      */
     fun dropToGroup(targetGroupId: Long) {
+        Log.d("DRAG_DROP", "dropToGroup targetGroupId=$targetGroupId dragState=${_dragState.value}")
+
         val s = _dragState.value
         val deviceId = s.draggingDeviceId ?: return
         val fromGroupId = s.fromGroupId ?: return
@@ -433,6 +436,7 @@ class ExplicationViewModel @Inject constructor(
      * Drop "в никуда" = отмена. Сбрасываем и drag, и панель целей (чтобы UI был чистый).
      */
     fun dropCancel() {
+
         _dragState.value = DragState()
         _moveDeviceUi.value = null
     }
@@ -579,7 +583,11 @@ class ExplicationViewModel @Inject constructor(
         _moveDeviceUi.value = null
 
         viewModelScope.launch(ioDispatcher) {
+            Log.d("MOVE_DEVICE", "deviceId=$deviceId targetGroupId=$targetGroupId from=${fromGroupId}")
             val session = manualSession.value ?: return@launch
+            Log.d("MOVE_DEVICE", "session=${session?.projectId} active=${session?.manualModeActive} draftGroups=${session?.draftState?.groups?.size}")
+            Log.d("MOVE_DEVICE", "draft ids=" + (session?.draftState?.groups?.joinToString { "${it.groupId}#${it.groupNumber}" } ?: "null"))
+
             if (!session.manualModeActive) return@launch
 
             val state = session.draftState

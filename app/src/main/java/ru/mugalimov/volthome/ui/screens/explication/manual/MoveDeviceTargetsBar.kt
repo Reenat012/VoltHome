@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import ru.mugalimov.volthome.domain.model.manual.ManualGroupDraft
@@ -87,7 +88,7 @@ fun MoveDeviceTargetsBar(
                 // Box нужен, чтобы снять boundsInRoot не с внутренностей AssistChip, а стабильно сверху.
                 Box(
                     modifier = Modifier.onGloballyPositioned { coords ->
-                        onTargetBounds(target, coords.boundsInRoot())
+                        onTargetBounds(target, coords.boundsInWindow())
                     }
                 ) {
                     AssistChip(
