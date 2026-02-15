@@ -73,23 +73,28 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
     }
 
     override suspend fun apply(action: ManualEditAction) {
-        val current = sessionFlow.value ?: return
-        if (!current.manualModeActive) return
+        val current = sessionFlow.value ?: run {
+            Log.w("MANUAL_REPO", "apply ignored: session=null action=$action")
+            return
+        }
+        if (!current.manualModeActive) {
+            Log.w("MANUAL_REPO", "apply ignored: manualModeActive=false action=$action")
+            return
+        }
 
-        val now = System.currentTimeMillis()
+        Log.d("MANUAL_REPO", "apply action=$action ver=${current.version} groups=${current.draftState.groups.size}")
 
-        val newDraft = reduceDraft(
-            draft = current.draftState,
-            action = action,
-            // Если у тебя где-то в проекте хранится phaseMode для manual — прокинешь сюда.
-            // Пока считаем, что manual экран у тебя трёхфазный по умолчанию.
-            mode = PhaseMode.THREE
-        )
+        val before = current.draftState
+        val newDraft = reduceDraft(before, action, mode = PhaseMode.THREE)
+
+        // Быстрая “диагностика изменения”
+        val changed = before != newDraft
+        Log.d("MANUAL_REPO", "apply done changed=$changed newGroups=${newDraft.groups.size} unassigned=${newDraft.unassignedDeviceIds.size}")
 
         sessionFlow.value = current.copy(
             draftState = newDraft,
             version = current.version + 1L,
-            updatedAtEpochMs = now
+            updatedAtEpochMs = System.currentTimeMillis()
         )
     }
 

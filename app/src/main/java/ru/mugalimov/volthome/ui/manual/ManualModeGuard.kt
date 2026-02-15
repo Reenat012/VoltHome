@@ -1,6 +1,7 @@
 package ru.mugalimov.volthome.ui.manual
 
 import android.content.Context
+import android.util.Log
 import dagger.hilt.android.EntryPointAccessors
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
@@ -109,15 +110,29 @@ class ManualModeGuard private constructor(
                 return@launch
             }
 
-            val ok = runCatching {
+            // ✅ ВАЖНО:
+            // 1) Сначала пробуем commit (diff-commit).
+            // 2) Выходим из manual ТОЛЬКО если commit успешен.
+            // 3) Если commit упал — manual НЕ выключаем, возвращаем кнопки.
+            val commitResult = runCatching {
                 commitManualDraftToLocalDb.execute(
                     CommitManualDraftToLocalDbUseCase.Params(
                         projectId = session.projectId,
                         draft = session.draftState
                     )
                 )
-                manualRepo.exitManualMode(session.projectId)
-            }.isSuccess
+            }
+
+            val ok = if (commitResult.isSuccess) {
+                val exitOk = runCatching { manualRepo.exitManualMode(session.projectId) }.isSuccess
+                if (!exitOk) {
+                    Log.e(TAG, "onSaveClicked: commit ok, but exitManualMode failed. projectId=${session.projectId}")
+                }
+                exitOk
+            } else {
+                Log.e(TAG, "onSaveClicked: commit failed. projectId=${session.projectId}", commitResult.exceptionOrNull())
+                false
+            }
 
             withContext(Dispatchers.Main.immediate) {
                 if (ok) {
@@ -153,6 +168,8 @@ class ManualModeGuard private constructor(
                 }
                 // Если session == null — manual уже не активен (или kill-process),
                 // тут просто считаем "cancel" успешным (действие можно продолжать).
+            }.onFailure {
+                Log.e(TAG, "onCancelClicked failed. sessionProjectId=${session?.projectId}", it)
             }.isSuccess
 
             withContext(Dispatchers.Main.immediate) {
@@ -168,6 +185,8 @@ class ManualModeGuard private constructor(
     }
 
     companion object {
+        private const val TAG = "ManualModeGuard"
+
         fun fromApp(appContext: Context): ManualModeGuard {
             val ep = EntryPointAccessors.fromApplication(
                 appContext,

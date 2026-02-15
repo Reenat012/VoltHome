@@ -410,11 +410,7 @@ fun MainApp(
                                 )
                             )
 
-                            // 2) КРИТИЧНО: после ручного Save overrides больше не должны перекрывать фазы в AUTO.
-                            // Иначе AUTO сразу "откатит" к прошлым сохранениям.
-                            commitEp.groupPhaseOverrideDao().deleteByProject(projectId)
-
-                            // 3) Выходим из manual (и чистим marker внутри repo)
+                            // 2) Выходим из manual
                             manualRepo.exitManualMode(projectId)
 
                             // 4) Закрываем диалог и выполняем отложенное действие

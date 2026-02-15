@@ -40,9 +40,7 @@ import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.ProFeature
 import ru.mugalimov.volthome.domain.model.VoltageType
 import ru.mugalimov.volthome.domain.model.incomer.IncomerSpec
-import ru.mugalimov.volthome.domain.model.manual.ManualDeviceDraft
 import ru.mugalimov.volthome.domain.model.manual.ManualEditAction
-import ru.mugalimov.volthome.domain.model.manual.ManualGroupDraft
 import ru.mugalimov.volthome.domain.model.manual.ProjectEditState
 import ru.mugalimov.volthome.domain.model.report.DonutModel
 import ru.mugalimov.volthome.domain.model.report.ReportDevice
@@ -55,12 +53,12 @@ import ru.mugalimov.volthome.domain.use_case.CalculateGroupBreakdownUseCase
 import ru.mugalimov.volthome.domain.use_case.CalculateShieldOverviewUseCase
 import ru.mugalimov.volthome.domain.use_case.GroupCalculatorFactory
 import ru.mugalimov.volthome.domain.use_case.IncomerSelector
+import ru.mugalimov.volthome.domain.use_case.SaveAutoCalculatedGroupsToLocalDbUseCase
 import ru.mugalimov.volthome.domain.use_case.getOrZero
 import ru.mugalimov.volthome.domain.use_case.phaseCurrents
 import ru.mugalimov.volthome.domain.use_case.report.BuildProfessionalSectionsUseCase
 import ru.mugalimov.volthome.domain.use_case.manual.CancelManualAndAutoRecalcUseCase
 import ru.mugalimov.volthome.domain.use_case.manual.CommitManualDraftToLocalDbUseCase
-import ru.mugalimov.volthome.domain.use_case.manual.ProjectBaseStateBuilder
 import ru.mugalimov.volthome.domain.util.PowerCurrentNormalizer
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
 import ru.mugalimov.volthome.ui.screens.explication.sheets.CalcBlocksMapper
@@ -87,10 +85,15 @@ class ExplicationViewModel @Inject constructor(
 
     private val commitManualDraftToLocalDbUseCase: CommitManualDraftToLocalDbUseCase,
     private val cancelManualAndAutoRecalcUseCase: CancelManualAndAutoRecalcUseCase,
+    private val saveAutoCalculatedGroupsToLocalDbUseCase: SaveAutoCalculatedGroupsToLocalDbUseCase,
 
     // ✅ Коммит 8: kill-process UX маркер
     private val manualDraftResetNotifier: ManualDraftResetNotifier,
 ) : ViewModel() {
+
+    private val TAG_DND = "EXP_DND"
+    private val TAG_MOVE = "EXP_MOVE"
+    private val TAG_SESS = "EXP_SESS"
 
     // =========================
     // UI state
@@ -226,9 +229,20 @@ class ExplicationViewModel @Inject constructor(
     private val _showMixedWarningDialog = MutableStateFlow(false)
     val showMixedWarningDialog: StateFlow<Boolean> = _showMixedWarningDialog.asStateFlow()
 
-    // Если пользователь подтвердил перенос после блок-диалога — сохраняем pending-операцию
-    private val _pendingMixedMove = MutableStateFlow<Pair<Long, Long>?>(null)
-    // Pair(deviceId, targetGroupId)
+    /**
+     * Pending-перенос для MIXED предупреждения.
+     *
+     * ВАЖНО:
+     * - Нельзя полагаться на _moveDeviceUi в confirm: UI уже успевает обнулить этот стейт.
+     * - Поэтому храним ВСЁ, что нужно для выполнения операции после Confirm.
+     */
+    private data class PendingMixedMove(
+        val deviceId: Long,
+        val fromGroupId: Long,
+        val targetGroupId: Long
+    )
+
+    private val _pendingMixedMove = MutableStateFlow<PendingMixedMove?>(null)
 
     // =========================
     // Init
@@ -256,6 +270,20 @@ class ExplicationViewModel @Inject constructor(
                         _events.value = UiEvent.ShowSnackbar("Черновик ручного режима был сброшен")
                     }
                 }
+        }
+
+        viewModelScope.launch(ioDispatcher) {
+            manualSession.collect { s ->
+                if (s == null) {
+                    Log.d(TAG_SESS, "manualSession=null")
+                } else {
+                    Log.d(TAG_SESS,
+                        "manualSession pid=${s.projectId} active=${s.manualModeActive} ver=${s.version} " +
+                                "groups=${s.draftState.groups.size} unassigned=${s.draftState.unassignedDeviceIds.size}"
+                    )
+                    Log.d(TAG_SESS, "draft.groups=" + s.draftState.groups.joinToString { "${it.groupId}#${it.groupNumber}(devs=${it.deviceIds.size})" })
+                }
+            }
         }
     }
 
@@ -349,6 +377,7 @@ class ExplicationViewModel @Inject constructor(
         itemStartRoot: Offset,
         pointerStartRoot: Offset
     ) {
+        Log.d(TAG_DND, "startDrag deviceId=$deviceId from=$fromGroupId item=$itemStartRoot pointer=$pointerStartRoot")
         _dragState.value = DragState(
             draggingDeviceId = deviceId,
             fromGroupId = fromGroupId,
@@ -366,7 +395,11 @@ class ExplicationViewModel @Inject constructor(
      */
     fun setActiveDragTarget(target: DragTarget?) {
         val s = _dragState.value
-        if (!s.isActive) return
+        if (!s.isActive) {
+            Log.w(TAG_DND, "setActiveDragTarget ignored: not active target=$target")
+            return
+        }
+        Log.d(TAG_DND, "setActiveDragTarget $target")
         if (s.activeTarget == target) return
         _dragState.value = s.copy(activeTarget = target)
     }
@@ -377,7 +410,11 @@ class ExplicationViewModel @Inject constructor(
      */
     fun updateDrag(pointerRoot: Offset) {
         val s = _dragState.value
-        if (!s.isActive) return
+        if (!s.isActive) {
+            Log.w(TAG_DND, "updateDrag ignored: not active")
+            return
+        }
+        Log.v(TAG_DND, "updateDrag pointer=$pointerRoot startPointer=${s.pointerStartRoot} startItem=${s.itemStartRoot}")
 
         val startPointer = s.pointerStartRoot ?: return
         val startItem = s.itemStartRoot ?: return
@@ -407,6 +444,7 @@ class ExplicationViewModel @Inject constructor(
         Log.d("DRAG_DROP", "dropToGroup targetGroupId=$targetGroupId dragState=${_dragState.value}")
 
         val s = _dragState.value
+        Log.d(TAG_DND, "dropToGroup target=$targetGroupId state=$s")
         val deviceId = s.draggingDeviceId ?: return
         val fromGroupId = s.fromGroupId ?: return
 
@@ -424,7 +462,6 @@ class ExplicationViewModel @Inject constructor(
     /**
      * Drop в "Нераспределённые": контракт под следующий коммит.
      */
-
     fun dropToUnassigned() {
         val s = _dragState.value
         val deviceId = s.draggingDeviceId ?: return
@@ -436,12 +473,11 @@ class ExplicationViewModel @Inject constructor(
         _dragState.value = DragState()
     }
 
-
     /**
      * Drop "в никуда" = отмена. Сбрасываем и drag, и панель целей (чтобы UI был чистый).
      */
     fun dropCancel() {
-
+        Log.d(TAG_DND, "dropCancel state=${_dragState.value}")
         _dragState.value = DragState()
         _moveDeviceUi.value = null
     }
@@ -449,7 +485,6 @@ class ExplicationViewModel @Inject constructor(
     /**
      * Drop в "Новая группа": контракт под следующий коммит.
      */
-
     fun dropToNewGroup() {
         val s = _dragState.value
         val deviceId = s.draggingDeviceId ?: return
@@ -576,6 +611,7 @@ class ExplicationViewModel @Inject constructor(
     // =========================
 
     fun onDeviceLongPressed(deviceId: Long, fromGroupId: Long) {
+        Log.d(TAG_MOVE, "onDeviceLongPressed deviceId=$deviceId fromGroupId=$fromGroupId")
         _moveDeviceUi.value = MoveDeviceUi(deviceId = deviceId, fromGroupId = fromGroupId)
     }
 
@@ -583,15 +619,33 @@ class ExplicationViewModel @Inject constructor(
         _moveDeviceUi.value = null
     }
 
+    /**
+     * Перенос устройства в выбранную группу.
+     *
+     * ФИКС (важно):
+     * - Если тип устройства != тип группы => MIXED:
+     *   * первый раз показываем блокирующий диалог,
+     *   * confirm должен выполнить ИМЕННО перенос в targetGroup (а не MoveToUnassigned).
+     * - Нельзя в confirm брать fromGroupId из _moveDeviceUi: UI успевает сбросить.
+     *   Поэтому используем PendingMixedMove (deviceId/fromGroupId/targetGroupId).
+     */
     fun onMoveDeviceTargetGroupSelected(deviceId: Long, targetGroupId: Long) {
-        val fromGroupId = _moveDeviceUi.value?.fromGroupId // может быть null, если UI уже сбросил
+        val fromGroupId = _moveDeviceUi.value?.fromGroupId
+        Log.d(TAG_MOVE, "targetSelected deviceId=$deviceId from=$fromGroupId -> target=$targetGroupId moveUiWas=${_moveDeviceUi.value}")
+        // ВАЖНО: фиксируем from ДО обнуления UI-стейта, иначе потеряем источник.
+        val from = _moveDeviceUi.value?.fromGroupId
         _moveDeviceUi.value = null
 
         viewModelScope.launch(ioDispatcher) {
-            Log.d("MOVE_DEVICE", "deviceId=$deviceId targetGroupId=$targetGroupId from=${fromGroupId}")
-            val session = manualSession.value ?: return@launch
-            Log.d("MOVE_DEVICE", "session=${session?.projectId} active=${session?.manualModeActive} draftGroups=${session?.draftState?.groups?.size}")
-            Log.d("MOVE_DEVICE", "draft ids=" + (session?.draftState?.groups?.joinToString { "${it.groupId}#${it.groupNumber}" } ?: "null"))
+            Log.d("MOVE_DEVICE", "deviceId=$deviceId targetGroupId=$targetGroupId from=${from}")
+
+            // ✅ Не полагаемся только на manualSession.value (WhileSubscribed может дать null).
+            // Берём активную сессию напрямую из репозитория.
+            val session = manualRepo.getActiveSession() ?: manualSession.value ?: return@launch
+            Log.d(TAG_MOVE, "session pid=${session?.projectId} active=${session?.manualModeActive} ver=${session?.version}")
+
+            Log.d("MOVE_DEVICE", "session=${session.projectId} active=${session.manualModeActive} draftGroups=${session.draftState.groups.size}")
+            Log.d("MOVE_DEVICE", "draft ids=" + (session.draftState.groups.joinToString { "${it.groupId}#${it.groupNumber}" }))
 
             if (!session.manualModeActive) return@launch
 
@@ -604,16 +658,17 @@ class ExplicationViewModel @Inject constructor(
             // Смешение = тип устройства не совпадает с типом группы
             val isMixed = device.deviceType != targetGroup.groupType
 
-            if (!isMixed) {
-                // ✅ нормальный перенос: применяем action (пересчёт линии делает repo внутри apply)
-                val from = fromGroupId ?: run {
-                    _events.value = UiEvent.ShowSnackbar("Не удалось определить исходную группу")
-                    return@launch
-                }
+            // Защита: если UI не смог дать from — честно выходим
+            val fromGroupId = from ?: run {
+                _events.value = UiEvent.ShowSnackbar("Не удалось определить исходную группу")
+                return@launch
+            }
 
+            if (!isMixed) {
+                // ✅ обычный перенос
                 try {
-                    if (from == FROM_UNASSIGNED) {
-                        // ✅ перенос из unassigned в группу
+                    if (fromGroupId == FROM_UNASSIGNED) {
+                        // перенос из unassigned -> group
                         manualRepo.apply(
                             ManualEditAction.MoveFromUnassigned(
                                 deviceId = deviceId,
@@ -621,11 +676,11 @@ class ExplicationViewModel @Inject constructor(
                             )
                         )
                     } else {
-                        // ✅ перенос из группы в группу
+                        // перенос group -> group
                         manualRepo.apply(
                             ManualEditAction.MoveDevice(
                                 deviceId = deviceId,
-                                fromGroupId = from,
+                                fromGroupId = fromGroupId,
                                 toGroupId = targetGroupId
                             )
                         )
@@ -636,29 +691,46 @@ class ExplicationViewModel @Inject constructor(
                 return@launch
             }
 
-            // MIXED_MANUAL разрешён, но предупреждаем:
-            // 1) первый раз — блокирующий диалог (если не отключили)
-            // 2) дальше — snackbar
+            // ✅ MIXED: первый раз — блокирующий диалог (если не отключили)
             if (!_mixedWarningDontShowAgain.value && !_mixedWarningBlocked.value) {
-                _pendingMixedMove.value = deviceId to targetGroupId
+                _pendingMixedMove.value = PendingMixedMove(
+                    deviceId = deviceId,
+                    fromGroupId = fromGroupId,
+                    targetGroupId = targetGroupId
+                )
                 _showMixedWarningDialog.value = true
                 return@launch
             }
 
-            // Дальше — просто snackbar + выполняем перенос
+            Log.d(TAG_MOVE, "before: fromGroupDevices=" +
+                    (state.groups.firstOrNull { it.groupId == fromGroupId }?.deviceIds?.size ?: -1) +
+                    " targetDevices=" +
+                    (state.groups.firstOrNull { it.groupId == targetGroupId }?.deviceIds?.size ?: -1)
+            )
+
+            // ✅ MIXED дальше: snackbar + выполняем перенос
             _events.value = UiEvent.ShowSnackbar("Группа помечена как MIXED (ручное смешение типов)")
-            val from = fromGroupId ?: return@launch
             try {
-                manualRepo.apply(
-                    ManualEditAction.MoveDevice(
-                        deviceId = deviceId,
-                        fromGroupId = from,
-                        toGroupId = targetGroupId
+                if (fromGroupId == FROM_UNASSIGNED) {
+                    manualRepo.apply(
+                        ManualEditAction.MoveFromUnassigned(
+                            deviceId = deviceId,
+                            toGroupId = targetGroupId
+                        )
                     )
-                )
+                } else {
+                    manualRepo.apply(
+                        ManualEditAction.MoveDevice(
+                            deviceId = deviceId,
+                            fromGroupId = fromGroupId,
+                            toGroupId = targetGroupId
+                        )
+                    )
+                }
             } catch (_: Throwable) {
                 // не спамим вторым снеком
             }
+            Log.d(TAG_MOVE, "apply action=MoveDevice/MoveFromUnassigned ...")
         }
     }
 
@@ -670,34 +742,35 @@ class ExplicationViewModel @Inject constructor(
         val pending = _pendingMixedMove.value
         _pendingMixedMove.value = null
 
-        if (pending != null) {
-            val deviceId = pending.first
-            val targetGroupId = pending.second
-            val fromGroupId = _moveDeviceUi.value?.fromGroupId
-            _moveDeviceUi.value = null
+        if (pending == null) return
 
-            viewModelScope.launch(ioDispatcher) {
-                val session = manualSession.value ?: return@launch
-                if (!session.manualModeActive) return@launch
+        viewModelScope.launch(ioDispatcher) {
+            // ✅ Не опираемся на _moveDeviceUi — это UI-шный стейт и он уже очищен.
+            val session = manualRepo.getActiveSession() ?: manualSession.value ?: return@launch
+            if (!session.manualModeActive) return@launch
 
-                val from = fromGroupId ?: run {
-                    _events.value = UiEvent.ShowSnackbar("Не удалось определить исходную группу")
-                    return@launch
-                }
-
-                // ✅ Если устройство уже из unassigned — это NOP (просто закрываем панель/drag)
-                if (from == FROM_UNASSIGNED) return@launch
-
-                try {
+            try {
+                if (pending.fromGroupId == FROM_UNASSIGNED) {
+                    // перенос из unassigned -> group (даже если MIXED)
                     manualRepo.apply(
-                        ManualEditAction.MoveToUnassigned(
-                            deviceId = deviceId,
-                            fromGroupId = from
+                        ManualEditAction.MoveFromUnassigned(
+                            deviceId = pending.deviceId,
+                            toGroupId = pending.targetGroupId
                         )
                     )
-                } catch (_: Throwable) {
-                    _events.value = UiEvent.ShowSnackbar("Не удалось переместить в нераспределённые")
+                } else {
+                    // перенос group -> group (MIXED)
+                    manualRepo.apply(
+                        ManualEditAction.MoveDevice(
+                            deviceId = pending.deviceId,
+                            fromGroupId = pending.fromGroupId,
+                            toGroupId = pending.targetGroupId
+                        )
+                    )
                 }
+                _events.value = UiEvent.ShowSnackbar("Перенос выполнен (MIXED)")
+            } catch (_: Throwable) {
+                _events.value = UiEvent.ShowSnackbar("Не удалось перенести устройство")
             }
         }
     }
@@ -937,9 +1010,12 @@ class ExplicationViewModel @Inject constructor(
                             return@launch
                         }
 
-                        repo.replaceAllGroupsTransactional(
-                            projectId = projectId,
-                            groups = groups
+                        saveAutoCalculatedGroupsToLocalDbUseCase.execute(
+                            SaveAutoCalculatedGroupsToLocalDbUseCase.Params(
+                                projectId = projectId,
+                                groups = groups,
+                                distributionDecisions = res.distributionDecisions
+                            )
                         )
 
                         repo.setLastDistributionDecisions(res.distributionDecisions)
@@ -1237,4 +1313,3 @@ data class PdfReportSnapshot(
     val installedPowerW: Double,
     val calculatedPowerW: Double
 )
-

@@ -73,13 +73,6 @@ fun PhaseLoadScreen(
     val canDrag = LocalUserPlan.current.capabilities.phaseDragAndDrop
     val uiState = viewModel.uiState.collectAsStateWithLifecycle().value
 
-    // ✅ Auto-recalc запускаем только в AUTO (в manual не трогаем проект)
-    LaunchedEffect(uiState.phaseLoadMode) {
-        if (uiState.phaseLoadMode == PhaseLoadMode.AUTO) {
-            explicationViewModel.recalcAndSaveGroups()
-        }
-    }
-
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(Unit) {
         viewModel.events.collect { msg ->
