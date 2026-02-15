@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.domain.use_case.manual
 
+import android.util.Log
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -31,6 +32,11 @@ class CancelManualAndAutoRecalcUseCase @Inject constructor(
      * Выполняет полный авто-пересчёт по текущему PhaseMode и сохраняет результат в БД (строго в projectId).
      */
     suspend fun execute(params: Params): GroupingResult {
+        Log.e(
+            "MANUAL_CANCEL",
+            "CANCEL_USE_CASE EXECUTE pid=${params.projectId}",
+            Throwable("STACK")
+        )
         val projectId = params.projectId
         if (projectId.isBlank()) {
             return GroupingResult.Error("projectId пуст")

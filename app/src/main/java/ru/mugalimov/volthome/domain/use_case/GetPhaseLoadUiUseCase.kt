@@ -1,6 +1,7 @@
 // ru/mugalimov/volthome/domain/use_case/GetPhaseLoadUiUseCase.kt
 package ru.mugalimov.volthome.domain.use_case
 
+import android.util.Log
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -48,6 +49,12 @@ class GetPhaseLoadUiUseCase @Inject constructor(
                                 groupDao.observeGroupsWithDevicesByProject(projectId),
                                 overrideDao.observeByProject(projectId)
                             ) { relations, overrides ->
+                                Log.w(
+                                    "PHASE_OVR",
+                                    "AUTO overrides projectId=$projectId count=${overrides.size} sample=" +
+                                            overrides.take(10).joinToString { "${it.groupId}->${it.phase}" }
+                                )
+
                                 val groups = relations.mapToDomainGroupsFromRelations() // -> List<CircuitGroup>
 
                                 // groupId -> Phase (override)

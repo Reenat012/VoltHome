@@ -20,5 +20,5 @@ interface GroupPhaseOverrideDao {
         DELETE FROM group_phase_overrides
         WHERE project_id = :projectId
     """)
-    suspend fun deleteByProject(projectId: String)
+    suspend fun deleteByProject(projectId: String):  Int
 }

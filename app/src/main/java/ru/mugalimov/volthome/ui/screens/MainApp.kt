@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.ui.screens
 
+import android.util.Log
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -115,6 +116,11 @@ fun MainApp(
     }
     val commitUseCase = remember { commitEp.commitManualDraftToLocalDbUseCase() }
     val cancelUseCase = remember { commitEp.cancelManualAndAutoRecalcUseCase() }
+
+
+    // ✅ КРИТИЧНО: overrides живут отдельно и в AUTO перетирают фазы поверх сохранённых групп.
+    // После manual-save их нужно чистить, иначе получаешь "откат" в AUTO.
+    val groupPhaseOverrideDao = remember { commitEp.groupPhaseOverrideDao() }
 
     // ВАЖНО: manualRepo должен быть объявлен ДО первого использования
     val manualDraftResetNotifier = remember { resetEp.manualDraftResetNotifier() }
@@ -346,6 +352,7 @@ fun MainApp(
                         subscriptionStatus = me.plan
                     )
                 }
+
                 else -> null
             }
         }
@@ -390,10 +397,10 @@ fun MainApp(
                     dismissManualExitDialog()
                 },
                 onManualSaveClick = {
-                    // ✅ Save: commit draft -> (важно) очистить overrides -> exit manual -> выполнить pendingProceed
+                    // ✅ Save: commit draft -> очистить overrides -> exit manual -> выполнить pendingProceed
                     scope.launch {
                         val projectId = activeProjectId.orEmpty()
-                        val s = manualSession
+                        val s = manualRepo.getActiveSession()
 
                         if (projectId.isBlank() || s == null || s.projectId != projectId) {
                             snackbarHostState.showSnackbar("Нет активного черновика для сохранения")
@@ -410,9 +417,12 @@ fun MainApp(
                                 )
                             )
 
+                            // 1.5) КРИТИЧНО: чистим overrides, иначе AUTO будет форсить старые фазы
+                            val deleted = groupPhaseOverrideDao.deleteByProject(projectId)
+                            Log.w("OVERRIDES", "DELETE overrides pid=$projectId (manual SAVE) deletedRows=$deleted")
+
                             // 2) Выходим из manual
                             manualRepo.exitManualMode(projectId)
-
                             // 4) Закрываем диалог и выполняем отложенное действие
                             val proceed = pendingProceed
                             dismissManualExitDialog()
@@ -442,10 +452,14 @@ fun MainApp(
                                     snackbarHostState.showSnackbar("Ошибка пересчёта: ${res.message}")
                                     return@launch
                                 }
+
                                 is GroupingResult.Success -> {
                                     // ок
                                 }
                             }
+
+                            val deleted = groupPhaseOverrideDao.deleteByProject(projectId)
+                            Log.w("OVERRIDES", "DELETE overrides pid=$projectId (manual CANCEL) deletedRows=$deleted")
 
                             // 2) Выходим из manual (и чистим marker внутри repo)
                             manualRepo.exitManualMode(projectId)
@@ -480,7 +494,9 @@ fun MainApp(
                     val proceed = {
                         projectsVm.selectProject(id)
                         appNavController.navigate(Screens.RoomsList.route) {
-                            popUpTo(appNavController.graph.findStartDestination().id) { saveState = true }
+                            popUpTo(appNavController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
                             launchSingleTop = true
                             restoreState = true
                         }
@@ -493,7 +509,9 @@ fun MainApp(
                     val proceed = {
                         projectsVm.createNewProject()
                         appNavController.navigate(Screens.RoomsList.route) {
-                            popUpTo(appNavController.graph.findStartDestination().id) { saveState = true }
+                            popUpTo(appNavController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
                             launchSingleTop = true
                             restoreState = true
                         }
@@ -503,13 +521,19 @@ fun MainApp(
                 },
 
                 onOpenSettings = {
-                    appNavController.navigate(Screens.SettingsScreen.route) { launchSingleTop = true }
+                    appNavController.navigate(Screens.SettingsScreen.route) {
+                        launchSingleTop = true
+                    }
                 },
                 onOpenProfile = {
-                    appNavController.navigate(Screens.ProfileScreen.route) { launchSingleTop = true }
+                    appNavController.navigate(Screens.ProfileScreen.route) {
+                        launchSingleTop = true
+                    }
                 },
                 onOpenSubscription = {
-                    appNavController.navigate(Screens.SubscriptionScreen.route) { launchSingleTop = true }
+                    appNavController.navigate(Screens.SubscriptionScreen.route) {
+                        launchSingleTop = true
+                    }
                 },
                 onOpenAbout = {
                     rootNavController.navigate(Screens.AboutScreen.route) { launchSingleTop = true }
