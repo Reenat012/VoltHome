@@ -34,6 +34,7 @@ import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceCalcBreakdown
 import ru.mugalimov.volthome.domain.model.DeviceType
+import ru.mugalimov.volthome.domain.model.DistributionDecision
 import ru.mugalimov.volthome.domain.model.GroupingResult
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.PhaseMode
@@ -143,6 +144,23 @@ class ExplicationViewModel @Inject constructor(
         .flatMapLatest { projectId -> manualRepo.observeSession(projectId) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    // =========================
+    // DB-driven pipeline (FIX отката)
+    // =========================
+
+    // ✅ Поток групп из БД (уже project-scoped внутри репозитория)
+    private val dbGroupsFlow: StateFlow<List<CircuitGroup>> =
+        repo.observeAllGroup()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    // ✅ Последние decisions (в памяти) — пригодится для pro-секций
+    private val decisionsFlow: StateFlow<List<DistributionDecision>> =
+        repo.observeDistributionDecisions()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    // ✅ Чтобы не запускать авто-recalc бесконечно
+    private val initialAutoRecalcTriggered = MutableStateFlow(false)
+
     data class MoveDeviceUi(
         val deviceId: Long,
         val fromGroupId: Long
@@ -242,6 +260,8 @@ class ExplicationViewModel @Inject constructor(
         val targetGroupId: Long
     )
 
+    private data class Quad<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
+
     private val _pendingMixedMove = MutableStateFlow<PendingMixedMove?>(null)
 
     // =========================
@@ -285,6 +305,144 @@ class ExplicationViewModel @Inject constructor(
                 }
             }
         }
+
+        // 3) ✅ Главный FIX: uiState строим от БД, когда manual выключен.
+// Это делает Экспликацию реактивной: Save из AppBar → БД → UI обновился.
+        viewModelScope.launch(ioDispatcher) {
+
+            // Комбайним группы + phaseMode + доступ к pro-секциям + decisions.
+            // (decisions могут быть старыми после manual-save — но это не ломает UI)
+            kotlinx.coroutines.flow.combine(
+                dbGroupsFlow,
+                phaseMode,
+                userPlanRepository.planFlow,
+                decisionsFlow
+            ) { groups, mode, plan, decisions ->
+                Quad(groups, mode, plan.capabilities.professionalReportSections, decisions)
+            }.collect { (groups, mode, isProReport, decisions) ->
+
+                // Пока manual активен — UI строится как base + draft overlay,
+                // поэтому НЕ трогаем _uiState здесь, иначе будут гонки и “мигание”.
+                val s = manualSession.value
+                if (s?.manualModeActive == true) {
+                    return@collect
+                }
+
+                // Если групп нет — это либо новый проект, либо ещё не было авторасчёта.
+                // Запускаем recalc ОДИН раз на входе в AUTO, а не из Screen.
+                if (groups.isEmpty()) {
+                    if (!initialAutoRecalcTriggered.value) {
+                        initialAutoRecalcTriggered.value = true
+                        recalcAndSaveGroups()
+                    } else {
+                        // остаёмся в Loading, пока не появятся группы (или ошибка)
+                        if (_uiState.value !is GroupScreenState.Loading) {
+                            _uiState.value = GroupScreenState.Loading
+                        }
+                    }
+                    return@collect
+                }
+
+                // Когда группы в БД есть — гарантированно приводим UI к факту.
+                setSuccessFromGroups(
+                    groups = groups,
+                    mode = mode,
+                    isProReport = isProReport,
+                    decisions = decisions
+                )
+            }
+        }
+    }
+
+    private fun setSuccessFromGroups(
+        groups: List<CircuitGroup>,
+        mode: PhaseMode,
+        isProReport: Boolean,
+        decisions: List<DistributionDecision>
+    ) {
+        val totalGroups = groups.size
+        val totalCurrent = groups.sumOf { it.nominalCurrent }
+        val hasGroupRcds = groups.any { it.rcdRequired }
+
+        val incomer = IncomerSelector().select(
+            IncomerSelector.Params(
+                groups = groups,
+                preferRcbo = false,
+                hasGroupRcds = hasGroupRcds,
+                voltageTypeOverride = when (mode) {
+                    PhaseMode.SINGLE -> VoltageType.AC_1PHASE
+                    PhaseMode.THREE -> VoltageType.AC_3PHASE
+                }
+            )
+        )
+
+        val totals = calculateShieldOverviewUseCase.execute(groups)
+        val installedPower = totals.installedPowerW
+        val calculatedPower = totals.calculatedPowerW
+
+        val calcWarningsFromGroups = if (isProReport) {
+            buildWarningsFromGroups(groups)
+        } else emptyList()
+
+        val shieldTotalsAssumptions: List<CalcAssumption> =
+            if (isProReport) calculatedPower.assumptions else emptyList()
+
+        val proAssumptions: List<CalcAssumption> =
+            if (isProReport) {
+                buildList {
+                    addAll(installedPower.assumptions)
+                    addAll(calculatedPower.assumptions)
+                }.distinctBy { it.toString() }
+            } else emptyList()
+
+        val proWarnings: List<CalcWarning> =
+            if (isProReport) {
+                buildList {
+                    addAll(calcWarningsFromGroups)
+                    addAll(installedPower.warnings)
+                    addAll(calculatedPower.warnings)
+                }.distinctBy { "${it.severity}|${it.scope}|${it.title}|${it.message}" }
+            } else emptyList()
+
+        // ✅ Стабильная дата: если уже был Success — сохраняем прежнюю (чтобы PDF не “прыгал” без причины).
+        val reportDate = (uiState.value as? GroupScreenState.Success)?.reportDate
+            ?: SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(System.currentTimeMillis())
+
+        val (meta, phases) = buildReportDataFromDeterministic(
+            groups = groups,
+            incomer = incomer,
+            totalGroups = totalGroups,
+            mode = mode,
+            date = reportDate
+        )
+
+        val professionalSections: ProfessionalSections? =
+            if (isProReport) {
+                BuildProfessionalSectionsUseCase().execute(
+                    BuildProfessionalSectionsUseCase.Params(
+                        phaseMode = mode,
+                        meta = meta,
+                        phases = phases,
+                        distributionDecisions = decisions,
+                        calcWarnings = proWarnings,
+                        assumptions = proAssumptions
+                    )
+                )
+            } else null
+
+        _uiState.value = GroupScreenState.Success(
+            groups = groups,
+            totalGroups = totalGroups,
+            totalCurrent = totalCurrent,
+            incomer = incomer,
+            hasGroupRcds = hasGroupRcds,
+            installedPowerW = installedPower,
+            calculatedPowerW = calculatedPower,
+            shieldTotalsAssumptions = shieldTotalsAssumptions,
+            calcWarnings = calcWarningsFromGroups,
+            professionalSections = professionalSections,
+            reportDate = reportDate
+        )
     }
 
     // =========================
@@ -526,8 +684,13 @@ class ExplicationViewModel @Inject constructor(
                 manualRepo.exitManualMode(projectId)
                 manualDraftResetNotifier.clearExpected(projectId)
 
-                // 3) Обновляем UI сразу (НЕ делаем авто-recalc, иначе затрём ручные правки)
-                applyGroupsToUiAfterExternalCommit(committedGroups)
+                // ✅ Мгновенно обновим UI (а DB-flow следом подтвердит то же самое)
+                setSuccessFromGroups(
+                    groups = committedGroups,
+                    mode = phaseMode.value,
+                    isProReport = userPlanRepository.planFlow.value.capabilities.professionalReportSections,
+                    decisions = decisionsFlow.value
+                )
 
                 _events.value = UiEvent.ShowSnackbar("Изменения сохранены")
             } catch (_: Throwable) {

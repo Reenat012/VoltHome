@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.domain.use_case.manual
 
+import android.util.Log
 import javax.inject.Inject
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.domain.model.CircuitGroup
@@ -34,7 +35,7 @@ class CommitManualDraftToLocalDbUseCase @Inject constructor(
      *
      * Ошибки:
      * - Исключение пробрасываем наверх (выше по стеку обязан быть try/catch),
-     *   при этом политика "ошибка не выключает manual" реализуется на уровне VM/Coordinator.
+     *   при этом политика "ошибка не выключает manual" реализуется на уровне UI/Coordinator.
      */
     suspend fun execute(params: Params): List<CircuitGroup> {
         val projectId = params.projectId
@@ -42,25 +43,56 @@ class CommitManualDraftToLocalDbUseCase @Inject constructor(
 
         val draft = params.draft
 
-        // 1) DIFF-COMMIT: репозиторий сам:
-        // - читает dbState (groups + joins) в рамках projectId,
-        // - вычисляет diff,
-        // - применяет deletes/updates/inserts,
-        // - пересобирает joins,
-        // - делает sanity-check и падает, если что-то не сошлось.
+        // =========================
+        // MANUAL_SAVE: входные данные
+        // =========================
+        val desiredGroups = draft.groups
+        val desiredGroupCount = desiredGroups.size
+
+        val desiredUnassigned = draft.unassignedDeviceIds.toSet()
+        val desiredAllDeviceIds = desiredGroups.flatMap { it.deviceIds }.toSet()
+
+        // Важно: “assigned devices” = то, что в группах, но НЕ в unassigned
+        val desiredAssigned = (desiredAllDeviceIds - desiredUnassigned)
+
+        // Сводка по группам: groupId#num#phase#devCount
+        val desiredSummary = desiredGroups
+            .sortedBy { it.groupNumber }
+            .joinToString { g -> "${g.groupId}#${g.groupNumber}#${g.phase.name}(devs=${g.deviceIds.size})" }
+
+        Log.d(
+            "MANUAL_SAVE",
+            "MANUAL_SAVE BEGIN projectId=$projectId groups=$desiredGroupCount " +
+                    "devices(all)=${desiredAllDeviceIds.size} assigned=${desiredAssigned.size} unassigned=${desiredUnassigned.size} " +
+                    "groupsSummary=[$desiredSummary]"
+        )
+
+        // =========================
+        // 1) DIFF-COMMIT (атомарно)
+        // =========================
         explicationRepository.commitManualDraftTransactional(
             projectId = projectId,
             draftState = draft
         )
 
-        // 2) Возвращаем фактическое состояние БД после коммита.
-        // Это важнее, чем "просто draft", потому что:
-        // - у новых групп появились реальные group_id,
-        // - membership уже нормализован,
-        // - unassigned гарантированно без join’ов.
-        return explicationRepository
+        // =========================
+        // 2) Читаем ФАКТИЧЕСКОЕ состояние БД
+        // =========================
+        val after = explicationRepository
             .getGroupsWithDevicesByProject(projectId)
             .map { it.group }
             .sortedBy { it.groupNumber }
+
+        val afterSummary = after.joinToString { g ->
+            val phaseName = g.phase?.name ?: "null"
+            "${g.groupId}#${g.groupNumber}#$phaseName(devs=${g.devices.size})"
+        }
+
+        Log.d(
+            "MANUAL_SAVE",
+            "MANUAL_SAVE END projectId=$projectId groups=${after.size} groupsSummary=[$afterSummary]"
+        )
+
+        return after
     }
 }

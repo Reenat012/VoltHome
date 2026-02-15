@@ -80,19 +80,6 @@ fun ExplicationScreen(
     val manualSession by viewModel.manualSession.collectAsState(initial = null)
     val isManual = manualSession?.manualModeActive == true
 
-    // ✅ Коммит 1 (ТЗ v1.1 §10.1):
-    // Полный auto-recalc НЕЛЬЗЯ вешать на "isManual=false", иначе мы перетрём сохранённую вручную структуру
-    // сразу после Save (manual -> auto).
-    //
-    // Поэтому auto-recalc запускаем ТОЛЬКО как первоначальную загрузку экрана в AUTO,
-    // когда данных ещё нет (Loading). Выход из manual сам по себе НЕ должен триггерить пересчёт.
-    LaunchedEffect(Unit) {
-        val current = viewModel.uiState.value
-        if (!isManual && current is GroupScreenState.Loading) {
-            viewModel.recalcAndSaveGroups()
-        }
-    }
-
     val unassignedIds = manualSession?.draftState?.unassignedDeviceIds.orEmpty()
     val unassignedDevices by viewModel.unassignedDevices.collectAsState()
 

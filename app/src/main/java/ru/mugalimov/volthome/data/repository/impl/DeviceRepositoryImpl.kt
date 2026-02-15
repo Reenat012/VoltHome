@@ -133,13 +133,16 @@ class DeviceRepositoryImpl @Inject constructor(
                 ?: throw DeviceNotFoundException("Устройство ${device.id} не найдено")
 
             // 1) локально
+            // КРИТИЧНО: projectId обязателен. Берём его из текущей записи (источник истины).
+            val pid = current.projectId
+                ?: throw IllegalStateException("DEVICE_UPDATE: у устройства ${device.id} нет projectId в БД")
+
             deviceDao.update(
-                device.toEntityDevice().copy(projectId = current.projectId)
+                device.toEntityDevice(pid)
             )
 
             // 2) outbox
-            val pid = current.projectId
-            if (!pid.isNullOrBlank()) {
+            if (!pid.isBlank()) {
                 outboxDao.insert(
                     OutboxEntity(
                         project_id = pid,

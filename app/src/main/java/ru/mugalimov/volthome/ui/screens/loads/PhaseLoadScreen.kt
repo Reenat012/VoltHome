@@ -28,11 +28,9 @@ import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.local.datastore.AppPreferences
 import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseGroupItem
-import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadMode
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.paywall.PaywallEntryPoint
 import ru.mugalimov.volthome.ui.screens.loads.single.PhaseLoadSingleReportContent
-import ru.mugalimov.volthome.ui.viewmodel.ExplicationViewModel
 import ru.mugalimov.volthome.ui.viewmodel.PhaseLoadViewModel
 
 @EntryPoint
@@ -45,7 +43,6 @@ interface AppPreferencesEntryPoint {
 @Composable
 fun PhaseLoadScreen(
     viewModel: PhaseLoadViewModel = hiltViewModel(),
-    explicationViewModel: ExplicationViewModel = hiltViewModel(),
     onGroupAction: (PhaseGroupItem) -> Unit = {},
 ) {
     val context = LocalContext.current

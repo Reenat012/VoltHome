@@ -36,18 +36,30 @@ fun DeviceEntity.toDomainDevice(): Device =
         id = deviceId,
         name = name,
         power = power,
-        voltage = voltage,                     // у тебя Voltage хранится через конвертер
+        voltage = voltage, // Voltage хранится через конвертер
         demandRatio = demandRatio,
         createdAt = createdAt,
         roomId = roomId,
-        deviceType = deviceType,               // enum DeviceType в Entity
+        deviceType = deviceType, // enum DeviceType в Entity
         powerFactor = powerFactor,
         hasMotor = hasMotor,
         requiresDedicatedCircuit = requiresDedicatedCircuit,
         requiresSocketConnection = requiresSocketConnection
     )
 
+/**
+ * КРИТИЧНО:
+ * Нельзя создавать DeviceEntity без projectId, иначе в мультипроектности девайсы "утекут" в никуда.
+ */
+@Deprecated(
+    message = "ОПАСНО: toEntityDevice() без projectId. Используй toEntityDevice(projectId).",
+    replaceWith = ReplaceWith("toEntityDevice(projectId)"),
+    level = DeprecationLevel.ERROR
+)
 fun Device.toEntityDevice(): DeviceEntity =
+    throw IllegalStateException("Use toEntityDevice(projectId)")
+
+fun Device.toEntityDevice(projectId: String): DeviceEntity =
     DeviceEntity(
         deviceId = id,
         name = name,
@@ -60,7 +72,8 @@ fun Device.toEntityDevice(): DeviceEntity =
         powerFactor = powerFactor,
         hasMotor = hasMotor,
         requiresDedicatedCircuit = requiresDedicatedCircuit,
-        requiresSocketConnection = requiresSocketConnection
+        requiresSocketConnection = requiresSocketConnection,
+        projectId = projectId
     )
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -70,11 +83,23 @@ fun Device.toEntityDevice(): DeviceEntity =
 fun List<DeviceEntity>.mapToDomainDevices(): List<Device> =
     map { it.toDomainDevice() }
 
+/**
+ * КРИТИЧНО:
+ * Нельзя маппить List<Device> → List<DeviceEntity> без projectId.
+ */
+@Deprecated(
+    message = "ОПАСНО: mapToDeviceEntities() без projectId. Используй mapToDeviceEntities(projectId).",
+    replaceWith = ReplaceWith("mapToDeviceEntities(projectId)"),
+    level = DeprecationLevel.ERROR
+)
 fun List<Device>.mapToDeviceEntities(): List<DeviceEntity> =
-    map { it.toEntityDevice() }
+    throw IllegalStateException("Use mapToDeviceEntities(projectId)")
+
+fun List<Device>.mapToDeviceEntities(projectId: String): List<DeviceEntity> =
+    map { it.toEntityDevice(projectId) }
 
 // ──────────────────────────────────────────────────────────────────────────────
-/** CircuitGroupEntity ↔ CircuitGroup (одиночные объекты) */
+// CircuitGroupEntity ↔ CircuitGroup (одиночные объекты)
 // ──────────────────────────────────────────────────────────────────────────────
 
 fun CircuitGroupEntity.toDomainGroup(devices: List<Device> = emptyList()): CircuitGroup =
@@ -91,25 +116,37 @@ fun CircuitGroupEntity.toDomainGroup(devices: List<Device> = emptyList()): Circu
         breakerType = breakerType,
         rcdRequired = rcdRequired,
         rcdCurrent = rcdCurrent,
-        // Важно: Device.power в домене = Int (non-null)
         installedPowerW = devices.sumOf { it.power },
-        phase = phase.toPhaseOrDefaultA()                // String → enum
+        phase = phase.toPhaseOrDefaultA() // String → enum
     )
 
+/**
+ * КРИТИЧНО:
+ * Нельзя создавать CircuitGroupEntity без projectId, иначе группы "утекут" между проектами.
+ */
+@Deprecated(
+    message = "ОПАСНО: toEntityGroup() без projectId. Используй toEntityGroup(projectId).",
+    replaceWith = ReplaceWith("toEntityGroup(projectId)"),
+    level = DeprecationLevel.ERROR
+)
 fun CircuitGroup.toEntityGroup(): CircuitGroupEntity =
+    throw IllegalStateException("Use toEntityGroup(projectId)")
+
+fun CircuitGroup.toEntityGroup(projectId: String): CircuitGroupEntity =
     CircuitGroupEntity(
         groupId = groupId,
         groupNumber = groupNumber,
         roomId = roomId,
         roomName = roomName,
-        groupType = groupType.name,                          // enum → String
+        groupType = groupType.name,
         nominalCurrent = nominalCurrent,
         circuitBreaker = circuitBreaker,
         cableSection = cableSection,
         breakerType = breakerType,
         rcdRequired = rcdRequired,
         rcdCurrent = rcdCurrent,
-        phase = phase.name                                   // enum → "A"/"B"/"C"
+        phase = phase.name,
+        projectId = projectId
     )
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -125,11 +162,23 @@ fun List<CircuitGroupEntity>.mapToDomainGroups(
 ): List<CircuitGroup> =
     map { e -> e.toDomainGroup(groupsDevices[e.groupId].orEmpty()) }
 
+/**
+ * КРИТИЧНО:
+ * Нельзя маппить List<CircuitGroup> → List<CircuitGroupEntity> без projectId.
+ */
+@Deprecated(
+    message = "ОПАСНО: mapToGroupEntities() без projectId. Используй mapToGroupEntities(projectId).",
+    replaceWith = ReplaceWith("mapToGroupEntities(projectId)"),
+    level = DeprecationLevel.ERROR
+)
 fun List<CircuitGroup>.mapToGroupEntities(): List<CircuitGroupEntity> =
-    map { it.toEntityGroup() }
+    throw IllegalStateException("Use mapToGroupEntities(projectId)")
+
+fun List<CircuitGroup>.mapToGroupEntities(projectId: String): List<CircuitGroupEntity> =
+    map { it.toEntityGroup(projectId) }
 
 // ──────────────────────────────────────────────────────────────────────────────
-/** CircuitGroupWithDevices (relation) → CircuitGroup (Domain) */
+// CircuitGroupWithDevices (relation) → CircuitGroup (Domain)
 // ──────────────────────────────────────────────────────────────────────────────
 
 fun CircuitGroupWithDevices.toDomainGroupFromRelation(): CircuitGroup {
@@ -177,18 +226,9 @@ fun List<RoomEntity>.mapToDomainRooms(
 fun List<Room>.mapToRoomEntities(): List<RoomEntity> =
     map { it.toEntityRoom() }
 
-/**
- * Если нужно получить доменные Room из relation (RoomWithDevices),
- * добавь сюда свою Relation-модель и аналогичный маппер, например:
- *
- * data class RoomWithDevices(val room: RoomEntity, val devices: List<DeviceEntity>)
- *
- * fun RoomWithDevices.toDomainRoomFromRelation(): Room =
- *     room.toDomainRoom(devices.map { it.toDomainDevice() })
- *
- * fun List<RoomWithDevices>.mapToDomainRoomsFromRelations(): List<Room> =
- *     map { it.toDomainRoomFromRelation() }
- */
+// ──────────────────────────────────────────────────────────────────────────────
+// Совместимость со старыми моделями RoomWithDevicesEntity
+// ──────────────────────────────────────────────────────────────────────────────
 
 fun RoomWithDevicesEntity.toDomainModelGroup(): Room {
     return Room(
@@ -209,6 +249,10 @@ fun List<RoomWithDevicesEntity>.toDomainModelListRoomWithDevices(): List<RoomWit
     }
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// LoadEntity → Load
+// ──────────────────────────────────────────────────────────────────────────────
+
 fun List<LoadEntity>.toDomainModelListLoad(): List<Load> {
     return map { entity ->
         Load(
@@ -223,21 +267,36 @@ fun List<LoadEntity>.toDomainModelListLoad(): List<Load> {
     }
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Join
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Этот "маппер" не делает ничего (GroupDeviceJoin → GroupDeviceJoin).
+ * Оставляем только для обратной совместимости, но запрещаем использовать дальше.
+ */
+@Deprecated(
+    message = "Бесполезно: GroupDeviceJoin -> GroupDeviceJoin. Удали использование.",
+    level = DeprecationLevel.WARNING
+)
 fun GroupDeviceJoin.toEntityJoin(): GroupDeviceJoin =
     GroupDeviceJoin(
-        groupId  = groupId,
+        groupId = groupId,
         deviceId = deviceId
     )
+
+// ──────────────────────────────────────────────────────────────────────────────
+// DefaultDevice → DeviceCreateRequest (старый поток, совместимость)
+// ──────────────────────────────────────────────────────────────────────────────
 
 /** Маппер из DefaultDevice в DeviceCreateRequest для старого потока (сохраняем совместимость). */
 private fun DefaultDevice.toCreateRequest(qty: Int): DeviceCreateRequest =
     DeviceCreateRequest(
-        title = this.name,              // имя по каталогу (без кастомизации)
-        type = this.deviceType,         // DeviceType
+        title = this.name, // имя по каталогу (без кастомизации)
+        type = this.deviceType, // DeviceType
         count = qty.coerceAtLeast(1),
-        ratedPowerW = this.power,       // всегда Вт
+        ratedPowerW = this.power, // всегда Вт
         powerFactor = this.powerFactor,
         demandRatio = this.demandRatio,
         voltage = this.voltage
     )
-
