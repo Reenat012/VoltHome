@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
@@ -312,7 +313,7 @@ class ExplicationViewModel @Inject constructor(
 
             // Комбайним группы + phaseMode + доступ к pro-секциям + decisions.
             // (decisions могут быть старыми после manual-save — но это не ломает UI)
-            kotlinx.coroutines.flow.combine(
+            combine(
                 dbGroupsFlow,
                 phaseMode,
                 userPlanRepository.planFlow,
@@ -342,6 +343,12 @@ class ExplicationViewModel @Inject constructor(
                     }
                     return@collect
                 }
+
+                Log.w("EXP_AUTO",
+                    "AUTO pipeline groups=${groups.size} " +
+                            "sample=" + groups.sortedBy { it.groupNumber }.take(5)
+                        .joinToString { g -> "${g.groupId}#${g.groupNumber}(devs=${g.devices.size})" }
+                )
 
                 // Когда группы в БД есть — гарантированно приводим UI к факту.
                 setSuccessFromGroups(
@@ -945,12 +952,28 @@ class ExplicationViewModel @Inject constructor(
 
     fun onMoveDeviceToNewGroupSelected(deviceId: Long) {
         _moveDeviceUi.value = null
+
         viewModelScope.launch(ioDispatcher) {
-            val session = manualSession.value ?: return@launch
-            if (!session.manualModeActive) return@launch
+            // ✅ Берём активную сессию надёжно (manualSession.value может быть null из-за WhileSubscribed)
+            val session = manualRepo.getActiveSession() ?: manualSession.value
+            if (session == null) {
+                Log.w(TAG_SESS, "onMoveDeviceToNewGroupSelected: session=null (ignored) deviceId=$deviceId")
+                _events.value = UiEvent.ShowSnackbar("Сессия ручного режима недоступна")
+                return@launch
+            }
+
+            if (!session.manualModeActive) {
+                Log.w(TAG_SESS, "onMoveDeviceToNewGroupSelected: manualModeActive=false deviceId=$deviceId")
+                _events.value = UiEvent.ShowSnackbar("Ручной режим выключен")
+                return@launch
+            }
+
+            Log.d(TAG_MOVE, "toNewGroup deviceId=$deviceId pid=${session.projectId} ver=${session.version}")
+
             try {
                 manualRepo.apply(ManualEditAction.CreateNewGroupAndMove(deviceId = deviceId))
-            } catch (_: Throwable) {
+            } catch (t: Throwable) {
+                Log.e(TAG_MOVE, "toNewGroup failed deviceId=$deviceId", t)
                 _events.value = UiEvent.ShowSnackbar("Не удалось создать новую группу")
             }
         }
@@ -961,13 +984,27 @@ class ExplicationViewModel @Inject constructor(
         _moveDeviceUi.value = null
 
         viewModelScope.launch(ioDispatcher) {
-            val session = manualSession.value ?: return@launch
-            if (!session.manualModeActive) return@launch
+            // ✅ Надёжно берём активную сессию
+            val session = manualRepo.getActiveSession() ?: manualSession.value
+            if (session == null) {
+                Log.w(TAG_SESS, "onMoveDeviceToUnassignedSelected: session=null deviceId=$deviceId from=$fromGroupId")
+                _events.value = UiEvent.ShowSnackbar("Сессия ручного режима недоступна")
+                return@launch
+            }
+
+            if (!session.manualModeActive) {
+                Log.w(TAG_SESS, "onMoveDeviceToUnassignedSelected: manualModeActive=false deviceId=$deviceId")
+                _events.value = UiEvent.ShowSnackbar("Ручной режим выключен")
+                return@launch
+            }
 
             val from = fromGroupId ?: run {
+                Log.w(TAG_MOVE, "toUnassigned: fromGroupId=null deviceId=$deviceId")
                 _events.value = UiEvent.ShowSnackbar("Не удалось определить исходную группу")
                 return@launch
             }
+
+            Log.d(TAG_MOVE, "toUnassigned deviceId=$deviceId from=$from pid=${session.projectId} ver=${session.version}")
 
             try {
                 manualRepo.apply(
@@ -976,7 +1013,8 @@ class ExplicationViewModel @Inject constructor(
                         fromGroupId = from
                     )
                 )
-            } catch (_: Throwable) {
+            } catch (t: Throwable) {
+                Log.e(TAG_MOVE, "toUnassigned failed deviceId=$deviceId from=$from", t)
                 _events.value = UiEvent.ShowSnackbar("Не удалось переместить в нераспределённые")
             }
         }

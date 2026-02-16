@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.data.repository.impl
 
+import android.util.Log
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -36,6 +37,15 @@ class LoadsRepositoryImpl @Inject constructor(
     }
 
     override fun observeGroupsWithDevices(): Flow<List<CircuitGroupWithDevices>> {
+        // READER MAP:
+        // ВАЖНО: сейчас читаем группы БЕЗ projectId boundary (observeAllGroups).
+        // Это потенциально может давать "cross-project" эффекты.
+        Log.w(
+            "GROUP_READER",
+            "LoadsRepositoryImpl.observeGroupsWithDevices() uses observeAllGroups() WITHOUT project boundary"
+        )
+
+
         val groupsFlow  = groupDao.observeAllGroups()
         val devicesFlow = deviceDao.observeAllDevices()   // 🔁 было observeDevices()
         val joinsFlow   = joinDao.observeJoins()

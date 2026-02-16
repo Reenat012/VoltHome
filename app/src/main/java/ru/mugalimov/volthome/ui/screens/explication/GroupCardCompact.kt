@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.ui.screens.explication
 
+import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -89,14 +90,16 @@ fun GroupCardCompact(
         .sumOf { it.power.toDouble() * it.demandRatio }
         .roundToInt()
 
+    val TAG_GROUP = "EXP_GROUP"
+
     Surface(shape = MaterialTheme.shapes.large, tonalElevation = 3.dp) {
         Column(
             modifier = Modifier
-                // ВАЖНО:
-                // Возвращаем кликабельность всей карточки (как было по UX),
-                // но теперь устройства внутри имеют свои жесты и будут "съедать" клики,
-                // поэтому нажатия по устройствам НЕ должны раскрывать группу.
-                .clickable { expanded.value = !expanded.value }
+                .clickable {
+                    val newValue = !expanded.value
+                    Log.d(TAG_GROUP, "toggleExpand groupId=${group.groupId} num=${group.groupNumber} new=$newValue")
+                    expanded.value = newValue
+                }
                 .padding(16.dp)
         ) {
             // ── Header
@@ -156,6 +159,7 @@ fun GroupCardCompact(
                 DeviceChips(
                     devices = group.devices,
                     onDeviceClick = { id ->
+                        Log.d(TAG_GROUP, "deviceClick groupId=${group.groupId} deviceId=$id manual=$isManualMode")
                         val real = group.devices.firstOrNull { it.id == id }
                         if (real != null) {
                             sheetDevice.value = DeviceSpecUi(
@@ -175,25 +179,32 @@ fun GroupCardCompact(
                         onDeviceClick(id)
                     },
 
-                    // Старое поведение сохраняем: long-press включает панель целей
                     onDeviceLongPress = { id ->
+                        Log.d(TAG_GROUP, "deviceLongPress groupId=${group.groupId} deviceId=$id manual=$isManualMode")
                         if (isManualMode) onDeviceLongPress(id, group.groupId)
                     },
 
-                    // Новое: drag-цепочка (manual-only)
                     onDeviceDragStart = { deviceId, itemStartRoot, pointerStartRoot ->
+                        Log.d(
+                            TAG_GROUP,
+                            "deviceDragStart groupId=${group.groupId} deviceId=$deviceId manual=$isManualMode " +
+                                    "itemStartRoot=$itemStartRoot pointerStartRoot=$pointerStartRoot"
+                        )
                         if (!isManualMode) return@DeviceChips
                         onDeviceDragStart(deviceId, group.groupId, itemStartRoot, pointerStartRoot)
                     },
                     onDeviceDragMove = { pointerRoot ->
+                        Log.v(TAG_GROUP, "deviceDragMove groupId=${group.groupId} manual=$isManualMode pointerRoot=$pointerRoot")
                         if (!isManualMode) return@DeviceChips
                         onDeviceDragMove(pointerRoot)
                     },
                     onDeviceDragEnd = {
+                        Log.d(TAG_GROUP, "deviceDragEnd groupId=${group.groupId} manual=$isManualMode")
                         if (!isManualMode) return@DeviceChips
                         onDeviceDragEnd()
                     },
                     onDeviceDragCancel = {
+                        Log.w(TAG_GROUP, "deviceDragCancel groupId=${group.groupId} manual=$isManualMode")
                         if (!isManualMode) return@DeviceChips
                         onDeviceDragCancel()
                     },

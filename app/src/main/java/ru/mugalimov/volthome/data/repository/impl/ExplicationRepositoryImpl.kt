@@ -11,9 +11,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import ru.mugalimov.volthome.core.error.GroupNotFoundException
+import ru.mugalimov.volthome.core.logging.GroupWriteLogger
 import ru.mugalimov.volthome.data.local.dao.DeviceDao
 import ru.mugalimov.volthome.data.local.dao.GroupDao
 import ru.mugalimov.volthome.data.local.dao.GroupDeviceJoinDao
@@ -45,7 +47,7 @@ class ExplicationRepositoryImpl @Inject constructor(
     private val groupDao: GroupDao,
     private val groupDeviceJoinDao: GroupDeviceJoinDao,
     private val deviceDao: DeviceDao,
-    private val overrideDao: GroupPhaseOverrideDao, // ✅ добавили
+    private val overrideDao: GroupPhaseOverrideDao,
     private val db: AppDatabase,
     private val activeProjectDs: ActiveProjectDataStore,
     @IoDispatcher private val dispatchers: CoroutineDispatcher,
@@ -54,7 +56,6 @@ class ExplicationRepositoryImpl @Inject constructor(
 
     // ===== Decision log распределения фаз (in-memory) =====
     // Не пишем в БД, чтобы не тащить миграции.
-    // Для UI "почему так распределилось" достаточно этого списка в памяти.
     private val _distributionDecisions = MutableStateFlow<List<DistributionDecision>>(emptyList())
 
     override fun observeDistributionDecisions(): Flow<List<DistributionDecision>> =
@@ -65,30 +66,23 @@ class ExplicationRepositoryImpl @Inject constructor(
     }
 
     /**
-     * Поток доменных групп с учётом активного проекта.
-     * Важно: источник — observeGroupsWithDevices(), который уже фильтруется по activeProjectId.
+     * Reader Map (Коммит 0):
+     * - UI читает группы через observeGroupsWithDevices(), где есть boundary по activeProjectId:
+     *   groupDao.observeAllGroupsByProject(pid) + deviceDao.observeAllDevices() + joinDao.observeJoins().
+     * - membership источник истины: group_device_join (без projectId).
+     * - структура групп: таблица groups (с projectId).
      */
     override fun observeAllGroup(): Flow<List<CircuitGroup>> =
-        observeGroupsWithDevices().map { rel ->
-            rel.map { it.toDomainGroupFromRelation() }
-        }
+        observeGroupsWithDevices().map { rel -> rel.map { it.toDomainGroupFromRelation() } }
 
-    /**
-     * Поток сущностей для PhaseLoad: строго в рамках активного проекта.
-     *
-     * Важно:
-     * - join-таблица group_device_join не содержит projectId, поэтому фильтрация происходит
-     *   за счёт того, что сами группы берутся по projectId.
-     * - устройства берём из общего потока devices и маппим по deviceId.
-     */
     override fun observeGroupsWithDevices(): Flow<List<CircuitGroupWithDevices>> {
         val allDevicesFlow = deviceDao.observeAllDevices()
         val joinsFlow = groupDeviceJoinDao.observeJoins()
 
-        return activeProjectDs.activeProjectId.flatMapLatest { projectId ->
-            if (projectId.isNullOrBlank()) {
-                // нет активного проекта => нет групп
-                kotlinx.coroutines.flow.flowOf(emptyList())
+        return activeProjectDs.activeProjectId.flatMapLatest { projectIdNullable ->
+            val projectId = projectIdNullable.orEmpty()
+            if (projectId.isBlank()) {
+                flowOf(emptyList())
             } else {
                 val groupsFlow = groupDao.observeAllGroupsByProject(projectId)
                 combine(groupsFlow, allDevicesFlow, joinsFlow) { groups, devices, joins ->
@@ -114,7 +108,6 @@ class ExplicationRepositoryImpl @Inject constructor(
         withContext(dispatchers) {
             require(projectId.isNotBlank()) { "projectId must be non-blank" }
 
-            // Один tag на весь коммит — удобно фильтровать.
             val tag = "APPLY_DIFF"
 
             fun groupsSummaryFromDraft(): String =
@@ -128,12 +121,26 @@ class ExplicationRepositoryImpl @Inject constructor(
                     .joinToString { g -> "${g.groupId}#${g.groupNumber}#${g.phase}(type=${g.groupType})" }
 
             fun sanityFail(message: String): Nothing {
-                // Важно: логируем перед падением, иначе require() не оставит следа кроме stacktrace.
                 Log.e(tag, "SANITY FAILED: $message")
                 throw IllegalStateException(message)
             }
 
             db.withTransaction {
+                // Коммит 0: fingerprint снимаем внутри транзакции (атомарно относительно наших write).
+                val fpBefore = snapshotFingerprintInTx(projectId)
+
+                GroupWriteLogger.logStructureWrite(
+                    source = GroupWriteLogger.Source.MANUAL_SAVE,
+                    reason = GroupWriteLogger.Reason.DIFF_COMMIT,
+                    projectId = projectId,
+                    groupsCount = draftState.groups.size,
+                    joinsCount = -1,
+                    before = fpBefore,
+                    after = null,
+                    sample = "BEGIN op=MANUAL_DIFF_COMMIT draftGroups=${draftState.groups.size}",
+                    throwable = null
+                )
+
                 // =========================
                 // 0) MANUAL_SAVE: входные данные (draft)
                 // =========================
@@ -159,11 +166,8 @@ class ExplicationRepositoryImpl @Inject constructor(
                 val dbGroupsById = dbGroups.associateBy { it.groupId }
                 val dbGroupIds = dbGroups.map { it.groupId }.toSet()
 
-                val dbJoins = if (dbGroupIds.isEmpty()) {
-                    emptyList()
-                } else {
-                    groupDeviceJoinDao.getJoinsForGroupIds(dbGroupIds.toList())
-                }
+                val dbJoins = if (dbGroupIds.isEmpty()) emptyList()
+                else groupDeviceJoinDao.getJoinsForGroupIds(dbGroupIds.toList())
 
                 Log.d(
                     tag,
@@ -172,7 +176,7 @@ class ExplicationRepositoryImpl @Inject constructor(
                 )
 
                 // =========================
-                // 2) BUILD desiredState (разделяем existing vs new)
+                // 2) BUILD desiredState (existing vs new)
                 // =========================
                 val desiredExistingDraft = desiredDraftGroups
                     .filter { it.groupId > 0L && dbGroupsById.containsKey(it.groupId) }
@@ -251,7 +255,6 @@ class ExplicationRepositoryImpl @Inject constructor(
                     Log.d(tag, "APPLY_DIFF Applied update: groups=${groupsToUpdateEntities.size}")
                 }
 
-                // tempId -> newRealId (для новых групп из draft)
                 val tempToNewId = LinkedHashMap<Long, Long>()
                 if (groupsToInsertEntities.isNotEmpty()) {
                     val newIds = groupDao.insertGroups(groupsToInsertEntities)
@@ -274,7 +277,6 @@ class ExplicationRepositoryImpl @Inject constructor(
                 // =========================
                 // 6) APPLY joins + clean overrides
                 // =========================
-                // ВАЖНО: после коммита manual фазы в AUTO не должны перекрываться старым override.
                 overrideDao.deleteByProject(projectId)
 
                 val affectedDeviceIds = (desiredAllDeviceIds + desiredUnassignedIds).toList()
@@ -288,7 +290,7 @@ class ExplicationRepositoryImpl @Inject constructor(
                         if (finalGroupId <= 0L) return@forEach
 
                         gDraft.deviceIds
-                            .filter { it !in desiredUnassignedIds } // unassigned не должны получить join
+                            .filter { it !in desiredUnassignedIds }
                             .distinct()
                             .forEach { deviceId ->
                                 add(GroupDeviceJoin(groupId = finalGroupId, deviceId = deviceId))
@@ -300,14 +302,8 @@ class ExplicationRepositoryImpl @Inject constructor(
                     groupDeviceJoinDao.insertAll(joinsToInsert)
                 }
 
-                Log.d(
-                    tag,
-                    "APPLY_DIFF delta joins: affectedDevices=${affectedDeviceIds.size} " +
-                            "joinsInserted=${joinsToInsert.size} joinsSample=${joinsToInsert.take(12).map { it.groupId to it.deviceId }}"
-                )
-
                 // =========================
-                // 7) SANITY CHECK (жёстко доказываем корректность)
+                // 7) SANITY CHECK
                 // =========================
                 val afterGroups = groupDao.getAllGroupsByProject(projectId)
                 val afterGroupIds = afterGroups.map { it.groupId }.toSet()
@@ -316,14 +312,11 @@ class ExplicationRepositoryImpl @Inject constructor(
                     sanityFail("groups count mismatch. desired=$desiredGroupCount actual=${afterGroups.size}")
                 }
 
-                // 7.1) Доказываем стабильность существующих group_id (они обязаны пережить коммит)
                 val missingStable = desiredExistingIds - afterGroupIds
                 if (missingStable.isNotEmpty()) {
                     sanityFail("stable groupIds lost after commit. missing=${missingStable.take(30)}")
                 }
 
-                // 7.2) Доказываем что новые группы получили реальные id
-                // (если были новые, tempToNewId должен быть заполнен и эти id должны существовать)
                 if (desiredNewDraft.isNotEmpty()) {
                     val newRealIds = tempToNewId.values.toSet()
                     val missingNew = newRealIds - afterGroupIds
@@ -332,153 +325,110 @@ class ExplicationRepositoryImpl @Inject constructor(
                     }
                 }
 
-                if (afterGroupIds.isNotEmpty()) {
-                    val afterJoins = groupDeviceJoinDao.getJoinsForGroupIds(afterGroupIds.toList())
-                    val afterJoinDeviceIds = afterJoins.map { it.deviceId }.toSet()
+                val afterJoinsCount = if (afterGroupIds.isNotEmpty()) {
+                    groupDeviceJoinDao.getJoinsForGroupIds(afterGroupIds.toList()).size
+                } else 0
 
-                    // 7.3) unassigned устройства не должны иметь join’ов
-                    val badUnassigned = desiredUnassignedIds.intersect(afterJoinDeviceIds)
-                    if (badUnassigned.isNotEmpty()) {
-                        sanityFail("unassigned devices still have joins. bad=${badUnassigned.take(30)}")
-                    }
+                val fpAfter = snapshotFingerprintInTx(projectId)
 
-                    // 7.4) membership должен совпасть 1:1
-                    val desiredJoinPairs = joinsToInsert.map { it.groupId to it.deviceId }.toSet()
-                    val actualJoinPairs = afterJoins.map { it.groupId to it.deviceId }.toSet()
-
-                    if (actualJoinPairs != desiredJoinPairs) {
-                        val missing = (desiredJoinPairs - actualJoinPairs).take(30)
-                        val extra = (actualJoinPairs - desiredJoinPairs).take(30)
-                        sanityFail(
-                            "joins mismatch. desired=${desiredJoinPairs.size} actual=${actualJoinPairs.size} " +
-                                    "missing=$missing extra=$extra"
-                        )
-                    }
-
-                    // Итоговый "до/после" пакет
-                    val afterSummary = afterGroups
-                        .sortedBy { it.groupNumber }
-                        .joinToString { g -> "${g.groupId}#${g.groupNumber}#${g.phase}(type=${g.groupType})" }
-
-                    Log.d(
-                        tag,
-                        "SANITY OK projectId=$projectId groups=${afterGroups.size} joins=${afterJoins.size} " +
-                                "stableIds=${desiredExistingIds.size} newIds=${tempToNewId.size} " +
-                                "afterGroups=[$afterSummary]"
-                    )
-                } else {
-                    Log.d(tag, "SANITY OK projectId=$projectId (no groups) desired=$desiredGroupCount")
-                }
+                GroupWriteLogger.logStructureWrite(
+                    source = GroupWriteLogger.Source.MANUAL_SAVE,
+                    reason = GroupWriteLogger.Reason.DIFF_COMMIT,
+                    projectId = projectId,
+                    groupsCount = afterGroups.size,
+                    joinsCount = afterJoinsCount,
+                    before = fpBefore,
+                    after = fpAfter,
+                    sample = "END op=MANUAL_DIFF_COMMIT stableIds=${desiredExistingIds.size} newIds=${tempToNewId.size}",
+                    throwable = null
+                )
 
                 Log.d(tag, "MANUAL_SAVE END projectId=$projectId")
             }
         }
     }
 
-    /**
-     * Основная реализация replace: строго в рамках projectId.
-     *
-     * Почему так:
-     * - join-таблица завязана на group_id, а group_id при REPLACE меняется (autoIncrement),
-     *   поэтому мы:
-     *   1) читаем старые group_id проекта
-     *   2) чистим join по этим group_id
-     *   3) удаляем группы проекта
-     *   4) вставляем новые группы (получаем новые group_id)
-     *   5) пересоздаём join под новые group_id
-     */
     override suspend fun replaceAllGroupsTransactional(
         projectId: String,
         groups: List<CircuitGroup>
     ) = withContext(dispatchers) {
-
-        Log.e(
-            "GROUP_WRITE",
-            "REPLACE_ALL BEGIN pid=$projectId groups=${groups.size} " +
-                    "thread=${Thread.currentThread().name}",
-            Throwable("STACK")
-        )
-
         require(projectId.isNotBlank()) { "projectId must be non-blank" }
 
-        db.withTransaction {
-            val oldGroupIds = groupDao.getGroupIdsByProject(projectId)
+        val caller = GroupWriteLogger.shortCallerTrace(skip = 2, take = 8)
+        val detectedSource = GroupWriteLogger.detectSourceFromCaller(caller)
 
-            Log.e(
-                "GROUP_WRITE",
-                "REPLACE_ALL DB snapshot pid=$projectId oldGroups=${oldGroupIds.size} " +
-                        "oldIds(sample)=${oldGroupIds.take(12)}"
+        db.withTransaction {
+            val fpBefore = snapshotFingerprintInTx(projectId)
+
+            GroupWriteLogger.logStructureWrite(
+                source = detectedSource,
+                reason = GroupWriteLogger.Reason.EXPLICIT_REBUILD,
+                projectId = projectId,
+                groupsCount = groups.size,
+                joinsCount = -1,
+                before = fpBefore,
+                after = null,
+                sample = "BEGIN op=REPLACE_ALL caller=$caller",
+                throwable = null
             )
 
+            val oldGroupIds = groupDao.getGroupIdsByProject(projectId)
             if (oldGroupIds.isNotEmpty()) {
                 groupDeviceJoinDao.deleteJoinsForGroupIds(oldGroupIds)
             }
 
-            // ✅ КРИТИЧНО: сносим overrides проекта, чтобы они не "накрывали" сохранённые фазы после Save.
             overrideDao.deleteByProject(projectId)
-
             groupDao.deleteAllGroupsByProject(projectId)
 
-            val groupEntities = groups.map { g ->
-                // projectId обязателен на уровне маппера
-                g.toEntityGroup(projectId).copy(
-                    // при replace мы всегда хотим новые id
-                    groupId = 0
-                )
-            }
-
+            val groupEntities = groups.map { g -> g.toEntityGroup(projectId).copy(groupId = 0) }
             val newIds = groupDao.insertGroups(groupEntities)
             require(newIds.size == groups.size) {
                 "insertGroups returned ${newIds.size} ids for ${groups.size} groups"
             }
-            Log.e("GROUP_WRITE", "REPLACE_ALL END pid=$projectId insertedGroups=${groups.size}")
 
-            // 5) Создаём новые join записи под новые group_id
             val joins = buildList {
                 groups.forEachIndexed { idx, g ->
                     val newGroupId = newIds[idx]
                     g.devices.forEach { d ->
-                        require(d.id > 0L) {
-                            "Device id must be > 0 for join. Device=${d.name}"
-                        }
+                        require(d.id > 0L) { "Device id must be > 0 for join. Device=${d.name}" }
                         add(GroupDeviceJoin(groupId = newGroupId, deviceId = d.id))
                     }
                 }
             }
-
             if (joins.isNotEmpty()) {
                 groupDeviceJoinDao.insertAll(joins)
             }
+
+            val fpAfter = snapshotFingerprintInTx(projectId)
+
+            GroupWriteLogger.logStructureWrite(
+                source = detectedSource,
+                reason = GroupWriteLogger.Reason.EXPLICIT_REBUILD,
+                projectId = projectId,
+                groupsCount = groups.size,
+                joinsCount = joins.size,
+                before = fpBefore,
+                after = fpAfter,
+                sample = "END op=REPLACE_ALL insertedGroups=${groups.size} insertedJoins=${joins.size} oldGroups=${oldGroupIds.size}",
+                throwable = null
+            )
         }
     }
 
-    /**
-     * Overload без projectId.
-     * Важно: НЕ дублируем транзакционную логику — делегируем в основной метод.
-     */
     override suspend fun replaceAllGroupsTransactional(groups: List<CircuitGroup>) =
         withContext(dispatchers) {
-            val projectId = activeProjectDs.activeProjectId.first()
-
-            Log.e(
-                "GROUP_WRITE",
-                "REPLACE_ALL(overload) activePid=$projectId groups=${groups.size} " +
-                        "thread=${Thread.currentThread().name}",
-                Throwable("STACK")
-            )
-
-            require(!projectId.isNullOrBlank()) {
+            // ✅ FIX: activeProjectId nullable -> делаем String
+            val projectId = activeProjectDs.activeProjectId.first().orEmpty()
+            require(projectId.isNotBlank()) {
                 "activeProjectId is null/blank. Нельзя выполнять replaceAllGroupsTransactional без projectId."
             }
-
             replaceAllGroupsTransactional(projectId = projectId, groups = groups)
         }
 
     override suspend fun getGroupsWithDevices(): List<GroupWithDevices> {
-        val projectId = activeProjectDs.activeProjectId.first()
-
-        val groups = if (projectId != null) {
-            groupDao.getAllGroupsByProject(projectId)
+        val projectIdNullable = activeProjectDs.activeProjectId.first()
+        val groups = if (!projectIdNullable.isNullOrBlank()) {
+            groupDao.getAllGroupsByProject(projectIdNullable)
         } else {
             groupDao.getAllGroups()
         }
@@ -486,7 +436,6 @@ class ExplicationRepositoryImpl @Inject constructor(
         return groups.map { entity ->
             val devices = groupDeviceJoinDao.getDevicesForGroup(entity.groupId)
             val domainDevices = devices.map { it.toDomainDevice() }
-
             GroupWithDevices(
                 group = entity.toDomainGroup(domainDevices),
                 devices = domainDevices
@@ -494,17 +443,11 @@ class ExplicationRepositoryImpl @Inject constructor(
         }
     }
 
-    /**
-     * Снимок групп + устройств строго по projectId.
-     * Нужен для построения baseState при входе в manual из общего AppBar.
-     */
     override suspend fun getGroupsWithDevicesByProject(projectId: String): List<GroupWithDevices> {
         val groups = groupDao.getAllGroupsByProject(projectId)
-
         return groups.map { entity ->
             val devices = groupDeviceJoinDao.getDevicesForGroup(entity.groupId)
             val domainDevices = devices.map { it.toDomainDevice() }
-
             GroupWithDevices(
                 group = entity.toDomainGroup(domainDevices),
                 devices = domainDevices
@@ -514,66 +457,66 @@ class ExplicationRepositoryImpl @Inject constructor(
 
     override suspend fun addGroup(circuitGroups: List<CircuitGroup>) {
         withContext(dispatchers) {
-
-            val projectId = activeProjectDs.activeProjectId.first()
-            require(!projectId.isNullOrBlank()) { "activeProjectId is null/blank. addGroup запрещён без projectId." }
-
-            Log.e(
-                "GROUP_WRITE",
-                "ADD_GROUP BEGIN pid=$projectId groups=${circuitGroups.size} " +
-                        "thread=${Thread.currentThread().name}",
-                Throwable("STACK")
-            )
+            // ✅ FIX: activeProjectId nullable -> делаем String
+            val projectId = activeProjectDs.activeProjectId.first().orEmpty()
+            require(projectId.isNotBlank()) { "activeProjectId is null/blank. addGroup запрещён без projectId." }
 
             db.withTransaction {
-                val oldGroupIds = groupDao.getGroupIdsByProject(projectId)
+                val fpBefore = snapshotFingerprintInTx(projectId)
 
-                Log.e(
-                    "GROUP_WRITE",
-                    "ADD_GROUP DB snapshot pid=$projectId oldGroups=${oldGroupIds.size} " +
-                            "oldIds(sample)=${oldGroupIds.take(12)}"
+                GroupWriteLogger.logStructureWrite(
+                    source = GroupWriteLogger.Source.UNKNOWN,
+                    reason = GroupWriteLogger.Reason.USER_ACTION,
+                    projectId = projectId,
+                    groupsCount = circuitGroups.size,
+                    joinsCount = -1,
+                    before = fpBefore,
+                    after = null,
+                    sample = "BEGIN op=ADD_GROUP(legacy) groups=${circuitGroups.size}",
+                    throwable = null
                 )
 
-                // 2) Чистим join-таблицу только для групп проекта
+                val oldGroupIds = groupDao.getGroupIdsByProject(projectId)
                 if (oldGroupIds.isNotEmpty()) {
                     groupDeviceJoinDao.deleteJoinsForGroupIds(oldGroupIds)
                 }
-
-                // 3) Удаляем группы только текущего проекта (никаких wipe all)
                 groupDao.deleteAllGroupsByProject(projectId)
 
-                // 4) Вставляем новые группы с явным projectId
                 circuitGroups.forEach { group ->
-                    val entityToInsert = group.toEntityGroup(projectId).copy(
-                        // при вставке всегда autoIncrement
-                        groupId = 0
-                    )
-
+                    val entityToInsert = group.toEntityGroup(projectId).copy(groupId = 0)
                     val newGroupId = groupDao.addGroup(entityToInsert)
 
-                    // 5) Вставляем join'ы
                     group.devices.forEach { device ->
                         require(device.id > 0L) { "Device id must be > 0 for join. Device=${device.name}" }
-                        groupDeviceJoinDao.insertJoin(
-                            GroupDeviceJoin(groupId = newGroupId, deviceId = device.id)
-                        )
-                        Log.e("GROUP_WRITE", "ADD_GROUP END pid=$projectId insertedGroups=${circuitGroups.size}")
+                        groupDeviceJoinDao.insertJoin(GroupDeviceJoin(groupId = newGroupId, deviceId = device.id))
                     }
                 }
+
+                val fpAfter = snapshotFingerprintInTx(projectId)
+
+                GroupWriteLogger.logStructureWrite(
+                    source = GroupWriteLogger.Source.UNKNOWN,
+                    reason = GroupWriteLogger.Reason.USER_ACTION,
+                    projectId = projectId,
+                    groupsCount = circuitGroups.size,
+                    joinsCount = -1,
+                    before = fpBefore,
+                    after = fpAfter,
+                    sample = "END op=ADD_GROUP(legacy)",
+                    throwable = null
+                )
             }
         }
     }
 
     override suspend fun updateGroup(groupId: Long) {
-        Log.e(
-            "GROUP_WRITE",
-            "UPDATE_GROUP BEGIN groupId=$groupId thread=${Thread.currentThread().name}",
-            Throwable("STACK")
-        )
+        Log.e("GROUP_WRITE", "UPDATE_GROUP BEGIN groupId=$groupId", Throwable("STACK"))
 
         val groupWithDevices = groupDao.getGroupWithDevicesById(groupId)
             ?: throw GroupNotFoundException("Группа $groupId не найдена")
 
+        // ✅ FIX: projectId может быть nullable в сущности/отношении -> делаем String
+        val projectId = groupWithDevices.group.projectId.orEmpty().ifBlank { "unknown" }
         val devCount = groupWithDevices.devices.size
 
         val newCurrent = groupWithDevices.devices
@@ -588,16 +531,30 @@ class ExplicationRepositoryImpl @Inject constructor(
                 )
             }
 
-        Log.e(
-            "GROUP_WRITE",
-            "UPDATE_GROUP CALC groupId=$groupId devs=$devCount newCurrent=$newCurrent"
-        )
-
         if (newCurrent == 0.0) {
-            Log.e("GROUP_WRITE", "UPDATE_GROUP DELETE groupId=$groupId (current=0)")
+            // STRUCTURE: удаление группы
+            GroupWriteLogger.logStructureWrite(
+                source = GroupWriteLogger.Source.UPDATE_GROUP,
+                reason = GroupWriteLogger.Reason.USER_ACTION,
+                projectId = projectId,
+                groupsCount = 1,
+                joinsCount = -1,
+                before = null,
+                after = null,
+                sample = "op=UPDATE_GROUP delete groupId=$groupId (current=0)",
+                throwable = null
+            )
             groupDao.deleteGroupByGroupId(groupId)
         } else {
-            Log.e("GROUP_WRITE", "UPDATE_GROUP SET_CURRENT groupId=$groupId current=$newCurrent")
+            // PARAMETER: derived-поле
+            GroupWriteLogger.logParameterWrite(
+                source = GroupWriteLogger.Source.UPDATE_GROUP,
+                reason = GroupWriteLogger.Reason.USER_ACTION,
+                projectId = projectId,
+                groupsCount = 1,
+                sample = "op=UPDATE_GROUP set_current groupId=$groupId newCurrent=$newCurrent devs=$devCount",
+                throwable = null
+            )
             groupDao.updateGroupCurrent(groupId, newCurrent)
         }
 
@@ -613,18 +570,30 @@ class ExplicationRepositoryImpl @Inject constructor(
         level = DeprecationLevel.ERROR
     )
     override suspend fun deleteAllGroups() {
-        // Даже если кто-то обойдёт deprecation через @Suppress,
-        // мы не выполняем wipe-all и не трогаем другие проекты.
         withContext(dispatchers) {
             val projectId = activeProjectDs.activeProjectId.first().orEmpty()
             require(projectId.isNotBlank()) { "activeProjectId пуст. deleteAllGroups запрещён." }
-
-            // Эквивалент "удалить всё в проекте" — через безопасный транзакционный replace.
             replaceAllGroupsTransactional(projectId = projectId, groups = emptyList())
         }
     }
 
     override suspend fun addDeviceToGroup(deviceId: Long, groupId: Long) {
+        // STRUCTURE: вставка join (membership)
+        val groupEntity = groupDao.getGroupById(groupId)
+        val projectId = groupEntity?.projectId.orEmpty().ifBlank { "unknown" }
+
+        GroupWriteLogger.logStructureWrite(
+            source = GroupWriteLogger.Source.UNKNOWN,
+            reason = GroupWriteLogger.Reason.USER_ACTION,
+            projectId = projectId,
+            groupsCount = 0,
+            joinsCount = 1,
+            before = null,
+            after = null,
+            sample = "op=ADD_DEVICE_TO_GROUP join(groupId=$groupId, deviceId=$deviceId)",
+            throwable = null
+        )
+
         groupDeviceJoinDao.insertJoin(GroupDeviceJoin(groupId, deviceId))
     }
 
@@ -633,32 +602,62 @@ class ExplicationRepositoryImpl @Inject constructor(
     }
 
     override suspend fun handleRoomDeletion(roomId: Long) {
-        // Удаляем join для групп комнаты и сами группы комнаты
+        // STRUCTURE: удаление join'ов и групп комнаты
+        val projectId = activeProjectDs.activeProjectId.first().orEmpty().ifBlank { "unknown" }
+
+        GroupWriteLogger.logStructureWrite(
+            source = GroupWriteLogger.Source.UNKNOWN,
+            reason = GroupWriteLogger.Reason.USER_ACTION,
+            projectId = projectId,
+            groupsCount = -1,
+            joinsCount = -1,
+            before = null,
+            after = null,
+            sample = "op=HANDLE_ROOM_DELETION roomId=$roomId",
+            throwable = null
+        )
+
         groupDeviceJoinDao.deleteJoinsForRoom(roomId)
         groupDao.deleteGroupByRoomId(roomId)
     }
 
     override suspend fun handleDeviceDeletion(deviceId: Long) {
-        Log.e(
-            "GROUP_WRITE",
-            "HANDLE_DEVICE_DELETE BEGIN deviceId=$deviceId thread=${Thread.currentThread().name}",
-            Throwable("STACK")
-        )
+        // STRUCTURE: удаление join по deviceId
+        // PARAMETER: updateGroupCurrent(..., 0.0)
+        val projectId = activeProjectDs.activeProjectId.first().orEmpty().ifBlank { "unknown" }
 
+        // Берём список групп ДО удаления join, иначе потеряем связь
         val groupIds = groupDeviceJoinDao.getGroupIdsForDevice(deviceId)
 
-        Log.e("GROUP_WRITE", "HANDLE_DEVICE_DELETE deviceId=$deviceId groups=${groupIds.size} ids=${groupIds.take(20)}")
+        GroupWriteLogger.logStructureWrite(
+            source = GroupWriteLogger.Source.UNKNOWN,
+            reason = GroupWriteLogger.Reason.USER_ACTION,
+            projectId = projectId,
+            groupsCount = groupIds.size,
+            joinsCount = -1,
+            before = null,
+            after = null,
+            sample = "op=HANDLE_DEVICE_DELETE deviceId=$deviceId groups=${groupIds.size}",
+            throwable = Throwable("STACK")
+        )
 
         groupDeviceJoinDao.deleteJoinsForDevice(deviceId)
 
+        // derived-поля — отдельный канал логов
         groupIds.forEach { id ->
             groupDao.getGroupById(id)?.let {
-                Log.e("GROUP_WRITE", "HANDLE_DEVICE_DELETE zeroCurrent groupId=$id")
+                GroupWriteLogger.logParameterWrite(
+                    // ✅ FIX: не используем несуществующий enum
+                    source = GroupWriteLogger.Source.UNKNOWN,
+                    reason = GroupWriteLogger.Reason.USER_ACTION,
+                    projectId = projectId,
+                    groupsCount = 1,
+                    sample = "op=HANDLE_DEVICE_DELETE set_current groupId=$id current=0.0 (deviceId=$deviceId)",
+                    throwable = null
+                )
                 groupDao.updateGroupCurrent(id, 0.0)
             }
         }
-
-        Log.e("GROUP_WRITE", "HANDLE_DEVICE_DELETE END deviceId=$deviceId")
     }
 
     override suspend fun getGroupById(groupId: Long): CircuitGroup? {
@@ -677,11 +676,31 @@ class ExplicationRepositoryImpl @Inject constructor(
     override suspend fun getGroupByType(groupType: DeviceType): List<CircuitGroup> =
         withContext(dispatchers) {
             try {
-                // В БД group_type хранится как String, поэтому в DAO должен быть String.
-                // Если ты уже поправил DAO на String — это верный вызов.
                 groupDao.getGroupByType(groupType.name).mapToDomainGroups()
             } catch (_: Exception) {
                 throw GroupNotFoundException()
             }
         }
+
+    // -------------------- Fingerprint helpers (Коммит 0) --------------------
+    // join-таблица не имеет projectId, поэтому boundary делаем через groupIds проекта.
+
+    private suspend fun snapshotFingerprintInTx(projectId: String): GroupWriteLogger.Fingerprint {
+        val groups = groupDao.getAllGroupsByProject(projectId)
+
+        val groupIds = groups.map { it.groupId }
+        val joins = if (groupIds.isEmpty()) emptyList() else groupDeviceJoinDao.getJoinsForGroupIds(groupIds)
+
+        val joinPairs = joins
+            .map { it.groupId to it.deviceId }
+            .sortedWith(compareBy<Pair<Long, Long>> { it.first }.thenBy { it.second })
+
+        val groupStruct = groups
+            .map { g ->
+                "${g.groupId}|ph=${g.phase}|num=${g.groupNumber}|type=${g.groupType}|room=${g.roomId}"
+            }
+            .sorted()
+
+        return GroupWriteLogger.fingerprint(joinPairs, groupStruct)
+    }
 }

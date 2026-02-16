@@ -24,11 +24,6 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
     )
 
     suspend fun execute(params: Params) {
-        Log.e(
-            "AUTO_SAVE",
-            "AUTO_SAVE execute pid=${params.projectId} groups=${params.groups.size}",
-            Throwable("STACK")
-        )
         require(params.projectId.isNotBlank()) { "projectId must be non-blank" }
 
         val projectId = params.projectId
@@ -48,12 +43,15 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
             .take(8)
             .joinToString(" <- ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
 
+        // Маркер для grep: кто инициирует структурную запись
         Log.w(
             "AUTO_SAVE",
-            "AUTO_SAVE BEGIN projectId=$projectId groups=${groups.size} summary=[$summary] caller=$caller"
+            "AUTO_SAVE BEGIN source=AUTO_SAVE reason=EXPLICIT_REBUILD projectId=$projectId " +
+                    "groups=${groups.size} summary=[$summary] caller=$caller"
         )
 
         // 1) Сохраняем группы AUTO-результата (replace допустим только тут)
+        // Внутри репозитория будет GROUP_STRUCTURE_WRITE с fingerprint before/after.
         explicationRepository.replaceAllGroupsTransactional(
             projectId = projectId,
             groups = groups

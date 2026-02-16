@@ -29,25 +29,32 @@ class RecalculateGroupsOnDeviceChangeUseCase @Inject constructor(
     @OptIn(FlowPreview::class)
     fun launch(scope: CoroutineScope): Job {
         return combine(
-            deviceDao.observeAllDevices(),          // Flow<List<DeviceEntity>>
-            joinDao.observeJoins(),              // Flow<List<GroupDeviceJoin>>
-            preferencesRepository.phaseMode      // Flow<PhaseMode>
+            deviceDao.observeAllDevices(),          // вход: устройства
+            joinDao.observeJoins(),                 // вход: membership
+            preferencesRepository.phaseMode         // вход: режим фаз
         ) { devices, joins, mode ->
-            // компактные «сигнатуры» для отсечения повторов + текущий mode
+            // Сигнатуры для distinctUntilChanged.
             val devSig = devices.map { it.deviceId }.sorted()
+
             val joinSig = joins.map { it.groupId to it.deviceId }
                 .sortedWith(compareBy<Pair<Long, Long>> { it.first }.thenBy { it.second })
-            Triple(devSig to joinSig, mode, Unit)
+
+            Triple(devSig, joinSig, mode)
         }
-            .map { (pair, mode) -> Triple(pair.first.hashCode(), pair.second.hashCode(), mode) }
-            .distinctUntilChanged()              // срежет одинаковые (dev, join, mode)
+            .distinctUntilChanged()
             .debounce(200)
-            .onEach { (_, _, mode) ->
+            .onEach { (devSig, joinSig, mode) ->
+                // Лог триггера (для расследований циклов).
+                // Комментарий: пока без projectId (у flows глобальные), но уже можно видеть "что поменялось".
+                android.util.Log.w(
+                    "AUTO_RECALC_TRIGGER",
+                    "trigger=DEVICE_OR_JOIN_OR_MODE " +
+                            "devices=${devSig.size} joins=${joinSig.size} mode=$mode " +
+                            "devIds(sample)=${devSig.take(12)} joins(sample)=${joinSig.take(12)}"
+                )
+
                 withContext(Dispatchers.IO) {
-                    // ВАЖНО: передаём режим!
                     calculatorFactory.create().calculateGroups(mode)
-                    // Если метод у тебя называется иначе:
-                    // calculatorFactory.create().calculate(mode)
                 }
             }
             .launchIn(scope)

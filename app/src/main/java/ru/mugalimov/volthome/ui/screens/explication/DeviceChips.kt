@@ -55,9 +55,17 @@ fun DeviceChips(
     val rememberKey = groupKey ?: devices.joinToString("|") { it.id.toString() }
     val (expanded, setExpanded) = rememberSaveable(rememberKey) { mutableStateOf(false) }
 
+    val TAG_CHIPS = "EXP_CHIPS"
+
     val total = devices.size
     val overflow = (total - maxVisible).coerceAtLeast(0)
     val visible = if (expanded || total <= maxVisible) devices else devices.take(maxVisible)
+
+    Log.d(
+        TAG_CHIPS,
+        "render groupKey=$groupKey rememberKey=$rememberKey total=$total visible=${visible.size} " +
+                "overflow=$overflow expanded=$expanded enableLongPress=$enableLongPress"
+    )
 
     FlowRow(
         modifier = Modifier.padding(top = 2.dp),
@@ -68,25 +76,34 @@ fun DeviceChips(
             key(d.id) {
                 DeviceChip(
                     text = d.name,
-                    onClick = { onDeviceClick(d.id) },
+                    onClick = {
+                        Log.d(TAG_CHIPS, "click deviceId=${d.id} name=${d.name}")
+                        onDeviceClick(d.id)
+                    },
 
-                    // ✅ В manual включаем drag по long-press (через detectDragGesturesAfterLongPress)
                     enableDrag = enableLongPress,
                     onDragStart = { itemStartRoot, pointerStartRoot ->
-                        // ВАЖНО: сохраняем старое поведение (панель целей),
-                        // чтобы UI в этом коммите не поменялся.
+                        Log.d(
+                            TAG_CHIPS,
+                            "dragStart deviceId=${d.id} name=${d.name} itemStartRoot=$itemStartRoot pointerStartRoot=$pointerStartRoot"
+                        )
+
+                        // ВАЖНО: это старое поведение — включение панели целей
                         onDeviceLongPress?.invoke(d.id)
 
                         // Новый контракт: startDrag в VM
                         onDeviceDragStart?.invoke(d.id, itemStartRoot, pointerStartRoot)
                     },
                     onDragMove = { pointerRoot ->
+                        Log.v(TAG_CHIPS, "dragMove deviceId=${d.id} name=${d.name} pointerRoot=$pointerRoot")
                         onDeviceDragMove?.invoke(pointerRoot)
                     },
                     onDragEnd = {
+                        Log.d(TAG_CHIPS, "dragEnd deviceId=${d.id} name=${d.name}")
                         onDeviceDragEnd?.invoke()
                     },
                     onDragCancel = {
+                        Log.w(TAG_CHIPS, "dragCancel deviceId=${d.id} name=${d.name}")
                         onDeviceDragCancel?.invoke()
                     }
                 )
@@ -136,37 +153,51 @@ private fun DeviceChip(
 
     // Координаты чипа в root-системе — нужны для вычисления itemStartRoot/pointerRoot.
 // ВАЖНО: LayoutCoordinates нельзя сохранять через rememberSaveable (не Bundle-тип).
+    val TAG_CHIP = "EXP_CHIP"
     val coordsState = remember { mutableStateOf<LayoutCoordinates?>(null) }
 
     val dragModifier = if (enableDrag) {
         Modifier
-            // Снимаем геометрию чипа в root координатах.
-            .onGloballyPositioned { coordsState.value = it }
-            // Long-press -> drag. ВАЖНО: click остаётся через combinedClickable ниже.
+            .onGloballyPositioned { coords ->
+                coordsState.value = coords
+                Log.v(TAG_CHIP, "positioned text=$text root=${coords.positionInRoot()}")
+            }
             .pointerInput(Unit) {
+                Log.d(TAG_CHIP, "pointerInput ACTIVE text=$text enableDrag=$enableDrag")
+
                 detectDragGesturesAfterLongPress(
                     onDragStart = { startLocal ->
-                        val coords = coordsState.value ?: return@detectDragGesturesAfterLongPress
+                        val coords = coordsState.value
+                        if (coords == null) {
+                            Log.e(TAG_CHIP, "dragStart SKIP coords=null text=$text")
+                            return@detectDragGesturesAfterLongPress
+                        }
+
                         val itemStartRoot = coords.positionInRoot()
                         val pointerStartRoot = coords.localToRoot(startLocal)
 
-                        Log.d("DRAG", "START text=$text itemStartRoot=$itemStartRoot pointerStartRoot=$pointerStartRoot")
+                        Log.d(TAG_CHIP, "DRAG_START text=$text itemStartRoot=$itemStartRoot pointerStartRoot=$pointerStartRoot")
                         onDragStart?.invoke(itemStartRoot, pointerStartRoot)
                     },
                     onDrag = { change, _ ->
-                        val coords = coordsState.value ?: return@detectDragGesturesAfterLongPress
-                        val pointerRoot = coords.localToRoot(change.position)
+                        val coords = coordsState.value
+                        if (coords == null) {
+                            Log.e(TAG_CHIP, "dragMove SKIP coords=null text=$text")
+                            return@detectDragGesturesAfterLongPress
+                        }
 
-                        Log.d("DRAG", "MOVE text=$text pointerRoot=$pointerRoot")
+                        val pointerRoot = coords.localToRoot(change.position)
+                        Log.v(TAG_CHIP, "DRAG_MOVE text=$text pointerRoot=$pointerRoot consumed=${change.isConsumed}")
+
                         onDragMove?.invoke(pointerRoot)
                         change.consume()
                     },
                     onDragEnd = {
-                        Log.d("DRAG", "END text=$text")
+                        Log.d(TAG_CHIP, "DRAG_END text=$text")
                         onDragEnd?.invoke()
                     },
                     onDragCancel = {
-                        Log.d("DRAG", "CANCEL text=$text")
+                        Log.w(TAG_CHIP, "DRAG_CANCEL text=$text")
                         onDragCancel?.invoke()
                     }
                 )
