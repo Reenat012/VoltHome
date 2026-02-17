@@ -153,51 +153,53 @@ private fun DeviceChip(
 
     // Координаты чипа в root-системе — нужны для вычисления itemStartRoot/pointerRoot.
 // ВАЖНО: LayoutCoordinates нельзя сохранять через rememberSaveable (не Bundle-тип).
-    val TAG_CHIP = "EXP_CHIP"
+//    val TAG_CHIP = "EXP_CHIP"
     val coordsState = remember { mutableStateOf<LayoutCoordinates?>(null) }
 
     val dragModifier = if (enableDrag) {
         Modifier
             .onGloballyPositioned { coords ->
                 coordsState.value = coords
-                Log.v(TAG_CHIP, "positioned text=$text root=${coords.positionInRoot()}")
+//                Log.v(TAG_CHIP, "positioned text=$text root=${coords.positionInRoot()}")
             }
             .pointerInput(Unit) {
-                Log.d(TAG_CHIP, "pointerInput ACTIVE text=$text enableDrag=$enableDrag")
+//                Log.d(TAG_CHIP, "pointerInput ACTIVE text=$text enableDrag=$enableDrag")
 
                 detectDragGesturesAfterLongPress(
                     onDragStart = { startLocal ->
                         val coords = coordsState.value
                         if (coords == null) {
-                            Log.e(TAG_CHIP, "dragStart SKIP coords=null text=$text")
+//                            Log.e(TAG_CHIP, "dragStart SKIP coords=null text=$text")
                             return@detectDragGesturesAfterLongPress
                         }
 
                         val itemStartRoot = coords.positionInRoot()
                         val pointerStartRoot = coords.localToRoot(startLocal)
 
-                        Log.d(TAG_CHIP, "DRAG_START text=$text itemStartRoot=$itemStartRoot pointerStartRoot=$pointerStartRoot")
+//                        Log.d(TAG_CHIP, "DRAG_START text=$text itemStartRoot=$itemStartRoot pointerStartRoot=$pointerStartRoot")
                         onDragStart?.invoke(itemStartRoot, pointerStartRoot)
                     },
                     onDrag = { change, _ ->
                         val coords = coordsState.value
                         if (coords == null) {
-                            Log.e(TAG_CHIP, "dragMove SKIP coords=null text=$text")
+//                            Log.e(TAG_CHIP, "dragMove SKIP coords=null text=$text")
                             return@detectDragGesturesAfterLongPress
                         }
 
                         val pointerRoot = coords.localToRoot(change.position)
-                        Log.v(TAG_CHIP, "DRAG_MOVE text=$text pointerRoot=$pointerRoot consumed=${change.isConsumed}")
+//                        Log.v(TAG_CHIP, "DRAG_MOVE text=$text pointerRoot=$pointerRoot consumed=${change.isConsumed}")
 
                         onDragMove?.invoke(pointerRoot)
                         change.consume()
                     },
                     onDragEnd = {
-                        Log.d(TAG_CHIP, "DRAG_END text=$text")
+//                        Log.d(TAG_CHIP, "DRAG_END text=$text")
+                        Log.d("DRAG_TRACE", "UI onDragEnd text=$text")
                         onDragEnd?.invoke()
                     },
                     onDragCancel = {
-                        Log.w(TAG_CHIP, "DRAG_CANCEL text=$text")
+//                        Log.w(TAG_CHIP, "DRAG_CANCEL text=$text")
+                        Log.d("DRAG_TRACE", "UI onDragCancel text=$text")
                         onDragCancel?.invoke()
                     }
                 )

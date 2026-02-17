@@ -280,6 +280,7 @@ fun ExplicationScreen(
                                     viewModel.setActiveDragTarget(active)
                                 },
                                 onDeviceDragEnd = {
+                                    Log.d("DRAG_TRACE", "SCREEN onDeviceDragEnd activeTarget=${dragStateLatest.value.activeTarget}")
                                     val latest = dragStateLatest.value
                                     when (val t = latest.activeTarget) {
                                         is ExplicationViewModel.DragTarget.Group -> viewModel.dropToGroup(t.groupId)
@@ -289,6 +290,7 @@ fun ExplicationScreen(
                                     }
                                 },
                                 onDeviceDragCancel = {
+                                    Log.d("DRAG_TRACE", "SCREEN onDeviceDragCancel")
                                     viewModel.cancelDrag()
                                 },
 

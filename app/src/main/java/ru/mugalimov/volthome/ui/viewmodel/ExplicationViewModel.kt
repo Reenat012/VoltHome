@@ -671,6 +671,7 @@ class ExplicationViewModel @Inject constructor(
      * В этом коммите не трогаем _moveDeviceUi, чтобы не менять текущее поведение UI.
      */
     fun cancelDrag() {
+        Log.d("DRAG_TRACE", "VM cancelDrag called state=$_dragState.value")
         _dragState.value = DragState()
     }
 
@@ -679,7 +680,7 @@ class ExplicationViewModel @Inject constructor(
      * Реальный перенос (manualRepo.apply) подключим в коммите с drop-логикой (позже).
      */
     fun dropToGroup(targetGroupId: Long) {
-        Log.d("DRAG_DROP", "dropToGroup targetGroupId=$targetGroupId dragState=${_dragState.value}")
+        Log.d("DRAG_TRACE", "VM dropToGroup target=$targetGroupId state=$_dragState.value")
 
         val s = _dragState.value
         Log.d(TAG_DND, "dropToGroup target=$targetGroupId state=$s")
@@ -896,7 +897,7 @@ class ExplicationViewModel @Inject constructor(
                 return@launch
             }
 
-            Log.e("MOVE_DEBUG", "APPLY device=$deviceId from=$fromGroupId to=$targetGroupId")
+            Log.d("DRAG_TRACE", "VM APPLY MOVE device=$deviceId from=$fromGroupId to=$targetGroupId")
 
             manualRepo.apply(
                 ManualEditAction.MoveDevice(
@@ -961,7 +962,7 @@ class ExplicationViewModel @Inject constructor(
             // ✅ Берём активную сессию надёжно (manualSession.value может быть null из-за WhileSubscribed)
             val session = manualRepo.getActiveSession() ?: manualSession.value
             if (session == null) {
-                Log.w(TAG_SESS, "onMoveDeviceToNewGroupSelected: session=null (ignored) deviceId=$deviceId")
+                Log.d(TAG_SESS, "onMoveDeviceToNewGroupSelected: session=null (ignored) deviceId=$deviceId")
                 _events.value = UiEvent.ShowSnackbar("Сессия ручного режима недоступна")
                 return@launch
             }
