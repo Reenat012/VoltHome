@@ -130,4 +130,15 @@ interface DeviceDao {
     WHERE d.project_id = :projectId
 """)
     suspend fun countByProjectId(projectId: String): Int
+
+    @Query("""
+        SELECT d.* FROM devices d
+        WHERE d.device_id IN (:ids)
+          AND NOT EXISTS (
+              SELECT 1 FROM tombstones t
+              WHERE t.entity_type = 'DEVICE'
+                AND t.local_id = d.device_id
+          )
+    """)
+    suspend fun getDevicesByIds(ids: List<Long>): List<DeviceEntity>
 }

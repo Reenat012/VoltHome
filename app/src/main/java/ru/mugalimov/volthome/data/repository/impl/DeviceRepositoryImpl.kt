@@ -255,4 +255,19 @@ class DeviceRepositoryImpl @Inject constructor(
                 throw DeviceNotFoundException()
             }
         }
+
+    override suspend fun getDevicesByIds(ids: List<Long>): List<Device> =
+        withContext(dispatchers) {
+            if (ids.isEmpty()) return@withContext emptyList()
+
+            // 1) Одним запросом получаем сущности (tombstones уже отфильтрованы на уровне DAO)
+            val entities = deviceDao.getDevicesByIds(ids)
+
+            // 2) Делаем индекс по id
+            val byId = entities.associateBy { it.deviceId }
+
+            // 3) Детерминированность: возвращаем в том же порядке, что входные ids.
+            // Если каких-то id нет (удалены/tombstone/не существуют) — просто пропускаем.
+            ids.distinct().mapNotNull { id -> byId[id]?.toDomainDevice() }
+        }
 }

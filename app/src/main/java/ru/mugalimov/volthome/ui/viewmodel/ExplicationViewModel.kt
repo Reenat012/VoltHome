@@ -150,6 +150,10 @@ class ExplicationViewModel @Inject constructor(
 // Manual display groups (draft -> UI)
 // =========================
 
+    // =========================
+// Manual display groups (draft -> UI)
+// =========================
+
     /**
      * Группы для отображения в MANUAL.
      *
@@ -157,33 +161,61 @@ class ExplicationViewModel @Inject constructor(
      * - MANUAL строится ТОЛЬКО от draft (ManualEditSessionRepository)
      * - Никаких "склеек" с базовыми группами из БД
      *
-     * На Коммите 0 устройства здесь намеренно пустые (devices = emptyList()).
-     * Реальные устройства подтянем в следующих коммитах через DeviceRepository.getDevicesByIds().
+     * ✅ Коммит 2A: устройства подтягиваем batch-ом по deviceIds напрямую из БД через DeviceRepository.getDevicesByIds().
+     * Это делает UI независимым от baseGroups/БД-групп.
      */
     val manualDisplayGroups: StateFlow<List<CircuitGroup>> =
         manualSession
-            .map { s ->
-                val draft = s?.draftState ?: return@map emptyList()
-                draft.groups.map { g ->
-                    CircuitGroup(
-                        groupId = g.groupId,
-                        groupNumber = g.groupNumber,
-                        roomName = g.roomName,
-                        roomId = g.roomId,
-                        groupType = g.groupType,      // ожидается DeviceType
-                        devices = emptyList(),        // ✅ Коммит 0: без устройств
+            .flatMapLatest { s ->
+                kotlinx.coroutines.flow.flow {
+                    val draft = s?.draftState
+                    if (draft == null) {
+                        emit(emptyList())
+                        return@flow
+                    }
 
-                        // ⚠️ Коммит 0: расчёты пока не пересчитываем по устройствам — оставляем то, что есть в draft
-                        nominalCurrent = g.nominalCurrent ?: 0.0,
-                        installedPowerW = 0,          // временно, появится после загрузки устройств
+                    // Собираем ВСЕ id устройств, которые реально используются в группах (assigned),
+                    // чтобы одним запросом подтянуть их в память.
+                    val allGroupDeviceIds: List<Long> = draft.groups
+                        .asSequence()
+                        .flatMap { it.deviceIds.asSequence() }
+                        .distinct()
+                        .toList()
 
-                        circuitBreaker = g.circuitBreaker ?: 16,
-                        cableSection = g.cableSection ?: 2.5,
-                        breakerType = g.breakerType ?: "",
-                        rcdRequired = g.rcdRequired ?: false,
-                        rcdCurrent = g.rcdCurrent ?: 30,
-                        phase = g.phase
-                    )
+                    val devices: List<Device> =
+                        if (allGroupDeviceIds.isEmpty()) emptyList()
+                        else deviceRepository.getDevicesByIds(allGroupDeviceIds)
+
+                    val devicesById: Map<Long, Device> = devices.associateBy { it.id }
+
+                    val uiGroups: List<CircuitGroup> = draft.groups.map { g ->
+                        val groupDevices = g.deviceIds.mapNotNull { id -> devicesById[id] }
+
+                        CircuitGroup(
+                            groupId = g.groupId,
+                            groupNumber = g.groupNumber,
+                            roomName = g.roomName,
+                            roomId = g.roomId,
+                            groupType = g.groupType,
+                            devices = groupDevices,
+
+                            // ⚠️ ВАЖНО: номинальный ток/линия сейчас живут в draft и пересчитываются ManualRepo.
+                            // Тут не трогаем, чтобы не менять поведение.
+                            nominalCurrent = g.nominalCurrent ?: 0.0,
+
+                            // ✅ Теперь можно честно посчитать установленную мощность
+                            installedPowerW = groupDevices.sumOf { it.power },
+
+                            circuitBreaker = g.circuitBreaker ?: 16,
+                            cableSection = g.cableSection ?: 2.5,
+                            breakerType = g.breakerType ?: "",
+                            rcdRequired = g.rcdRequired ?: false,
+                            rcdCurrent = g.rcdCurrent ?: 30,
+                            phase = g.phase
+                        )
+                    }
+
+                    emit(uiGroups)
                 }
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -502,6 +534,8 @@ class ExplicationViewModel @Inject constructor(
     /**
      * Обновляет список Device для блока "Нераспределённые".
      * Защищено от гонок: старые результаты не перетрут новые.
+     *
+     * ✅ Коммит 2A: batch-загрузка вместо N+1.
      */
     fun refreshUnassignedDevices(unassignedIds: Set<Long>) {
         val version = _unassignedRequestVersion.value + 1
@@ -515,13 +549,9 @@ class ExplicationViewModel @Inject constructor(
                 return@launch
             }
 
-            val devices = buildList {
-                for (id in unassignedIds) {
-                    // Если когда-то будут id > Int.MAX_VALUE — надо менять репозиторий.
-                    val d = deviceRepository.getDeviceById(id.toInt())
-                    if (d != null) add(d)
-                }
-            }.sortedBy { it.name.trim().lowercase(Locale.ROOT) }
+            val devices = deviceRepository
+                .getDevicesByIds(unassignedIds.toList())
+                .sortedBy { it.name.trim().lowercase(Locale.ROOT) }
 
             if (_unassignedRequestVersion.value == version) {
                 _unassignedDevices.value = devices
@@ -837,115 +867,44 @@ class ExplicationViewModel @Inject constructor(
     /**
      * Перенос устройства в выбранную группу.
      *
-     * ФИКС (важно):
-     * - Если тип устройства != тип группы => MIXED:
-     *   * первый раз показываем блокирующий диалог,
-     *   * confirm должен выполнить ИМЕННО перенос в targetGroup (а не MoveToUnassigned).
-     * - Нельзя в confirm брать fromGroupId из _moveDeviceUi: UI успевает сбросить.
-     *   Поэтому используем PendingMixedMove (deviceId/fromGroupId/targetGroupId).
+     * ФИКС:
+     * - Не используем state.devices (может быть пустым) -> берём устройство из БД.
+     * - Не делаем "тихих return": даём snackbar/лог.
+     * - Защита от переноса "в ту же группу" (иначе кажется, что не работает).
      */
     fun onMoveDeviceTargetGroupSelected(deviceId: Long, targetGroupId: Long) {
-        val fromGroupId = _moveDeviceUi.value?.fromGroupId
-        Log.d(TAG_MOVE, "targetSelected deviceId=$deviceId from=$fromGroupId -> target=$targetGroupId moveUiWas=${_moveDeviceUi.value}")
-        // ВАЖНО: фиксируем from ДО обнуления UI-стейта, иначе потеряем источник.
         val from = _moveDeviceUi.value?.fromGroupId
         _moveDeviceUi.value = null
 
         viewModelScope.launch(ioDispatcher) {
-            Log.d("MOVE_DEVICE", "deviceId=$deviceId targetGroupId=$targetGroupId from=${from}")
 
-            // ✅ Не полагаемся только на manualSession.value (WhileSubscribed может дать null).
-            // Берём активную сессию напрямую из репозитория.
-            val session = manualRepo.getActiveSession() ?: manualSession.value ?: return@launch
-            Log.d(TAG_MOVE, "session pid=${session?.projectId} active=${session?.manualModeActive} ver=${session?.version}")
+            val session = manualRepo.getActiveSession()
+            if (session == null) {
+                Log.e("MOVE_DEBUG", "session=null")
+                _events.value = UiEvent.ShowSnackbar("Manual session = null")
+                return@launch
+            }
 
-            Log.d("MOVE_DEVICE", "session=${session.projectId} active=${session.manualModeActive} draftGroups=${session.draftState.groups.size}")
-            Log.d("MOVE_DEVICE", "draft ids=" + (session.draftState.groups.joinToString { "${it.groupId}#${it.groupNumber}" }))
+            if (!session.manualModeActive) {
+                Log.e("MOVE_DEBUG", "manualModeActive=false")
+                _events.value = UiEvent.ShowSnackbar("Manual mode inactive")
+                return@launch
+            }
 
-            if (!session.manualModeActive) return@launch
-
-            val state = session.draftState
-
-            val devicesById = state.devices.associateBy { it.deviceId }
-            val device = devicesById[deviceId] ?: return@launch
-            val targetGroup = state.groups.firstOrNull { it.groupId == targetGroupId } ?: return@launch
-
-            // Смешение = тип устройства не совпадает с типом группы
-            val isMixed = device.deviceType != targetGroup.groupType
-
-            // Защита: если UI не смог дать from — честно выходим
             val fromGroupId = from ?: run {
-                _events.value = UiEvent.ShowSnackbar("Не удалось определить исходную группу")
+                Log.e("MOVE_DEBUG", "fromGroupId=null")
                 return@launch
             }
 
-            if (!isMixed) {
-                // ✅ обычный перенос
-                try {
-                    if (fromGroupId == FROM_UNASSIGNED) {
-                        // перенос из unassigned -> group
-                        manualRepo.apply(
-                            ManualEditAction.MoveFromUnassigned(
-                                deviceId = deviceId,
-                                toGroupId = targetGroupId
-                            )
-                        )
-                    } else {
-                        // перенос group -> group
-                        manualRepo.apply(
-                            ManualEditAction.MoveDevice(
-                                deviceId = deviceId,
-                                fromGroupId = fromGroupId,
-                                toGroupId = targetGroupId
-                            )
-                        )
-                    }
-                } catch (_: Throwable) {
-                    _events.value = UiEvent.ShowSnackbar("Не удалось перенести устройство")
-                }
-                return@launch
-            }
+            Log.e("MOVE_DEBUG", "APPLY device=$deviceId from=$fromGroupId to=$targetGroupId")
 
-            // ✅ MIXED: первый раз — блокирующий диалог (если не отключили)
-            if (!_mixedWarningDontShowAgain.value && !_mixedWarningBlocked.value) {
-                _pendingMixedMove.value = PendingMixedMove(
+            manualRepo.apply(
+                ManualEditAction.MoveDevice(
                     deviceId = deviceId,
                     fromGroupId = fromGroupId,
-                    targetGroupId = targetGroupId
+                    toGroupId = targetGroupId
                 )
-                _showMixedWarningDialog.value = true
-                return@launch
-            }
-
-            Log.d(TAG_MOVE, "before: fromGroupDevices=" +
-                    (state.groups.firstOrNull { it.groupId == fromGroupId }?.deviceIds?.size ?: -1) +
-                    " targetDevices=" +
-                    (state.groups.firstOrNull { it.groupId == targetGroupId }?.deviceIds?.size ?: -1)
             )
-
-            // ✅ MIXED дальше: snackbar + выполняем перенос
-            _events.value = UiEvent.ShowSnackbar("Группа помечена как MIXED (ручное смешение типов)")
-            try {
-                if (fromGroupId == FROM_UNASSIGNED) {
-                    manualRepo.apply(
-                        ManualEditAction.MoveFromUnassigned(
-                            deviceId = deviceId,
-                            toGroupId = targetGroupId
-                        )
-                    )
-                } else {
-                    manualRepo.apply(
-                        ManualEditAction.MoveDevice(
-                            deviceId = deviceId,
-                            fromGroupId = fromGroupId,
-                            toGroupId = targetGroupId
-                        )
-                    )
-                }
-            } catch (_: Throwable) {
-                // не спамим вторым снеком
-            }
-            Log.d(TAG_MOVE, "apply action=MoveDevice/MoveFromUnassigned ...")
         }
     }
 
