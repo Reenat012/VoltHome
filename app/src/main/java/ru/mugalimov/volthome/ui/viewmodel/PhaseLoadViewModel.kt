@@ -52,11 +52,50 @@ class PhaseLoadViewModel @Inject constructor(
     private val _events = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val events: SharedFlow<String> = _events.asSharedFlow()
 
+    // =========================
+// Groups source: AUTO from DB, MANUAL from draft (ТЗ v1.1)
+// =========================
+
+    private val groupsFlow: Flow<List<ru.mugalimov.volthome.domain.model.CircuitGroup>> =
+        activeProjectDs.activeProjectId
+            .filterNotNull()
+            .distinctUntilChanged()
+            .flatMapLatest { projectId ->
+                manualRepo.observeSession(projectId).flatMapLatest { s ->
+                    if (s?.manualModeActive == true) {
+                        // ✅ MANUAL: строго draft, без БД
+                        flowOf(
+                            s.draftState.groups.map { g ->
+                                ru.mugalimov.volthome.domain.model.CircuitGroup(
+                                    groupId = g.groupId,
+                                    groupNumber = g.groupNumber,
+                                    roomName = g.roomName,
+                                    roomId = g.roomId,
+                                    groupType = g.groupType,
+                                    devices = emptyList(),      // Коммит 0: без устройств
+                                    nominalCurrent = g.nominalCurrent ?: 0.0,
+                                    installedPowerW = 0,
+                                    circuitBreaker = g.circuitBreaker ?: 16,
+                                    cableSection = g.cableSection ?: 2.5,
+                                    breakerType = g.breakerType ?: "",
+                                    rcdRequired = g.rcdRequired ?: false,
+                                    rcdCurrent = g.rcdCurrent ?: 30,
+                                    phase = g.phase
+                                )
+                            }
+                        )
+                    } else {
+                        // ✅ AUTO: из БД
+                        explicationRepository.observeAllGroup()
+                    }
+                }
+            }
+
     val uiState: StateFlow<PhaseLoadUiState> =
         combine(
-            getPhaseLoadUiUseCase(),
+            getPhaseLoadUiUseCase(),                     // ⚠️ пока остаётся как есть (Коммит 5 будет переводить data на draft)
             preferencesRepository.phaseMode,
-            explicationRepository.observeAllGroup(),
+            groupsFlow,                                  // ✅ вот тут теперь строгое разделение
             explicationRepository.observeDistributionDecisions(),
             phaseLoadMode
         ) { items, mode, groups, decisions, phaseLoadMode ->

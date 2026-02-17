@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
@@ -144,6 +145,48 @@ class ExplicationViewModel @Inject constructor(
         .filterNotNull()
         .flatMapLatest { projectId -> manualRepo.observeSession(projectId) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    // =========================
+// Manual display groups (draft -> UI)
+// =========================
+
+    /**
+     * Группы для отображения в MANUAL.
+     *
+     * ВАЖНО (ТЗ v1.1):
+     * - MANUAL строится ТОЛЬКО от draft (ManualEditSessionRepository)
+     * - Никаких "склеек" с базовыми группами из БД
+     *
+     * На Коммите 0 устройства здесь намеренно пустые (devices = emptyList()).
+     * Реальные устройства подтянем в следующих коммитах через DeviceRepository.getDevicesByIds().
+     */
+    val manualDisplayGroups: StateFlow<List<CircuitGroup>> =
+        manualSession
+            .map { s ->
+                val draft = s?.draftState ?: return@map emptyList()
+                draft.groups.map { g ->
+                    CircuitGroup(
+                        groupId = g.groupId,
+                        groupNumber = g.groupNumber,
+                        roomName = g.roomName,
+                        roomId = g.roomId,
+                        groupType = g.groupType,      // ожидается DeviceType
+                        devices = emptyList(),        // ✅ Коммит 0: без устройств
+
+                        // ⚠️ Коммит 0: расчёты пока не пересчитываем по устройствам — оставляем то, что есть в draft
+                        nominalCurrent = g.nominalCurrent ?: 0.0,
+                        installedPowerW = 0,          // временно, появится после загрузки устройств
+
+                        circuitBreaker = g.circuitBreaker ?: 16,
+                        cableSection = g.cableSection ?: 2.5,
+                        breakerType = g.breakerType ?: "",
+                        rcdRequired = g.rcdRequired ?: false,
+                        rcdCurrent = g.rcdCurrent ?: 30,
+                        phase = g.phase
+                    )
+                }
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     // =========================
     // DB-driven pipeline (FIX отката)

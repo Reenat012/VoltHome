@@ -63,14 +63,7 @@ fun ExplicationScreen(
     navController: NavHostController,
     viewModel: ExplicationViewModel = hiltViewModel()
 ) {
-    // ВАЖНО: НЕЛЬЗЯ склеивать baseGroups и draft по groupId.
-    // groupId может "переиспользоваться"/меняться после пересчётов/реинсертов,
-    // из-за чего UI может стать пустым (draft есть, а match по id — нет).
-    // Поэтому используем стабильный ключ, который не зависит от БД id.
-    data class DraftKey(
-        val groupNumber: Int,
-        val roomId: Long
-    )
+
 
     val selectedBreakdown by viewModel.selectedDeviceBreakdown.collectAsState()
     val sheetPayload by viewModel.infoSheetPayload.collectAsState()
@@ -138,35 +131,30 @@ fun ExplicationScreen(
 
         is GroupScreenState.Success -> {
             val baseGroups = s.groups
-            val draft = manualSession?.draftState
 
-            // Временная диагностика: поможет увидеть, что baseGroups и draft живут с разными groupId.
-            if (isManual && draft != null) {
-                Log.d("MANUAL_UI", "baseGroups ids=${baseGroups.map { it.groupId }}")
-                Log.d("MANUAL_UI", "draft ids=${draft.groups.map { it.groupId }}")
-            }
+            // ✅ MANUAL-группы теперь собираются в VM (без склейки с БД)
+            val manualDisplayGroups by viewModel.manualDisplayGroups.collectAsState()
 
             val displayGroups =
-                if (!isManual || manualSession?.draftState == null) {
+                if (!isManual) {
+                    // ✅ AUTO: как было — группы из БД/авто-расчёта
                     baseGroups
                 } else {
-                    val draftLocal = manualSession!!.draftState
-
-                    val deviceById = buildMap<Long, ru.mugalimov.volthome.domain.model.Device> {
-                        baseGroups.asSequence()
-                            .flatMap { it.devices.asSequence() }
-                            .forEach { put(it.id, it) }
-                        unassignedDevices.forEach { put(it.id, it) }
-                    }
-
-                    val draftByKey = draftLocal.groups.associateBy { DraftKey(it.groupNumber, it.roomId) }
-
-                    baseGroups.mapNotNull { g ->
-                        val dg = draftByKey[DraftKey(g.groupNumber, g.roomId)] ?: return@mapNotNull null
-                        val newDevices = dg.deviceIds.mapNotNull { deviceById[it] }
-                        g.copy(groupId = dg.groupId, phase = dg.phase, devices = newDevices)
-                    }
+                    // ✅ MANUAL: строго от draft, без участия baseGroups
+                    // На Коммите 0 устройства здесь будут пустые — это нормально.
+                    manualDisplayGroups
                 }
+
+            // ---- Диагностика (по DoD) ----
+            LaunchedEffect(isManual, displayGroups.size) {
+                if (isManual) {
+                    val summary = displayGroups
+                        .sortedBy { it.groupNumber }
+                        .joinToString { g -> "${g.groupId}#${g.groupNumber}#${(g.phase ?: Phase.A).name}(devs=${g.devices.size})" }
+
+                    Log.d("MANUAL_UI", "MANUAL displayGroups size=${displayGroups.size} summary=[$summary]")
+                }
+            }
 
             val sections = remember(displayGroups) { displayGroups.groupBy { it.phase ?: Phase.A } }
 
@@ -440,5 +428,13 @@ fun ExplicationScreen(
     }
 }
 
+/**
+ * Стабильный ключ для LazyColumn.
+ *
+ * ВАЖНО:
+ * - В MANUAL появляются временные группы и меняются поля (roomName/breakerType/номиналы).
+ * - Ключ НЕ должен зависеть от "контента", иначе Compose будет пересоздавать item,
+ *   ломать раскрытия и состояния карточек.
+ */
 private fun stableGroupKey(phase: Phase, g: CircuitGroup): String =
-    "ph-${phase.name}__grp-${g.groupNumber}-${g.roomName}-${g.breakerType}${g.circuitBreaker}"
+    "ph-${phase.name}__gid-${g.groupId}"
