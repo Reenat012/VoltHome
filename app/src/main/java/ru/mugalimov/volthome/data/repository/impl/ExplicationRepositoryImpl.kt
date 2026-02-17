@@ -75,31 +75,29 @@ class ExplicationRepositoryImpl @Inject constructor(
     override fun observeAllGroup(): Flow<List<CircuitGroup>> =
         observeGroupsWithDevices().map { rel -> rel.map { it.toDomainGroupFromRelation() } }
 
-    override fun observeGroupsWithDevices(): Flow<List<CircuitGroupWithDevices>> {
-        val allDevicesFlow = deviceDao.observeAllDevices()
-        val joinsFlow = groupDeviceJoinDao.observeJoins()
-
-        return activeProjectDs.activeProjectId.flatMapLatest { projectIdNullable ->
+    override fun observeGroupsWithDevices(): Flow<List<CircuitGroupWithDevices>> =
+        activeProjectDs.activeProjectId.flatMapLatest { projectIdNullable ->
             val projectId = projectIdNullable.orEmpty()
             if (projectId.isBlank()) {
                 flowOf(emptyList())
             } else {
-                val groupsFlow = groupDao.observeAllGroupsByProject(projectId)
-                combine(groupsFlow, allDevicesFlow, joinsFlow) { groups, devices, joins ->
-                    val devicesById = devices.associateBy { it.deviceId }
-                    val deviceIdsByGroup = joins
-                        .groupBy({ it.groupId }, { it.deviceId })
-                        .mapValues { (_, ids) -> ids.toHashSet() }
-
-                    groups.map { g ->
-                        val ids = deviceIdsByGroup[g.groupId].orEmpty()
-                        val devs = ids.mapNotNull { devicesById[it] }
-                        CircuitGroupWithDevices(group = g, devices = devs)
+                groupDao.observeGroupsWithDevicesByProject(projectId)
+                    .map { rel ->
+                        // Небольшой доказательный лог: если вдруг снова появится "groups>0 & devices=0"
+                        // мы это увидим сразу.
+                        if (rel.isNotEmpty()) {
+                            val zeros = rel.count { it.devices.isEmpty() }
+                            if (zeros > 0) {
+                                Log.w(
+                                    "EXP_OBSERVE",
+                                    "observeGroupsWithDevicesByProject pid=$projectId groups=${rel.size} emptyDeviceGroups=$zeros"
+                                )
+                            }
+                        }
+                        rel
                     }
-                }
             }
         }
-    }
 
     override suspend fun commitManualDraftTransactional(
         projectId: String,
@@ -354,8 +352,41 @@ class ExplicationRepositoryImpl @Inject constructor(
     ) = withContext(dispatchers) {
         require(projectId.isNotBlank()) { "projectId must be non-blank" }
 
-        val caller = GroupWriteLogger.shortCallerTrace(skip = 2, take = 8)
-        val detectedSource = GroupWriteLogger.detectSourceFromCaller(caller)
+        val shortCaller = GroupWriteLogger.shortCallerTrace(skip = 2, take = 8)
+
+        // Для детекта берём полный стек — иначе Cancel иногда видится как "resumeWith/dispatcher"
+        val fullCaller = Throwable().stackTrace
+            .joinToString(" <- ") { "${it.className}.${it.methodName}:${it.lineNumber}" }
+
+        val detectedSource = GroupWriteLogger.detectSourceFromCaller(fullCaller)
+
+        /**
+         * ✅ Single-writer rule для STRUCTURE:
+         * replaceAllGroupsTransactional разрешён только для explicit сценариев.
+         *
+         * AUTO reactive контур НЕ имеет права сюда попадать.
+         * Если попал — это баг, и его надо ловить сразу.
+         */
+        val allowedStructuralWriters = setOf(
+            // ✅ Явный AUTO rebuild всегда идёт через SaveAutoCalculatedGroupsToLocalDbUseCase
+            GroupWriteLogger.Source.AUTO_SAVE,
+
+            // ✅ Manual commit (diff-commit) — отдельный explicit writer
+            GroupWriteLogger.Source.MANUAL_SAVE,
+
+            // ⚠️ Временно допускаем UNKNOWN, пока не везде проставлены/детектятся источники.
+            // Потом можно ужесточить и выжечь UNKNOWN.
+            GroupWriteLogger.Source.UNKNOWN
+        )
+
+        if (detectedSource !in allowedStructuralWriters) {
+            // В debug — валим выполнение, чтобы баг не маскировался.
+            val msg =
+                "STRUCTURE WRITE BLOCKED: replaceAllGroupsTransactional called from forbidden source=$detectedSource " +
+                        "projectId=$projectId caller=$shortCaller"
+            Log.e("STRUCTURE_GUARD", msg, Throwable("STACK"))
+            require(false) { msg }
+        }
 
         db.withTransaction {
             val fpBefore = snapshotFingerprintInTx(projectId)
@@ -368,7 +399,7 @@ class ExplicationRepositoryImpl @Inject constructor(
                 joinsCount = -1,
                 before = fpBefore,
                 after = null,
-                sample = "BEGIN op=REPLACE_ALL caller=$caller",
+                sample = "BEGIN op=REPLACE_ALL caller=$shortCaller",
                 throwable = null
             )
 
@@ -515,8 +546,10 @@ class ExplicationRepositoryImpl @Inject constructor(
         val groupWithDevices = groupDao.getGroupWithDevicesById(groupId)
             ?: throw GroupNotFoundException("Группа $groupId не найдена")
 
-        // ✅ FIX: projectId может быть nullable в сущности/отношении -> делаем String
-        val projectId = groupWithDevices.group.projectId.orEmpty().ifBlank { "unknown" }
+        // projectId обязателен для derived-write boundary
+        val projectId = groupWithDevices.group.projectId.orEmpty()
+        require(projectId.isNotBlank()) { "projectId is blank for groupId=$groupId. derived write is forbidden." }
+
         val devCount = groupWithDevices.devices.size
 
         val newCurrent = groupWithDevices.devices
@@ -531,32 +564,23 @@ class ExplicationRepositoryImpl @Inject constructor(
                 )
             }
 
-        if (newCurrent == 0.0) {
-            // STRUCTURE: удаление группы
-            GroupWriteLogger.logStructureWrite(
-                source = GroupWriteLogger.Source.UPDATE_GROUP,
-                reason = GroupWriteLogger.Reason.USER_ACTION,
-                projectId = projectId,
-                groupsCount = 1,
-                joinsCount = -1,
-                before = null,
-                after = null,
-                sample = "op=UPDATE_GROUP delete groupId=$groupId (current=0)",
-                throwable = null
-            )
-            groupDao.deleteGroupByGroupId(groupId)
-        } else {
-            // PARAMETER: derived-поле
-            GroupWriteLogger.logParameterWrite(
-                source = GroupWriteLogger.Source.UPDATE_GROUP,
-                reason = GroupWriteLogger.Reason.USER_ACTION,
-                projectId = projectId,
-                groupsCount = 1,
-                sample = "op=UPDATE_GROUP set_current groupId=$groupId newCurrent=$newCurrent devs=$devCount",
-                throwable = null
-            )
-            groupDao.updateGroupCurrent(groupId, newCurrent)
-        }
+        // ❗Коммит 4: updateGroup = только derived-параметры через whitelist
+        GroupWriteLogger.logParameterWrite(
+            source = GroupWriteLogger.Source.UPDATE_GROUP,
+            reason = GroupWriteLogger.Reason.USER_ACTION,
+            projectId = projectId,
+            groupsCount = 1,
+            sample = "op=UPDATE_GROUP derived nominal_current groupId=$groupId newCurrent=$newCurrent devs=$devCount",
+            throwable = null
+        )
+
+        // ✅ Whitelist derived update (project boundary + идемпотентность)
+        groupDao.updateDerivedNominalCurrentOnly(
+            projectId = projectId,
+            groupId = groupId,
+            nominalCurrent = newCurrent,
+            epsilon = 1e-4
+        )
 
         Log.e("GROUP_WRITE", "UPDATE_GROUP END groupId=$groupId")
     }
@@ -622,8 +646,6 @@ class ExplicationRepositoryImpl @Inject constructor(
     }
 
     override suspend fun handleDeviceDeletion(deviceId: Long) {
-        // STRUCTURE: удаление join по deviceId
-        // PARAMETER: updateGroupCurrent(..., 0.0)
         val projectId = activeProjectDs.activeProjectId.first().orEmpty().ifBlank { "unknown" }
 
         // Берём список групп ДО удаления join, иначе потеряем связь
@@ -643,19 +665,25 @@ class ExplicationRepositoryImpl @Inject constructor(
 
         groupDeviceJoinDao.deleteJoinsForDevice(deviceId)
 
-        // derived-поля — отдельный канал логов
-        groupIds.forEach { id ->
-            groupDao.getGroupById(id)?.let {
+        // ✅ derived current пересчитываем/сбрасываем только whitelist'ом
+        // ВАЖНО: projectId может быть unknown (если activeProject пуст). Тогда derived-write запрещаем.
+        if (projectId != "unknown") {
+            groupIds.forEach { id ->
                 GroupWriteLogger.logParameterWrite(
-                    // ✅ FIX: не используем несуществующий enum
                     source = GroupWriteLogger.Source.UNKNOWN,
                     reason = GroupWriteLogger.Reason.USER_ACTION,
                     projectId = projectId,
                     groupsCount = 1,
-                    sample = "op=HANDLE_DEVICE_DELETE set_current groupId=$id current=0.0 (deviceId=$deviceId)",
+                    sample = "op=HANDLE_DEVICE_DELETE derived nominal_current groupId=$id current=0.0 (deviceId=$deviceId)",
                     throwable = null
                 )
-                groupDao.updateGroupCurrent(id, 0.0)
+
+                groupDao.updateDerivedNominalCurrentOnly(
+                    projectId = projectId,
+                    groupId = id,
+                    nominalCurrent = 0.0,
+                    epsilon = 1e-4
+                )
             }
         }
     }

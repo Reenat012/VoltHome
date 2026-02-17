@@ -322,10 +322,9 @@ class ExplicationViewModel @Inject constructor(
                 Quad(groups, mode, plan.capabilities.professionalReportSections, decisions)
             }.collect { (groups, mode, isProReport, decisions) ->
 
-                // Пока manual активен — UI строится как base + draft overlay,
-                // поэтому НЕ трогаем _uiState здесь, иначе будут гонки и “мигание”.
-                val s = manualSession.value
-                if (s?.manualModeActive == true) {
+                val active = manualRepo.getActiveSession() ?: manualSession.value
+                if (active?.manualModeActive == true) {
+                    Log.w("AUTO_GATE", "DB_PIPELINE_SKIP reason=MANUAL_ACTIVE pid=${active.projectId} ver=${active.version}")
                     return@collect
                 }
 
@@ -334,6 +333,7 @@ class ExplicationViewModel @Inject constructor(
                 if (groups.isEmpty()) {
                     if (!initialAutoRecalcTriggered.value) {
                         initialAutoRecalcTriggered.value = true
+                        Log.w("AUTO_TRIGGER", "AUTO_RECALC_START reason=INIT_EMPTY_DB pid=${activeProjectDs.activeProjectId.first().orEmpty()}")
                         recalcAndSaveGroups()
                     } else {
                         // остаёмся в Loading, пока не появятся группы (или ошибка)
@@ -714,25 +714,27 @@ class ExplicationViewModel @Inject constructor(
      */
     fun onManualCancelRequested() {
         viewModelScope.launch(ioDispatcher) {
-            val session = manualSession.value
+            val session = manualRepo.getActiveSession() ?: manualSession.value
             val projectId = session?.projectId
+
+            if (projectId.isNullOrBlank()) {
+                _events.value = UiEvent.ShowSnackbar("Не удалось отменить: не найден projectId")
+                return@launch
+            }
 
             try {
                 // 1) выходим из manual сразу
-                if (projectId != null) {
-                    manualRepo.exitManualMode(projectId)
-                    manualDraftResetNotifier.clearExpected(projectId)
-                }
+                manualRepo.exitManualMode(projectId)
+                manualDraftResetNotifier.clearExpected(projectId)
 
-                // 2) полный авто-recalc + commit в БД (строго по projectId)
-                val pid = projectId ?: return@launch // если нет projectId — значит и отменять нечего
+                Log.w("AUTO_TRIGGER", "CANCEL_MANUAL pid=$projectId -> explicit rebuild")
+
+                // 2) explicit rebuild + commit в БД (use-case уже делает AUTO_SAVE)
                 cancelManualAndAutoRecalcUseCase.execute(
-                    CancelManualAndAutoRecalcUseCase.Params(projectId = pid)
+                    CancelManualAndAutoRecalcUseCase.Params(projectId = projectId)
                 )
 
-                // 3) возвращаем UI в стандартный pipeline (чтобы totals/sections совпали на 100%)
-                recalcAndSaveGroups()
-
+                // 3) НИЧЕГО больше не считаем: DB pipeline подтянет группы и обновит UI
                 _events.value = UiEvent.ShowSnackbar("Ручные изменения отменены")
             } catch (_: Throwable) {
                 _events.value = UiEvent.ShowSnackbar("Не удалось отменить изменения")
@@ -1181,13 +1183,25 @@ class ExplicationViewModel @Inject constructor(
     fun recalcAndSaveGroups() {
         viewModelScope.launch(ioDispatcher) {
 
-            // ✅ Защита: в ручном режиме полный auto-recalc запрещён.
-            // Иначе можно затереть черновик/ручные правки и/или рассинхронизировать UI.
-            val session = manualSession.value
-            if (session?.manualModeActive == true) {
+            // ✅ Надёжный guard: manualSession.value может быть null
+            val activeSession = manualRepo.getActiveSession() ?: manualSession.value
+            val isManual = activeSession?.manualModeActive == true
+            val manualPid = activeSession?.projectId
+
+            if (isManual) {
+                Log.w(
+                    "AUTO_GATE",
+                    "AUTO_RECALC_BLOCKED reason=EXPLICIT_RECALC_REQUEST manual=true pid=$manualPid ver=${activeSession?.version}"
+                )
                 _events.value = UiEvent.ShowSnackbar("Сейчас включён ручной режим. Пересчёт недоступен.")
                 return@launch
             }
+
+            val projectId = activeProjectDs.activeProjectId.first().orEmpty()
+            Log.w(
+                "AUTO_GATE",
+                "AUTO_RECALC_ALLOWED reason=EXPLICIT_RECALC_REQUEST manual=false pid=$projectId"
+            )
 
             _isRecalculating.value = true
             _uiState.value = GroupScreenState.Loading
@@ -1195,17 +1209,16 @@ class ExplicationViewModel @Inject constructor(
             try {
                 val mode = preferencesRepository.phaseMode.first()
 
+                Log.w("AUTO_TRIGGER", "AUTO_RECALC_START reason=EXPLICIT_RECALC_REQUEST pid=$projectId mode=$mode")
+
                 val calc = groupCalculatorFactory.create()
                 when (val res = calc.calculateGroups(mode)) {
                     is GroupingResult.Error -> {
                         _uiState.value = GroupScreenState.Error(res.message)
                     }
-
                     is GroupingResult.Success -> {
                         val groups = res.system.groups
 
-                        // Важно: сохраняем результат пересчёта строго в активный проект
-                        val projectId = activeProjectDs.activeProjectId.first().orEmpty()
                         if (projectId.isBlank()) {
                             _uiState.value = GroupScreenState.Error("Не выбран проект")
                             return@launch

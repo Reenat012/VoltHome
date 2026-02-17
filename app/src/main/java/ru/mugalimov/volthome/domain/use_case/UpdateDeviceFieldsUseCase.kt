@@ -1,29 +1,30 @@
 package ru.mugalimov.volthome.domain.use_case
 
 import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import ru.mugalimov.volthome.core.validation.PowerValidator
 import ru.mugalimov.volthome.data.repository.DeviceRepository
-import ru.mugalimov.volthome.data.repository.PreferencesRepository
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
-import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.VoltageType
 import javax.inject.Inject
 
 /**
- * Обновляет поля экземпляра устройства.
- * FREE: имя + мощность.
- * PRO: дополнительно deviceType / powerFactor / demandRatio / voltageType (+value если нужно) / flags.
+ * Обновляет поля устройства.
  *
- * После сохранения вызываем пересчёт (учитываем текущий режим 1/3 фазы).
+ * ВАЖНО (Коммит №2):
+ * - Здесь НЕТ пересчёта.
+ * - Пересчёт запускается только реактивным контуром RecalculateGroupsOnDeviceChangeUseCase
+ *   по факту изменения устройства (DEVICE_CHANGED).
+ *
+ * Иначе получаешь:
+ * 1) прямой запуск recalc отсюда
+ * 2) второй запуск от observeAllDevices()
+ * => "реактивная бензопила"
  */
 class UpdateDeviceFieldsUseCase @Inject constructor(
     private val deviceRepository: DeviceRepository,
-    private val recalc: RecalculateAllUseCase,
-    private val prefs: PreferencesRepository,
     @IoDispatcher private val io: CoroutineDispatcher
 ) {
 
@@ -92,19 +93,7 @@ class UpdateDeviceFieldsUseCase @Inject constructor(
 
         deviceRepository.updateDevice(updated)
 
-        val mode: PhaseMode = prefs.phaseMode.first()
-        recalc(mode)
-    }
-}
-
-/**
- * Унифицированная точка пересчёта всего проекта.
- */
-class RecalculateAllUseCase @Inject constructor(
-    private val calculatorFactory: GroupCalculatorFactory,
-    @IoDispatcher private val io: CoroutineDispatcher
-) {
-    suspend operator fun invoke(mode: PhaseMode) = withContext(io) {
-        calculatorFactory.create().calculateGroups(mode)
+        // ❌ Никакого recalc() тут.
+        // ✅ Пересчёт поднимется реактивно: DEVICE_CHANGED.
     }
 }

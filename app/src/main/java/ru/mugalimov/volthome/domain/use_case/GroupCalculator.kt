@@ -7,6 +7,7 @@ import ru.mugalimov.volthome.data.repository.RoomRepository
 import ru.mugalimov.volthome.domain.mapper.toDomainDevice
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.DeviceType
+import ru.mugalimov.volthome.domain.model.DistributionDecision
 import ru.mugalimov.volthome.domain.model.ElectricalSystem
 import ru.mugalimov.volthome.domain.model.GroupProfile
 import ru.mugalimov.volthome.domain.model.GroupingResult
@@ -265,21 +266,6 @@ class GroupCalculator(
         )
     }
 
-    /**
-     * ⚠️ ВАЖНО:
-     * Группы сохраняем только с ЯВНЫМ projectId.
-     * Этот метод оставлен как утилита, но без projectId он запрещён.
-     *
-     * Сейчас GroupCalculator по твоему же комменту “не сохраняет тут” — и это правильно.
-     * Поэтому:
-     * - либо удаляешь этот метод вообще,
-     * - либо используешь только если снаружи передаёшь projectId.
-     */
-    private suspend fun saveGroupsWithDevices(projectId: String, groups: List<CircuitGroup>) {
-        require(projectId.isNotBlank()) { "projectId must be non-blank" }
-        groupRepository.replaceAllGroupsTransactional(projectId = projectId, groups = groups)
-    }
-
     private fun validateBeforeSave(groups: List<CircuitGroup>) {
         val eps = 1e-6
         groups.forEach { g ->
@@ -294,6 +280,7 @@ class GroupCalculator(
         }
     }
 }
+
 
 // --- Extensions / мапперы ---
 

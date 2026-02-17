@@ -10,6 +10,16 @@ import kotlinx.coroutines.flow.Flow
 import ru.mugalimov.volthome.data.local.entity.CircuitGroupEntity
 import ru.mugalimov.volthome.data.local.entity.CircuitGroupWithDevices
 
+/**
+ * DTO для whitelist-обновлений derived-полей.
+ * ВАЖНО: сюда добавляем ТОЛЬКО derived-колонки.
+ * Никаких phase/groupNumber/order/groupType/roomId и т.п.
+ */
+data class GroupNominalCurrentUpdate(
+    val groupId: Long,
+    val nominalCurrent: Double
+)
+
 @Dao
 interface GroupDao {
 
@@ -120,6 +130,11 @@ interface GroupDao {
 
     // -------------------- MISC --------------------
 
+    @Deprecated(
+        message = "ОПАСНО: нет project boundary. Используйте updateDerivedNominalCurrentOnly(projectId, ...).",
+        replaceWith = ReplaceWith("updateDerivedNominalCurrentOnly(projectId, groupId, current, epsilon)"),
+        level = DeprecationLevel.ERROR
+    )
     @Query("UPDATE `groups` SET nominal_current = :current WHERE group_id = :groupId")
     suspend fun updateGroupCurrent(groupId: Long, current: Double)
 
@@ -154,4 +169,86 @@ interface GroupDao {
      */
     @Query("DELETE FROM `groups` WHERE project_id = :projectId")
     suspend fun deleteAllGroupsByProject(projectId: String)
+
+// -------------------- DERIVED WHITELIST UPDATES --------------------
+
+    /**
+     * ✅ Whitelist-апдейт derived-поля nominal_current:
+     * - строго по project_id + group_id (никаких cross-project)
+     * - идемпотентность: обновляем только если значение реально изменилось
+     *
+     * @return rowsUpdated: 1 если обновили, 0 если значение уже было таким же (нормально)
+     */
+    @Query(
+        """
+    UPDATE `groups`
+    SET nominal_current = :nominalCurrent
+    WHERE project_id = :projectId
+      AND group_id = :groupId
+      AND (
+          nominal_current IS NULL
+          OR ABS(nominal_current - :nominalCurrent) > :epsilon
+      )
+    """
+    )
+    suspend fun updateDerivedNominalCurrentOnly(
+        projectId: String,
+        groupId: Long,
+        nominalCurrent: Double,
+        epsilon: Double
+    ): Int
+
+    /**
+     * Batch-обновление derived-полей (whitelist).
+     *
+     * Правила:
+     * - только derived (nominal_current)
+     * - project boundary обязателен
+     * - идемпотентность через epsilon
+     * - защита от NaN/Infinity (иначе ABS/сравнения становятся мусором)
+     * - chunking, чтобы не держать write-транзакцию слишком долго на больших списках
+     *
+     * @return total rowsUpdated
+     */
+    @Transaction
+    suspend fun updateDerivedNominalCurrentOnlyBatch(
+        projectId: String,
+        updates: List<GroupNominalCurrentUpdate>,
+        epsilon: Double,
+        chunkSize: Int = 200
+    ): Int {
+        if (updates.isEmpty()) return 0
+
+        // ❗SQLite/Room + NaN/Infinity = потенциальная грязь в БД и сломанная идемпотентность.
+        // Сразу фильтруем.
+        val safe = updates
+            .asSequence()
+            .filter { it.groupId > 0L }
+            .filter { it.nominalCurrent.isFinite() } // kotlin Double.isFinite()
+            .toList()
+
+        if (safe.isEmpty()) return 0
+
+        var total = 0
+
+        // Дробим на чанки: меньше удержание write-lock, меньше шанс фризов и конкуренции с другими write-операциями.
+        var i = 0
+        while (i < safe.size) {
+            val end = minOf(i + chunkSize, safe.size)
+            val chunk = safe.subList(i, end)
+
+            for (u in chunk) {
+                total += updateDerivedNominalCurrentOnly(
+                    projectId = projectId,
+                    groupId = u.groupId,
+                    nominalCurrent = u.nominalCurrent,
+                    epsilon = epsilon
+                )
+            }
+
+            i = end
+        }
+
+        return total
+    }
 }

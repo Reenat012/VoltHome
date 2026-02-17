@@ -61,11 +61,11 @@ fun DeviceChips(
     val overflow = (total - maxVisible).coerceAtLeast(0)
     val visible = if (expanded || total <= maxVisible) devices else devices.take(maxVisible)
 
-    Log.d(
-        TAG_CHIPS,
-        "render groupKey=$groupKey rememberKey=$rememberKey total=$total visible=${visible.size} " +
-                "overflow=$overflow expanded=$expanded enableLongPress=$enableLongPress"
-    )
+//    Log.d(
+//        TAG_CHIPS,
+//        "render groupKey=$groupKey rememberKey=$rememberKey total=$total visible=${visible.size} " +
+//                "overflow=$overflow expanded=$expanded enableLongPress=$enableLongPress"
+//    )
 
     FlowRow(
         modifier = Modifier.padding(top = 2.dp),
@@ -77,16 +77,16 @@ fun DeviceChips(
                 DeviceChip(
                     text = d.name,
                     onClick = {
-                        Log.d(TAG_CHIPS, "click deviceId=${d.id} name=${d.name}")
+//                        Log.d(TAG_CHIPS, "click deviceId=${d.id} name=${d.name}")
                         onDeviceClick(d.id)
                     },
 
                     enableDrag = enableLongPress,
                     onDragStart = { itemStartRoot, pointerStartRoot ->
-                        Log.d(
-                            TAG_CHIPS,
-                            "dragStart deviceId=${d.id} name=${d.name} itemStartRoot=$itemStartRoot pointerStartRoot=$pointerStartRoot"
-                        )
+//                        Log.d(
+//                            TAG_CHIPS,
+//                            "dragStart deviceId=${d.id} name=${d.name} itemStartRoot=$itemStartRoot pointerStartRoot=$pointerStartRoot"
+//                        )
 
                         // ВАЖНО: это старое поведение — включение панели целей
                         onDeviceLongPress?.invoke(d.id)
@@ -95,15 +95,15 @@ fun DeviceChips(
                         onDeviceDragStart?.invoke(d.id, itemStartRoot, pointerStartRoot)
                     },
                     onDragMove = { pointerRoot ->
-                        Log.v(TAG_CHIPS, "dragMove deviceId=${d.id} name=${d.name} pointerRoot=$pointerRoot")
+//                        Log.v(TAG_CHIPS, "dragMove deviceId=${d.id} name=${d.name} pointerRoot=$pointerRoot")
                         onDeviceDragMove?.invoke(pointerRoot)
                     },
                     onDragEnd = {
-                        Log.d(TAG_CHIPS, "dragEnd deviceId=${d.id} name=${d.name}")
+//                        Log.d(TAG_CHIPS, "dragEnd deviceId=${d.id} name=${d.name}")
                         onDeviceDragEnd?.invoke()
                     },
                     onDragCancel = {
-                        Log.w(TAG_CHIPS, "dragCancel deviceId=${d.id} name=${d.name}")
+//                        Log.w(TAG_CHIPS, "dragCancel deviceId=${d.id} name=${d.name}")
                         onDeviceDragCancel?.invoke()
                     }
                 )

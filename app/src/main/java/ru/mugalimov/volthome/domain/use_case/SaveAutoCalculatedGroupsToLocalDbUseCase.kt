@@ -9,10 +9,9 @@ import ru.mugalimov.volthome.domain.model.DistributionDecision
 /**
  * Сохранение результата AUTO-пересчёта в локальную БД.
  *
- * ВАЖНО:
- * - Это AUTO-путь (исторический): replace-by-delete+insert.
- * - Для manual Save использовать ЗАПРЕЩЕНО (manual делает diff-commit).
- * - Вынесено в domain/use_case, чтобы UI/VM не держали прямых вызовов replaceAllGroupsTransactional().
+ * ❗STRUCTURE writer:
+ * - Это ЯВНЫЙ structural commit (rebuild) по кнопке/сценарию.
+ * - Реактивный AUTO-контур НЕ имеет права менять структуру.
  */
 class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
     private val explicationRepository: ExplicationRepository
@@ -37,27 +36,25 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
                 "${g.groupId}#${g.groupNumber}#$ph(devs=${g.devices.size})"
             }
 
-        // stacktrace-маркер: покажет, кто вызвал AUTO-save (обрезаем, чтобы не шумело)
+        // stacktrace-маркер: кто инициирует STRUCTURE write
         val caller = Throwable().stackTrace
             .drop(1)
             .take(8)
             .joinToString(" <- ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
 
-        // Маркер для grep: кто инициирует структурную запись
         Log.w(
             "AUTO_SAVE",
             "AUTO_SAVE BEGIN source=AUTO_SAVE reason=EXPLICIT_REBUILD projectId=$projectId " +
                     "groups=${groups.size} summary=[$summary] caller=$caller"
         )
 
-        // 1) Сохраняем группы AUTO-результата (replace допустим только тут)
-        // Внутри репозитория будет GROUP_STRUCTURE_WRITE с fingerprint before/after.
+        // ✅ ЕДИНСТВЕННАЯ структурная запись
         explicationRepository.replaceAllGroupsTransactional(
             projectId = projectId,
             groups = groups
         )
 
-        // 2) Обновляем decision log (in-memory)
+        // Decisions (in-memory)
         explicationRepository.setLastDistributionDecisions(params.distributionDecisions)
 
         Log.w("AUTO_SAVE", "AUTO_SAVE END projectId=$projectId groups=${groups.size}")
