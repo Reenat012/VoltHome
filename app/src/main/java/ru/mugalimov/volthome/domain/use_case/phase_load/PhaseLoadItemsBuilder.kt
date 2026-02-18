@@ -1,75 +1,24 @@
-package ru.mugalimov.volthome.domain.use_case
+package ru.mugalimov.volthome.domain.use_case.phase_load
 
-import android.util.Log
-import javax.inject.Inject
-import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.filterNotNull
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.map
-import ru.mugalimov.volthome.data.local.dao.GroupDao
-import ru.mugalimov.volthome.data.local.dao.GroupPhaseOverrideDao
-import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
-import ru.mugalimov.volthome.di.database.IoDispatcher
-import ru.mugalimov.volthome.domain.mapper.mapToDomainGroupsFromRelations
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.VoltageType
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseDeviceItem
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseGroupItem
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
+import ru.mugalimov.volthome.domain.use_case.CurrentCalculator
 
 /**
- * Источник PhaseLoadItem для AUTO режима.
+ * Единый детерминированный builder PhaseLoadItem из доменных групп.
  *
- * ВАЖНО (Коммит 5):
- * - MANUAL больше НЕ строится здесь (он строится во ViewModel из draft).
- * - Здесь оставляем только AUTO-пайплайн: БД + overrides.
+ * ВАЖНО:
+ * - в MANUAL сюда приходят группы из draft + devicesById
+ * - в AUTO сюда приходят группы из DB (с applied overrides)
  */
-class GetPhaseLoadUiUseCase @Inject constructor(
-    private val groupDao: GroupDao,
-    private val overrideDao: GroupPhaseOverrideDao,
-    private val activeDs: ActiveProjectDataStore,
-    @IoDispatcher private val dispatcher: CoroutineDispatcher
-) {
+object PhaseLoadItemsBuilder {
 
-    operator fun invoke(): Flow<List<PhaseLoadItem>> {
-        return activeDs.activeProjectId
-            .distinctUntilChanged()
-            .filterNotNull()
-            .flatMapLatest { projectId ->
-                combine(
-                    groupDao.observeGroupsWithDevicesByProject(projectId),
-                    overrideDao.observeByProject(projectId)
-                ) { relations, overrides ->
-                    Log.w(
-                        "PHASE_OVR",
-                        "AUTO overrides projectId=$projectId count=${overrides.size} sample=" +
-                                overrides.take(10).joinToString { "${it.groupId}->${it.phase}" }
-                    )
-
-                    val groupsFromDb: List<CircuitGroup> = relations.mapToDomainGroupsFromRelations()
-
-                    // groupId -> Phase (override)
-                    val overrideMap = overrides.associate { it.groupId to it.phase }
-
-                    // применяем override ДО сборки PhaseLoadItem
-                    groupsFromDb.map { g ->
-                        val forced = overrideMap[g.groupId]
-                        if (forced != null && forced != g.phase) g.copy(phase = forced) else g
-                    }
-                }.map { groupsWithOverrides ->
-                    buildPhaseItems(groupsWithOverrides)
-                }
-            }
-            .flowOn(dispatcher)
-    }
-
-    private fun buildPhaseItems(groups: List<CircuitGroup>): List<PhaseLoadItem> {
-        // 1) Сбор 3φ пула: устройства с AC_3PHASE (вне зависимости от фазы группы)
+    fun build(groups: List<CircuitGroup>): List<PhaseLoadItem> {
+        // 1) 3φ пул: устройства с AC_3PHASE, независимо от фазы группы
         val threePhaseDevices = groups
             .flatMap { g -> g.devices.map { d -> g to d } }
             .filter { (_, d) -> d.voltage.type == VoltageType.AC_3PHASE }
@@ -117,13 +66,12 @@ class GetPhaseLoadUiUseCase @Inject constructor(
         val p3PerPhase = p3Total / 3.0
         val i3PerPhase = i3Total / 3.0
 
-        // 2) Секции A/B/C: берём только группы A/B/C и внутри них — только НЕ 3φ устройства
+        // 2) A/B/C: внутри групп только НЕ 3φ устройства
         val phaseItems = listOf(Phase.A, Phase.B, Phase.C).map { phase ->
             val groupsOfPhase = groups.filter { it.phase == phase }
 
             val groupRows: List<PhaseGroupItem> = groupsOfPhase.map { g ->
-                val onePhaseDevices = g.devices
-                    .filter { it.voltage.type != VoltageType.AC_3PHASE }
+                val onePhaseDevices = g.devices.filter { it.voltage.type != VoltageType.AC_3PHASE }
 
                 val deviceRows = onePhaseDevices.map { d ->
                     PhaseDeviceItem(
@@ -164,7 +112,7 @@ class GetPhaseLoadUiUseCase @Inject constructor(
             )
         }
 
-        // 3) Отдельный блок 3φ как отдельный PhaseLoadItem, чтобы не ломать контракт List<PhaseLoadItem>
+        // 3) отдельный блок 3φ
         val threePhaseItem = PhaseLoadItem(
             phase = Phase.THREE_PHASE,
             groups = threePhaseGroups,

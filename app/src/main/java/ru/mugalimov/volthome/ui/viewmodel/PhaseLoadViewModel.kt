@@ -1,18 +1,36 @@
 package ru.mugalimov.volthome.ui.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
+import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
 import ru.mugalimov.volthome.data.repository.PreferencesRepository
 import ru.mugalimov.volthome.data.repository.UserPlanRepository
+import ru.mugalimov.volthome.domain.model.CircuitGroup
+import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.Phase
-import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.ProFeature
 import ru.mugalimov.volthome.domain.model.manual.ManualEditAction
 import ru.mugalimov.volthome.domain.model.phase_load.LoadThresholds
@@ -21,16 +39,17 @@ import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadUiState
 import ru.mugalimov.volthome.domain.use_case.GetPhaseLoadUiUseCase
 import ru.mugalimov.volthome.domain.use_case.IncomerSelector
 import ru.mugalimov.volthome.domain.use_case.manual.CancelManualAndAutoRecalcUseCase
+import ru.mugalimov.volthome.domain.use_case.phase_load.PhaseLoadItemsBuilder
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
 import ru.mugalimov.volthome.ui.utilities.ManualDraftResetNotifier
 
 @HiltViewModel
 class PhaseLoadViewModel @Inject constructor(
-    getPhaseLoadUiUseCase: GetPhaseLoadUiUseCase,
+    private val getPhaseLoadUiUseCase: GetPhaseLoadUiUseCase,
     private val preferencesRepository: PreferencesRepository,
     private val explicationRepository: ExplicationRepository,
+    private val deviceRepository: DeviceRepository,
     private val incomerSelector: IncomerSelector,
-
     private val manualRepo: ManualEditSessionRepository,
     private val activeProjectDs: ActiveProjectDataStore,
     private val userPlanRepository: UserPlanRepository,
@@ -39,7 +58,13 @@ class PhaseLoadViewModel @Inject constructor(
     private val manualDraftResetNotifier: ManualDraftResetNotifier,
 ) : ViewModel() {
 
-    // ✅ manual/auto режим экрана теперь зависит от факта активной manual-сессии
+    // =========================
+    // Mode: AUTO/MANUAL
+    // =========================
+
+    /**
+     * ✅ Режим экрана "Нагрузки" зависит строго от факта активной manual-сессии.
+     */
     private val phaseLoadMode: StateFlow<PhaseLoadMode> =
         activeProjectDs.activeProjectId
             .filterNotNull()
@@ -48,57 +73,152 @@ class PhaseLoadViewModel @Inject constructor(
             .map { s -> if (s?.manualModeActive == true) PhaseLoadMode.MANUAL else PhaseLoadMode.AUTO }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PhaseLoadMode.AUTO)
 
-    // ✅ события для snackbar
+    // =========================
+    // Events
+    // =========================
+
     private val _events = MutableSharedFlow<String>(extraBufferCapacity = 1)
-    val events: SharedFlow<String> = _events.asSharedFlow()
+    val events = _events.asSharedFlow()
 
     // =========================
-// Groups source: AUTO from DB, MANUAL from draft (ТЗ v1.1)
-// =========================
+    // Manual session (project-scoped)
+    // =========================
 
-    private val groupsFlow: Flow<List<ru.mugalimov.volthome.domain.model.CircuitGroup>> =
+    /**
+     * ВАЖНО: тип намеренно не фиксируем, чтобы не ловить "ProjectEditSession" vs "ManualEditSession" дрейф.
+     * Нам важны только поля: manualModeActive, draftState, projectId.
+     */
+    private val manualSession =
         activeProjectDs.activeProjectId
             .filterNotNull()
             .distinctUntilChanged()
-            .flatMapLatest { projectId ->
-                manualRepo.observeSession(projectId).flatMapLatest { s ->
-                    if (s?.manualModeActive == true) {
-                        // ✅ MANUAL: строго draft, без БД
-                        flowOf(
-                            s.draftState.groups.map { g ->
-                                ru.mugalimov.volthome.domain.model.CircuitGroup(
-                                    groupId = g.groupId,
-                                    groupNumber = g.groupNumber,
-                                    roomName = g.roomName,
-                                    roomId = g.roomId,
-                                    groupType = g.groupType,
-                                    devices = emptyList(),      // Коммит 0: без устройств
-                                    nominalCurrent = g.nominalCurrent ?: 0.0,
-                                    installedPowerW = 0,
-                                    circuitBreaker = g.circuitBreaker ?: 16,
-                                    cableSection = g.cableSection ?: 2.5,
-                                    breakerType = g.breakerType ?: "",
-                                    rcdRequired = g.rcdRequired ?: false,
-                                    rcdCurrent = g.rcdCurrent ?: 30,
-                                    phase = g.phase
-                                )
-                            }
-                        )
+            .flatMapLatest { projectId -> manualRepo.observeSession(projectId) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    // =========================
+    // MANUAL devices cache (batch-load как в ExplicationViewModel)
+    // =========================
+
+    private val _manualDevicesById = MutableStateFlow<Map<Long, Device>>(emptyMap())
+    val manualDevicesById: StateFlow<Map<Long, Device>> = _manualDevicesById.asStateFlow()
+
+    private val _manualDevicesRequestVersion = MutableStateFlow(0)
+
+    init {
+        // ✅ Единый batch-load устройств по deviceIds из draft.groups
+        viewModelScope.launch {
+            manualSession
+                .map { s ->
+                    if (s?.manualModeActive != true) return@map emptySet<Long>()
+                    val draft = s.draftState
+                    draft.groups.asSequence().flatMap { it.deviceIds.asSequence() }.toSet()
+                }
+                .distinctUntilChanged()
+                .collectLatest { neededIds ->
+                    if (neededIds.isEmpty()) {
+                        val ver = _manualDevicesRequestVersion.value + 1
+                        _manualDevicesRequestVersion.value = ver
+                        _manualDevicesById.value = emptyMap()
+                        Log.d("PHASE_MANUAL_DEV", "CLEAR ids=0 ver=$ver")
+                        return@collectLatest
+                    }
+
+                    val ver = _manualDevicesRequestVersion.value + 1
+                    _manualDevicesRequestVersion.value = ver
+
+                    Log.d("PHASE_MANUAL_DEV", "LOAD start ids=${neededIds.size} ver=$ver")
+
+                    val devices = deviceRepository.getDevicesByIds(neededIds.toList())
+                    val map = devices.associateBy { it.id }
+
+                    // ✅ защита от гонок: старый запрос не может перезатереть новый
+                    if (_manualDevicesRequestVersion.value == ver) {
+                        _manualDevicesById.value = map
+                        Log.d("PHASE_MANUAL_DEV", "LOAD apply ids=${map.size} ver=$ver")
                     } else {
-                        // ✅ AUTO: из БД
-                        explicationRepository.observeAllGroup()
+                        Log.w(
+                            "PHASE_MANUAL_DEV",
+                            "LOAD drop stale ids=${map.size} ver=$ver current=${_manualDevicesRequestVersion.value}"
+                        )
                     }
                 }
+        }
+    }
+
+    // =========================
+    // Groups source: AUTO from DB, MANUAL from draft+devicesById
+    // =========================
+
+    private val manualGroupsFlow: Flow<List<CircuitGroup>> =
+        combine(manualSession, manualDevicesById) { s, devicesById ->
+            if (s?.manualModeActive != true) return@combine emptyList()
+            val draft = s.draftState
+
+            draft.groups.map { g ->
+                val groupDevices = g.deviceIds.mapNotNull { id -> devicesById[id] }
+
+                CircuitGroup(
+                    groupId = g.groupId,
+                    groupNumber = g.groupNumber,
+                    roomName = g.roomName,
+                    roomId = g.roomId,
+                    groupType = g.groupType,
+                    devices = groupDevices,
+
+                    // линия/номиналы живут в draft и пересчитываются ManualRepo
+                    nominalCurrent = g.nominalCurrent ?: 0.0,
+                    installedPowerW = groupDevices.sumOf { it.power },
+
+                    circuitBreaker = g.circuitBreaker ?: 16,
+                    cableSection = g.cableSection ?: 2.5,
+                    breakerType = g.breakerType ?: "",
+                    rcdRequired = g.rcdRequired ?: false,
+                    rcdCurrent = g.rcdCurrent ?: 30,
+                    phase = g.phase
+                )
             }
+        }
+
+    private val autoGroupsFlow: Flow<List<CircuitGroup>> =
+        explicationRepository.observeAllGroup()
+
+    /**
+     * ✅ Для расчёта incomer/thresholds используем тот же источник групп:
+     * - MANUAL: draft+devices
+     * - AUTO: DB
+     */
+    private val groupsFlow: Flow<List<CircuitGroup>> =
+        phaseLoadMode.flatMapLatest { mode ->
+            if (mode == PhaseLoadMode.MANUAL) manualGroupsFlow else autoGroupsFlow
+        }
+
+    // =========================
+    // Phase items source: AUTO from usecase, MANUAL from draft groups
+    // =========================
+
+    private val phaseItemsFlow =
+        phaseLoadMode.flatMapLatest { mode ->
+            if (mode == PhaseLoadMode.MANUAL) {
+                // ✅ MANUAL: строим PhaseLoadItem из draft групп (с реальными devices)
+                manualGroupsFlow.map { groups -> PhaseLoadItemsBuilder.build(groups) }
+            } else {
+                // ✅ AUTO: как было (overrides остаются в use case)
+                getPhaseLoadUiUseCase()
+            }
+        }
+
+    // =========================
+    // UI state
+    // =========================
 
     val uiState: StateFlow<PhaseLoadUiState> =
         combine(
-            getPhaseLoadUiUseCase(),                     // ⚠️ пока остаётся как есть (Коммит 5 будет переводить data на draft)
+            phaseItemsFlow,
             preferencesRepository.phaseMode,
-            groupsFlow,                                  // ✅ вот тут теперь строгое разделение
+            groupsFlow,
             explicationRepository.observeDistributionDecisions(),
             phaseLoadMode
-        ) { items, mode, groups, decisions, phaseLoadMode ->
+        ) { items, mode, groups, decisions, currentMode ->
 
             val hasGroupRcds = groups.any { it.rcdRequired }
             val incomer = incomerSelector.select(
@@ -112,7 +232,7 @@ class PhaseLoadViewModel @Inject constructor(
             PhaseLoadUiState(
                 data = items,
                 mode = mode,
-                phaseLoadMode = phaseLoadMode,
+                phaseLoadMode = currentMode,
                 incomer = incomer,
                 thresholds = LoadThresholds(),
                 decisions = decisions
@@ -127,7 +247,7 @@ class PhaseLoadViewModel @Inject constructor(
             )
 
     // =========================
-    // ✅ DnD API
+    // DnD API
     // =========================
 
     fun onGroupDragged(groupId: Long, targetPhase: Phase) {
@@ -165,7 +285,7 @@ class PhaseLoadViewModel @Inject constructor(
                         phase = targetPhase
                     )
                 )
-            } catch (t: Throwable) {
+            } catch (_: Throwable) {
                 _events.tryEmit("Не удалось изменить фазу. Попробуйте ещё раз.")
             }
         }
@@ -195,7 +315,7 @@ class PhaseLoadViewModel @Inject constructor(
                 )
 
                 _events.tryEmit("Ручные изменения сброшены, вернулись в авто-режим")
-            } catch (t: Throwable) {
+            } catch (_: Throwable) {
                 _events.tryEmit("Не удалось сбросить ручные изменения")
             }
         }
