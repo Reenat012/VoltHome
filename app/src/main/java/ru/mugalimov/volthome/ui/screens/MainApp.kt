@@ -414,29 +414,45 @@ fun MainApp(
                             return@launch
                         }
 
+                        val session = manualRepo.getActiveSession()
+                        if (session == null || session.projectId != projectId) {
+                            snackbarHostState.showSnackbar("Нет активного ручного режима")
+                            dismissManualExitDialog()
+                            return@launch
+                        }
+
                         try {
+                            Log.w("MANUAL_CANCEL", "MAINAPP Cancel START pid=$projectId")
+
                             when (val res = cancelUseCase.execute(
                                 CancelManualAndAutoRecalcUseCase.Params(projectId = projectId)
                             )) {
                                 is GroupingResult.Error -> {
+                                    Log.e("MANUAL_CANCEL", "Cancel FAILED pid=$projectId msg=${res.message}")
                                     snackbarHostState.showSnackbar("Ошибка пересчёта: ${res.message}")
                                     return@launch
                                 }
 
                                 is GroupingResult.Success -> {
-                                    // ok
+                                    Log.w("MANUAL_CANCEL", "Cancel OK pid=$projectId groups=${res.system.groups.size}")
                                 }
                             }
 
+                            // ⚠️ ВАЖНО: чистим overrides ДО выхода из manual
                             val deleted = groupPhaseOverrideDao.deleteByProject(projectId)
                             Log.w("OVERRIDES", "DELETE overrides pid=$projectId (manual CANCEL) deletedRows=$deleted")
 
+                            // Теперь безопасно выключаем manual
                             manualRepo.exitManualMode(projectId)
 
                             val proceed = pendingProceed
                             dismissManualExitDialog()
                             proceed?.invoke()
+
+                            snackbarHostState.showSnackbar("Ручные изменения отменены")
+
                         } catch (t: Throwable) {
+                            Log.e("MANUAL_CANCEL", "Cancel EXCEPTION pid=$projectId", t)
                             snackbarHostState.showSnackbar("Ошибка отмены: ${t.message ?: "неизвестно"}")
                         }
                     }

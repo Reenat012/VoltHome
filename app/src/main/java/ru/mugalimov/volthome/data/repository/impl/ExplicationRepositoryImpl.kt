@@ -182,19 +182,79 @@ class ExplicationRepositoryImpl @Inject constructor(
                     )
 
                     // =========================
-                    // 2) BUILD desiredState (existing vs new)
-                    // =========================
+// 2) BUILD desiredState (existing vs new) + resolve temp ids (idempotent save)
+// =========================
+
+                    // deviceIds в draft, которые реально должны быть join’ами (unassigned не пишем)
+                    fun assignedDeviceIdsForDraftGroup(g: ru.mugalimov.volthome.domain.model.manual.ManualGroupDraft): Set<Long> =
+                        g.deviceIds.asSequence()
+                            .filter { it !in desiredUnassignedIds }
+                            .toSet()
+
+                    val dbDevicesByGroupId: Map<Long, Set<Long>> =
+                        dbJoins.groupBy({ it.groupId }, { it.deviceId })
+                            .mapValues { (_, ids) -> ids.toSet() }
+
+// tempId(-1) -> realId(7288) если в БД уже есть группа, совпадающая по сигнатуре и membership
+                    val tempToExistingId = LinkedHashMap<Long, Long>()
+
+// Чтобы не “назначить” один db group на две temp-группы
+                    val claimedDbIds = HashSet<Long>()
+
+                    desiredDraftGroups
+                        .asSequence()
+                        .filter { it.groupId <= 0L }
+                        .sortedBy { it.groupNumber } // детерминизм
+                        .forEach { gDraft ->
+                            val wantedDevices = assignedDeviceIdsForDraftGroup(gDraft)
+
+                            // Кандидаты: по “структуре”, затем по membership
+                            val candidates = dbGroups
+                                .asSequence()
+                                .filter { it.groupId !in claimedDbIds }
+                                .filter { it.groupNumber == gDraft.groupNumber }
+                                .filter { it.phase == gDraft.phase.name }
+                                .filter { it.groupType == gDraft.groupType.name }
+                                .filter { it.roomId == gDraft.roomId }
+                                .filter { it.roomName == gDraft.roomName }
+                                .toList()
+
+                            val matched = candidates.firstOrNull { db ->
+                                val dbDevs = dbDevicesByGroupId[db.groupId].orEmpty()
+                                dbDevs == wantedDevices
+                            }
+
+                            if (matched != null) {
+                                tempToExistingId[gDraft.groupId] = matched.groupId
+                                claimedDbIds += matched.groupId
+                            }
+                        }
+
                     val desiredExistingDraft = desiredDraftGroups
-                        .filter { it.groupId > 0L && dbGroupsById.containsKey(it.groupId) }
-                    val desiredExistingIds = desiredExistingDraft.map { it.groupId }.toSet()
+                        .filter { g ->
+                            // existing, если:
+                            // 1) реальный id > 0 и он есть в БД
+                            // 2) или temp id резолвится в уже существующую группу БД
+                            (g.groupId > 0L && dbGroupsById.containsKey(g.groupId)) || tempToExistingId.containsKey(g.groupId)
+                        }
+
+                    val desiredExistingIds = desiredExistingDraft
+                        .map { g -> tempToExistingId[g.groupId] ?: g.groupId }
+                        .toSet()
 
                     val desiredNewDraft = desiredDraftGroups
-                        .filter { it.groupId <= 0L || !dbGroupsById.containsKey(it.groupId) }
+                        .filter { g ->
+                            // new, если:
+                            // - это temp id, который НЕ резолвится
+                            // - или real id, которого нет в БД (крайний кейс)
+                            (g.groupId <= 0L && !tempToExistingId.containsKey(g.groupId)) ||
+                                    (g.groupId > 0L && !dbGroupsById.containsKey(g.groupId))
+                        }
 
                     Log.d(
                         tag,
                         "APPLY_DIFF desired split: existing=${desiredExistingDraft.size} new=${desiredNewDraft.size} " +
-                                "existingIds(sample)=${desiredExistingIds.take(12)}"
+                                "existingIds(sample)=${desiredExistingIds.take(12)} tempResolved=${tempToExistingId.size}"
                     )
 
                     // =========================
@@ -319,7 +379,11 @@ class ExplicationRepositoryImpl @Inject constructor(
 
                     val joinsToInsert = buildList {
                         desiredDraftGroups.forEach { gDraft ->
-                            val finalGroupId = tempToNewId[gDraft.groupId] ?: gDraft.groupId
+                            val finalGroupId =
+                                tempToNewId[gDraft.groupId]
+                                    ?: tempToExistingId[gDraft.groupId]
+                                    ?: gDraft.groupId
+
                             if (finalGroupId <= 0L) return@forEach
 
                             gDraft.deviceIds

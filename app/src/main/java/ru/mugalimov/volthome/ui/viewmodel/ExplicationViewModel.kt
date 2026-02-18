@@ -700,6 +700,75 @@ class ExplicationViewModel @Inject constructor(
         )
     }
 
+    // =========================
+// Manual: Cancel -> auto recalc -> DB -> exit manual -> UI обновится из DB pipeline
+// =========================
+    fun onCancelManualClicked() {
+        viewModelScope.launch(ioDispatcher) {
+
+            // Берём pid надёжно
+            val projectId = activeProjectDs.activeProjectId.first().orEmpty()
+            if (projectId.isBlank()) {
+                _events.value = UiEvent.ShowSnackbar("Не выбран проект")
+                return@launch
+            }
+
+            // Cancel имеет смысл только если manual активен
+            val session = manualRepo.getActiveSession() ?: manualSession.value
+            val isManual = session?.manualModeActive == true && session.projectId == projectId
+            if (!isManual) {
+                _events.value = UiEvent.ShowSnackbar("Ручной режим не активен")
+                return@launch
+            }
+
+            Log.w("MANUAL_CANCEL", "VM Cancel START pid=$projectId ver=${session?.version}")
+
+            // UI: показываем загрузку, но manual НЕ выключаем до успешного auto-save
+            _isRecalculating.value = true
+            _uiState.value = GroupScreenState.Loading
+
+            try {
+                when (val res = cancelManualAndAutoRecalcUseCase.execute(
+                    CancelManualAndAutoRecalcUseCase.Params(projectId = projectId)
+                )) {
+                    is GroupingResult.Error -> {
+                        Log.e("MANUAL_CANCEL", "VM Cancel FAILED pid=$projectId msg=${res.message}")
+                        _events.value = UiEvent.ShowSnackbar("Не удалось отменить изменения: ${res.message}")
+
+                        // ❗ВАЖНО: manual остаётся активным, draft не трогаем.
+                        // Возвращаем UI к manual-экрану (он рисуется из draft через UI слой).
+                        return@launch
+                    }
+
+                    is GroupingResult.Success -> {
+                        Log.w("MANUAL_CANCEL", "VM Cancel OK pid=$projectId groups=${res.system.groups.size}")
+
+                        // decisions держим в памяти (для PRO секций), как в обычном auto-recalc
+                        repo.setLastDistributionDecisions(res.distributionDecisions)
+
+                        // Теперь можно безопасно выключать manual (снимаем kill-process маркер внутри manualRepo)
+                        manualRepo.exitManualMode(projectId)
+
+                        // Убираем хвосты переноса/drag, чтобы UI не завис в "полудраге"
+                        _moveDeviceUi.value = null
+                        _dragState.value = DragState()
+                        _pendingMixedMove.value = null
+                        _showMixedWarningDialog.value = false
+
+                        _events.value = UiEvent.ShowSnackbar("Ручные изменения отменены")
+                        // Дальше UI сам обновится из DB pipeline (combine(dbGroupsFlow,...,manualSession))
+                    }
+                }
+            } catch (t: Throwable) {
+                Log.e("MANUAL_CANCEL", "VM Cancel EXCEPTION pid=$projectId", t)
+                _events.value = UiEvent.ShowSnackbar("Ошибка отмены изменений")
+                // manual НЕ выключаем, draft сохраняем
+            } finally {
+                _isRecalculating.value = false
+            }
+        }
+    }
+
     /**
      * Отмена drag — сбрасываем состояние.
      * В этом коммите не трогаем _moveDeviceUi, чтобы не менять текущее поведение UI.

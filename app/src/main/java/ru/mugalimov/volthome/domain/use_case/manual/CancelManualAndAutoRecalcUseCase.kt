@@ -23,11 +23,7 @@ class CancelManualAndAutoRecalcUseCase @Inject constructor(
     )
 
     suspend fun execute(params: Params): GroupingResult {
-        Log.e(
-            "MANUAL_CANCEL",
-            "CANCEL_USE_CASE EXECUTE pid=${params.projectId}",
-            Throwable("STACK")
-        )
+        Log.w("MANUAL_CANCEL", "CANCEL_USE_CASE EXECUTE pid=${params.projectId}")
 
         val projectId = params.projectId
         if (projectId.isBlank()) {
