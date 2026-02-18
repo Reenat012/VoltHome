@@ -422,23 +422,39 @@ class ExplicationViewModel @Inject constructor(
         }
 
         // 3) ✅ Главный FIX: uiState строим от БД, когда manual выключен.
-// Это делает Экспликацию реактивной: Save из AppBar → БД → UI обновился.
+// ФИКС "AUTO после Save теряется":
+// manualSession добавлен в combine, чтобы при exitManualMode() пайплайн пересрабатывал
+// даже если dbGroupsFlow не эмитит повторно.
         viewModelScope.launch(ioDispatcher) {
 
-            // Комбайним группы + phaseMode + доступ к pro-секциям + decisions.
-            // (decisions могут быть старыми после manual-save — но это не ломает UI)
+            // Комбайним группы + phaseMode + доступ к pro-секциям + decisions + manualSession(!!!)
             combine(
                 dbGroupsFlow,
                 phaseMode,
                 userPlanRepository.planFlow,
-                decisionsFlow
-            ) { groups, mode, plan, decisions ->
-                Quad(groups, mode, plan.capabilities.professionalReportSections, decisions)
-            }.collect { (groups, mode, isProReport, decisions) ->
+                decisionsFlow,
+                manualSession // ✅ ключевой фикс: manual -> вход пайплайна
+            ) { groups, mode, plan, decisions, session ->
+                // Quad оставляем, чтобы не переписывать остальную логику
+                Pair(
+                    Quad(groups, mode, plan.capabilities.professionalReportSections, decisions),
+                    session
+                )
+            }.collect { (quad, session) ->
 
-                val active = manualRepo.getActiveSession() ?: manualSession.value
-                if (active?.manualModeActive == true) {
-                    Log.w("AUTO_GATE", "DB_PIPELINE_SKIP reason=MANUAL_ACTIVE pid=${active.projectId} ver=${active.version}")
+                val groups = quad.a
+                val mode = quad.b
+                val isProReport = quad.c
+                val decisions = quad.d
+
+                // ✅ manual-статус только из session, которая участвует в combine
+                val manualActive = session?.manualModeActive == true
+
+                if (manualActive) {
+                    Log.w(
+                        "AUTO_GATE",
+                        "DB_PIPELINE_SKIP reason=MANUAL_ACTIVE pid=${session?.projectId} ver=${session?.version}"
+                    )
                     return@collect
                 }
 
@@ -447,10 +463,10 @@ class ExplicationViewModel @Inject constructor(
                 if (groups.isEmpty()) {
                     if (!initialAutoRecalcTriggered.value) {
                         initialAutoRecalcTriggered.value = true
-                        Log.w("AUTO_TRIGGER", "AUTO_RECALC_START reason=INIT_EMPTY_DB pid=${activeProjectDs.activeProjectId.first().orEmpty()}")
+                        val pid = activeProjectDs.activeProjectId.first().orEmpty()
+                        Log.w("AUTO_TRIGGER", "AUTO_RECALC_START reason=INIT_EMPTY_DB pid=$pid")
                         recalcAndSaveGroups()
                     } else {
-                        // остаёмся в Loading, пока не появятся группы (или ошибка)
                         if (_uiState.value !is GroupScreenState.Loading) {
                             _uiState.value = GroupScreenState.Loading
                         }
@@ -458,13 +474,14 @@ class ExplicationViewModel @Inject constructor(
                     return@collect
                 }
 
-                Log.w("EXP_AUTO",
+                Log.w(
+                    "EXP_AUTO",
                     "AUTO pipeline groups=${groups.size} " +
                             "sample=" + groups.sortedBy { it.groupNumber }.take(5)
                         .joinToString { g -> "${g.groupId}#${g.groupNumber}(devs=${g.devices.size})" }
                 )
 
-                // Когда группы в БД есть — гарантированно приводим UI к факту.
+                // Когда manual выключен — гарантированно приводим UI к факту из БД
                 setSuccessFromGroups(
                     groups = groups,
                     mode = mode,

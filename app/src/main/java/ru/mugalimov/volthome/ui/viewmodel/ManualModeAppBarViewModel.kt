@@ -105,8 +105,6 @@ class ManualModeAppBarViewModel @Inject constructor(
                 val s = manualRepo.getActiveSession()
                 Log.d(TAG, "entered: sessionPid=${s?.projectId} active=${s?.manualModeActive} groups=${s?.draftState?.groups?.size}")
 
-                // ✅ kill-process UX: ставим маркер "manual ожидается"
-                manualDraftResetNotifier.markExpected(projectId)
 
                 messages.tryEmit("Ручной режим включён")
             } catch (_: Throwable) {
