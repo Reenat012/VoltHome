@@ -12,9 +12,14 @@ import ru.mugalimov.volthome.domain.model.DistributionDecision
  * ❗STRUCTURE writer:
  * - Это ЯВНЫЙ structural commit (rebuild) по кнопке/сценарию.
  * - Реактивный AUTO-контур НЕ имеет права менять структуру.
+ *
+ * Коммит v3.1:
+ * - Single-flight (Mutex) per projectId
+ * - Инварианты до записи
  */
 class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
-    private val explicationRepository: ExplicationRepository
+    private val explicationRepository: ExplicationRepository,
+    private val structuralWriteMutex: ProjectStructuralWriteMutex, // ✅ single-flight
 ) {
     data class Params(
         val projectId: String,
@@ -28,35 +33,52 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
         val projectId = params.projectId
         val groups = params.groups
 
-        // Сводка: groupId#num#phase#devCount
-        val summary = groups
-            .sortedBy { it.groupNumber }
-            .joinToString { g ->
-                val ph = g.phase?.name ?: "null"
-                "${g.groupId}#${g.groupNumber}#$ph(devs=${g.devices.size})"
+        structuralWriteMutex.withLock(projectId) {
+            // -------------------------
+            // ✅ Быстрые инварианты (до БД)
+            // -------------------------
+            val dupGroupIds = groups.groupBy { it.groupId }.filter { it.value.size > 1 }.keys
+            require(dupGroupIds.isEmpty()) {
+                "AUTO_SAVE invariant failed: duplicate groupId(s)=$dupGroupIds projectId=$projectId"
             }
 
-        // stacktrace-маркер: кто инициирует STRUCTURE write
-        val caller = Throwable().stackTrace
-            .drop(1)
-            .take(8)
-            .joinToString(" <- ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
+            val dupNumbers = groups.groupBy { it.groupNumber }.filter { it.value.size > 1 }.keys
+            require(dupNumbers.isEmpty()) {
+                "AUTO_SAVE invariant failed: duplicate groupNumber(s)=$dupNumbers projectId=$projectId"
+            }
 
-        Log.w(
-            "AUTO_SAVE",
-            "AUTO_SAVE BEGIN source=AUTO_SAVE reason=EXPLICIT_REBUILD projectId=$projectId " +
-                    "groups=${groups.size} summary=[$summary] caller=$caller"
-        )
+            val nullPhase = groups.filter { it.phase == null }.map { it.groupId }
+            require(nullPhase.isEmpty()) {
+                "AUTO_SAVE invariant failed: null phase for groupId(s)=$nullPhase projectId=$projectId"
+            }
 
-        // ✅ ЕДИНСТВЕННАЯ структурная запись
-        explicationRepository.replaceAllGroupsTransactional(
-            projectId = projectId,
-            groups = groups
-        )
+            val summary = groups
+                .sortedBy { it.groupNumber }
+                .joinToString { g ->
+                    val ph = g.phase?.name ?: "null"
+                    "${g.groupId}#${g.groupNumber}#$ph(devs=${g.devices.size})"
+                }
 
-        // Decisions (in-memory)
-        explicationRepository.setLastDistributionDecisions(params.distributionDecisions)
+            val caller = Throwable().stackTrace
+                .drop(1)
+                .take(8)
+                .joinToString(" <- ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
 
-        Log.w("AUTO_SAVE", "AUTO_SAVE END projectId=$projectId groups=${groups.size}")
+            Log.w(
+                "AUTO_SAVE",
+                "AUTO_SAVE BEGIN source=AUTO_SAVE reason=EXPLICIT_REBUILD projectId=$projectId " +
+                        "groups=${groups.size} summary=[$summary] caller=$caller"
+            )
+
+            // ✅ ЕДИНСТВЕННАЯ structural запись (внутри неё теперь будет DB-sanity)
+            explicationRepository.replaceAllGroupsTransactional(
+                projectId = projectId,
+                groups = groups
+            )
+
+            explicationRepository.setLastDistributionDecisions(params.distributionDecisions)
+
+            Log.w("AUTO_SAVE", "AUTO_SAVE END projectId=$projectId groups=${groups.size}")
+        }
     }
 }

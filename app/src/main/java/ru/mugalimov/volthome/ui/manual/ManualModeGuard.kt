@@ -12,7 +12,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import ru.mugalimov.volthome.data.local.dao.GroupPhaseOverrideDao
 import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
+import ru.mugalimov.volthome.domain.model.GroupingResult
 import ru.mugalimov.volthome.domain.use_case.manual.CancelManualAndAutoRecalcUseCase
 import ru.mugalimov.volthome.domain.use_case.manual.CommitManualDraftToLocalDbUseCase
 
@@ -26,12 +28,17 @@ import ru.mugalimov.volthome.domain.use_case.manual.CommitManualDraftToLocalDbUs
  * Важно:
  * - request() НЕ должен блокировать UI: проверка manual-сессии делается в фоне.
  * - Добавлена защита от повторных нажатий (isProcessing) — иначе гонки и двойные execute().
+ *
+ * Коммит 8:
+ * - После Save/Cancel обязательно чистим group_phase_overrides,
+ *   иначе AUTO перетрёт сохранённые фазы и пользователь увидит "откат".
  */
 @Singleton
 class ManualModeGuard private constructor(
     private val manualRepo: ManualEditSessionRepository,
     private val commitManualDraftToLocalDb: CommitManualDraftToLocalDbUseCase,
     private val cancelManualAndAutoRecalc: CancelManualAndAutoRecalcUseCase,
+    private val groupPhaseOverrideDao: GroupPhaseOverrideDao,
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -46,7 +53,6 @@ class ManualModeGuard private constructor(
     )
 
     fun dismiss() {
-        // Важно: UI-стейт трогаем на Main, чтобы не ловить “мелькание”/гонки в Compose.
         scope.launch {
             withContext(Dispatchers.Main.immediate) {
                 _dialogState.value = null
@@ -54,19 +60,12 @@ class ManualModeGuard private constructor(
         }
     }
 
-    /**
-     * Главная точка входа.
-     *
-     * @param forceDialog true = показать диалог без проверки getActiveSession().
-     * Нужен, когда UI уже ТОЧНО знает, что manual включён (observeSession(projectId)).
-     */
     fun request(
         action: ForbiddenAction,
         onProceed: () -> Unit,
         forceDialog: Boolean = false,
     ) {
         if (forceDialog) {
-            // Вызывающая сторона гарантирует, что manual включён — сразу показываем диалог.
             scope.launch {
                 withContext(Dispatchers.Main.immediate) {
                     _dialogState.value = DialogState(action = action, onProceed = onProceed)
@@ -75,17 +74,14 @@ class ManualModeGuard private constructor(
             return
         }
 
-        // ✅ Никаких синхронных запросов на UI-потоке — проверяем в фоне.
         scope.launch {
             val s = runCatching { manualRepo.getActiveSession() }.getOrNull()
             val manualActive = (s?.manualModeActive == true)
 
             withContext(Dispatchers.Main.immediate) {
                 if (!manualActive) {
-                    // Manual выключен — выполняем действие сразу.
                     onProceed()
                 } else {
-                    // Manual включён — показываем диалог.
                     _dialogState.value = DialogState(action = action, onProceed = onProceed)
                 }
             }
@@ -96,13 +92,11 @@ class ManualModeGuard private constructor(
         val state = _dialogState.value ?: return
         if (state.isProcessing) return
 
-        // Блокируем повторные нажатия.
         _dialogState.value = state.copy(isProcessing = true)
 
         scope.launch {
             val session = runCatching { manualRepo.getActiveSession() }.getOrNull()
             if (session == null) {
-                // Сессии уже нет — просто закрываем и выполняем действие.
                 withContext(Dispatchers.Main.immediate) {
                     _dialogState.value = null
                     state.onProceed()
@@ -110,36 +104,33 @@ class ManualModeGuard private constructor(
                 return@launch
             }
 
-            // ✅ ВАЖНО:
-            // 1) Сначала пробуем commit (diff-commit).
-            // 2) Выходим из manual ТОЛЬКО если commit успешен.
-            // 3) Если commit упал — manual НЕ выключаем, возвращаем кнопки.
-            val commitResult = runCatching {
+            val projectId = session.projectId
+
+            val ok = runCatching {
+                // 1) commit draft -> локальная БД (diff-commit)
                 commitManualDraftToLocalDb.execute(
                     CommitManualDraftToLocalDbUseCase.Params(
-                        projectId = session.projectId,
+                        projectId = projectId,
                         draft = session.draftState
                     )
                 )
-            }
 
-            val ok = if (commitResult.isSuccess) {
-                val exitOk = runCatching { manualRepo.exitManualMode(session.projectId) }.isSuccess
-                if (!exitOk) {
-                    Log.e(TAG, "onSaveClicked: commit ok, but exitManualMode failed. projectId=${session.projectId}")
-                }
-                exitOk
-            } else {
-                Log.e(TAG, "onSaveClicked: commit failed. projectId=${session.projectId}", commitResult.exceptionOrNull())
-                false
-            }
+                // 2) КРИТИЧНО: чистим overrides, иначе AUTO "откатается" поверх сохранённых фаз
+                val deleted = groupPhaseOverrideDao.deleteByProject(projectId)
+                Log.w(TAG, "DELETE overrides pid=$projectId (guard SAVE) deletedRows=$deleted")
+
+                // 3) Выходим из manual
+                manualRepo.exitManualMode(projectId)
+            }.onFailure {
+                Log.e(TAG, "onSaveClicked failed. projectId=$projectId", it)
+            }.isSuccess
 
             withContext(Dispatchers.Main.immediate) {
                 if (ok) {
                     _dialogState.value = null
                     state.onProceed()
                 } else {
-                    // Ошибка — остаёмся в manual, возвращаем кнопки.
+                    // Ошибка — остаёмся в manual, возвращаем кнопки
                     _dialogState.value = state.copy(isProcessing = false)
                 }
             }
@@ -150,26 +141,39 @@ class ManualModeGuard private constructor(
         val state = _dialogState.value ?: return
         if (state.isProcessing) return
 
-        // Блокируем повторные нажатия.
         _dialogState.value = state.copy(isProcessing = true)
 
         scope.launch {
             val session = runCatching { manualRepo.getActiveSession() }.getOrNull()
 
-            val ok = runCatching {
-                if (session != null) {
-                    // ✅ Сначала выходим из manual для этого проекта
-                    manualRepo.exitManualMode(session.projectId)
-
-                    // ✅ Затем запускаем авто-пересчёт именно по этому projectId
-                    cancelManualAndAutoRecalc.execute(
-                        CancelManualAndAutoRecalcUseCase.Params(projectId = session.projectId)
-                    )
+            // Если сессии нет (kill-process или manual уже выключен) — считаем cancel успешным.
+            if (session == null) {
+                withContext(Dispatchers.Main.immediate) {
+                    _dialogState.value = null
+                    state.onProceed()
                 }
-                // Если session == null — manual уже не активен (или kill-process),
-                // тут просто считаем "cancel" успешным (действие можно продолжать).
+                return@launch
+            }
+
+            val projectId = session.projectId
+
+            val ok = runCatching {
+                // 1) Авто-пересчёт + коммит результата (внутренняя логика usecase)
+                when (val res = cancelManualAndAutoRecalc.execute(
+                    CancelManualAndAutoRecalcUseCase.Params(projectId = projectId)
+                )) {
+                    is GroupingResult.Error -> error("CancelManual failed: ${res.message}")
+                    is GroupingResult.Success -> Unit
+                }
+
+                // 2) КРИТИЧНО: чистим overrides, иначе AUTO перетрёт то, что мы только что пересчитали
+                val deleted = groupPhaseOverrideDao.deleteByProject(projectId)
+                Log.w(TAG, "DELETE overrides pid=$projectId (guard CANCEL) deletedRows=$deleted")
+
+                // 3) Выходим из manual
+                manualRepo.exitManualMode(projectId)
             }.onFailure {
-                Log.e(TAG, "onCancelClicked failed. sessionProjectId=${session?.projectId}", it)
+                Log.e(TAG, "onCancelClicked failed. projectId=$projectId", it)
             }.isSuccess
 
             withContext(Dispatchers.Main.immediate) {
@@ -177,7 +181,6 @@ class ManualModeGuard private constructor(
                     _dialogState.value = null
                     state.onProceed()
                 } else {
-                    // Ошибка — диалог оставляем, чтобы пользователь мог нажать "Остаться".
                     _dialogState.value = state.copy(isProcessing = false)
                 }
             }
@@ -196,7 +199,8 @@ class ManualModeGuard private constructor(
             return ManualModeGuard(
                 manualRepo = ep.manualRepo(),
                 commitManualDraftToLocalDb = ep.commitManualDraftToLocalDb(),
-                cancelManualAndAutoRecalc = ep.cancelManualAndAutoRecalc()
+                cancelManualAndAutoRecalc = ep.cancelManualAndAutoRecalc(),
+                groupPhaseOverrideDao = ep.groupPhaseOverrideDao()
             )
         }
     }

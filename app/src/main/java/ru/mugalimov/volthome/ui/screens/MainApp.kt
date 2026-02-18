@@ -37,11 +37,15 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import ru.mugalimov.volthome.data.local.dao.GroupPhaseOverrideDao
 import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
+import ru.mugalimov.volthome.domain.model.GroupingResult
 import ru.mugalimov.volthome.domain.model.PlanCapabilities
 import ru.mugalimov.volthome.domain.model.ProFeature
 import ru.mugalimov.volthome.domain.model.manual.ManualEditSession
-import ru.mugalimov.volthome.ui.manual.ForbiddenAction
+import ru.mugalimov.volthome.domain.use_case.manual.CancelManualAndAutoRecalcUseCase
+import ru.mugalimov.volthome.domain.use_case.manual.CommitManualDraftToLocalDbUseCase
 import ru.mugalimov.volthome.ui.manual.LocalManualModeGuard
 import ru.mugalimov.volthome.ui.manual.ManualModeGuard
 import ru.mugalimov.volthome.ui.manual.ManualModeGuardDialog
@@ -61,11 +65,6 @@ import ru.mugalimov.volthome.ui.viewmodel.ProfileViewModel
 import ru.mugalimov.volthome.ui.viewmodel.ProjectsViewModel
 import ru.mugalimov.volthome.ui.viewmodel.UserPlanViewModel
 import androidx.compose.runtime.rememberCoroutineScope
-import kotlinx.coroutines.launch
-import ru.mugalimov.volthome.data.local.dao.GroupPhaseOverrideDao
-import ru.mugalimov.volthome.domain.model.GroupingResult
-import ru.mugalimov.volthome.domain.use_case.manual.CommitManualDraftToLocalDbUseCase
-import ru.mugalimov.volthome.domain.use_case.manual.CancelManualAndAutoRecalcUseCase
 
 @Composable
 fun MainApp(
@@ -117,7 +116,6 @@ fun MainApp(
     val commitUseCase = remember { commitEp.commitManualDraftToLocalDbUseCase() }
     val cancelUseCase = remember { commitEp.cancelManualAndAutoRecalcUseCase() }
 
-
     // ✅ КРИТИЧНО: overrides живут отдельно и в AUTO перетирают фазы поверх сохранённых групп.
     // После manual-save их нужно чистить, иначе получаешь "откат" в AUTO.
     val groupPhaseOverrideDao = remember { commitEp.groupPhaseOverrideDao() }
@@ -143,12 +141,10 @@ fun MainApp(
     val manualSessionFlow: Flow<ManualEditSession?> = remember(activeProjectId, manualRepo) {
         val pid = activeProjectId
         if (pid.isNullOrBlank()) {
-            // ВАЖНО: указываем тип, иначе Kotlin может начать “плыть” по типам
             flowOf<ManualEditSession?>(null)
         } else {
             manualRepo.observeSession(pid)
         }
-            // На всякий случай — чтобы лишний раз не дёргать Compose
             .distinctUntilChanged()
     }
 
@@ -158,8 +154,6 @@ fun MainApp(
         when {
             manualSession?.manualModeActive != true -> ManualModeChipState.AUTO
             else -> {
-                // ✅ DIRTY: draft отличается от baseState
-                // Если equals неадекватный — будет MANUAL, но не упадём.
                 val isDirty = try {
                     manualSession.draftState != manualSession.baseState
                 } catch (_: Throwable) {
@@ -176,6 +170,16 @@ fun MainApp(
     // (isManualMode сейчас может быть не использован напрямую — оставляю как было)
 
     // -----------------------------
+    // ✅ Коммит 8: глобально слушаем сообщения от ManualModeAppBarViewModel
+    // -----------------------------
+    LaunchedEffect(manualAppBarVm) {
+        manualAppBarVm.messages.collect { msg ->
+            // ✅ сообщения от VM должны быть видимыми пользователю, иначе они бессмысленны
+            snackbarHostState.showSnackbar(msg)
+        }
+    }
+
+    // -----------------------------
     // --- профиль
     // -----------------------------
     val profileVm: ProfileViewModel = hiltViewModel()
@@ -190,12 +194,9 @@ fun MainApp(
     LaunchedEffect(activeProjectId) {
         val projectId = activeProjectId ?: return@LaunchedEffect
 
-        // Проверяем: есть ли активная manual-сессия именно для этого проекта.
-        // Важно: getActiveSession() может быть null после kill-process, и это и есть нужный сигнал.
         val s = manualRepo.getActiveSession()
         val hasActiveSession = (s?.projectId == projectId) && (s.manualModeActive)
 
-        // Если маркер стоит, но сессии нет => черновик пропал -> показываем snackbar ровно один раз.
         if (manualDraftResetNotifier.consumeResetIfNeeded(projectId, hasActiveSession)) {
             snackbarHostState.showSnackbar("Черновик ручного режима был сброшен")
         }
@@ -210,7 +211,6 @@ fun MainApp(
     var manualExitDialogVisible by remember { mutableStateOf(false) }
     var pendingProceed by remember { mutableStateOf<(() -> Unit)?>(null) }
 
-    // ✅ Запрос на выход из manual (показываем диалог, опционально запоминаем действие после выхода)
     fun requestManualExit(proceedAfterExit: (() -> Unit)? = null) {
         pendingProceed = proceedAfterExit
         manualExitDialogVisible = true
@@ -224,15 +224,11 @@ fun MainApp(
     LaunchedEffect(paywallBus, userPlan) {
         val caps = userPlan.capabilities
         paywallBus.events.collect { feature ->
-            if (isFeatureAllowed(feature, caps)) {
-                // Уже доступно — игнорируем
-                return@collect
-            }
+            if (isFeatureAllowed(feature, caps)) return@collect
             paywallFeature = feature
         }
     }
 
-    // ✅ Guard: если capabilities обновились так, что текущая фича стала доступна — закрываем диалог
     LaunchedEffect(userPlan, paywallFeature) {
         val feature = paywallFeature ?: return@LaunchedEffect
         if (isFeatureAllowed(feature, userPlan.capabilities)) {
@@ -247,7 +243,6 @@ fun MainApp(
         val feature = paywallFeature!!
 
         when (feature) {
-            // ✅ Коммит 5: объясняем механику (как это работает), а не "PRO ради PRO"
             ProFeature.PHASE_DND_TEASER -> {
                 AlertDialog(
                     onDismissRequest = { paywallFeature = null },
@@ -266,19 +261,14 @@ fun MainApp(
                         TextButton(
                             onClick = {
                                 paywallFeature = null
-                                appNavController.navigate(Screens.SubscriptionScreen.route) {
-                                    launchSingleTop = true
-                                }
+                                appNavController.navigate(Screens.SubscriptionScreen.route) { launchSingleTop = true }
                             }
                         ) { Text("Открыть PRO") }
                     },
-                    dismissButton = {
-                        TextButton(onClick = { paywallFeature = null }) { Text("Понятно") }
-                    }
+                    dismissButton = { TextButton(onClick = { paywallFeature = null }) { Text("Понятно") } }
                 )
             }
 
-            // ✅ Коммит 3: feature-specific объясняющая модалка (не тупой paywall)
             ProFeature.DECISION_DETAILS -> {
                 AlertDialog(
                     onDismissRequest = { paywallFeature = null },
@@ -299,15 +289,11 @@ fun MainApp(
                         TextButton(
                             onClick = {
                                 paywallFeature = null
-                                appNavController.navigate(Screens.SubscriptionScreen.route) {
-                                    launchSingleTop = true
-                                }
+                                appNavController.navigate(Screens.SubscriptionScreen.route) { launchSingleTop = true }
                             }
                         ) { Text("Открыть PRO") }
                     },
-                    dismissButton = {
-                        TextButton(onClick = { paywallFeature = null }) { Text("Понятно") }
-                    }
+                    dismissButton = { TextButton(onClick = { paywallFeature = null }) { Text("Понятно") } }
                 )
             }
 
@@ -320,15 +306,11 @@ fun MainApp(
                         TextButton(
                             onClick = {
                                 paywallFeature = null
-                                appNavController.navigate(Screens.SubscriptionScreen.route) {
-                                    launchSingleTop = true
-                                }
+                                appNavController.navigate(Screens.SubscriptionScreen.route) { launchSingleTop = true }
                             }
                         ) { Text("Да") }
                     },
-                    dismissButton = {
-                        TextButton(onClick = { paywallFeature = null }) { Text("Нет") }
-                    }
+                    dismissButton = { TextButton(onClick = { paywallFeature = null }) { Text("Нет") } }
                 )
             }
         }
@@ -367,16 +349,13 @@ fun MainApp(
     val navBackStackEntry = appNavController.currentBackStackEntryAsState().value
     val currentRoute = navBackStackEntry?.destination?.route
 
-    // Пробрасываем тариф и guard в UI через CompositionLocal
     CompositionLocalProvider(
         LocalUserPlan provides userPlan,
         LocalManualModeGuard provides manualGuard
     ) {
         Box(Modifier.fillMaxSize()) {
-            // ✅ Единый guard-диалог для всех "опасных" действий в manual
             ManualModeGuardDialog(guard = manualGuard)
 
-            // ✅ Глобальный snackbar host (one-shot уведомления)
             SnackbarHost(
                 hostState = snackbarHostState,
                 modifier = Modifier
@@ -390,14 +369,10 @@ fun MainApp(
                 projectsFlow = projectsFlow,
                 drawerState = drawerState,
 
-                // ✅ Диалог Save/Cancel/Stay на верхнем уровне
                 manualExitDialogVisible = manualExitDialogVisible,
-                onManualExitDialogDismiss = {
-                    // ✅ Stay: просто закрываем диалог
-                    dismissManualExitDialog()
-                },
+                onManualExitDialogDismiss = { dismissManualExitDialog() },
+
                 onManualSaveClick = {
-                    // ✅ Save: commit draft -> очистить overrides -> exit manual -> выполнить pendingProceed
                     scope.launch {
                         val projectId = activeProjectId.orEmpty()
                         val s = manualRepo.getActiveSession()
@@ -409,7 +384,6 @@ fun MainApp(
                         }
 
                         try {
-                            // 1) Коммитим draft в локальную БД
                             commitUseCase.execute(
                                 CommitManualDraftToLocalDbUseCase.Params(
                                     projectId = projectId,
@@ -417,24 +391,21 @@ fun MainApp(
                                 )
                             )
 
-                            // 1.5) КРИТИЧНО: чистим overrides, иначе AUTO будет форсить старые фазы
                             val deleted = groupPhaseOverrideDao.deleteByProject(projectId)
                             Log.w("OVERRIDES", "DELETE overrides pid=$projectId (manual SAVE) deletedRows=$deleted")
 
-                            // 2) Выходим из manual
                             manualRepo.exitManualMode(projectId)
-                            // 4) Закрываем диалог и выполняем отложенное действие
+
                             val proceed = pendingProceed
                             dismissManualExitDialog()
                             proceed?.invoke()
                         } catch (t: Throwable) {
-                            // ✅ Ошибка Save: manual НЕ выключаем
                             snackbarHostState.showSnackbar("Ошибка сохранения: ${t.message ?: "неизвестно"}")
                         }
                     }
                 },
+
                 onManualCancelClick = {
-                    // ✅ Cancel: auto-recalc -> commit to DB -> exit manual -> выполнить pendingProceed
                     scope.launch {
                         val projectId = activeProjectId.orEmpty()
                         if (projectId.isBlank()) {
@@ -448,23 +419,20 @@ fun MainApp(
                                 CancelManualAndAutoRecalcUseCase.Params(projectId = projectId)
                             )) {
                                 is GroupingResult.Error -> {
-                                    // ✅ Ошибка Cancel: manual НЕ выключаем
                                     snackbarHostState.showSnackbar("Ошибка пересчёта: ${res.message}")
                                     return@launch
                                 }
 
                                 is GroupingResult.Success -> {
-                                    // ок
+                                    // ok
                                 }
                             }
 
                             val deleted = groupPhaseOverrideDao.deleteByProject(projectId)
                             Log.w("OVERRIDES", "DELETE overrides pid=$projectId (manual CANCEL) deletedRows=$deleted")
 
-                            // 2) Выходим из manual (и чистим marker внутри repo)
                             manualRepo.exitManualMode(projectId)
 
-                            // 3) Закрываем диалог и выполняем отложенное действие
                             val proceed = pendingProceed
                             dismissManualExitDialog()
                             proceed?.invoke()
@@ -474,7 +442,6 @@ fun MainApp(
                     }
                 },
 
-                // ✅ Чип ручного режима (справа в AppBar)
                 onManualModeClick = {
                     if (manualChipState == ManualModeChipState.AUTO) {
                         manualAppBarVm.onManualModeClick()
@@ -494,9 +461,7 @@ fun MainApp(
                     val proceed = {
                         projectsVm.selectProject(id)
                         appNavController.navigate(Screens.RoomsList.route) {
-                            popUpTo(appNavController.graph.findStartDestination().id) {
-                                saveState = true
-                            }
+                            popUpTo(appNavController.graph.findStartDestination().id) { saveState = true }
                             launchSingleTop = true
                             restoreState = true
                         }
@@ -509,9 +474,7 @@ fun MainApp(
                     val proceed = {
                         projectsVm.createNewProject()
                         appNavController.navigate(Screens.RoomsList.route) {
-                            popUpTo(appNavController.graph.findStartDestination().id) {
-                                saveState = true
-                            }
+                            popUpTo(appNavController.graph.findStartDestination().id) { saveState = true }
                             launchSingleTop = true
                             restoreState = true
                         }
@@ -520,27 +483,47 @@ fun MainApp(
                     else requestManualExit(proceedAfterExit = proceed)
                 },
 
+                // ✅ Коммит 8: эти переходы тоже обязаны проходить через Save/Cancel/Stay
                 onOpenSettings = {
-                    appNavController.navigate(Screens.SettingsScreen.route) {
-                        launchSingleTop = true
+                    val proceed = {
+                        appNavController.navigate(Screens.SettingsScreen.route) { launchSingleTop = true }
                     }
+                    if (manualChipState == ManualModeChipState.AUTO) proceed()
+                    else requestManualExit(proceedAfterExit = proceed)
                 },
                 onOpenProfile = {
-                    appNavController.navigate(Screens.ProfileScreen.route) {
-                        launchSingleTop = true
+                    val proceed = {
+                        appNavController.navigate(Screens.ProfileScreen.route) { launchSingleTop = true }
                     }
+                    if (manualChipState == ManualModeChipState.AUTO) proceed()
+                    else requestManualExit(proceedAfterExit = proceed)
                 },
                 onOpenSubscription = {
-                    appNavController.navigate(Screens.SubscriptionScreen.route) {
-                        launchSingleTop = true
+                    val proceed = {
+                        appNavController.navigate(Screens.SubscriptionScreen.route) { launchSingleTop = true }
                     }
+                    if (manualChipState == ManualModeChipState.AUTO) proceed()
+                    else requestManualExit(proceedAfterExit = proceed)
                 },
                 onOpenAbout = {
-                    rootNavController.navigate(Screens.AboutScreen.route) { launchSingleTop = true }
+                    val proceed = {
+                        rootNavController.navigate(Screens.AboutScreen.route) { launchSingleTop = true }
+                    }
+                    if (manualChipState == ManualModeChipState.AUTO) proceed()
+                    else requestManualExit(proceedAfterExit = proceed)
                 },
 
-                onRenameProject = { id, newName -> projectsVm.renameProject(id, newName) },
-                onDeleteProject = { id -> projectsVm.deleteProject(id) },
+                // ✅ Коммит 8: rename/delete тоже не должны обходить ручной режим
+                onRenameProject = { id, newName ->
+                    val proceed = { projectsVm.renameProject(id, newName) }
+                    if (manualChipState == ManualModeChipState.AUTO) proceed()
+                    else requestManualExit(proceedAfterExit = proceed)
+                },
+                onDeleteProject = { id ->
+                    val proceed = { projectsVm.deleteProject(id) }
+                    if (manualChipState == ManualModeChipState.AUTO) proceed()
+                    else requestManualExit(proceedAfterExit = proceed)
+                },
 
                 bottomBar = {
                     if (currentRoute in bottomRoutes) {
@@ -565,15 +548,9 @@ private fun isFeatureAllowed(feature: ProFeature, caps: PlanCapabilities): Boole
         ProFeature.PROJECTS_LIMIT -> caps.unlimitedProjects
         ProFeature.PHASE_DND_TEASER -> caps.phaseDragAndDrop
         ProFeature.ADVANCED_DEVICE_EDITOR -> caps.extendedDeviceEditor
-
-        // export actions для отчёта (save/share/действия PDF) — только при pdfExport
         ProFeature.PRO_REPORT -> caps.pdfExport
-
-        // шаги/обоснования/предупреждения (проф. секции отчёта)
         ProFeature.CALC_EXPLANATIONS -> caps.professionalReportSections
         ProFeature.CALC_WARNINGS -> caps.professionalReportSections
-
-        // техподробности выбора фазы (уровень C)
         ProFeature.DECISION_DETAILS -> caps.professionalReportSections
     }
 }
@@ -590,7 +567,5 @@ interface ManualDraftResetEntryPoint {
 interface ManualCommitEntryPoint {
     fun commitManualDraftToLocalDbUseCase(): CommitManualDraftToLocalDbUseCase
     fun cancelManualAndAutoRecalcUseCase(): CancelManualAndAutoRecalcUseCase
-
-    // ✅ нужно, чтобы после Save чистить overrides и не получать "откат"
     fun groupPhaseOverrideDao(): GroupPhaseOverrideDao
 }

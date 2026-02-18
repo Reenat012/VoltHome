@@ -26,10 +26,6 @@ interface GroupDeviceJoinDao {
 
     // -------------------- READ (dbState для diff-commit) --------------------
 
-    /**
-     * Снимок join'ов по списку групп проекта (это наш projectId boundary).
-     * Используется для вычисления joinsToInsert/joinsToDelete.
-     */
     @Query("SELECT * FROM group_device_join WHERE group_id IN (:groupIds)")
     suspend fun getJoinsForGroupIds(groupIds: List<Long>): List<GroupDeviceJoin>
 
@@ -61,42 +57,28 @@ interface GroupDeviceJoinDao {
     // -------------------- DELETE helpers --------------------
 
     @Query("DELETE FROM group_device_join")
-    suspend fun deleteAll()
+    suspend fun deleteAll(): Int
 
     @Query("DELETE FROM group_device_join WHERE device_id = :deviceId")
-    suspend fun deleteJoinsForDevice(deviceId: Long)
+    suspend fun deleteJoinsForDevice(deviceId: Long): Int
 
-    /**
-     * Батч-удаление join'ов по deviceIds.
-     * Удобно для diff: перед вставкой desired join'ов по затронутым устройствам.
-     *
-     * Важно: device_id — глобальный PK devices, поэтому удаление по deviceIds не затрагивает “другие проекты”
-     * (устройства физически разные).
-     */
     @Query("DELETE FROM group_device_join WHERE device_id IN (:deviceIds)")
     suspend fun deleteJoinsForDeviceIds(deviceIds: List<Long>): Int
 
-    /**
-     * Удаляет все join'ы конкретной группы.
-     * Используется при groupsToDelete (сначала joins → потом groups).
-     */
     @Query("DELETE FROM group_device_join WHERE group_id = :groupId")
     suspend fun deleteJoinsForGroupId(groupId: Long): Int
 
-    /**
-     * Удаление всех связей для групп, принадлежащих комнате.
-     */
     @Query(
         """
         DELETE FROM group_device_join
         WHERE group_id IN (SELECT group_id FROM `groups` WHERE room_id = :roomId)
         """
     )
-    suspend fun deleteJoinsForRoom(roomId: Long)
+    suspend fun deleteJoinsForRoom(roomId: Long): Int
 
     /**
-     * Удаляет связи "группа-устройство" по списку group_id.
+     * ✅ Теперь возвращаем rowsDeleted, чтобы сравнивать с expected.
      */
     @Query("DELETE FROM group_device_join WHERE group_id IN (:groupIds)")
-    suspend fun deleteJoinsForGroupIds(groupIds: List<Long>)
+    suspend fun deleteJoinsForGroupIds(groupIds: List<Long>): Int
 }

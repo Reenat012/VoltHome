@@ -165,10 +165,12 @@ interface GroupDao {
 
     /**
      * Удаляет все группы только в рамках конкретного проекта.
-     * (нужно для AUTO replace, но не для manual diff)
+     *
+     * @return rowsDeleted — количество реально удалённых строк.
+     * Нужен для DB-sanity (rowsUpdated == expected).
      */
     @Query("DELETE FROM `groups` WHERE project_id = :projectId")
-    suspend fun deleteAllGroupsByProject(projectId: String)
+    suspend fun deleteAllGroupsByProject(projectId: String): Int
 
 // -------------------- DERIVED WHITELIST UPDATES --------------------
 

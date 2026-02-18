@@ -42,6 +42,7 @@ import ru.mugalimov.volthome.domain.model.manual.ProjectEditState
 import ru.mugalimov.volthome.domain.model.phase_load.GroupWithDevices
 import ru.mugalimov.volthome.domain.use_case.CurrentCalculator
 import javax.inject.Inject
+import ru.mugalimov.volthome.domain.use_case.ProjectStructuralWriteMutex
 
 class ExplicationRepositoryImpl @Inject constructor(
     private val groupDao: GroupDao,
@@ -51,7 +52,8 @@ class ExplicationRepositoryImpl @Inject constructor(
     private val db: AppDatabase,
     private val activeProjectDs: ActiveProjectDataStore,
     @IoDispatcher private val dispatchers: CoroutineDispatcher,
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val structuralWriteMutex: ProjectStructuralWriteMutex,
 ) : ExplicationRepository {
 
     // ===== Decision log распределения фаз (in-memory) =====
@@ -106,242 +108,303 @@ class ExplicationRepositoryImpl @Inject constructor(
         withContext(dispatchers) {
             require(projectId.isNotBlank()) { "projectId must be non-blank" }
 
-            val tag = "APPLY_DIFF"
+            structuralWriteMutex.withLock(projectId) {
 
-            fun groupsSummaryFromDraft(): String =
-                draftState.groups
-                    .sortedBy { it.groupNumber }
-                    .joinToString { g -> "${g.groupId}#${g.groupNumber}#${g.phase.name}(devs=${g.deviceIds.size})" }
+                val tag = "APPLY_DIFF"
 
-            fun groupsSummaryFromDb(groups: List<CircuitGroupEntity>): String =
-                groups
-                    .sortedBy { it.groupNumber }
-                    .joinToString { g -> "${g.groupId}#${g.groupNumber}#${g.phase}(type=${g.groupType})" }
+                fun groupsSummaryFromDraft(): String =
+                    draftState.groups
+                        .sortedBy { it.groupNumber }
+                        .joinToString { g -> "${g.groupId}#${g.groupNumber}#${g.phase.name}(devs=${g.deviceIds.size})" }
 
-            fun sanityFail(message: String): Nothing {
-                Log.e(tag, "SANITY FAILED: $message")
-                throw IllegalStateException(message)
-            }
+                fun groupsSummaryFromDb(groups: List<CircuitGroupEntity>): String =
+                    groups
+                        .sortedBy { it.groupNumber }
+                        .joinToString { g -> "${g.groupId}#${g.groupNumber}#${g.phase}(type=${g.groupType})" }
 
-            db.withTransaction {
-                // Коммит 0: fingerprint снимаем внутри транзакции (атомарно относительно наших write).
-                val fpBefore = snapshotFingerprintInTx(projectId)
+                fun sanityFail(message: String): Nothing {
+                    Log.e(tag, "SANITY FAILED: $message")
+                    throw IllegalStateException(message)
+                }
 
-                GroupWriteLogger.logStructureWrite(
-                    source = GroupWriteLogger.Source.MANUAL_SAVE,
-                    reason = GroupWriteLogger.Reason.DIFF_COMMIT,
-                    projectId = projectId,
-                    groupsCount = draftState.groups.size,
-                    joinsCount = -1,
-                    before = fpBefore,
-                    after = null,
-                    sample = "BEGIN op=MANUAL_DIFF_COMMIT draftGroups=${draftState.groups.size}",
-                    throwable = null
-                )
+                db.withTransaction {
+                    // Коммит 0: fingerprint снимаем внутри транзакции (атомарно относительно наших write).
+                    val fpBefore = snapshotFingerprintInTx(projectId)
 
-                // =========================
-                // 0) MANUAL_SAVE: входные данные (draft)
-                // =========================
-                val desiredDraftGroups = draftState.groups
-                val desiredGroupCount = desiredDraftGroups.size
-
-                val desiredUnassignedIds = draftState.unassignedDeviceIds.toSet()
-                val desiredAllDeviceIds = desiredDraftGroups.flatMap { it.deviceIds }.toSet()
-                val desiredAssignedIds = desiredAllDeviceIds - desiredUnassignedIds
-
-                Log.d(
-                    tag,
-                    "MANUAL_SAVE BEGIN projectId=$projectId " +
-                            "desiredGroups=$desiredGroupCount devices(all)=${desiredAllDeviceIds.size} " +
-                            "assigned=${desiredAssignedIds.size} unassigned=${desiredUnassignedIds.size} " +
-                            "draftGroups=[${groupsSummaryFromDraft()}]"
-                )
-
-                // =========================
-                // 1) LOAD dbState (groups + joins) строго по projectId boundary
-                // =========================
-                val dbGroups = groupDao.getAllGroupsByProject(projectId)
-                val dbGroupsById = dbGroups.associateBy { it.groupId }
-                val dbGroupIds = dbGroups.map { it.groupId }.toSet()
-
-                val dbJoins = if (dbGroupIds.isEmpty()) emptyList()
-                else groupDeviceJoinDao.getJoinsForGroupIds(dbGroupIds.toList())
-
-                Log.d(
-                    tag,
-                    "APPLY_DIFF DB snapshot: groups=${dbGroups.size} joins=${dbJoins.size} " +
-                            "groupIds(sample)=${dbGroupIds.take(12)} dbGroups=[${groupsSummaryFromDb(dbGroups)}]"
-                )
-
-                // =========================
-                // 2) BUILD desiredState (existing vs new)
-                // =========================
-                val desiredExistingDraft = desiredDraftGroups
-                    .filter { it.groupId > 0L && dbGroupsById.containsKey(it.groupId) }
-                val desiredExistingIds = desiredExistingDraft.map { it.groupId }.toSet()
-
-                val desiredNewDraft = desiredDraftGroups
-                    .filter { it.groupId <= 0L || !dbGroupsById.containsKey(it.groupId) }
-
-                Log.d(
-                    tag,
-                    "APPLY_DIFF desired split: existing=${desiredExistingDraft.size} new=${desiredNewDraft.size} " +
-                            "existingIds(sample)=${desiredExistingIds.take(12)}"
-                )
-
-                // =========================
-                // 3) COMPUTE diff (groups)
-                // =========================
-                val groupsToDeleteIds = (dbGroupIds - desiredExistingIds).toList()
-
-                val groupsToUpdateEntities = desiredExistingDraft.mapNotNull { gDraft ->
-                    val dbEntity = dbGroupsById[gDraft.groupId] ?: return@mapNotNull null
-                    dbEntity.copy(
-                        groupNumber = gDraft.groupNumber,
-                        roomId = gDraft.roomId,
-                        roomName = gDraft.roomName,
-                        groupType = gDraft.groupType.name,
-                        phase = gDraft.phase.name,
-                        nominalCurrent = gDraft.nominalCurrent ?: 0.0,
-                        circuitBreaker = gDraft.circuitBreaker ?: 16,
-                        cableSection = gDraft.cableSection ?: 2.5,
-                        breakerType = gDraft.breakerType ?: "",
-                        rcdRequired = gDraft.rcdRequired ?: false,
-                        rcdCurrent = gDraft.rcdCurrent ?: 30
+                    GroupWriteLogger.logStructureWrite(
+                        source = GroupWriteLogger.Source.MANUAL_SAVE,
+                        reason = GroupWriteLogger.Reason.DIFF_COMMIT,
+                        projectId = projectId,
+                        groupsCount = draftState.groups.size,
+                        joinsCount = -1,
+                        before = fpBefore,
+                        after = null,
+                        sample = "BEGIN op=MANUAL_DIFF_COMMIT draftGroups=${draftState.groups.size}",
+                        throwable = null
                     )
-                }
 
-                val groupsToInsertEntities = desiredNewDraft.map { gDraft ->
-                    CircuitGroupEntity(
-                        groupId = 0L,
-                        groupNumber = gDraft.groupNumber,
-                        roomId = gDraft.roomId,
-                        roomName = gDraft.roomName,
-                        groupType = gDraft.groupType.name,
-                        nominalCurrent = gDraft.nominalCurrent ?: 0.0,
-                        circuitBreaker = gDraft.circuitBreaker ?: 16,
-                        cableSection = gDraft.cableSection ?: 2.5,
-                        breakerType = gDraft.breakerType ?: "",
-                        rcdRequired = gDraft.rcdRequired ?: false,
-                        rcdCurrent = gDraft.rcdCurrent ?: 30,
-                        phase = gDraft.phase.name,
-                        projectId = projectId
+                    // =========================
+                    // 0) MANUAL_SAVE: входные данные (draft)
+                    // =========================
+                    val desiredDraftGroups = draftState.groups
+                    val desiredGroupCount = desiredDraftGroups.size
+
+                    val desiredUnassignedIds = draftState.unassignedDeviceIds.toSet()
+                    val desiredAllDeviceIds = desiredDraftGroups.flatMap { it.deviceIds }.toSet()
+                    val desiredAssignedIds = desiredAllDeviceIds - desiredUnassignedIds
+
+                    Log.d(
+                        tag,
+                        "MANUAL_SAVE BEGIN projectId=$projectId " +
+                                "desiredGroups=$desiredGroupCount devices(all)=${desiredAllDeviceIds.size} " +
+                                "assigned=${desiredAssignedIds.size} unassigned=${desiredUnassignedIds.size} " +
+                                "draftGroups=[${groupsSummaryFromDraft()}]"
                     )
-                }
 
-                Log.d(
-                    tag,
-                    "APPLY_DIFF delta groups: toDelete=${groupsToDeleteIds.size} " +
-                            "toUpdate=${groupsToUpdateEntities.size} toInsert=${groupsToInsertEntities.size} " +
-                            "deleteIds(sample)=${groupsToDeleteIds.take(12)}"
-                )
+                    // =========================
+                    // 1) LOAD dbState (groups + joins) строго по projectId boundary
+                    // =========================
+                    val dbGroups = groupDao.getAllGroupsByProject(projectId)
+                    val dbGroupsById = dbGroups.associateBy { it.groupId }
+                    val dbGroupIds = dbGroups.map { it.groupId }.toSet()
 
-                // =========================
-                // 4) APPLY deletes (joins -> groups)
-                // =========================
-                if (groupsToDeleteIds.isNotEmpty()) {
-                    groupDeviceJoinDao.deleteJoinsForGroupIds(groupsToDeleteIds)
-                    groupDao.deleteGroupsByIds(projectId = projectId, groupIds = groupsToDeleteIds)
-                    Log.d(tag, "APPLY_DIFF Applied delete: groups=${groupsToDeleteIds.size}")
-                }
+                    val dbJoins = if (dbGroupIds.isEmpty()) emptyList()
+                    else groupDeviceJoinDao.getJoinsForGroupIds(dbGroupIds.toList())
 
-                // =========================
-                // 5) APPLY updates/inserts groups (без REPLACE)
-                // =========================
-                if (groupsToUpdateEntities.isNotEmpty()) {
-                    groupDao.updateGroups(groupsToUpdateEntities)
-                    Log.d(tag, "APPLY_DIFF Applied update: groups=${groupsToUpdateEntities.size}")
-                }
+                    Log.d(
+                        tag,
+                        "APPLY_DIFF DB snapshot: groups=${dbGroups.size} joins=${dbJoins.size} " +
+                                "groupIds(sample)=${dbGroupIds.take(12)} dbGroups=[${
+                                    groupsSummaryFromDb(
+                                        dbGroups
+                                    )
+                                }]"
+                    )
 
-                val tempToNewId = LinkedHashMap<Long, Long>()
-                if (groupsToInsertEntities.isNotEmpty()) {
-                    val newIds = groupDao.insertGroups(groupsToInsertEntities)
-                    if (newIds.size != groupsToInsertEntities.size) {
-                        sanityFail("insertGroups returned ${newIds.size} ids for ${groupsToInsertEntities.size} groups")
+                    // =========================
+                    // 2) BUILD desiredState (existing vs new)
+                    // =========================
+                    val desiredExistingDraft = desiredDraftGroups
+                        .filter { it.groupId > 0L && dbGroupsById.containsKey(it.groupId) }
+                    val desiredExistingIds = desiredExistingDraft.map { it.groupId }.toSet()
+
+                    val desiredNewDraft = desiredDraftGroups
+                        .filter { it.groupId <= 0L || !dbGroupsById.containsKey(it.groupId) }
+
+                    Log.d(
+                        tag,
+                        "APPLY_DIFF desired split: existing=${desiredExistingDraft.size} new=${desiredNewDraft.size} " +
+                                "existingIds(sample)=${desiredExistingIds.take(12)}"
+                    )
+
+                    // =========================
+                    // 3) COMPUTE diff (groups)
+                    // =========================
+                    val groupsToDeleteIds = (dbGroupIds - desiredExistingIds).toList()
+
+                    val groupsToUpdateEntities = desiredExistingDraft.mapNotNull { gDraft ->
+                        val dbEntity = dbGroupsById[gDraft.groupId] ?: return@mapNotNull null
+                        dbEntity.copy(
+                            groupNumber = gDraft.groupNumber,
+                            roomId = gDraft.roomId,
+                            roomName = gDraft.roomName,
+                            groupType = gDraft.groupType.name,
+                            phase = gDraft.phase.name,
+                            nominalCurrent = gDraft.nominalCurrent ?: 0.0,
+                            circuitBreaker = gDraft.circuitBreaker ?: 16,
+                            cableSection = gDraft.cableSection ?: 2.5,
+                            breakerType = gDraft.breakerType ?: "",
+                            rcdRequired = gDraft.rcdRequired ?: false,
+                            rcdCurrent = gDraft.rcdCurrent ?: 30
+                        )
                     }
 
-                    desiredNewDraft.forEachIndexed { idx, draft ->
-                        tempToNewId[draft.groupId] = newIds[idx]
+                    val groupsToInsertEntities = desiredNewDraft.map { gDraft ->
+                        CircuitGroupEntity(
+                            groupId = 0L,
+                            groupNumber = gDraft.groupNumber,
+                            roomId = gDraft.roomId,
+                            roomName = gDraft.roomName,
+                            groupType = gDraft.groupType.name,
+                            nominalCurrent = gDraft.nominalCurrent ?: 0.0,
+                            circuitBreaker = gDraft.circuitBreaker ?: 16,
+                            cableSection = gDraft.cableSection ?: 2.5,
+                            breakerType = gDraft.breakerType ?: "",
+                            rcdRequired = gDraft.rcdRequired ?: false,
+                            rcdCurrent = gDraft.rcdCurrent ?: 30,
+                            phase = gDraft.phase.name,
+                            projectId = projectId
+                        )
                     }
 
                     Log.d(
                         tag,
-                        "APPLY_DIFF Applied insert: groups=${newIds.size} newIds(sample)=${newIds.take(12)} tempToNew(sample)=${tempToNewId.entries.take(12)}"
+                        "APPLY_DIFF delta groups: toDelete=${groupsToDeleteIds.size} " +
+                                "toUpdate=${groupsToUpdateEntities.size} toInsert=${groupsToInsertEntities.size} " +
+                                "deleteIds(sample)=${groupsToDeleteIds.take(12)}"
                     )
-                } else {
-                    Log.d(tag, "APPLY_DIFF Applied insert: groups=0")
-                }
 
-                // =========================
-                // 6) APPLY joins + clean overrides
-                // =========================
-                overrideDao.deleteByProject(projectId)
+                    // =========================
+                    // 4) APPLY deletes (joins -> groups)
+                    // =========================
+                    if (groupsToDeleteIds.isNotEmpty()) {
+                        // expected joins to delete = join'ы тех групп, которые удаляем (снимок dbJoins уже есть)
+                        val expectedJoinsToDelete = dbJoins.count { it.groupId in groupsToDeleteIds }
 
-                val affectedDeviceIds = (desiredAllDeviceIds + desiredUnassignedIds).toList()
-                if (affectedDeviceIds.isNotEmpty()) {
-                    groupDeviceJoinDao.deleteJoinsForDeviceIds(affectedDeviceIds)
-                }
+                        val rowsJoinsDeleted = groupDeviceJoinDao.deleteJoinsForGroupIds(groupsToDeleteIds)
+                        if (rowsJoinsDeleted != expectedJoinsToDelete) {
+                            sanityFail("deleteJoinsForGroupIds rows mismatch. expected=$expectedJoinsToDelete actual=$rowsJoinsDeleted deleteGroups=${groupsToDeleteIds.size}")
+                        }
 
-                val joinsToInsert = buildList {
-                    desiredDraftGroups.forEach { gDraft ->
-                        val finalGroupId = tempToNewId[gDraft.groupId] ?: gDraft.groupId
-                        if (finalGroupId <= 0L) return@forEach
+                        val rowsGroupsDeleted = groupDao.deleteGroupsByIds(projectId = projectId, groupIds = groupsToDeleteIds)
+                        if (rowsGroupsDeleted != groupsToDeleteIds.size) {
+                            sanityFail("deleteGroupsByIds rows mismatch. expected=${groupsToDeleteIds.size} actual=$rowsGroupsDeleted")
+                        }
 
-                        gDraft.deviceIds
-                            .filter { it !in desiredUnassignedIds }
-                            .distinct()
-                            .forEach { deviceId ->
-                                add(GroupDeviceJoin(groupId = finalGroupId, deviceId = deviceId))
-                            }
+                        Log.d(tag, "APPLY_DIFF Applied delete: groups=${groupsToDeleteIds.size} joins=$rowsJoinsDeleted")
                     }
-                }
 
-                if (joinsToInsert.isNotEmpty()) {
-                    groupDeviceJoinDao.insertAll(joinsToInsert)
-                }
-
-                // =========================
-                // 7) SANITY CHECK
-                // =========================
-                val afterGroups = groupDao.getAllGroupsByProject(projectId)
-                val afterGroupIds = afterGroups.map { it.groupId }.toSet()
-
-                if (afterGroups.size != desiredGroupCount) {
-                    sanityFail("groups count mismatch. desired=$desiredGroupCount actual=${afterGroups.size}")
-                }
-
-                val missingStable = desiredExistingIds - afterGroupIds
-                if (missingStable.isNotEmpty()) {
-                    sanityFail("stable groupIds lost after commit. missing=${missingStable.take(30)}")
-                }
-
-                if (desiredNewDraft.isNotEmpty()) {
-                    val newRealIds = tempToNewId.values.toSet()
-                    val missingNew = newRealIds - afterGroupIds
-                    if (missingNew.isNotEmpty()) {
-                        sanityFail("new groupIds not found after commit. missing=${missingNew.take(30)} tempToNew=$tempToNewId")
+                    // =========================
+                    // 5) APPLY updates/inserts groups (без REPLACE)
+                    // =========================
+                    if (groupsToUpdateEntities.isNotEmpty()) {
+                        groupDao.updateGroups(groupsToUpdateEntities)
+                        Log.d(
+                            tag,
+                            "APPLY_DIFF Applied update: groups=${groupsToUpdateEntities.size}"
+                        )
                     }
+
+                    val tempToNewId = LinkedHashMap<Long, Long>()
+                    if (groupsToInsertEntities.isNotEmpty()) {
+                        val newIds = groupDao.insertGroups(groupsToInsertEntities)
+                        if (newIds.size != groupsToInsertEntities.size) {
+                            sanityFail("insertGroups returned ${newIds.size} ids for ${groupsToInsertEntities.size} groups")
+                        }
+
+                        desiredNewDraft.forEachIndexed { idx, draft ->
+                            tempToNewId[draft.groupId] = newIds[idx]
+                        }
+
+                        Log.d(
+                            tag,
+                            "APPLY_DIFF Applied insert: groups=${newIds.size} newIds(sample)=${
+                                newIds.take(
+                                    12
+                                )
+                            } tempToNew(sample)=${tempToNewId.entries.take(12)}"
+                        )
+                    } else {
+                        Log.d(tag, "APPLY_DIFF Applied insert: groups=0")
+                    }
+
+                    // =========================
+                    // 6) APPLY joins + clean overrides
+                    // =========================
+                    overrideDao.deleteByProject(projectId)
+
+                    val affectedDeviceIds = (desiredAllDeviceIds + desiredUnassignedIds).toList()
+                    if (affectedDeviceIds.isNotEmpty()) {
+                        // ✅ boundary: текущие группы проекта (после delete/update/insert групп)
+                        val curGroupIds = groupDao.getGroupIdsByProject(projectId)
+                        val curJoins = if (curGroupIds.isEmpty()) emptyList() else groupDeviceJoinDao.getJoinsForGroupIds(curGroupIds)
+
+                        val expectedDeviceJoinDeletes = curJoins.count { it.deviceId in affectedDeviceIds }
+
+                        val rowsDeleted = groupDeviceJoinDao.deleteJoinsForDeviceIds(affectedDeviceIds)
+                        if (rowsDeleted != expectedDeviceJoinDeletes) {
+                            sanityFail("deleteJoinsForDeviceIds rows mismatch. expected=$expectedDeviceJoinDeletes actual=$rowsDeleted affectedDevices=${affectedDeviceIds.size}")
+                        }
+                    }
+
+                    val joinsToInsert = buildList {
+                        desiredDraftGroups.forEach { gDraft ->
+                            val finalGroupId = tempToNewId[gDraft.groupId] ?: gDraft.groupId
+                            if (finalGroupId <= 0L) return@forEach
+
+                            gDraft.deviceIds
+                                .filter { it !in desiredUnassignedIds }
+                                .distinct()
+                                .forEach { deviceId ->
+                                    add(
+                                        GroupDeviceJoin(
+                                            groupId = finalGroupId,
+                                            deviceId = deviceId
+                                        )
+                                    )
+                                }
+                        }
+                    }
+
+                    if (joinsToInsert.isNotEmpty()) {
+                        groupDeviceJoinDao.insertAll(joinsToInsert)
+                    }
+
+                    // ✅ Полный sanity: join состояние == desired
+                    val finalGroupIds = groupDao.getGroupIdsByProject(projectId)
+
+                    val expectedPairs = joinsToInsert
+                        .asSequence()
+                        .map { it.groupId to it.deviceId }
+                        .toSet()
+
+                    assertJoinsState(tag = tag, groupIdsBoundary = finalGroupIds, expectedPairs = expectedPairs)
+
+                    // =========================
+                    // 7) SANITY CHECK
+                    // =========================
+                    val afterGroups = groupDao.getAllGroupsByProject(projectId)
+                    val afterGroupIds = afterGroups.map { it.groupId }.toSet()
+
+                    if (afterGroups.size != desiredGroupCount) {
+                        sanityFail("groups count mismatch. desired=$desiredGroupCount actual=${afterGroups.size}")
+                    }
+
+                    val missingStable = desiredExistingIds - afterGroupIds
+                    if (missingStable.isNotEmpty()) {
+                        sanityFail(
+                            "stable groupIds lost after commit. missing=${
+                                missingStable.take(
+                                    30
+                                )
+                            }"
+                        )
+                    }
+
+                    if (desiredNewDraft.isNotEmpty()) {
+                        val newRealIds = tempToNewId.values.toSet()
+                        val missingNew = newRealIds - afterGroupIds
+                        if (missingNew.isNotEmpty()) {
+                            sanityFail(
+                                "new groupIds not found after commit. missing=${
+                                    missingNew.take(
+                                        30
+                                    )
+                                } tempToNew=$tempToNewId"
+                            )
+                        }
+                    }
+
+                    val afterJoinsCount = if (afterGroupIds.isNotEmpty()) {
+                        groupDeviceJoinDao.getJoinsForGroupIds(afterGroupIds.toList()).size
+                    } else 0
+
+                    val fpAfter = snapshotFingerprintInTx(projectId)
+
+                    GroupWriteLogger.logStructureWrite(
+                        source = GroupWriteLogger.Source.MANUAL_SAVE,
+                        reason = GroupWriteLogger.Reason.DIFF_COMMIT,
+                        projectId = projectId,
+                        groupsCount = afterGroups.size,
+                        joinsCount = afterJoinsCount,
+                        before = fpBefore,
+                        after = fpAfter,
+                        sample = "END op=MANUAL_DIFF_COMMIT stableIds=${desiredExistingIds.size} newIds=${tempToNewId.size}",
+                        throwable = null
+                    )
+
+                    Log.d(tag, "MANUAL_SAVE END projectId=$projectId")
                 }
-
-                val afterJoinsCount = if (afterGroupIds.isNotEmpty()) {
-                    groupDeviceJoinDao.getJoinsForGroupIds(afterGroupIds.toList()).size
-                } else 0
-
-                val fpAfter = snapshotFingerprintInTx(projectId)
-
-                GroupWriteLogger.logStructureWrite(
-                    source = GroupWriteLogger.Source.MANUAL_SAVE,
-                    reason = GroupWriteLogger.Reason.DIFF_COMMIT,
-                    projectId = projectId,
-                    groupsCount = afterGroups.size,
-                    joinsCount = afterJoinsCount,
-                    before = fpBefore,
-                    after = fpAfter,
-                    sample = "END op=MANUAL_DIFF_COMMIT stableIds=${desiredExistingIds.size} newIds=${tempToNewId.size}",
-                    throwable = null
-                )
-
-                Log.d(tag, "MANUAL_SAVE END projectId=$projectId")
             }
         }
     }
@@ -352,97 +415,140 @@ class ExplicationRepositoryImpl @Inject constructor(
     ) = withContext(dispatchers) {
         require(projectId.isNotBlank()) { "projectId must be non-blank" }
 
-        val shortCaller = GroupWriteLogger.shortCallerTrace(skip = 2, take = 8)
+        // ✅ Single-flight на уровне репозитория: structural операции строго последовательны по проекту
+        structuralWriteMutex.withLock(projectId) {
 
-        // Для детекта берём полный стек — иначе Cancel иногда видится как "resumeWith/dispatcher"
-        val fullCaller = Throwable().stackTrace
-            .joinToString(" <- ") { "${it.className}.${it.methodName}:${it.lineNumber}" }
+            val shortCaller = GroupWriteLogger.shortCallerTrace(skip = 2, take = 8)
 
-        val detectedSource = GroupWriteLogger.detectSourceFromCaller(fullCaller)
+            val fullCaller = Throwable().stackTrace
+                .joinToString(" <- ") { "${it.className}.${it.methodName}:${it.lineNumber}" }
 
-        /**
-         * ✅ Single-writer rule для STRUCTURE:
-         * replaceAllGroupsTransactional разрешён только для explicit сценариев.
-         *
-         * AUTO reactive контур НЕ имеет права сюда попадать.
-         * Если попал — это баг, и его надо ловить сразу.
-         */
-        val allowedStructuralWriters = setOf(
-            // ✅ Явный AUTO rebuild всегда идёт через SaveAutoCalculatedGroupsToLocalDbUseCase
-            GroupWriteLogger.Source.AUTO_SAVE,
+            val detectedSource = GroupWriteLogger.detectSourceFromCaller(fullCaller)
 
-            // ✅ Manual commit (diff-commit) — отдельный explicit writer
-            GroupWriteLogger.Source.MANUAL_SAVE,
-
-            // ⚠️ Временно допускаем UNKNOWN, пока не везде проставлены/детектятся источники.
-            // Потом можно ужесточить и выжечь UNKNOWN.
-            GroupWriteLogger.Source.UNKNOWN
-        )
-
-        if (detectedSource !in allowedStructuralWriters) {
-            // В debug — валим выполнение, чтобы баг не маскировался.
-            val msg =
-                "STRUCTURE WRITE BLOCKED: replaceAllGroupsTransactional called from forbidden source=$detectedSource " +
-                        "projectId=$projectId caller=$shortCaller"
-            Log.e("STRUCTURE_GUARD", msg, Throwable("STACK"))
-            require(false) { msg }
-        }
-
-        db.withTransaction {
-            val fpBefore = snapshotFingerprintInTx(projectId)
-
-            GroupWriteLogger.logStructureWrite(
-                source = detectedSource,
-                reason = GroupWriteLogger.Reason.EXPLICIT_REBUILD,
-                projectId = projectId,
-                groupsCount = groups.size,
-                joinsCount = -1,
-                before = fpBefore,
-                after = null,
-                sample = "BEGIN op=REPLACE_ALL caller=$shortCaller",
-                throwable = null
+            val allowedStructuralWriters = setOf(
+                GroupWriteLogger.Source.AUTO_SAVE,
+                GroupWriteLogger.Source.MANUAL_SAVE,
+                GroupWriteLogger.Source.UNKNOWN
             )
 
-            val oldGroupIds = groupDao.getGroupIdsByProject(projectId)
-            if (oldGroupIds.isNotEmpty()) {
-                groupDeviceJoinDao.deleteJoinsForGroupIds(oldGroupIds)
+            if (detectedSource !in allowedStructuralWriters) {
+                val msg =
+                    "STRUCTURE WRITE BLOCKED: replaceAllGroupsTransactional called from forbidden source=$detectedSource " +
+                            "projectId=$projectId caller=$shortCaller"
+                Log.e("STRUCTURE_GUARD", msg, Throwable("STACK"))
+                require(false) { msg }
             }
 
-            overrideDao.deleteByProject(projectId)
-            groupDao.deleteAllGroupsByProject(projectId)
+            val tag = "AUTO_REPLACE"
 
-            val groupEntities = groups.map { g -> g.toEntityGroup(projectId).copy(groupId = 0) }
-            val newIds = groupDao.insertGroups(groupEntities)
-            require(newIds.size == groups.size) {
-                "insertGroups returned ${newIds.size} ids for ${groups.size} groups"
-            }
+            db.withTransaction {
+                val fpBefore = snapshotFingerprintInTx(projectId)
 
-            val joins = buildList {
-                groups.forEachIndexed { idx, g ->
-                    val newGroupId = newIds[idx]
-                    g.devices.forEach { d ->
-                        require(d.id > 0L) { "Device id must be > 0 for join. Device=${d.name}" }
-                        add(GroupDeviceJoin(groupId = newGroupId, deviceId = d.id))
+                GroupWriteLogger.logStructureWrite(
+                    source = detectedSource,
+                    reason = GroupWriteLogger.Reason.EXPLICIT_REBUILD,
+                    projectId = projectId,
+                    groupsCount = groups.size,
+                    joinsCount = -1,
+                    before = fpBefore,
+                    after = null,
+                    sample = "BEGIN op=REPLACE_ALL caller=$shortCaller",
+                    throwable = null
+                )
+
+                // 1) Снимок старого состояния в границах проекта
+                val oldGroupIds = groupDao.getGroupIdsByProject(projectId)
+
+                // ВАЖНО: join не имеет projectId -> boundary через groupIds проекта
+                val oldJoins = if (oldGroupIds.isEmpty()) emptyList()
+                else groupDeviceJoinDao.getJoinsForGroupIds(oldGroupIds)
+                val expectedOldJoins = oldJoins.size
+
+                // 2) Удаляем join'ы старых групп
+                if (oldGroupIds.isNotEmpty()) {
+                    val rowsJoinsDeleted = groupDeviceJoinDao.deleteJoinsForGroupIds(oldGroupIds)
+                    if (rowsJoinsDeleted != expectedOldJoins) {
+                        sanityFail(
+                            tag,
+                            "deleteJoinsForGroupIds rows mismatch. expected=$expectedOldJoins actual=$rowsJoinsDeleted"
+                        )
                     }
                 }
-            }
-            if (joins.isNotEmpty()) {
-                groupDeviceJoinDao.insertAll(joins)
-            }
 
-            val fpAfter = snapshotFingerprintInTx(projectId)
+                // 3) Чистим overrides (они могут “накрыть” структуру)
+                overrideDao.deleteByProject(projectId)
 
-            GroupWriteLogger.logStructureWrite(
-                source = detectedSource,
-                reason = GroupWriteLogger.Reason.EXPLICIT_REBUILD,
-                projectId = projectId,
-                groupsCount = groups.size,
-                joinsCount = joins.size,
-                before = fpBefore,
-                after = fpAfter,
-                sample = "END op=REPLACE_ALL insertedGroups=${groups.size} insertedJoins=${joins.size} oldGroups=${oldGroupIds.size}",
-                throwable = null
-            )
+                // 4) Удаляем группы проекта
+                val rowsGroupsDeleted = groupDao.deleteAllGroupsByProject(projectId)
+                if (rowsGroupsDeleted != oldGroupIds.size) {
+                    // Если mismatch — это почти всегда гонка/битая выборка/сторонняя запись
+                    sanityFail(
+                        tag,
+                        "deleteAllGroupsByProject rows mismatch. expected=${oldGroupIds.size} actual=$rowsGroupsDeleted"
+                    )
+                }
+
+                // 5) Вставляем новые группы
+                val groupEntities = groups.map { g -> g.toEntityGroup(projectId).copy(groupId = 0) }
+                val newIds = groupDao.insertGroups(groupEntities)
+                if (newIds.size != groups.size) {
+                    sanityFail(
+                        tag,
+                        "insertGroups returned ${newIds.size} ids for ${groups.size} groups"
+                    )
+                }
+
+                // 6) Вставляем join'ы под новые groupId
+                val desiredPairs = buildSet {
+                    groups.forEachIndexed { idx, g ->
+                        val newGroupId = newIds[idx]
+                        g.devices.forEach { d ->
+                            require(d.id > 0L) { "Device id must be > 0 for join. Device=${d.name}" }
+                            add(newGroupId to d.id)
+                        }
+                    }
+                }
+
+                val joinsToInsert = desiredPairs.map { (gid, did) ->
+                    GroupDeviceJoin(
+                        groupId = gid,
+                        deviceId = did
+                    )
+                }
+                if (joinsToInsert.isNotEmpty()) {
+                    groupDeviceJoinDao.insertAll(joinsToInsert)
+                }
+
+                // 7) DB-sanity: фактическое состояние join'ов должно ровно совпасть с ожидаемым
+                assertJoinsState(tag = tag, groupIdsBoundary = newIds, expectedPairs = desiredPairs)
+
+                // 8) DB-sanity: старых join'ов больше не существует
+                if (oldGroupIds.isNotEmpty()) {
+                    val leakedOld = groupDeviceJoinDao.getJoinsForGroupIds(oldGroupIds)
+                    if (leakedOld.isNotEmpty()) {
+                        sanityFail(
+                            tag,
+                            "old joins leaked after delete. leaked=${leakedOld.size} sample=${
+                                leakedOld.take(10)
+                            }"
+                        )
+                    }
+                }
+
+                val fpAfter = snapshotFingerprintInTx(projectId)
+
+                GroupWriteLogger.logStructureWrite(
+                    source = detectedSource,
+                    reason = GroupWriteLogger.Reason.EXPLICIT_REBUILD,
+                    projectId = projectId,
+                    groupsCount = groups.size,
+                    joinsCount = joinsToInsert.size,
+                    before = fpBefore,
+                    after = fpAfter,
+                    sample = "END op=REPLACE_ALL insertedGroups=${groups.size} insertedJoins=${joinsToInsert.size} oldGroups=${oldGroupIds.size}",
+                    throwable = null
+                )
+            }
         }
     }
 
@@ -519,7 +625,12 @@ class ExplicationRepositoryImpl @Inject constructor(
 
                     group.devices.forEach { device ->
                         require(device.id > 0L) { "Device id must be > 0 for join. Device=${device.name}" }
-                        groupDeviceJoinDao.insertJoin(GroupDeviceJoin(groupId = newGroupId, deviceId = device.id))
+                        groupDeviceJoinDao.insertJoin(
+                            GroupDeviceJoin(
+                                groupId = newGroupId,
+                                deviceId = device.id
+                            )
+                        )
                     }
                 }
 
@@ -717,7 +828,8 @@ class ExplicationRepositoryImpl @Inject constructor(
         val groups = groupDao.getAllGroupsByProject(projectId)
 
         val groupIds = groups.map { it.groupId }
-        val joins = if (groupIds.isEmpty()) emptyList() else groupDeviceJoinDao.getJoinsForGroupIds(groupIds)
+        val joins =
+            if (groupIds.isEmpty()) emptyList() else groupDeviceJoinDao.getJoinsForGroupIds(groupIds)
 
         val joinPairs = joins
             .map { it.groupId to it.deviceId }
@@ -731,4 +843,42 @@ class ExplicationRepositoryImpl @Inject constructor(
 
         return GroupWriteLogger.fingerprint(joinPairs, groupStruct)
     }
+
+    // -------------------- DB-sanity helpers --------------------
+
+    private fun sanityFail(tag: String, message: String): Nothing {
+        Log.e(tag, "SANITY FAILED: $message", Throwable("STACK"))
+        throw IllegalStateException(message)
+    }
+
+    private fun joinPairs(joins: List<GroupDeviceJoin>): Set<Pair<Long, Long>> =
+        joins.asSequence()
+            .map { it.groupId to it.deviceId }
+            .toSet()
+
+    /**
+     * Проверка: фактические join'ы в БД == ожидаемые (как set пар groupId-deviceId).
+     * Это заменяет "rowsInserted==expected" для insert'ов.
+     */
+    private suspend fun assertJoinsState(
+        tag: String,
+        groupIdsBoundary: List<Long>,
+        expectedPairs: Set<Pair<Long, Long>>
+    ) {
+        val actual = if (groupIdsBoundary.isEmpty()) emptyList()
+        else groupDeviceJoinDao.getJoinsForGroupIds(groupIdsBoundary)
+
+        val actualPairs = joinPairs(actual)
+
+        if (actualPairs != expectedPairs) {
+            val missing = (expectedPairs - actualPairs).take(30)
+            val extra = (actualPairs - expectedPairs).take(30)
+            sanityFail(
+                tag,
+                "joins mismatch. expected=${expectedPairs.size} actual=${actualPairs.size} " +
+                        "missing(sample)=$missing extra(sample)=$extra"
+            )
+        }
+    }
 }
+
