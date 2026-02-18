@@ -314,7 +314,11 @@ fun ExplicationScreen(
 
                             items(
                                 items = list,
-                                key = { stableGroupKey(ph, it) }
+                                // ✅ Коммит 6:
+                                // Ключ должен быть СТАБИЛЬНЫМ и НЕ зависеть от фазы/контента.
+                                // Иначе при переносе группы между фазами Compose считает item "новым",
+                                // пересоздаёт карточку и сбрасывает expanded/remembered state.
+                                key = { stableGroupKey(it) }
                             ) { g ->
                                 GroupCardCompact(
                                     group = g,
@@ -438,5 +442,8 @@ fun ExplicationScreen(
  * - Ключ НЕ должен зависеть от "контента", иначе Compose будет пересоздавать item,
  *   ломать раскрытия и состояния карточек.
  */
-private fun stableGroupKey(phase: Phase, g: CircuitGroup): String =
-    "ph-${phase.name}__gid-${g.groupId}"
+private fun stableGroupKey(g: CircuitGroup): String =
+// ✅ Коммит 6:
+// Одинаково для AUTO и MANUAL: только groupId.
+    // В MANUAL temp id тоже ок, главное — стабильность внутри списка.
+    "gid:${g.groupId}"

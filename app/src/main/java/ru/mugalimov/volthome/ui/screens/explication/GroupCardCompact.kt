@@ -74,7 +74,10 @@ fun GroupCardCompact(
     onGroupCurrentClick: (CircuitGroup) -> Unit,
     onOpenInfoSheet: (InfoSheetPayload) -> Unit
 ) {
-    val expanded = rememberSaveable(group.groupNumber) { mutableStateOf(false) }
+    // ✅ Коммит 6:
+// expanded должен жить по стабильному идентификатору группы.
+// groupId — единственный корректный ключ для сохранения состояния карточки.
+    val expanded = rememberSaveable(group.groupId) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -211,7 +214,10 @@ fun GroupCardCompact(
 
                     enableLongPress = isManualMode,
                     maxVisible = 3,
-                    groupKey = group.groupNumber
+                    // ✅ Коммит 6:
+                    // Если DeviceChips хранит состояние (например, анимации/локальный state),
+                    // то ключ должен быть groupId, а не groupNumber.
+                    groupKey = group.groupId
                 )
                 Spacer(Modifier.height(8.dp))
             }
