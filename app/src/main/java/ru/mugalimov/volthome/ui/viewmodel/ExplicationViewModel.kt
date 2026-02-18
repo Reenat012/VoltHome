@@ -688,7 +688,10 @@ class ExplicationViewModel @Inject constructor(
      * В этом коммите не трогаем _moveDeviceUi, чтобы не менять текущее поведение UI.
      */
     fun cancelDrag() {
-        Log.d("DRAG_TRACE", "VM cancelDrag called state=$_dragState.value")
+        // ✅ Коммит 7 (контракт):
+        // cancelDrag() = сброс ghost/activeTarget, НО панель переноса остаётся.
+        // Это критично для edge-scroll: cancel не должен закрывать targets bar.
+        Log.d("DRAG_TRACE", "VM cancelDrag -> reset dragState only (panel stays)")
         _dragState.value = DragState()
     }
 
@@ -762,7 +765,16 @@ class ExplicationViewModel @Inject constructor(
     }
 
     fun dismissMoveDevice() {
+        // ✅ Коммит 7 (контракт):
+        // dismissMoveDevice() = закрыть панель переноса
+        // + безопасно сбросить drag (ghost/activeTarget), чтобы UI не зависал в "полудраге".
+        Log.d(TAG_MOVE, "dismissMoveDevice -> close panel + reset dragState")
+
         _moveDeviceUi.value = null
+
+        // ✅ ВАЖНО: это НЕ cancelDrag(), потому что cancelDrag() панель НЕ трогает.
+        // Здесь панель уже закрывается, поэтому обязаны зачистить и drag.
+        _dragState.value = DragState()
     }
 
     /**
