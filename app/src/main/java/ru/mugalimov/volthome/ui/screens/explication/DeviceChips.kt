@@ -156,57 +156,57 @@ private fun DeviceChip(
 //    val TAG_CHIP = "EXP_CHIP"
     val coordsState = remember { mutableStateOf<LayoutCoordinates?>(null) }
 
+    // ✅ Локальный флаг на чип: если end уже был — cancel игнорируем
+    val dragEndedOrCanceled = remember { mutableStateOf(false) }
+
     val dragModifier = if (enableDrag) {
         Modifier
             .onGloballyPositioned { coords ->
                 coordsState.value = coords
-//                Log.v(TAG_CHIP, "positioned text=$text root=${coords.positionInRoot()}")
             }
             .pointerInput(Unit) {
-//                Log.d(TAG_CHIP, "pointerInput ACTIVE text=$text enableDrag=$enableDrag")
+
+                // Каждый новый pointerInput lifecycle начинаем “чистым”
+                dragEndedOrCanceled.value = false
 
                 detectDragGesturesAfterLongPress(
                     onDragStart = { startLocal ->
-                        val coords = coordsState.value
-                        if (coords == null) {
-//                            Log.e(TAG_CHIP, "dragStart SKIP coords=null text=$text")
-                            return@detectDragGesturesAfterLongPress
-                        }
+                        dragEndedOrCanceled.value = false
 
+                        val coords = coordsState.value ?: return@detectDragGesturesAfterLongPress
                         val itemStartRoot = coords.positionInRoot()
                         val pointerStartRoot = coords.localToRoot(startLocal)
-
-//                        Log.d(TAG_CHIP, "DRAG_START text=$text itemStartRoot=$itemStartRoot pointerStartRoot=$pointerStartRoot")
                         onDragStart?.invoke(itemStartRoot, pointerStartRoot)
                     },
                     onDrag = { change, _ ->
-                        val coords = coordsState.value
-                        if (coords == null) {
-//                            Log.e(TAG_CHIP, "dragMove SKIP coords=null text=$text")
-                            return@detectDragGesturesAfterLongPress
-                        }
+                        if (dragEndedOrCanceled.value) return@detectDragGesturesAfterLongPress
 
+                        val coords = coordsState.value ?: return@detectDragGesturesAfterLongPress
                         val pointerRoot = coords.localToRoot(change.position)
-//                        Log.v(TAG_CHIP, "DRAG_MOVE text=$text pointerRoot=$pointerRoot consumed=${change.isConsumed}")
-
                         onDragMove?.invoke(pointerRoot)
                         change.consume()
                     },
                     onDragEnd = {
-//                        Log.d(TAG_CHIP, "DRAG_END text=$text")
+                        if (dragEndedOrCanceled.value) return@detectDragGesturesAfterLongPress
+                        dragEndedOrCanceled.value = true
+
                         Log.d("DRAG_TRACE", "UI onDragEnd text=$text")
                         onDragEnd?.invoke()
                     },
                     onDragCancel = {
-//                        Log.w(TAG_CHIP, "DRAG_CANCEL text=$text")
+                        // ✅ Ключевой фикс: cancel после end — игнор
+                        if (dragEndedOrCanceled.value) {
+                            Log.d("DRAG_TRACE", "UI onDragCancel IGNORED (already ended) text=$text")
+                            return@detectDragGesturesAfterLongPress
+                        }
+                        dragEndedOrCanceled.value = true
+
                         Log.d("DRAG_TRACE", "UI onDragCancel text=$text")
                         onDragCancel?.invoke()
                     }
                 )
             }
-    } else {
-        Modifier
-    }
+    } else Modifier
 
     Surface(
         shape = MaterialTheme.shapes.large,

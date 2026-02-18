@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
@@ -116,29 +117,19 @@ class ExplicationViewModel @Inject constructor(
     private val _selectedDevice = MutableStateFlow<Device?>(null)
     val selectedDevice: StateFlow<Device?> = _selectedDevice.asStateFlow()
 
-    private val _selectedDeviceBreakdown = MutableStateFlow<DeviceCalcBreakdown?>(null)
-    val selectedDeviceBreakdown: StateFlow<DeviceCalcBreakdown?> = _selectedDeviceBreakdown.asStateFlow()
-
     // =========================
-    // Unassigned devices (manual)
-    // =========================
-
-    private val _unassignedDevices = MutableStateFlow<List<Device>>(emptyList())
-    val unassignedDevices: StateFlow<List<Device>> = _unassignedDevices.asStateFlow()
-
-    // версия запроса, чтобы старые результаты не перезатирали новые (гонки при быстрых изменениях)
-    private val _unassignedRequestVersion = MutableStateFlow(0)
-
-    // =========================
-    // BottomSheet payload
-    // =========================
+// InfoSheet state
+// =========================
 
     private val _infoSheetPayload = MutableStateFlow<InfoSheetPayload?>(null)
     val infoSheetPayload: StateFlow<InfoSheetPayload?> = _infoSheetPayload.asStateFlow()
 
+    private val _selectedDeviceBreakdown = MutableStateFlow<DeviceCalcBreakdown?>(null)
+    val selectedDeviceBreakdown: StateFlow<DeviceCalcBreakdown?> = _selectedDeviceBreakdown.asStateFlow()
+
     // =========================
-    // Manual session (scoped by activeProjectId)
-    // =========================
+// Manual session (scoped by activeProjectId)
+// =========================
 
     val manualSession = activeProjectDs.activeProjectId
         .distinctUntilChanged()
@@ -146,6 +137,34 @@ class ExplicationViewModel @Inject constructor(
         .flatMapLatest { projectId -> manualRepo.observeSession(projectId) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+// =========================
+// Manual devices cache (manual) — Коммит 3
+// =========================
+
+    private val _manualDevicesById = MutableStateFlow<Map<Long, Device>>(emptyMap())
+    val manualDevicesById: StateFlow<Map<Long, Device>> = _manualDevicesById.asStateFlow()
+
+    private val _manualDevicesRequestVersion = MutableStateFlow(0)
+
+// =========================
+// Unassigned devices (manual) — Коммит 3
+// =========================
+
+    val unassignedDevices: StateFlow<List<Device>> =
+        combine(manualSession, manualDevicesById) { s, devicesById ->
+            val draft = s?.draftState ?: return@combine emptyList()
+            if (s.manualModeActive != true) return@combine emptyList()
+
+            draft.unassignedDeviceIds
+                .mapNotNull { id -> devicesById[id] }
+                .sortedBy { it.name.trim().lowercase(Locale.ROOT) }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+// =========================
+// Manual display groups (draft -> UI) — Коммит 3
+// =========================
+
+// (твой manualDisplayGroups остаётся как есть, он уже правильный)
     // =========================
 // Manual display groups (draft -> UI)
 // =========================
@@ -157,68 +176,42 @@ class ExplicationViewModel @Inject constructor(
     /**
      * Группы для отображения в MANUAL.
      *
-     * ВАЖНО (ТЗ v1.1):
-     * - MANUAL строится ТОЛЬКО от draft (ManualEditSessionRepository)
-     * - Никаких "склеек" с базовыми группами из БД
-     *
-     * ✅ Коммит 2A: устройства подтягиваем batch-ом по deviceIds напрямую из БД через DeviceRepository.getDevicesByIds().
-     * Это делает UI независимым от baseGroups/БД-групп.
+     * ✅ Коммит 3: устройства берём ТОЛЬКО из manualDevicesById,
+     * который обновляется единым batch-load по draft (groups + unassigned).
      */
     val manualDisplayGroups: StateFlow<List<CircuitGroup>> =
-        manualSession
-            .flatMapLatest { s ->
-                kotlinx.coroutines.flow.flow {
-                    val draft = s?.draftState
-                    if (draft == null) {
-                        emit(emptyList())
-                        return@flow
-                    }
+        combine(
+            manualSession,
+            manualDevicesById
+        ) { s, devicesById ->
+            val draft = s?.draftState ?: return@combine emptyList()
+            if (s.manualModeActive != true) return@combine emptyList()
 
-                    // Собираем ВСЕ id устройств, которые реально используются в группах (assigned),
-                    // чтобы одним запросом подтянуть их в память.
-                    val allGroupDeviceIds: List<Long> = draft.groups
-                        .asSequence()
-                        .flatMap { it.deviceIds.asSequence() }
-                        .distinct()
-                        .toList()
+            draft.groups.map { g ->
+                val groupDevices = g.deviceIds.mapNotNull { id -> devicesById[id] }
 
-                    val devices: List<Device> =
-                        if (allGroupDeviceIds.isEmpty()) emptyList()
-                        else deviceRepository.getDevicesByIds(allGroupDeviceIds)
+                CircuitGroup(
+                    groupId = g.groupId,
+                    groupNumber = g.groupNumber,
+                    roomName = g.roomName,
+                    roomId = g.roomId,
+                    groupType = g.groupType,
+                    devices = groupDevices,
 
-                    val devicesById: Map<Long, Device> = devices.associateBy { it.id }
+                    // линия/номиналы живут в draft и пересчитываются ManualRepo
+                    nominalCurrent = g.nominalCurrent ?: 0.0,
 
-                    val uiGroups: List<CircuitGroup> = draft.groups.map { g ->
-                        val groupDevices = g.deviceIds.mapNotNull { id -> devicesById[id] }
+                    installedPowerW = groupDevices.sumOf { it.power },
 
-                        CircuitGroup(
-                            groupId = g.groupId,
-                            groupNumber = g.groupNumber,
-                            roomName = g.roomName,
-                            roomId = g.roomId,
-                            groupType = g.groupType,
-                            devices = groupDevices,
-
-                            // ⚠️ ВАЖНО: номинальный ток/линия сейчас живут в draft и пересчитываются ManualRepo.
-                            // Тут не трогаем, чтобы не менять поведение.
-                            nominalCurrent = g.nominalCurrent ?: 0.0,
-
-                            // ✅ Теперь можно честно посчитать установленную мощность
-                            installedPowerW = groupDevices.sumOf { it.power },
-
-                            circuitBreaker = g.circuitBreaker ?: 16,
-                            cableSection = g.cableSection ?: 2.5,
-                            breakerType = g.breakerType ?: "",
-                            rcdRequired = g.rcdRequired ?: false,
-                            rcdCurrent = g.rcdCurrent ?: 30,
-                            phase = g.phase
-                        )
-                    }
-
-                    emit(uiGroups)
-                }
+                    circuitBreaker = g.circuitBreaker ?: 16,
+                    cableSection = g.cableSection ?: 2.5,
+                    breakerType = g.breakerType ?: "",
+                    rcdRequired = g.rcdRequired ?: false,
+                    rcdCurrent = g.rcdCurrent ?: 30,
+                    phase = g.phase
+                )
             }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     // =========================
     // DB-driven pipeline (FIX отката)
@@ -382,6 +375,52 @@ class ExplicationViewModel @Inject constructor(
             }
         }
 
+        // 2.5) ✅ Коммит 3: единый batch-load устройств для MANUAL (groups + unassigned)
+        viewModelScope.launch(ioDispatcher) {
+            manualSession
+                .map { s ->
+                    if (s?.manualModeActive != true) return@map emptySet<Long>()
+
+                    val draft = s.draftState
+                    val assigned = draft.groups.asSequence().flatMap { it.deviceIds.asSequence() }
+                    val unassigned = draft.unassignedDeviceIds.asSequence()
+
+                    (assigned + unassigned).toSet()
+                }
+                .distinctUntilChanged() // если набор id не изменился — не дёргаем БД повторно
+                .collectLatest { neededIds ->
+                    // если manual выключен или id пустые — чистим кэш
+                    if (neededIds.isEmpty()) {
+                        val version = _manualDevicesRequestVersion.value + 1
+                        _manualDevicesRequestVersion.value = version
+                        _manualDevicesById.value = emptyMap()
+                        Log.d("MANUAL_DEVICES", "CLEAR neededIds=0 ver=$version")
+                        return@collectLatest
+                    }
+
+                    val version = _manualDevicesRequestVersion.value + 1
+                    _manualDevicesRequestVersion.value = version
+
+                    Log.d("MANUAL_DEVICES", "LOAD start ids=${neededIds.size} ver=$version")
+
+                    val devices = deviceRepository.getDevicesByIds(neededIds.toList())
+                    val returnedIds = devices.map { it.id }.toSet()
+                    val missing = neededIds - returnedIds
+
+                    Log.d("MANUAL_DEVICES", "LOAD result returned=${returnedIds.size} missing=${missing.size} missingIds=${missing.take(20)}")
+
+                    val map = devices.associateBy { it.id }
+
+                    // ✅ защита от гонок: старый запрос не имеет права перезатереть новый
+                    if (_manualDevicesRequestVersion.value == version) {
+                        _manualDevicesById.value = map
+                        Log.d("MANUAL_DEVICES", "LOAD apply ids=${map.size} ver=$version")
+                    } else {
+                        Log.w("MANUAL_DEVICES", "LOAD drop stale ids=${map.size} ver=$version current=${_manualDevicesRequestVersion.value}")
+                    }
+                }
+        }
+
         // 3) ✅ Главный FIX: uiState строим от БД, когда manual выключен.
 // Это делает Экспликацию реактивной: Save из AppBar → БД → UI обновился.
         viewModelScope.launch(ioDispatcher) {
@@ -530,39 +569,17 @@ class ExplicationViewModel @Inject constructor(
     // =========================
     // Unassigned: refresh/clear
     // =========================
-
     /**
-     * Обновляет список Device для блока "Нераспределённые".
-     * Защищено от гонок: старые результаты не перетрут новые.
-     *
-     * ✅ Коммит 2A: batch-загрузка вместо N+1.
-     */
+     * ✅ Коммит 3:
+     * Unassigned больше не грузим отдельно — всё приходит через manualDevicesById.
+     * Методы оставлены ради обратной совместимости с текущим UI.
+    */
     fun refreshUnassignedDevices(unassignedIds: Set<Long>) {
-        val version = _unassignedRequestVersion.value + 1
-        _unassignedRequestVersion.value = version
-
-        viewModelScope.launch(ioDispatcher) {
-            if (unassignedIds.isEmpty()) {
-                if (_unassignedRequestVersion.value == version) {
-                    _unassignedDevices.value = emptyList()
-                }
-                return@launch
-            }
-
-            val devices = deviceRepository
-                .getDevicesByIds(unassignedIds.toList())
-                .sortedBy { it.name.trim().lowercase(Locale.ROOT) }
-
-            if (_unassignedRequestVersion.value == version) {
-                _unassignedDevices.value = devices
-            }
-        }
+    Log.d("MANUAL_DEVICES", "refreshUnassignedDevices ignored (handled by manualDevicesById) ids=${unassignedIds.size}")
     }
 
     fun clearUnassignedDevices() {
-        val version = _unassignedRequestVersion.value + 1
-        _unassignedRequestVersion.value = version
-        _unassignedDevices.value = emptyList()
+    Log.d("MANUAL_DEVICES", "clearUnassignedDevices ignored (handled by manualDevicesById)")
     }
 
     /**
@@ -736,123 +753,6 @@ class ExplicationViewModel @Inject constructor(
     }
 
     // =========================
-    // Manual Save / Cancel (Коммит 8)
-    // =========================
-
-    /**
-     * Save:
-     * - commit draft -> локальная БД (groups + joins)
-     * - exit manual
-     * - обновить uiState на закоммиченный результат (без авто-recalc)
-     */
-    fun onManualSaveRequested() {
-        viewModelScope.launch(ioDispatcher) {
-            val session = manualSession.value ?: return@launch
-            if (!session.manualModeActive) return@launch
-
-            val projectId = session.projectId
-
-            try {
-                // 1) Коммитим draft в БД строго в projectId сессии (а не "активного проекта")
-                val committedGroups = commitManualDraftToLocalDbUseCase.execute(
-                    CommitManualDraftToLocalDbUseCase.Params(
-                        projectId = projectId,
-                        draft = session.draftState
-                    )
-                )
-
-                // 2) Выходим из manual
-                manualRepo.exitManualMode(projectId)
-                manualDraftResetNotifier.clearExpected(projectId)
-
-                // ✅ Мгновенно обновим UI (а DB-flow следом подтвердит то же самое)
-                setSuccessFromGroups(
-                    groups = committedGroups,
-                    mode = phaseMode.value,
-                    isProReport = userPlanRepository.planFlow.value.capabilities.professionalReportSections,
-                    decisions = decisionsFlow.value
-                )
-
-                _events.value = UiEvent.ShowSnackbar("Изменения сохранены")
-            } catch (_: Throwable) {
-                _events.value = UiEvent.ShowSnackbar("Не удалось сохранить изменения")
-            }
-        }
-    }
-
-    /**
-     * Cancel:
-     * - exit manual (черновик отброшен)
-     * - полный авто-пересчёт и сохранение результата в БД
-     * - вернуть UI в AUTO pipeline
-     */
-    fun onManualCancelRequested() {
-        viewModelScope.launch(ioDispatcher) {
-            val session = manualRepo.getActiveSession() ?: manualSession.value
-            val projectId = session?.projectId
-
-            if (projectId.isNullOrBlank()) {
-                _events.value = UiEvent.ShowSnackbar("Не удалось отменить: не найден projectId")
-                return@launch
-            }
-
-            try {
-                // 1) выходим из manual сразу
-                manualRepo.exitManualMode(projectId)
-                manualDraftResetNotifier.clearExpected(projectId)
-
-                Log.w("AUTO_TRIGGER", "CANCEL_MANUAL pid=$projectId -> explicit rebuild")
-
-                // 2) explicit rebuild + commit в БД (use-case уже делает AUTO_SAVE)
-                cancelManualAndAutoRecalcUseCase.execute(
-                    CancelManualAndAutoRecalcUseCase.Params(projectId = projectId)
-                )
-
-                // 3) НИЧЕГО больше не считаем: DB pipeline подтянет группы и обновит UI
-                _events.value = UiEvent.ShowSnackbar("Ручные изменения отменены")
-            } catch (_: Throwable) {
-                _events.value = UiEvent.ShowSnackbar("Не удалось отменить изменения")
-            }
-        }
-    }
-
-    /**
-     * Обновление UI после того, как группы уже сохранены "снаружи" (Save manual).
-     * Мы НЕ делаем авто-пересчёт (иначе затрём ручные правки).
-     */
-    private fun applyGroupsToUiAfterExternalCommit(groups: List<CircuitGroup>) {
-        val current = uiState.value as? GroupScreenState.Success ?: return
-
-        val totalGroups = groups.size
-        val totalCurrent = groups.sumOf { it.nominalCurrent }
-        val hasGroupRcds = groups.any { it.rcdRequired }
-
-        val incomer = IncomerSelector().select(
-            IncomerSelector.Params(
-                groups = groups,
-                preferRcbo = false,
-                hasGroupRcds = hasGroupRcds,
-                voltageTypeOverride = when (phaseMode.value) {
-                    PhaseMode.SINGLE -> VoltageType.AC_1PHASE
-                    PhaseMode.THREE -> VoltageType.AC_3PHASE
-                }
-            )
-        )
-
-        val totals = calculateShieldOverviewUseCase.execute(groups)
-
-        _uiState.value = current.copy(
-            groups = groups,
-            totalGroups = totalGroups,
-            totalCurrent = totalCurrent,
-            incomer = incomer,
-            hasGroupRcds = hasGroupRcds,
-            installedPowerW = totals.installedPowerW,
-            calculatedPowerW = totals.calculatedPowerW,
-        )
-    }
-
-    // =========================
     // Move device UI (manual)
     // =========================
 
@@ -899,13 +799,21 @@ class ExplicationViewModel @Inject constructor(
 
             Log.d("DRAG_TRACE", "VM APPLY MOVE device=$deviceId from=$fromGroupId to=$targetGroupId")
 
-            manualRepo.apply(
+            val action = if (fromGroupId == FROM_UNASSIGNED) {
+                ManualEditAction.MoveFromUnassigned(
+                    deviceId = deviceId,
+                    toGroupId = targetGroupId
+                )
+            } else {
                 ManualEditAction.MoveDevice(
                     deviceId = deviceId,
                     fromGroupId = fromGroupId,
                     toGroupId = targetGroupId
                 )
-            )
+            }
+
+            Log.d("DRAG_TRACE", "VM APPLY action=$action")
+            manualRepo.apply(action)
         }
     }
 
@@ -948,11 +856,6 @@ class ExplicationViewModel @Inject constructor(
                 _events.value = UiEvent.ShowSnackbar("Не удалось перенести устройство")
             }
         }
-    }
-
-    fun onMixedWarningDismiss() {
-        _showMixedWarningDialog.value = false
-        _pendingMixedMove.value = null
     }
 
     fun onMoveDeviceToNewGroupSelected(deviceId: Long) {

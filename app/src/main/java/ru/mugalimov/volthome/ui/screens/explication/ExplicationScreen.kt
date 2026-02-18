@@ -165,7 +165,7 @@ fun ExplicationScreen(
             // иначе остаются "старые" прямоугольники и activeTarget может врать.
             LaunchedEffect(isManual, moveUi) {
                 if (!isManual || moveUi == null) {
-                    Log.d("DRAG_BOUNDS", "CLEAR (isManual=$isManual moveUi=$moveUi) sizeBefore=${targetBounds.size}")
+//                    Log.d("DRAG_BOUNDS", "CLEAR (isManual=$isManual moveUi=$moveUi) sizeBefore=${targetBounds.size}")
                     targetBounds.clear()
                 }
             }
@@ -213,7 +213,7 @@ fun ExplicationScreen(
 
                         onTargetBounds = { target, rect ->
                             targetBounds[target] = rect
-                            Log.d("DRAG_BOUNDS", "SET target=$target rectRoot=$rect total=${targetBounds.size} fromGroupId=${moveUi?.fromGroupId}")
+//                            Log.d("DRAG_BOUNDS", "SET target=$target rectRoot=$rect total=${targetBounds.size} fromGroupId=${moveUi?.fromGroupId}")
                         },
 
                         // ✅ НОВОЕ: для edge-autoscroll
