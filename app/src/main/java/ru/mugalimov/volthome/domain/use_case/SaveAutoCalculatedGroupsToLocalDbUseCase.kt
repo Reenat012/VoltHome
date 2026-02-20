@@ -16,6 +16,12 @@ import ru.mugalimov.volthome.domain.model.DistributionDecision
  * Коммит v3.1:
  * - Single-flight (Mutex) per projectId
  * - Инварианты до записи
+ *
+ * ВАЖНО:
+ * - Mutex НЕ реентерабельный.
+ * - Поэтому есть 2 входа:
+ *   1) execute(...) — сам берёт lock
+ *   2) executeAlreadyLocked(...) — НЕЛЬЗЯ вызывать без внешнего structural lock
  */
 class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
     private val explicationRepository: ExplicationRepository,
@@ -30,55 +36,69 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
     suspend fun execute(params: Params) {
         require(params.projectId.isNotBlank()) { "projectId must be non-blank" }
 
+        // ✅ Обычный вход: берём lock здесь
+        structuralWriteMutex.withLock(params.projectId) {
+            executeAlreadyLocked(params)
+        }
+    }
+
+    /**
+     * ⚠️ Вызывать ТОЛЬКО если ВНЕ уже есть structuralWriteMutex.withLock(projectId).
+     * Иначе получишь гонки/перезаписи.
+     *
+     * Зачем нужно:
+     * - чтобы избежать self-deadlock при сценариях, когда вызывающий код уже под lock.
+     */
+    suspend fun executeAlreadyLocked(params: Params) {
+        require(params.projectId.isNotBlank()) { "projectId must be non-blank" }
+
         val projectId = params.projectId
         val groups = params.groups
 
-        structuralWriteMutex.withLock(projectId) {
-            // -------------------------
-            // ✅ Быстрые инварианты (до БД)
-            // -------------------------
-            val dupGroupIds = groups.groupBy { it.groupId }.filter { it.value.size > 1 }.keys
-            require(dupGroupIds.isEmpty()) {
-                "AUTO_SAVE invariant failed: duplicate groupId(s)=$dupGroupIds projectId=$projectId"
-            }
-
-            val dupNumbers = groups.groupBy { it.groupNumber }.filter { it.value.size > 1 }.keys
-            require(dupNumbers.isEmpty()) {
-                "AUTO_SAVE invariant failed: duplicate groupNumber(s)=$dupNumbers projectId=$projectId"
-            }
-
-            val nullPhase = groups.filter { it.phase == null }.map { it.groupId }
-            require(nullPhase.isEmpty()) {
-                "AUTO_SAVE invariant failed: null phase for groupId(s)=$nullPhase projectId=$projectId"
-            }
-
-            val summary = groups
-                .sortedBy { it.groupNumber }
-                .joinToString { g ->
-                    val ph = g.phase?.name ?: "null"
-                    "${g.groupId}#${g.groupNumber}#$ph(devs=${g.devices.size})"
-                }
-
-            val caller = Throwable().stackTrace
-                .drop(1)
-                .take(8)
-                .joinToString(" <- ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
-
-            Log.w(
-                "AUTO_SAVE",
-                "AUTO_SAVE BEGIN source=AUTO_SAVE reason=EXPLICIT_REBUILD projectId=$projectId " +
-                        "groups=${groups.size} summary=[$summary] caller=$caller"
-            )
-
-            // ✅ ЕДИНСТВЕННАЯ structural запись (внутри неё теперь будет DB-sanity)
-            explicationRepository.replaceAllGroupsTransactional(
-                projectId = projectId,
-                groups = groups
-            )
-
-            explicationRepository.setLastDistributionDecisions(params.distributionDecisions)
-
-            Log.w("AUTO_SAVE", "AUTO_SAVE END projectId=$projectId groups=${groups.size}")
+        // -------------------------
+        // ✅ Быстрые инварианты (до БД)
+        // -------------------------
+        val dupGroupIds = groups.groupBy { it.groupId }.filter { it.value.size > 1 }.keys
+        require(dupGroupIds.isEmpty()) {
+            "AUTO_SAVE invariant failed: duplicate groupId(s)=$dupGroupIds projectId=$projectId"
         }
+
+        val dupNumbers = groups.groupBy { it.groupNumber }.filter { it.value.size > 1 }.keys
+        require(dupNumbers.isEmpty()) {
+            "AUTO_SAVE invariant failed: duplicate groupNumber(s)=$dupNumbers projectId=$projectId"
+        }
+
+        val nullPhase = groups.filter { it.phase == null }.map { it.groupId }
+        require(nullPhase.isEmpty()) {
+            "AUTO_SAVE invariant failed: null phase for groupId(s)=$nullPhase projectId=$projectId"
+        }
+
+        val summary = groups
+            .sortedBy { it.groupNumber }
+            .joinToString { g ->
+                val ph = g.phase?.name ?: "null"
+                "${g.groupId}#${g.groupNumber}#$ph(devs=${g.devices.size})"
+            }
+
+        val caller = Throwable().stackTrace
+            .drop(1)
+            .take(8)
+            .joinToString(" <- ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
+
+        Log.w(
+            "AUTO_SAVE",
+            "AUTO_SAVE BEGIN source=AUTO_SAVE reason=EXPLICIT_REBUILD projectId=$projectId " +
+                    "groups=${groups.size} summary=[$summary] caller=$caller"
+        )
+
+        // ✅ ЕДИНСТВЕННАЯ structural запись (внутри неё DB-sanity)
+        explicationRepository.replaceAllGroupsTransactional(
+            projectId = projectId,
+            groups = groups
+        )
+
+        explicationRepository.setLastDistributionDecisions(params.distributionDecisions)
+
+        Log.w("AUTO_SAVE", "AUTO_SAVE END projectId=$projectId groups=${groups.size}")
     }
 }

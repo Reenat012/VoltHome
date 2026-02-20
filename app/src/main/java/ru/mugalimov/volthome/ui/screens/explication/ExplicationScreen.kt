@@ -76,14 +76,14 @@ fun ExplicationScreen(
     val unassignedIds = manualSession?.draftState?.unassignedDeviceIds.orEmpty()
     val unassignedDevices by viewModel.unassignedDevices.collectAsState()
 
-    // ✅ Подтягиваем "Нераспределённые" только в manual (и чистим при выходе)
-    LaunchedEffect(isManual, unassignedIds) {
-        if (isManual) {
-            viewModel.refreshUnassignedDevices(unassignedIds)
-        } else {
-            viewModel.clearUnassignedDevices()
-        }
-    }
+//    // ✅ Подтягиваем "Нераспределённые" только в manual (и чистим при выходе)
+//    LaunchedEffect(isManual, unassignedIds) {
+//        if (isManual) {
+//            viewModel.refreshUnassignedDevices(unassignedIds)
+//        } else {
+//            viewModel.clearUnassignedDevices()
+//        }
+//    }
 
     val moveUi by viewModel.moveDeviceUi.collectAsState(initial = null)
 
@@ -122,15 +122,22 @@ fun ExplicationScreen(
     }
 
     when (val s = state) {
-        is GroupScreenState.Loading -> LoadingState()
+        is GroupScreenState.Loading -> {
+            Log.e("STATE_TRACE", "UI -> Loading")
+            LoadingState()
+        }
 
-        is GroupScreenState.Error -> ErrorState(
-            message = s.message,
-            onRetry = { viewModel.recalcAndSaveGroups() }
-        )
+        is GroupScreenState.Error -> {
+            Log.e("STATE_TRACE", "UI -> Error message='${s.message}'")
+            ErrorState(
+                message = s.message,
+                onRetry = { viewModel.recalcAndSaveGroups() }
+            )
+        }
 
         is GroupScreenState.Success -> {
             val baseGroups = s.groups
+            Log.e("STATE_TRACE", "UI -> Success groups=${s.groups.size}")
 
             // ✅ MANUAL-группы теперь собираются в VM (без склейки с БД)
             val manualDisplayGroups by viewModel.manualDisplayGroups.collectAsState()

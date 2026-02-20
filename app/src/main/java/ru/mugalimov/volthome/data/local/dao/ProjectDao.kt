@@ -7,6 +7,7 @@ import ru.mugalimov.volthome.data.local.entity.ProjectEntity
 @Dao
 interface ProjectDao {
 
+
     /**
      * Стабильный порядок по "первой вставке".
      * Важно: мы не используем REPLACE при апсёрте, чтобы rowid не менялся.
@@ -38,6 +39,11 @@ interface ProjectDao {
         if (inserted == -1L) {
             update(item)
         }
+    }
+
+    @Transaction
+    suspend fun upsertMany(items: List<ProjectEntity>) {
+        for (it in items) upsert(it)
     }
 
     // ---- Остальные операции ----

@@ -230,6 +230,19 @@ class ExplicationViewModel @Inject constructor(
     // ✅ Чтобы не запускать авто-recalc бесконечно
     private val initialAutoRecalcTriggered = MutableStateFlow(false)
 
+    // ✅ Защита от гонок авто-recalc:
+    // 1) не даём запускать авто-recalc параллельно
+    // 2) сбрасываем "initialAutoRecalcTriggered" при смене проекта
+    private val autoRecalcInFlight = MutableStateFlow(false)
+    private val lastAutoRecalcProjectId = MutableStateFlow<String?>(null)
+
+    // ✅ Делаем projectId доступным как StateFlow (чтобы не блокировать first() внутри collect)
+    private val activeProjectIdState: StateFlow<String?> =
+        activeProjectDs.activeProjectId
+            .distinctUntilChanged()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+
     data class MoveDeviceUi(
         val deviceId: Long,
         val fromGroupId: Long
@@ -428,27 +441,57 @@ class ExplicationViewModel @Inject constructor(
         viewModelScope.launch(ioDispatcher) {
 
             // Комбайним группы + phaseMode + доступ к pro-секциям + decisions + manualSession(!!!)
+            // ✅ ВАЖНО: combine() на 6 flow уезжает в vararg-overload (Array<Any?>) и ломает типы.
+// Поэтому делаем "combine(5) -> потом combine(+ projectId)".
+            val dbPipelineInput =
+                combine(
+                    dbGroupsFlow,
+                    phaseMode,
+                    userPlanRepository.planFlow,
+                    decisionsFlow,
+                    manualSession
+                ) { groups, mode, plan, decisions, session ->
+                    Pair(
+                        Quad(
+                            groups,
+                            mode,
+                            // ✅ plan здесь снова нормального типа (как было раньше), capabilities доступен
+                            plan.capabilities.professionalReportSections,
+                            decisions
+                        ),
+                        session
+                    )
+                }
+
             combine(
-                dbGroupsFlow,
-                phaseMode,
-                userPlanRepository.planFlow,
-                decisionsFlow,
-                manualSession // ✅ ключевой фикс: manual -> вход пайплайна
-            ) { groups, mode, plan, decisions, session ->
-                // Quad оставляем, чтобы не переписывать остальную логику
-                Pair(
-                    Quad(groups, mode, plan.capabilities.professionalReportSections, decisions),
-                    session
-                )
-            }.collect { (quad, session) ->
+                dbPipelineInput,
+                activeProjectIdState
+            ) { (quad, session), projectId ->
+                Triple(quad, session, projectId)
+            }.collect { (quad, session, projectIdNullable) ->
 
                 val groups = quad.a
                 val mode = quad.b
                 val isProReport = quad.c
                 val decisions = quad.d
 
-                // ✅ manual-статус только из session, которая участвует в combine
                 val manualActive = session?.manualModeActive == true
+
+                val projectId = projectIdNullable.orEmpty()
+
+                // ✅ Если проект сменился — сбрасываем auto-trigger для нового проекта.
+                val lastPid = lastAutoRecalcProjectId.value
+                if (projectId.isNotBlank() && lastPid != projectId) {
+                    lastAutoRecalcProjectId.value = projectId
+                    initialAutoRecalcTriggered.value = false
+
+                    // ✅ Не перетираем Error (иначе "вечный спиннер" возвращается)
+                    if (_uiState.value !is GroupScreenState.Error) {
+                        _uiState.value = GroupScreenState.Loading
+                    }
+
+                    Log.w("AUTO_TRIGGER", "RESET initialAutoRecalcTriggered because project changed $lastPid -> $projectId")
+                }
 
                 if (manualActive) {
                     Log.w(
@@ -458,14 +501,24 @@ class ExplicationViewModel @Inject constructor(
                     return@collect
                 }
 
-                // Если групп нет — это либо новый проект, либо ещё не было авторасчёта.
-                // Запускаем recalc ОДИН раз на входе в AUTO, а не из Screen.
                 if (groups.isEmpty()) {
+
+                    // ✅ КРИТИЧНО: если уже показали Error — не перетираем его в Loading
+                    if (_uiState.value is GroupScreenState.Error) {
+                        Log.w("AUTO_TRIGGER", "SKIP_LOADING because uiState=Error and groups empty (keep Error visible)")
+                        return@collect
+                    }
+
+                    // Если проект ещё не выбран — ждём
+                    if (projectId.isBlank()) {
+                        Log.w("AUTO_TRIGGER", "WAIT projectId blank, groups empty -> keep current uiState")
+                        return@collect
+                    }
+
                     if (!initialAutoRecalcTriggered.value) {
                         initialAutoRecalcTriggered.value = true
-                        val pid = activeProjectDs.activeProjectId.first().orEmpty()
-                        Log.w("AUTO_TRIGGER", "AUTO_RECALC_START reason=INIT_EMPTY_DB pid=$pid")
-                        recalcAndSaveGroups()
+                        Log.w("AUTO_TRIGGER", "AUTO_RECALC_START reason=INIT_EMPTY_DB pid=$projectId")
+                        triggerAutoRecalc(projectId = projectId, reason = "INIT_EMPTY_DB")
                     } else {
                         if (_uiState.value !is GroupScreenState.Loading) {
                             _uiState.value = GroupScreenState.Loading
@@ -481,7 +534,6 @@ class ExplicationViewModel @Inject constructor(
                         .joinToString { g -> "${g.groupId}#${g.groupNumber}(devs=${g.devices.size})" }
                 )
 
-                // Когда manual выключен — гарантированно приводим UI к факту из БД
                 setSuccessFromGroups(
                     groups = groups,
                     mode = mode,
@@ -1201,136 +1253,96 @@ class ExplicationViewModel @Inject constructor(
                 return@launch
             }
 
-            val projectId = activeProjectDs.activeProjectId.first().orEmpty()
-            Log.w(
-                "AUTO_GATE",
-                "AUTO_RECALC_ALLOWED reason=EXPLICIT_RECALC_REQUEST manual=false pid=$projectId"
-            )
+            val projectId = activeProjectIdState.value.orEmpty()
+            if (projectId.isBlank()) {
+                Log.w("AUTO_GATE", "AUTO_RECALC_ABORT reason=NO_ACTIVE_PROJECT (keep current uiState)")
+                // ❗ Не выставляем Error: проект просто ещё не выбран
+                return@launch
+            }
 
-            _isRecalculating.value = true
-            _uiState.value = GroupScreenState.Loading
+            // ✅ Пользовательский retry тоже должен идти через single-flight, иначе можно сделать двойной запуск.
+            if (autoRecalcInFlight.value) {
+                Log.w("AUTO_GATE", "AUTO_RECALC_REJECT reason=IN_FLIGHT pid=$projectId")
+                return@launch
+            }
 
+            autoRecalcInFlight.value = true
             try {
-                val mode = preferencesRepository.phaseMode.first()
+                recalcAndSaveGroupsInternal(projectId = projectId, reason = "EXPLICIT_RECALC_REQUEST", updateUiSuccess = false)
+            } finally {
+                autoRecalcInFlight.value = false
+            }
+        }
+    }
 
-                Log.w("AUTO_TRIGGER", "AUTO_RECALC_START reason=EXPLICIT_RECALC_REQUEST pid=$projectId mode=$mode")
+    /**
+     * Общая реализация пересчёта.
+     *
+     * updateUiSuccess=false — ✅ правильный режим:
+     * - success НЕ пишет в uiState,
+     * - success приходит через DB pipeline (единственный писатель Success).
+     */
+    private suspend fun recalcAndSaveGroupsInternal(
+        projectId: String,
+        reason: String,
+        updateUiSuccess: Boolean
+    ) {
+        Log.w("AUTO_GATE", "AUTO_RECALC_ALLOWED reason=$reason pid=$projectId")
 
-                val calc = groupCalculatorFactory.create()
-                when (val res = calc.calculateGroups(mode)) {
-                    is GroupingResult.Error -> {
-                        _uiState.value = GroupScreenState.Error(res.message)
-                    }
-                    is GroupingResult.Success -> {
-                        val groups = res.system.groups
+        _isRecalculating.value = true
+        _uiState.value = GroupScreenState.Loading
 
-                        if (projectId.isBlank()) {
-                            _uiState.value = GroupScreenState.Error("Не выбран проект")
-                            return@launch
-                        }
+        try {
+            val mode = preferencesRepository.phaseMode.first()
 
-                        saveAutoCalculatedGroupsToLocalDbUseCase.execute(
-                            SaveAutoCalculatedGroupsToLocalDbUseCase.Params(
-                                projectId = projectId,
-                                groups = groups,
-                                distributionDecisions = res.distributionDecisions
-                            )
-                        )
+            Log.w("AUTO_TRIGGER", "AUTO_RECALC_START reason=$reason pid=$projectId mode=$mode")
 
-                        repo.setLastDistributionDecisions(res.distributionDecisions)
+            val calc = groupCalculatorFactory.create()
+            Log.e("CALC_TRACE", "calculateGroups START pid=$projectId mode=$mode")
+            when (val res = calc.calculateGroups(mode)) {
+                is GroupingResult.Error -> {
+                    Log.e("CALC_TRACE", "calculateGroups ERROR pid=$projectId message='${res.message}'")
+                    // ✅ Error разрешён: пользователь должен видеть Retry
+                    _uiState.value = GroupScreenState.Error(res.message)
+                }
 
-                        val totalGroups = groups.size
-                        val totalCurrent = groups.sumOf { it.nominalCurrent }
-                        val hasGroupRcds = groups.any { it.rcdRequired }
+                is GroupingResult.Success -> {
+                    val groups = res.system.groups
+                    Log.e("CALC_TRACE", "calculateGroups SUCCESS pid=$projectId groups=${groups.size}")
 
-                        val incomer = IncomerSelector().select(
-                            IncomerSelector.Params(
-                                groups = groups,
-                                preferRcbo = false,
-                                hasGroupRcds = hasGroupRcds,
-                                voltageTypeOverride = when (mode) {
-                                    PhaseMode.SINGLE -> VoltageType.AC_1PHASE
-                                    PhaseMode.THREE -> VoltageType.AC_3PHASE
-                                }
-                            )
-                        )
+                    val ids = groups.map { it.groupId }
+                    val dup = ids.groupBy { it }.filter { it.value.size > 1 }.keys
 
-                        val plan = userPlanRepository.planFlow.value
-                        val isProReport = plan.capabilities.professionalReportSections
-
-                        val totals = calculateShieldOverviewUseCase.execute(groups)
-                        val installedPower = totals.installedPowerW
-                        val calculatedPower = totals.calculatedPowerW
-
-                        val calcWarningsFromGroups = if (isProReport) {
-                            buildWarningsFromGroups(groups)
-                        } else emptyList()
-
-                        val shieldTotalsAssumptions: List<CalcAssumption> =
-                            if (isProReport) calculatedPower.assumptions else emptyList()
-
-                        val proAssumptions: List<CalcAssumption> =
-                            if (isProReport) {
-                                buildList {
-                                    addAll(installedPower.assumptions)
-                                    addAll(calculatedPower.assumptions)
-                                }.distinctBy { it.toString() }
-                            } else emptyList()
-
-                        val proWarnings: List<CalcWarning> =
-                            if (isProReport) {
-                                buildList {
-                                    addAll(calcWarningsFromGroups)
-                                    addAll(installedPower.warnings)
-                                    addAll(calculatedPower.warnings)
-                                }.distinctBy { "${it.severity}|${it.scope}|${it.title}|${it.message}" }
-                            } else emptyList()
-
-                        // фиксируем дату в state, чтобы превью/экспорт в рамках одного пересчёта были стабильнее
-                        val reportDate = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
-                            .format(System.currentTimeMillis())
-
-                        val (meta, phases) = buildReportDataFromDeterministic(
+                    Log.e(
+                        "AUTO_SAVE_TRACE",
+                        "about to save pid=$projectId mode=$mode groups=${groups.size} " +
+                                "idsSample=${ids.take(20)} dup=$dup"
+                    )
+                    saveAutoCalculatedGroupsToLocalDbUseCase.execute(
+                        SaveAutoCalculatedGroupsToLocalDbUseCase.Params(
+                            projectId = projectId,
                             groups = groups,
-                            incomer = incomer,
-                            totalGroups = totalGroups,
-                            mode = mode,
-                            date = reportDate
+                            distributionDecisions = res.distributionDecisions
                         )
+                    )
 
-                        val professionalSections: ProfessionalSections? =
-                            if (isProReport) {
-                                BuildProfessionalSectionsUseCase().execute(
-                                    BuildProfessionalSectionsUseCase.Params(
-                                        phaseMode = mode,
-                                        meta = meta,
-                                        phases = phases,
-                                        distributionDecisions = res.distributionDecisions,
-                                        calcWarnings = proWarnings,
-                                        assumptions = proAssumptions
-                                    )
-                                )
-                            } else null
+                    // decisions держим в памяти (как и было)
+                    repo.setLastDistributionDecisions(res.distributionDecisions)
 
-                        _uiState.value = GroupScreenState.Success(
-                            groups = groups,
-                            totalGroups = totalGroups,
-                            totalCurrent = totalCurrent,
-                            incomer = incomer,
-                            hasGroupRcds = hasGroupRcds,
-                            installedPowerW = installedPower,
-                            calculatedPowerW = calculatedPower,
-                            shieldTotalsAssumptions = shieldTotalsAssumptions,
-                            calcWarnings = calcWarningsFromGroups,
-                            professionalSections = professionalSections,
-                            reportDate = reportDate
-                        )
+                    Log.w("AUTO_TRIGGER", "AUTO_RECALC_OK pid=$projectId groups=${groups.size} (uiSuccess=$updateUiSuccess)")
+
+                    if (updateUiSuccess) {
+                        // ❗ В этом проекте мы НЕ используем этот режим (оставлен на будущее).
+                        // Success должен приходить только из DB pipeline.
+                        // Здесь можно оставить заглушку или удалить ветку вообще.
+                        Log.w("AUTO_TRIGGER", "updateUiSuccess=true is not used сейчас")
                     }
                 }
-            } catch (t: Throwable) {
-                _uiState.value = GroupScreenState.Error(t.message ?: "Неизвестная ошибка")
-            } finally {
-                _isRecalculating.value = false
             }
+        } catch (t: Throwable) {
+            _uiState.value = GroupScreenState.Error(t.message ?: "Неизвестная ошибка")
+        } finally {
+            _isRecalculating.value = false
         }
     }
 
@@ -1361,6 +1373,27 @@ class ExplicationViewModel @Inject constructor(
             installedPowerW = s.installedPowerW.value,
             calculatedPowerW = s.calculatedPowerW.value
         )
+    }
+
+    /**
+     * ✅ Запускает auto-recalc строго одиночно.
+     * Важно: не даём параллельных запусков, иначе получаем "двойной писатель" и перетирания стейтов.
+     */
+    private fun triggerAutoRecalc(projectId: String, reason: String) {
+        viewModelScope.launch(ioDispatcher) {
+
+            if (autoRecalcInFlight.value) {
+                Log.w("AUTO_TRIGGER", "REJECT auto recalc: already in flight pid=$projectId reason=$reason")
+                return@launch
+            }
+
+            autoRecalcInFlight.value = true
+            try {
+                recalcAndSaveGroupsInternal(projectId = projectId, reason = reason, updateUiSuccess = false)
+            } finally {
+                autoRecalcInFlight.value = false
+            }
+        }
     }
 }
 

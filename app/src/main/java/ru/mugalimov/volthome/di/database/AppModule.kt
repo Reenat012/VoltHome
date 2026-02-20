@@ -17,6 +17,7 @@ import ru.mugalimov.volthome.data.local.dao.GroupPhaseOverrideDao
 import ru.mugalimov.volthome.data.local.dao.LoadDao
 import ru.mugalimov.volthome.data.local.dao.OutboxDao
 import ru.mugalimov.volthome.data.local.dao.ProjectDao
+import ru.mugalimov.volthome.data.local.dao.ProjectLocalStateDao
 import ru.mugalimov.volthome.data.local.dao.RoomDao
 import ru.mugalimov.volthome.data.local.dao.RoomsTxDao
 import ru.mugalimov.volthome.data.local.dao.TombstoneDao
@@ -56,7 +57,8 @@ object DatabaseModule {
                 AppDatabase.MIGRATION_22_23,
                 AppDatabase.MIGRATION_23_24,
                 AppDatabase.MIGRATION_24_25, // «санитарная» миграция: выравнивание индексов под Entity
-                AppDatabase.MIGRATION_25_26
+                AppDatabase.MIGRATION_25_26,
+                AppDatabase.MIGRATION_26_27
             )
             // Для клиентов с очень старыми версиями (<16) просто пересоздаём БД
             .fallbackToDestructiveMigrationFrom(
@@ -107,6 +109,12 @@ object DatabaseModule {
     @Provides
     fun provideGroupPhaseOverrideDao(db: AppDatabase): GroupPhaseOverrideDao =
         db.groupPhaseOverrideDao()
+
+    @Provides
+    @Singleton
+    fun provideProjectLocalStateDao(db: AppDatabase): ProjectLocalStateDao {
+        return db.projectLocalStateDao()
+    }
 }
 
 @Module

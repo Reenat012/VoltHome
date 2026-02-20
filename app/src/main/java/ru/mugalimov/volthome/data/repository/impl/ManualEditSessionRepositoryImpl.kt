@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import ru.mugalimov.volthome.data.local.dao.ProjectLocalStateDao
 import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.PhaseMode
@@ -14,6 +15,7 @@ import ru.mugalimov.volthome.domain.model.manual.ManualEditAction
 import ru.mugalimov.volthome.domain.model.manual.ManualEditSession
 import ru.mugalimov.volthome.domain.model.manual.ManualGroupDraft
 import ru.mugalimov.volthome.domain.model.manual.ProjectEditState
+import ru.mugalimov.volthome.domain.use_case.StructuralWriteCoordinator
 import ru.mugalimov.volthome.domain.use_case.manual.DeleteGroupCascadeUseCase
 import ru.mugalimov.volthome.domain.use_case.manual.ManualDraftSelectors
 import ru.mugalimov.volthome.domain.use_case.manual.RecalculateGroupLineUseCase
@@ -25,8 +27,14 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
     private val recalculateGroupLineUseCase: RecalculateGroupLineUseCase,
     private val deleteGroupCascadeUseCase: DeleteGroupCascadeUseCase,
     private val manualDraftResetNotifier: ManualDraftResetNotifier, // ✅ kill-process UX маркер
+    private val projectLocalStateDao: ProjectLocalStateDao,
+    private val structuralWriteCoordinator: StructuralWriteCoordinator,
 ) : ManualEditSessionRepository {
     private val sessionFlow = MutableStateFlow<ManualEditSession?>(null)
+
+    // Глобальный key для сериализации операций с persisted marker.
+    // Важно: enter/exit manual должны быть глобально последовательны, иначе возможны 2 marker одновременно.
+    private val GLOBAL_MARKER_KEY = "__GLOBAL_MANUAL_MARKER__"
 
     override fun observeSession(projectId: String): Flow<ManualEditSession?> {
         return sessionFlow
@@ -42,15 +50,11 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
         val draft = baseState.deepCopy()
 
         val TAG = "MANUAL_REPO"
+        require(projectId.isNotBlank()) { "projectId must be non-blank" }
 
         Log.d(TAG, "enterManualMode pid=$projectId baseGroups=${baseState.groups.size} baseDevices=${baseState.devices.size}")
-        Log.d(TAG, "session set: groups=${draft.groups.size}")
 
-        // ✅ Kill-process UX:
-        // ставим маркер "manual ожидается" на уровне проекта.
-        // Если процесс убьют — сессия пропадёт, маркер останется, и на старте покажем snackbar.
-        manualDraftResetNotifier.markExpected(projectId)
-
+        // 1) Сначала создаём in-memory session (успешный enter = sessionFlow установлен)
         sessionFlow.value = ManualEditSession(
             projectId = projectId,
             manualModeActive = true,
@@ -59,17 +63,97 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
             version = 1L,
             updatedAtEpochMs = now
         )
+
+        // 2) Persisted marker: делаем “single marker globally” атомарно и с глобальной сериализацией.
+        // Это закрывает гонку “две строки с marker одновременно”.
+        val markerOut = structuralWriteCoordinator.execute(
+            projectId = GLOBAL_MARKER_KEY,
+            opName = "MANUAL_MARKER_SET"
+        ) {
+            // 1) Guard: если manual уже активен на другом проекте — НЕ воруем.
+            val marked = projectLocalStateDao.getActiveManualProjectId()
+            if (marked != null && marked != projectId) {
+                throw IllegalStateException("Manual already active for another project")
+            }
+
+            // 2) Санитизация допустима только когда marker пуст или уже наш.
+            // (опционально, но полезно если в БД есть мусор/двойные markers из старых версий)
+            projectLocalStateDao.clearActiveManualMarkerGlobal()
+
+            // 3) Реальная запись marker с гарантией существования строки и rowsUpdated==1
+            projectLocalStateDao.ensureRow(projectId)
+            val rows = projectLocalStateDao.setActiveManualMarker(projectId)
+            require(rows == 1) { "Failed to set persisted manual marker (rowsUpdated=$rows)" }
+        }
+
+        when (markerOut) {
+            is StructuralWriteCoordinator.Outcome.Success -> {
+                // Доп. UX marker (не SoT)
+                manualDraftResetNotifier.markExpected(projectId)
+                Log.d(TAG, "enterManualMode OK pid=$projectId markerSet=1")
+            }
+
+            StructuralWriteCoordinator.Outcome.Busy -> {
+                // Теоретически редко, но если кто-то параллельно крутит marker — лучше откатить enter.
+                sessionFlow.value = null
+                Log.w(TAG, "enterManualMode BUSY pid=$projectId")
+                throw IllegalStateException("Busy: marker operation in progress")
+            }
+
+            StructuralWriteCoordinator.Outcome.Panic -> {
+                sessionFlow.value = null
+                Log.e(TAG, "enterManualMode PANIC pid=$projectId")
+                throw IllegalStateException("Panic: marker operation timed out")
+            }
+
+            is StructuralWriteCoordinator.Outcome.Error -> {
+                sessionFlow.value = null
+                Log.e(TAG, "enterManualMode ERROR pid=$projectId", markerOut.throwable)
+                throw markerOut.throwable
+            }
+        }
     }
 
     override suspend fun exitManualMode(projectId: String) {
         val current = sessionFlow.value
         if (current?.projectId != projectId) return
 
-        // ✅ Kill-process UX:
-        // нормальное завершение manual (Save/Cancel) => снимаем маркер.
-        manualDraftResetNotifier.clearExpected(projectId)
+        val TAG = "MANUAL_REPO"
 
-        sessionFlow.value = null
+        // 1) Persisted marker: снимаем глобально (чтобы гарантировать “нет двух marker” после выхода),
+        // но при этом логика “точечная очистка” не нужна — в Commit 1 важнее гарантия single-marker.
+        val markerOut = structuralWriteCoordinator.execute(
+            projectId = GLOBAL_MARKER_KEY,
+            opName = "MANUAL_MARKER_CLEAR"
+        ) {
+            val cleared = projectLocalStateDao.clearActiveManualMarkerGlobal()
+            // cleared может быть 0, если marker уже снят — это нормально.
+            Log.d(TAG, "exitManualMode marker cleared rows=$cleared pid=$projectId")
+        }
+
+        when (markerOut) {
+            is StructuralWriteCoordinator.Outcome.Success -> {
+                manualDraftResetNotifier.clearExpected(projectId)
+                sessionFlow.value = null
+                Log.d(TAG, "exitManualMode OK pid=$projectId")
+            }
+
+            // Если даже marker-clear не прошёл — не “молча выходим”.
+            StructuralWriteCoordinator.Outcome.Busy -> {
+                Log.w(TAG, "exitManualMode BUSY pid=$projectId")
+                throw IllegalStateException("Busy: marker clear in progress")
+            }
+
+            StructuralWriteCoordinator.Outcome.Panic -> {
+                Log.e(TAG, "exitManualMode PANIC pid=$projectId")
+                throw IllegalStateException("Panic: marker clear timed out")
+            }
+
+            is StructuralWriteCoordinator.Outcome.Error -> {
+                Log.e(TAG, "exitManualMode ERROR pid=$projectId", markerOut.throwable)
+                throw markerOut.throwable
+            }
+        }
     }
 
     override suspend fun apply(action: ManualEditAction) {

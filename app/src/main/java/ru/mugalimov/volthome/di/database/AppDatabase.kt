@@ -61,7 +61,7 @@ import java.util.UUID
         TombstoneEntity::class,
         GroupPhaseOverrideEntity::class
     ],
-    version = 26, // подняли под «санитарную» миграцию 24 → 25
+    version = 27,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -876,6 +876,35 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL(
                     "CREATE UNIQUE INDEX IF NOT EXISTS index_group_phase_overrides_project_id_group_id ON group_phase_overrides(project_id, group_id)"
                 )
+            }
+        }
+
+        /**
+         * 26 -> 27: добавляем persisted marker active_manual_project_id в project_local_state.
+         * Safe: проверяем PRAGMA table_info, чтобы не падать на "кривых" базах.
+         */
+        val MIGRATION_26_27 = object : Migration(26, 27) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.query("PRAGMA table_info(project_local_state)").use { cursor ->
+                    val nameIndex = cursor.getColumnIndex("name")
+                    var exists = false
+
+                    while (cursor.moveToNext()) {
+                        if (nameIndex >= 0 && cursor.getString(nameIndex) == "active_manual_project_id") {
+                            exists = true
+                            break
+                        }
+                    }
+
+                    if (!exists) {
+                        db.execSQL(
+                            """
+                        ALTER TABLE project_local_state
+                        ADD COLUMN active_manual_project_id TEXT
+                        """.trimIndent()
+                        )
+                    }
+                }
             }
         }
     }

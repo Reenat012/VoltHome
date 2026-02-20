@@ -23,20 +23,30 @@ class CancelManualAndAutoRecalcUseCase @Inject constructor(
     )
 
     suspend fun execute(params: Params): GroupingResult {
-        Log.w("MANUAL_CANCEL", "CANCEL_USE_CASE EXECUTE pid=${params.projectId}")
-
         val projectId = params.projectId
+        Log.w("MANUAL_CANCEL", "CANCEL_USE_CASE EXECUTE pid=$projectId")
+
         if (projectId.isBlank()) {
             return GroupingResult.Error("projectId пуст")
         }
 
+        /**
+         * ✅ ВАЖНО:
+         * Мы уже под structural lock, поэтому внутри НЕЛЬЗЯ звать методы,
+         * которые снова пытаются взять тот же Mutex (он не реентерабельный).
+         *
+         * Раньше тут был self-deadlock:
+         * Cancel withLock -> SaveAuto.execute withLock -> вечное ожидание.
+         */
         return structuralWriteMutex.withLock(projectId) {
             val mode = preferencesRepository.phaseMode.first()
             val calc = groupCalculatorFactory.create()
+
             when (val res = calc.calculateGroups(mode)) {
                 is GroupingResult.Error -> res
                 is GroupingResult.Success -> {
-                    saveAutoCalculatedGroupsToLocalDbUseCase.execute(
+                    // ✅ Вызываем вариант "я уже под lock"
+                    saveAutoCalculatedGroupsToLocalDbUseCase.executeAlreadyLocked(
                         SaveAutoCalculatedGroupsToLocalDbUseCase.Params(
                             projectId = projectId,
                             groups = res.system.groups,
