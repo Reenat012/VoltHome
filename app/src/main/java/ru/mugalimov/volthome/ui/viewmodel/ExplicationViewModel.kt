@@ -217,10 +217,13 @@ class ExplicationViewModel @Inject constructor(
     // DB-driven pipeline (FIX отката)
     // =========================
 
-    // ✅ Поток групп из БД (уже project-scoped внутри репозитория)
-    private val dbGroupsFlow: StateFlow<List<CircuitGroup>> =
+    /**
+     * ✅ Коммит 1: важно отличать "ещё не загрузили" от "реально пусто".
+     * emptyList() в initial value → DB pipeline думает, что БД пуста и запускает авто-recalc (гонка).
+     */
+    private val dbGroupsFlow: StateFlow<List<CircuitGroup>?> =
         repo.observeAllGroup()
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     // ✅ Последние decisions (в памяти) — пригодится для pro-секций
     private val decisionsFlow: StateFlow<List<DistributionDecision>> =
@@ -450,12 +453,11 @@ class ExplicationViewModel @Inject constructor(
                     userPlanRepository.planFlow,
                     decisionsFlow,
                     manualSession
-                ) { groups, mode, plan, decisions, session ->
+                ) { groupsNullable, mode, plan, decisions, session ->
                     Pair(
                         Quad(
-                            groups,
+                            groupsNullable,
                             mode,
-                            // ✅ plan здесь снова нормального типа (как было раньше), capabilities доступен
                             plan.capabilities.professionalReportSections,
                             decisions
                         ),
@@ -470,7 +472,7 @@ class ExplicationViewModel @Inject constructor(
                 Triple(quad, session, projectId)
             }.collect { (quad, session, projectIdNullable) ->
 
-                val groups = quad.a
+                val groupsNullable = quad.a
                 val mode = quad.b
                 val isProReport = quad.c
                 val decisions = quad.d
@@ -501,31 +503,14 @@ class ExplicationViewModel @Inject constructor(
                     return@collect
                 }
 
-                if (groups.isEmpty()) {
-
-                    // ✅ КРИТИЧНО: если уже показали Error — не перетираем его в Loading
-                    if (_uiState.value is GroupScreenState.Error) {
-                        Log.w("AUTO_TRIGGER", "SKIP_LOADING because uiState=Error and groups empty (keep Error visible)")
-                        return@collect
-                    }
-
-                    // Если проект ещё не выбран — ждём
-                    if (projectId.isBlank()) {
-                        Log.w("AUTO_TRIGGER", "WAIT projectId blank, groups empty -> keep current uiState")
-                        return@collect
-                    }
-
-                    if (!initialAutoRecalcTriggered.value) {
-                        initialAutoRecalcTriggered.value = true
-                        Log.w("AUTO_TRIGGER", "AUTO_RECALC_START reason=INIT_EMPTY_DB pid=$projectId")
-                        triggerAutoRecalc(projectId = projectId, reason = "INIT_EMPTY_DB")
-                    } else {
-                        if (_uiState.value !is GroupScreenState.Loading) {
-                            _uiState.value = GroupScreenState.Loading
-                        }
-                    }
+                // ✅ 1) БД ещё не дала значение — не делаем выводов и не запускаем ничего.
+                if (groupsNullable == null) {
+                    Log.d("EXP_DB", "DB_PIPELINE_WAIT groups=null pid=$projectId")
                     return@collect
                 }
+
+                val groups = groupsNullable
+
 
                 Log.w(
                     "EXP_AUTO",
