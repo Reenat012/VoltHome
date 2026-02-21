@@ -232,6 +232,10 @@ class ExplicationViewModel @Inject constructor(
     // ✅ Чтобы не запускать авто-recalc бесконечно
     private val initialAutoRecalcTriggered = MutableStateFlow(false)
 
+    // ✅ Защита от ложного empty-эмита Room на старте:
+    // не триггерим auto-recalc, пока не подтвердили, что БД реально пустая.
+    private val emptyDbConfirmInFlight = MutableStateFlow(false)
+
     // ✅ Защита от гонок авто-recalc:
     // 1) не даём запускать авто-recalc параллельно
     // 2) сбрасываем "initialAutoRecalcTriggered" при смене проекта
@@ -606,20 +610,58 @@ class ExplicationViewModel @Inject constructor(
                     return@collect
                 }
 
-                // 3) AUTO: групп нет — показываем Empty и (1 раз) триггерим пересчёт
+                // 3) AUTO: групп нет — показываем Empty,
+                // НО auto-recalc НЕ запускаем по первому empty-эмиту.
+                // Room/Flow может на старте кратко эмитнуть empty, даже если БД не пустая.
+                // Поэтому сначала подтверждаем "БД реально пустая" через suspend snapshot.
+
                 _uiState.value = GroupScreenState.Empty(
                     mode = GroupScreenState.Empty.EmptyMode.AUTO,
                     title = "Распределение по фазам",
                     message = "Группы пока не созданы"
                 )
 
-                if (projectId.isNotBlank()
-                    && initialAutoRecalcTriggered.value == false
+                if (projectId.isBlank()) return@collect
+
+                // ✅ Стартуем подтверждение пустоты только 1 раз, без параллельных запусков
+                if (initialAutoRecalcTriggered.value == false
                     && autoRecalcInFlight.value == false
-                ) {
-                    initialAutoRecalcTriggered.value = true
-                    triggerAutoRecalc(projectId = projectId, reason = "INITIAL_EMPTY_DB")
+                    && emptyDbConfirmInFlight.value == false
+                 ) {
+                    emptyDbConfirmInFlight.value = true
+
+                    viewModelScope.launch(ioDispatcher) {
+                        try {
+                            // ✅ Подтверждаем, что БД действительно пустая (а не "ложный empty-эмит").
+                            // Используем snapshot чтение из репозитория (у тебя метод уже есть).
+                            val dbSnapshotCount = repo.getGroupsWithDevicesByProject(projectId).size
+
+                            Log.w(
+                                "AUTO_BOOT",
+                                "EMPTY_CONFIRM pid=$projectId dbSnapshotCount=$dbSnapshotCount " +
+                                        "initial=${initialAutoRecalcTriggered.value} inFlight=${autoRecalcInFlight.value}"
+                            )
+
+                            if (dbSnapshotCount == 0
+                                && initialAutoRecalcTriggered.value == false
+                                && autoRecalcInFlight.value == false
+                            ) {
+                                // ✅ Только теперь можно запускать auto-recalc
+                                initialAutoRecalcTriggered.value = true
+                                triggerAutoRecalc(projectId = projectId, reason = "INITIAL_EMPTY_DB_CONFIRMED")
+                            } else {
+                                // ✅ БД не пустая — значит empty в UI был временным/гонкой.
+                                Log.w("AUTO_BOOT", "SKIP_AUTO_RECALC pid=$projectId reason=DB_NOT_EMPTY")
+                            }
+                        } catch (t: Throwable) {
+                            Log.e("AUTO_BOOT", "EMPTY_CONFIRM FAILED pid=$projectId", t)
+                            // Ничего не делаем: лучше не запускать auto-recalc, чем перетереть данные.
+                        } finally {
+                            emptyDbConfirmInFlight.value = false
+                        }
+                    }
                 }
+
                 return@collect
             }
         }

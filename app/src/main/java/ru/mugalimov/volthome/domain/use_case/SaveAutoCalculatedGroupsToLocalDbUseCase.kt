@@ -101,22 +101,9 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
         val caller = Throwable().stackTrace
             .drop(1)
             .take(8)
-            .joinToString(" <- ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
-
-        Log.w(
-            "AUTO_SAVE",
-            "AUTO_SAVE BEGIN source=AUTO_SAVE reason=EXPLICIT_REBUILD projectId=$projectId " +
-                    "groups=${groups.size} summary=[$summary] caller=$caller"
-        )
-
-        // ✅ ЕДИНСТВЕННАЯ structural запись (внутри неё DB-sanity)
-        Log.w("AUTO_SAVE", "AUTO_SAVE BEFORE repo replace projectId=$projectId")
-        explicationRepository.replaceAllGroupsTransactionalAlreadyLocked(projectId, groups)
-        Log.w("AUTO_SAVE", "AUTO_SAVE AFTER repo replace projectId=$projectId")
-
-        explicationRepository.setLastDistributionDecisions(params.distributionDecisions)
-
-        Log.w("AUTO_SAVE", "AUTO_SAVE END projectId=$projectId groups=${groups.size}")
+            .joinToString(" <- ") {
+                "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}"
+            }
 
         Log.w(
             "AUTO_SAVE",
@@ -125,11 +112,12 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
         )
 
         try {
-            explicationRepository.replaceAllGroupsTransactionalAlreadyLocked(
-                projectId = projectId,
-                groups = groups
-            )
+            // ✅ ЕДИНСТВЕННАЯ structural запись (внутри неё DB-sanity)
+            Log.w("AUTO_SAVE", "AUTO_SAVE BEFORE repo replace projectId=$projectId")
+            explicationRepository.replaceAllGroupsTransactionalAlreadyLocked(projectId, groups)
+            Log.w("AUTO_SAVE", "AUTO_SAVE AFTER repo replace projectId=$projectId")
 
+            // decisions держим в памяти (не БД)
             explicationRepository.setLastDistributionDecisions(params.distributionDecisions)
 
             Log.w("AUTO_SAVE", "AUTO_SAVE END projectId=$projectId groups=${groups.size}")
@@ -175,23 +163,19 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
                 append("pid=").append(projectId)
                 append("|num=").append(g.groupNumber)
                 append("|roomId=").append(g.roomId)
-
-                // roomName может быть String — trim не обязателен
                 append("|roomName=").append(g.roomName)
-
-                // groupType — скорее всего enum DeviceType
                 append("|type=").append(g.groupType.name)
-
                 append("|phase=").append(g.phase?.name ?: "null")
             }
         }
+
         return groups.map { g ->
             val idOk = g.groupId > 0L && used.add(g.groupId)
             if (idOk) return@map g
 
             val baseKey = groupStableKey(g)
 
-            // Пытаемся несколько раз на случай коллизии (крайне маловероятно, но мы не играем в рулетку).
+            // Пытаемся несколько раз на случай коллизии.
             var attempt = 0
             var newId: Long
             do {
@@ -199,9 +183,10 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
                 newId = stablePositiveLong(salted)
 
                 attempt++
-                // защита от бесконечного цикла: в реальности не понадобится, но пусть будет.
                 if (attempt > 1000) {
-                    throw IllegalStateException("AUTO_SAVE failed to allocate unique groupId for key=$baseKey")
+                    throw IllegalStateException(
+                        "AUTO_SAVE failed to allocate unique groupId for key=$baseKey"
+                    )
                 }
             } while (!used.add(newId))
 
@@ -219,7 +204,6 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
         val hash = md.digest(input.toByteArray(Charsets.UTF_8))
 
         val value = ByteBuffer.wrap(hash, 0, 8).long
-        // делаем строго положительным и не нулём
         val positive = value and Long.MAX_VALUE
         return if (positive == 0L) 1L else positive
     }
