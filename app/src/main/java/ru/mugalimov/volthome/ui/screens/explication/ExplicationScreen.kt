@@ -6,6 +6,8 @@ import androidx.activity.ComponentActivity
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -20,12 +22,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.FileDownload
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -127,6 +131,15 @@ fun ExplicationScreen(
             LoadingState()
         }
 
+        is GroupScreenState.Empty -> {
+            ExplicationEmptyState(
+                isManual = (s.mode == GroupScreenState.Empty.EmptyMode.MANUAL),
+                title = s.title,
+                message = s.message,
+                onRecalc = { viewModel.recalcAndSaveGroups() } // в MANUAL VM покажет snackbar/guard
+            )
+        }
+
         is GroupScreenState.Error -> {
             Log.e("STATE_TRACE", "UI -> Error message='${s.message}'")
             ErrorState(
@@ -136,21 +149,13 @@ fun ExplicationScreen(
         }
 
         is GroupScreenState.Success -> {
-            val baseGroups = s.groups
+            // ✅ VM уже отдал "display groups" (AUTO или MANUAL)
+            val displayGroups = s.groups
+
+            val sections = remember(displayGroups) { displayGroups.groupBy { it.phase ?: Phase.A } }
+
             Log.e("STATE_TRACE", "UI -> Success groups=${s.groups.size}")
 
-            // ✅ MANUAL-группы теперь собираются в VM (без склейки с БД)
-            val manualDisplayGroups by viewModel.manualDisplayGroups.collectAsState()
-
-            val displayGroups =
-                if (!isManual) {
-                    // ✅ AUTO: как было — группы из БД/авто-расчёта
-                    baseGroups
-                } else {
-                    // ✅ MANUAL: строго от draft, без участия baseGroups
-                    // На Коммите 0 устройства здесь будут пустые — это нормально.
-                    manualDisplayGroups
-                }
 
             // ---- Диагностика (по DoD) ----
             LaunchedEffect(isManual, displayGroups.size) {
@@ -162,8 +167,6 @@ fun ExplicationScreen(
                     Log.d("MANUAL_UI", "MANUAL displayGroups size=${displayGroups.size} summary=[$summary]")
                 }
             }
-
-            val sections = remember(displayGroups) { displayGroups.groupBy { it.phase ?: Phase.A } }
 
             // Bounds целей drop (в root-координатах)
             val targetBounds = remember { mutableStateMapOf<ExplicationViewModel.DragTarget, Rect>() }
@@ -454,3 +457,31 @@ private fun stableGroupKey(g: CircuitGroup): String =
 // Одинаково для AUTO и MANUAL: только groupId.
     // В MANUAL temp id тоже ок, главное — стабильность внутри списка.
     "gid:${g.groupId}"
+
+@Composable
+private fun ExplicationEmptyState(
+    isManual: Boolean,
+    title: String,
+    message: String,
+    onRecalc: () -> Unit
+) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(message)
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(
+                onClick = {
+                    // В MANUAL VM уже покажет guard/snackbar — ок
+                    onRecalc()
+                }
+            ) {
+                Text(if (isManual) "Понятно" else "Пересчитать")
+            }
+        }
+    }
+}

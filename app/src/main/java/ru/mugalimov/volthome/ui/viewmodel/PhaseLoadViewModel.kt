@@ -192,6 +192,12 @@ class PhaseLoadViewModel @Inject constructor(
             if (mode == PhaseLoadMode.MANUAL) manualGroupsFlow else autoGroupsFlow
         }
 
+    val groupsCount: StateFlow<Int> =
+        groupsFlow
+            .map { it.size }
+            .distinctUntilChanged()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
     // =========================
     // Phase items source: AUTO from usecase, MANUAL from draft groups
     // =========================

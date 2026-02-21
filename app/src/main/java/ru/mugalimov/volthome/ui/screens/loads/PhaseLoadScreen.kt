@@ -1,8 +1,12 @@
 package ru.mugalimov.volthome.ui.screens.loads
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -18,6 +22,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dagger.hilt.EntryPoint
@@ -69,11 +74,30 @@ fun PhaseLoadScreen(
 
     val canDrag = LocalUserPlan.current.capabilities.phaseDragAndDrop
     val uiState = viewModel.uiState.collectAsStateWithLifecycle().value
+    val groupsCount = viewModel.groupsCount.collectAsStateWithLifecycle().value
 
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(Unit) {
         viewModel.events.collect { msg ->
             snackbarHostState.showSnackbar(msg)
+        }
+    }
+
+    @Composable
+    fun LoadsEmptyState(
+        onRecalc: () -> Unit
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Группы пока не созданы")
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(onClick = onRecalc) {
+                    Text("Пересчитать")
+                }
+            }
         }
     }
 
@@ -114,47 +138,69 @@ fun PhaseLoadScreen(
             }
 
             else -> {
-                when (uiState.mode) {
-                    PhaseMode.SINGLE -> {
-                        PhaseLoadSingleReportContent(
-                            uiState = uiState,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(padding)
-                        )
-                    }
+                // ✅ visibility: пустоту определяем ТОЛЬКО по количеству групп,
+                // потому что uiState.data может быть "каркас фаз"
+                if (groupsCount == 0) {
+                    val isManual = uiState.phaseLoadMode == ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadMode.MANUAL
 
-                    PhaseMode.THREE -> {
-                        PhaseLoadContent(
-                            phaseLoads = uiState.data,
-                            decisions = uiState.decisions,
-                            phaseLoadMode = uiState.phaseLoadMode,
-                            incomerRating = uiState.incomer?.mcbRating,
-                            thresholds = uiState.thresholds,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(padding),
-                            canDrag = canDrag,
-                            onPaywall = { viewModel.onDnDLockedTapped() },
-                            onGroupDropped = { groupId, phase -> viewModel.onGroupDragged(groupId, phase) },
-                            onReset = { viewModel.onResetOverrides() },
-                            onDecisionDetailsClick = { _ -> Unit },
-
-                            manualModeHintShown = manualModeHintShown,
-                            firstDragHintShown = firstDragHintShown,
-                            markManualModeHintShown = { coroutineScope.launch { appPreferences.setManualModeHintShown() } },
-                            markFirstDragHintShown = { coroutineScope.launch { appPreferences.setFirstDragHintShown() } },
-                            onDropMissed = {
+                    LoadsEmptyState(
+                        onRecalc = {
+                            if (isManual) {
+                                // ❗ В MANUAL пересчёт не предлагаем/не делаем
                                 coroutineScope.launch {
-                                    snackbarHostState.showSnackbar(
-                                        "Не попали в фазу. Перетащите группу на карточку A/B/C сверху."
-                                    )
+                                    snackbarHostState.showSnackbar("В ручном режиме пересчёт недоступен. Сначала сбросьте изменения.")
                                 }
+                            } else {
+                                // ✅ AUTO: вызови твоё действие "создать/пересчитать группы".
+                                // Сейчас в VM на этом экране явного recalc нет — поэтому оставляю самый близкий существующий экшен.
+                                viewModel.onResetOverrides()
                             }
-                        )
+                        }
+                    )
+                } else {
+                    when (uiState.mode) {
+                        PhaseMode.SINGLE -> {
+                            PhaseLoadSingleReportContent(
+                                uiState = uiState,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(padding)
+                            )
+                        }
+
+                        PhaseMode.THREE -> {
+                            PhaseLoadContent(
+                                phaseLoads = uiState.data,
+                                decisions = uiState.decisions,
+                                phaseLoadMode = uiState.phaseLoadMode,
+                                incomerRating = uiState.incomer?.mcbRating,
+                                thresholds = uiState.thresholds,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(padding),
+                                canDrag = canDrag,
+                                onPaywall = { viewModel.onDnDLockedTapped() },
+                                onGroupDropped = { groupId, phase -> viewModel.onGroupDragged(groupId, phase) },
+                                onReset = { viewModel.onResetOverrides() },
+                                onDecisionDetailsClick = { _ -> Unit },
+
+                                manualModeHintShown = manualModeHintShown,
+                                firstDragHintShown = firstDragHintShown,
+                                markManualModeHintShown = { coroutineScope.launch { appPreferences.setManualModeHintShown() } },
+                                markFirstDragHintShown = { coroutineScope.launch { appPreferences.setFirstDragHintShown() } },
+                                onDropMissed = {
+                                    coroutineScope.launch {
+                                        snackbarHostState.showSnackbar(
+                                            "Не попали в фазу. Перетащите группу на карточку A/B/C сверху."
+                                        )
+                                    }
+                                }
+                            )
+                        }
                     }
                 }
             }
         }
     }
+
 }

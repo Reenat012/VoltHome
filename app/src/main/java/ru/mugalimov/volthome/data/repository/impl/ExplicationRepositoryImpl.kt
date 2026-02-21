@@ -479,142 +479,140 @@ class ExplicationRepositoryImpl @Inject constructor(
     ) = withContext(dispatchers) {
         require(projectId.isNotBlank()) { "projectId must be non-blank" }
 
-        // ✅ Single-flight на уровне репозитория: structural операции строго последовательны по проекту
+        // ✅ ВХОД БЕЗ ВНЕШНЕГО ЛОКА: берём lock здесь
         structuralWriteMutex.withLock(projectId) {
-
-            val shortCaller = GroupWriteLogger.shortCallerTrace(skip = 2, take = 8)
-
-            val fullCaller = Throwable().stackTrace
-                .joinToString(" <- ") { "${it.className}.${it.methodName}:${it.lineNumber}" }
-
-            val detectedSource = GroupWriteLogger.detectSourceFromCaller(fullCaller)
-
-            val allowedStructuralWriters = setOf(
-                GroupWriteLogger.Source.AUTO_SAVE,
-                GroupWriteLogger.Source.MANUAL_SAVE,
-                GroupWriteLogger.Source.UNKNOWN
-            )
-
-            if (detectedSource !in allowedStructuralWriters) {
-                val msg =
-                    "STRUCTURE WRITE BLOCKED: replaceAllGroupsTransactional called from forbidden source=$detectedSource " +
-                            "projectId=$projectId caller=$shortCaller"
-                Log.e("STRUCTURE_GUARD", msg, Throwable("STACK"))
-                require(false) { msg }
-            }
-
-            val tag = "AUTO_REPLACE"
-
-            db.withTransaction {
-                val fpBefore = snapshotFingerprintInTx(projectId)
-
-                GroupWriteLogger.logStructureWrite(
-                    source = detectedSource,
-                    reason = GroupWriteLogger.Reason.EXPLICIT_REBUILD,
-                    projectId = projectId,
-                    groupsCount = groups.size,
-                    joinsCount = -1,
-                    before = fpBefore,
-                    after = null,
-                    sample = "BEGIN op=REPLACE_ALL caller=$shortCaller",
-                    throwable = null
-                )
-
-                // 1) Снимок старого состояния в границах проекта
-                val oldGroupIds = groupDao.getGroupIdsByProject(projectId)
-
-                // ВАЖНО: join не имеет projectId -> boundary через groupIds проекта
-                val oldJoins = if (oldGroupIds.isEmpty()) emptyList()
-                else groupDeviceJoinDao.getJoinsForGroupIds(oldGroupIds)
-                val expectedOldJoins = oldJoins.size
-
-                // 2) Удаляем join'ы старых групп
-                if (oldGroupIds.isNotEmpty()) {
-                    val rowsJoinsDeleted = groupDeviceJoinDao.deleteJoinsForGroupIds(oldGroupIds)
-                    if (rowsJoinsDeleted != expectedOldJoins) {
-                        sanityFail(
-                            tag,
-                            "deleteJoinsForGroupIds rows mismatch. expected=$expectedOldJoins actual=$rowsJoinsDeleted"
-                        )
-                    }
-                }
-
-                // 3) Чистим overrides (они могут “накрыть” структуру)
-                overrideDao.deleteByProject(projectId)
-
-                // 4) Удаляем группы проекта
-                val rowsGroupsDeleted = groupDao.deleteAllGroupsByProject(projectId)
-                if (rowsGroupsDeleted != oldGroupIds.size) {
-                    // Если mismatch — это почти всегда гонка/битая выборка/сторонняя запись
-                    sanityFail(
-                        tag,
-                        "deleteAllGroupsByProject rows mismatch. expected=${oldGroupIds.size} actual=$rowsGroupsDeleted"
-                    )
-                }
-
-                // 5) Вставляем новые группы
-                val groupEntities = groups.map { g -> g.toEntityGroup(projectId).copy(groupId = 0) }
-                val newIds = groupDao.insertGroups(groupEntities)
-                if (newIds.size != groups.size) {
-                    sanityFail(
-                        tag,
-                        "insertGroups returned ${newIds.size} ids for ${groups.size} groups"
-                    )
-                }
-
-                // 6) Вставляем join'ы под новые groupId
-                val desiredPairs = buildSet {
-                    groups.forEachIndexed { idx, g ->
-                        val newGroupId = newIds[idx]
-                        g.devices.forEach { d ->
-                            require(d.id > 0L) { "Device id must be > 0 for join. Device=${d.name}" }
-                            add(newGroupId to d.id)
-                        }
-                    }
-                }
-
-                val joinsToInsert = desiredPairs.map { (gid, did) ->
-                    GroupDeviceJoin(
-                        groupId = gid,
-                        deviceId = did
-                    )
-                }
-                if (joinsToInsert.isNotEmpty()) {
-                    groupDeviceJoinDao.insertAll(joinsToInsert)
-                }
-
-                // 7) DB-sanity: фактическое состояние join'ов должно ровно совпасть с ожидаемым
-                assertJoinsState(tag = tag, groupIdsBoundary = newIds, expectedPairs = desiredPairs)
-
-                // 8) DB-sanity: старых join'ов больше не существует
-                if (oldGroupIds.isNotEmpty()) {
-                    val leakedOld = groupDeviceJoinDao.getJoinsForGroupIds(oldGroupIds)
-                    if (leakedOld.isNotEmpty()) {
-                        sanityFail(
-                            tag,
-                            "old joins leaked after delete. leaked=${leakedOld.size} sample=${
-                                leakedOld.take(10)
-                            }"
-                        )
-                    }
-                }
-
-                val fpAfter = snapshotFingerprintInTx(projectId)
-
-                GroupWriteLogger.logStructureWrite(
-                    source = detectedSource,
-                    reason = GroupWriteLogger.Reason.EXPLICIT_REBUILD,
-                    projectId = projectId,
-                    groupsCount = groups.size,
-                    joinsCount = joinsToInsert.size,
-                    before = fpBefore,
-                    after = fpAfter,
-                    sample = "END op=REPLACE_ALL insertedGroups=${groups.size} insertedJoins=${joinsToInsert.size} oldGroups=${oldGroupIds.size}",
-                    throwable = null
-                )
-            }
+            replaceAllGroupsTransactionalAlreadyLocked(projectId = projectId, groups = groups)
         }
     }
+
+    override suspend fun replaceAllGroupsTransactionalAlreadyLocked(
+        projectId: String,
+        groups: List<CircuitGroup>
+    ) = withContext(dispatchers) {
+        require(projectId.isNotBlank()) { "projectId must be non-blank" }
+
+        val shortCaller = GroupWriteLogger.shortCallerTrace(skip = 2, take = 8)
+
+        val fullCaller = Throwable().stackTrace
+            .joinToString(" <- ") { "${it.className}.${it.methodName}:${it.lineNumber}" }
+
+        val detectedSource = GroupWriteLogger.detectSourceFromCaller(fullCaller)
+
+        val allowedStructuralWriters = setOf(
+            GroupWriteLogger.Source.AUTO_SAVE,
+            GroupWriteLogger.Source.MANUAL_SAVE,
+            GroupWriteLogger.Source.UNKNOWN
+        )
+
+        if (detectedSource !in allowedStructuralWriters) {
+            val msg =
+                "STRUCTURE WRITE BLOCKED: replaceAllGroupsTransactionalAlreadyLocked called from forbidden source=$detectedSource " +
+                        "projectId=$projectId caller=$shortCaller"
+            Log.e("STRUCTURE_GUARD", msg, Throwable("STACK"))
+            require(false) { msg }
+        }
+
+        val tag = "AUTO_REPLACE"
+
+        db.withTransaction {
+            val fpBefore = snapshotFingerprintInTx(projectId)
+
+            GroupWriteLogger.logStructureWrite(
+                source = detectedSource,
+                reason = GroupWriteLogger.Reason.EXPLICIT_REBUILD,
+                projectId = projectId,
+                groupsCount = groups.size,
+                joinsCount = -1,
+                before = fpBefore,
+                after = null,
+                sample = "BEGIN op=REPLACE_ALL caller=$shortCaller",
+                throwable = null
+            )
+
+            // 1) Снимок старого состояния в границах проекта
+            val oldGroupIds = groupDao.getGroupIdsByProject(projectId)
+
+            // join без projectId -> boundary через groupIds проекта
+            val oldJoins = if (oldGroupIds.isEmpty()) emptyList()
+            else groupDeviceJoinDao.getJoinsForGroupIds(oldGroupIds)
+            val expectedOldJoins = oldJoins.size
+
+            // 2) Удаляем join'ы старых групп
+            if (oldGroupIds.isNotEmpty()) {
+                val rowsJoinsDeleted = groupDeviceJoinDao.deleteJoinsForGroupIds(oldGroupIds)
+                if (rowsJoinsDeleted != expectedOldJoins) {
+                    sanityFail(
+                        tag,
+                        "deleteJoinsForGroupIds rows mismatch. expected=$expectedOldJoins actual=$rowsJoinsDeleted"
+                    )
+                }
+            }
+
+            // 3) Чистим overrides
+            overrideDao.deleteByProject(projectId)
+
+            // 4) Удаляем группы проекта
+            val rowsGroupsDeleted = groupDao.deleteAllGroupsByProject(projectId)
+            if (rowsGroupsDeleted != oldGroupIds.size) {
+                sanityFail(
+                    tag,
+                    "deleteAllGroupsByProject rows mismatch. expected=${oldGroupIds.size} actual=$rowsGroupsDeleted"
+                )
+            }
+
+            // 5) Вставляем новые группы
+            val groupEntities = groups.map { g -> g.toEntityGroup(projectId).copy(groupId = 0) }
+            val newIds = groupDao.insertGroups(groupEntities)
+            if (newIds.size != groups.size) {
+                sanityFail(tag, "insertGroups returned ${newIds.size} ids for ${groups.size} groups")
+            }
+
+            // 6) Вставляем join'ы под новые groupId
+            val desiredPairs = buildSet {
+                groups.forEachIndexed { idx, g ->
+                    val newGroupId = newIds[idx]
+                    g.devices.forEach { d ->
+                        require(d.id > 0L) { "Device id must be > 0 for join. Device=${d.name}" }
+                        add(newGroupId to d.id)
+                    }
+                }
+            }
+
+            val joinsToInsert = desiredPairs.map { (gid, did) ->
+                GroupDeviceJoin(groupId = gid, deviceId = did)
+            }
+            if (joinsToInsert.isNotEmpty()) {
+                groupDeviceJoinDao.insertAll(joinsToInsert)
+            }
+
+            // 7) join sanity
+            assertJoinsState(tag = tag, groupIdsBoundary = newIds, expectedPairs = desiredPairs)
+
+            // 8) старые join'ы не должны существовать
+            if (oldGroupIds.isNotEmpty()) {
+                val leakedOld = groupDeviceJoinDao.getJoinsForGroupIds(oldGroupIds)
+                if (leakedOld.isNotEmpty()) {
+                    sanityFail(tag, "old joins leaked after delete. leaked=${leakedOld.size} sample=${leakedOld.take(10)}")
+                }
+            }
+
+            val fpAfter = snapshotFingerprintInTx(projectId)
+
+            GroupWriteLogger.logStructureWrite(
+                source = detectedSource,
+                reason = GroupWriteLogger.Reason.EXPLICIT_REBUILD,
+                projectId = projectId,
+                groupsCount = groups.size,
+                joinsCount = joinsToInsert.size,
+                before = fpBefore,
+                after = fpAfter,
+                sample = "END op=REPLACE_ALL insertedGroups=${groups.size} insertedJoins=${joinsToInsert.size} oldGroups=${oldGroupIds.size}",
+                throwable = null
+            )
+        }
+    }
+
+
 
     override suspend fun replaceAllGroupsTransactional(groups: List<CircuitGroup>) =
         withContext(dispatchers) {

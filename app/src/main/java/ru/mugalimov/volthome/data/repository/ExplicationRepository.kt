@@ -81,7 +81,16 @@ interface ExplicationRepository {
      * AUTO-путь (исторический): replace-by-delete+insert.
      * В manual Save этот метод использовать нельзя.
      */
+    /**
+     * ✅ Обычный вход: сам берёт structural lock.
+     */
     suspend fun replaceAllGroupsTransactional(projectId: String, groups: List<CircuitGroup>)
+
+    /**
+     * ⚠️ Вызов ТОЛЬКО если ВНЕ уже есть structuralWriteMutex.withLock(projectId).
+     * Нужен, чтобы избежать self-deadlock (Mutex не реентерабелен).
+     */
+    suspend fun replaceAllGroupsTransactionalAlreadyLocked(projectId: String, groups: List<CircuitGroup>)
     suspend fun replaceAllGroupsTransactional(groups: List<CircuitGroup>)
 
     suspend fun getGroupsWithDevices(): List<GroupWithDevices>
