@@ -120,8 +120,8 @@ class ExplicationViewModel @Inject constructor(
     val selectedDevice: StateFlow<Device?> = _selectedDevice.asStateFlow()
 
     // =========================
-// InfoSheet state
-// =========================
+    // InfoSheet state
+    // =========================
 
     private val _infoSheetPayload = MutableStateFlow<InfoSheetPayload?>(null)
     val infoSheetPayload: StateFlow<InfoSheetPayload?> = _infoSheetPayload.asStateFlow()
@@ -131,8 +131,8 @@ class ExplicationViewModel @Inject constructor(
         _selectedDeviceBreakdown.asStateFlow()
 
     // =========================
-// Manual session (scoped by activeProjectId)
-// =========================
+    // Manual session (scoped by activeProjectId)
+    // =========================
 
     val manualSession: StateFlow<ManualEditSession?> =
         activeProjectDs.activeProjectId
@@ -141,25 +141,18 @@ class ExplicationViewModel @Inject constructor(
             .flatMapLatest { projectId -> manualRepo.observeSession(projectId) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    /**
-     * ✅ Нормализованный стейт ручного режима, который содержит manualModeActive/draftState.
-     *
-     * ВАЖНО: имя поля внутри ManualEditSession ниже — `state`.
-     * Если у тебя оно называется иначе (например editState / projectState) — замени `.state` на реальное имя.
-     */
-
-// =========================
-// Manual devices cache (manual) — Коммит 3
-// =========================
+    // =========================
+    // Manual devices cache (manual) — Коммит 3
+    // =========================
 
     private val _manualDevicesById = MutableStateFlow<Map<Long, Device>>(emptyMap())
     val manualDevicesById: StateFlow<Map<Long, Device>> = _manualDevicesById.asStateFlow()
 
     private val _manualDevicesRequestVersion = MutableStateFlow(0)
 
-// =========================
-// Unassigned devices (manual) — Коммит 3
-// =========================
+    // =========================
+    // Unassigned devices (manual) — Коммит 3
+    // =========================
 
     val unassignedDevices: StateFlow<List<Device>> =
         combine(manualSession, manualDevicesById) { s: ManualEditSession?, devicesById: Map<Long, Device> ->
@@ -170,18 +163,6 @@ class ExplicationViewModel @Inject constructor(
                 .mapNotNull { id -> devicesById[id] }
                 .sortedBy { it.name.trim().lowercase(Locale.ROOT) }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-// =========================
-// Manual display groups (draft -> UI) — Коммит 3
-// =========================
-
-// (твой manualDisplayGroups остаётся как есть, он уже правильный)
-    // =========================
-// Manual display groups (draft -> UI)
-// =========================
-
-    // =========================
-// Manual display groups (draft -> UI)
-// =========================
 
     /**
      * Группы для отображения в MANUAL.
@@ -215,6 +196,7 @@ class ExplicationViewModel @Inject constructor(
                 )
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     // =========================
     // DB-driven pipeline (FIX отката)
     // =========================
@@ -229,25 +211,14 @@ class ExplicationViewModel @Inject constructor(
         repo.observeDistributionDecisions()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    // ✅ Чтобы не запускать авто-recalc бесконечно
-    private val initialAutoRecalcTriggered = MutableStateFlow(false)
-
-    // ✅ Защита от ложного empty-эмита Room на старте:
-    // не триггерим auto-recalc, пока не подтвердили, что БД реально пустая.
-    private val emptyDbConfirmInFlight = MutableStateFlow(false)
-
-    // ✅ Защита от гонок авто-recalc:
-    // 1) не даём запускать авто-recalc параллельно
-    // 2) сбрасываем "initialAutoRecalcTriggered" при смене проекта
+    // ✅ Защита от параллельных запусков явного auto-recalc (user intent)
     private val autoRecalcInFlight = MutableStateFlow(false)
-    private val lastAutoRecalcProjectId = MutableStateFlow<String?>(null)
 
     // ✅ Делаем projectId доступным как StateFlow (чтобы не блокировать first() внутри collect)
     private val activeProjectIdState: StateFlow<String?> =
         activeProjectDs.activeProjectId
             .distinctUntilChanged()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
-
 
     data class MoveDeviceUi(
         val deviceId: Long,
@@ -266,20 +237,12 @@ class ExplicationViewModel @Inject constructor(
     // Drag state (manual) — Коммит 1
     // =========================
 
-    /**
-     * Цель перетаскивания (куда хотим "дропнуть").
-     * В этом коммите это только состояние (UI пока не использует).
-     */
     sealed class DragTarget {
         data class Group(val groupId: Long) : DragTarget()
         data object Unassigned : DragTarget()
         data object NewGroup : DragTarget()
     }
 
-    /**
-     * Полное состояние drag для manual-переноса устройств на Экспликации.
-     * ВАЖНО: в этом коммите это контракт для следующих коммитов, UI пока не использует.
-     */
     data class DragState(
         val draggingDeviceId: Long? = null,
         val fromGroupId: Long? = null,
@@ -331,17 +294,9 @@ class ExplicationViewModel @Inject constructor(
 
     private val _mixedWarningDontShowAgain = MutableStateFlow(false)
 
-    // Диалог показываем через отдельный state (StateFlow надёжнее для Compose)
     private val _showMixedWarningDialog = MutableStateFlow(false)
     val showMixedWarningDialog: StateFlow<Boolean> = _showMixedWarningDialog.asStateFlow()
 
-    /**
-     * Pending-перенос для MIXED предупреждения.
-     *
-     * ВАЖНО:
-     * - Нельзя полагаться на _moveDeviceUi в confirm: UI уже успевает обнулить этот стейт.
-     * - Поэтому храним ВСЁ, что нужно для выполнения операции после Confirm.
-     */
     private data class PendingMixedMove(
         val deviceId: Long,
         val fromGroupId: Long,
@@ -396,7 +351,8 @@ class ExplicationViewModel @Inject constructor(
                     )
                     Log.d(
                         TAG_SESS,
-                        "draft.groups=" + s.draftState.groups.joinToString { "${it.groupId}#${it.groupNumber}(devs=${it.deviceIds.size})" })
+                        "draft.groups=" + s.draftState.groups.joinToString { "${it.groupId}#${it.groupNumber}(devs=${it.deviceIds.size})" }
+                    )
                 }
             }
         }
@@ -435,9 +391,7 @@ class ExplicationViewModel @Inject constructor(
 
                     Log.d(
                         "MANUAL_DEVICES",
-                        "LOAD result returned=${returnedIds.size} missing=${missing.size} missingIds=${
-                            missing.take(20)
-                        }"
+                        "LOAD result returned=${returnedIds.size} missing=${missing.size} missingIds=${missing.take(20)}"
                     )
 
                     val map = devices.associateBy { it.id }
@@ -456,13 +410,9 @@ class ExplicationViewModel @Inject constructor(
         }
 
         // 3) ✅ Главный FIX: uiState строим от БД, когда manual выключен.
-// ФИКС "AUTO после Save теряется":
-// manualSession добавлен в pipeline, чтобы при exitManualMode() всё пересчиталось
-// даже если dbGroupsFlow не эмитит повторно.
+        // ✅ Коммит 2: УБРАН DB-triggered auto-recalc.
+        // DB pipeline = ТОЛЬКО READ → BUILD UI. Никаких write в БД.
         viewModelScope.launch(ioDispatcher) {
-
-            // Локальные контейнеры лучше НЕ делать data class внутри лямбд combine,
-            // но внутри init/coroutine — ок. Главное: типы Flow задаём явно.
 
             data class DbGroupsAndMode(
                 val groups: List<CircuitGroup>,
@@ -496,13 +446,11 @@ class ExplicationViewModel @Inject constructor(
                 val projectId: String
             )
 
-            // 1) groups + mode
             val groupsAndModeFlow: Flow<DbGroupsAndMode> =
                 dbGroupsFlow.combine(phaseMode) { groups: List<CircuitGroup>, mode: PhaseMode ->
                     DbGroupsAndMode(groups = groups, mode = mode)
                 }
 
-// 2) + decisions
             val withDecisionsFlow: Flow<DbWithDecisions> =
                 groupsAndModeFlow.combine(decisionsFlow) { gm: DbGroupsAndMode, decisions: List<DistributionDecision> ->
                     DbWithDecisions(
@@ -512,7 +460,6 @@ class ExplicationViewModel @Inject constructor(
                     )
                 }
 
-// 3) + manualSession (чтобы выход из manual триггерил пересборку)
             val withSessionFlow: Flow<DbWithSession> =
                 withDecisionsFlow.combine(manualSession) { base: DbWithDecisions, s: ManualEditSession? ->
                     DbWithSession(
@@ -523,7 +470,6 @@ class ExplicationViewModel @Inject constructor(
                     )
                 }
 
-// 4) + manualGroups (важно: чтобы pipeline пересобирался при догрузке устройств)
             val withManualGroupsFlow: Flow<DbWithSessionAndManualGroups> =
                 withSessionFlow.combine(manualDisplayGroups) { base: DbWithSession, manualGroups: List<CircuitGroup> ->
                     DbWithSessionAndManualGroups(
@@ -532,7 +478,6 @@ class ExplicationViewModel @Inject constructor(
                     )
                 }
 
-// 5) + projectId (последний атомарный вход)
             val snapshotFlow: Flow<Snapshot> =
                 withManualGroupsFlow.combine(activeProjectIdState) { packed: DbWithSessionAndManualGroups, projectIdNullable: String? ->
                     val base = packed.base
@@ -553,34 +498,14 @@ class ExplicationViewModel @Inject constructor(
                 val decisions = snap.decisions
                 val session = snap.session
                 val manualGroups = snap.manualGroups
-                val projectId = snap.projectId
-
-                // ✅ Если проект сменился — сбрасываем auto-trigger для нового проекта.
-                val lastPid = lastAutoRecalcProjectId.value
-                if (projectId.isNotBlank() && lastPid != projectId) {
-                    lastAutoRecalcProjectId.value = projectId
-                    initialAutoRecalcTriggered.value = false
-
-                    // ✅ Не перетираем Error (иначе "вечный спиннер" возвращается)
-                    if (_uiState.value !is GroupScreenState.Error) {
-                        _uiState.value = GroupScreenState.Loading
-                    }
-
-                    Log.w(
-                        "AUTO_TRIGGER",
-                        "RESET initialAutoRecalcTriggered because project changed $lastPid -> $projectId"
-                    )
-                }
 
                 val manualActive = session?.manualModeActive == true
-                val draftGroupsCount = session?.draftState?.groups?.size ?: 0
 
                 // ---- BUILD UI STATE (единственный писатель Success) ----
-
                 val plan = userPlanRepository.planFlow.value
                 val isProReport = plan.capabilities.professionalReportSections
 
-// 1) MANUAL: экран строим из draft (manualGroups)
+                // 1) MANUAL: экран строим из draft (manualGroups)
                 if (manualActive) {
                     if (manualGroups.isEmpty()) {
                         _uiState.value = GroupScreenState.Empty(
@@ -599,7 +524,7 @@ class ExplicationViewModel @Inject constructor(
                     return@collect
                 }
 
-                // 2) AUTO: если группы есть — это SUCCESS. Никаких "Empty" и никаких доп. условий.
+                // 2) AUTO: если группы есть — это SUCCESS.
                 if (groups.isNotEmpty()) {
                     setSuccessFromGroups(
                         groups = groups,
@@ -610,59 +535,13 @@ class ExplicationViewModel @Inject constructor(
                     return@collect
                 }
 
-                // 3) AUTO: групп нет — показываем Empty,
-                // НО auto-recalc НЕ запускаем по первому empty-эмиту.
-                // Room/Flow может на старте кратко эмитнуть empty, даже если БД не пустая.
-                // Поэтому сначала подтверждаем "БД реально пустая" через suspend snapshot.
-
+                // 3) AUTO: групп нет — показываем Empty.
+                // ✅ Коммит 2: НИКАКОГО auto-recalc / write из DB pipeline.
                 _uiState.value = GroupScreenState.Empty(
                     mode = GroupScreenState.Empty.EmptyMode.AUTO,
                     title = "Распределение по фазам",
                     message = "Группы пока не созданы"
                 )
-
-                if (projectId.isBlank()) return@collect
-
-                // ✅ Стартуем подтверждение пустоты только 1 раз, без параллельных запусков
-                if (initialAutoRecalcTriggered.value == false
-                    && autoRecalcInFlight.value == false
-                    && emptyDbConfirmInFlight.value == false
-                 ) {
-                    emptyDbConfirmInFlight.value = true
-
-                    viewModelScope.launch(ioDispatcher) {
-                        try {
-                            // ✅ Подтверждаем, что БД действительно пустая (а не "ложный empty-эмит").
-                            // Используем snapshot чтение из репозитория (у тебя метод уже есть).
-                            val dbSnapshotCount = repo.getGroupsWithDevicesByProject(projectId).size
-
-                            Log.w(
-                                "AUTO_BOOT",
-                                "EMPTY_CONFIRM pid=$projectId dbSnapshotCount=$dbSnapshotCount " +
-                                        "initial=${initialAutoRecalcTriggered.value} inFlight=${autoRecalcInFlight.value}"
-                            )
-
-                            if (dbSnapshotCount == 0
-                                && initialAutoRecalcTriggered.value == false
-                                && autoRecalcInFlight.value == false
-                            ) {
-                                // ✅ Только теперь можно запускать auto-recalc
-                                initialAutoRecalcTriggered.value = true
-                                triggerAutoRecalc(projectId = projectId, reason = "INITIAL_EMPTY_DB_CONFIRMED")
-                            } else {
-                                // ✅ БД не пустая — значит empty в UI был временным/гонкой.
-                                Log.w("AUTO_BOOT", "SKIP_AUTO_RECALC pid=$projectId reason=DB_NOT_EMPTY")
-                            }
-                        } catch (t: Throwable) {
-                            Log.e("AUTO_BOOT", "EMPTY_CONFIRM FAILED pid=$projectId", t)
-                            // Ничего не делаем: лучше не запускать auto-recalc, чем перетереть данные.
-                        } finally {
-                            emptyDbConfirmInFlight.value = false
-                        }
-                    }
-                }
-
-                return@collect
             }
         }
     }
@@ -764,11 +643,7 @@ class ExplicationViewModel @Inject constructor(
     // =========================
     // Unassigned: refresh/clear
     // =========================
-    /**
-     * ✅ Коммит 3:
-     * Unassigned больше не грузим отдельно — всё приходит через manualDevicesById.
-     * Методы оставлены ради обратной совместимости с текущим UI.
-     */
+
     fun refreshUnassignedDevices(unassignedIds: Set<Long>) {
         Log.d(
             "MANUAL_DEVICES",
@@ -780,10 +655,6 @@ class ExplicationViewModel @Inject constructor(
         Log.d("MANUAL_DEVICES", "clearUnassignedDevices ignored (handled by manualDevicesById)")
     }
 
-    /**
-     * В UI может быть кнопка "Авто-распределить" для нераспределённых.
-     * В этом VM делаем сразу применение action к draft (без внешнего обработчика).
-     */
     fun onAutoAssignUnassignedClick() {
         viewModelScope.launch(ioDispatcher) {
             val session = manualSession.value
@@ -801,12 +672,10 @@ class ExplicationViewModel @Inject constructor(
     // PDF
     // =========================
 
-    /** Клик по PDF (Free + PRO). */
     fun onExportPdfClick() {
         _events.value = UiEvent.ExportPdfRequested
     }
 
-    /** Экспортные действия (save/share/брендинг и т.п.) = только PRO. */
     fun onPdfExportActionsClick() {
         val plan = userPlanRepository.planFlow.value
         if (!plan.capabilities.pdfExport) {
@@ -820,10 +689,6 @@ class ExplicationViewModel @Inject constructor(
     // Drag actions (manual) — Коммит 1
     // =========================
 
-    /**
-     * Старт drag-переноса. UI в следующих коммитах будет вызывать это после long-press.
-     * В этом коммите только фиксируем состояние — без сайд-эффектов.
-     */
     fun startDrag(
         deviceId: Long,
         fromGroupId: Long,
@@ -845,10 +710,6 @@ class ExplicationViewModel @Inject constructor(
         )
     }
 
-    /**
-     * UI сообщает активную цель (hover) на основании pointerRoot и bounds целей.
-     * Никаких сайд-эффектов — чисто состояние для подсветки/решения drop.
-     */
     fun setActiveDragTarget(target: DragTarget?) {
         val s = _dragState.value
         if (!s.isActive) {
@@ -860,10 +721,6 @@ class ExplicationViewModel @Inject constructor(
         _dragState.value = s.copy(activeTarget = target)
     }
 
-    /**
-     * Обновление позиции пальца во время drag.
-     * В этом коммите считаем ghostPositionRoot прямо здесь, чтобы UI мог просто рисовать.
-     */
     fun updateDrag(pointerRoot: Offset) {
         val s = _dragState.value
         if (!s.isActive) {
@@ -887,13 +744,9 @@ class ExplicationViewModel @Inject constructor(
         )
     }
 
-    // =========================
-// Manual: Cancel -> auto recalc -> DB -> exit manual -> UI обновится из DB pipeline
-// =========================
     fun onCancelManualClicked() {
         viewModelScope.launch(ioDispatcher) {
 
-            // Берём pid надёжно
             val projectId = activeProjectDs.activeProjectId.first().orEmpty()
 
             if (projectId.isBlank()) {
@@ -901,7 +754,6 @@ class ExplicationViewModel @Inject constructor(
                 return@launch
             }
 
-            // Cancel имеет смысл только если manual активен
             val session = manualRepo.getActiveSession() ?: manualSession.value
             val isManual = session?.manualModeActive == true && session.projectId == projectId
             if (!isManual) {
@@ -911,7 +763,6 @@ class ExplicationViewModel @Inject constructor(
 
             Log.w("MANUAL_CANCEL", "VM Cancel START pid=$projectId ver=${session?.version}")
 
-            // UI: показываем загрузку, но manual НЕ выключаем до успешного auto-save
             _isRecalculating.value = true
             _uiState.value = GroupScreenState.Loading
 
@@ -923,9 +774,6 @@ class ExplicationViewModel @Inject constructor(
                         Log.e("MANUAL_CANCEL", "VM Cancel FAILED pid=$projectId msg=${res.message}")
                         _events.value =
                             UiEvent.ShowSnackbar("Не удалось отменить изменения: ${res.message}")
-
-                        // ❗ВАЖНО: manual остаётся активным, draft не трогаем.
-                        // Возвращаем UI к manual-экрану (он рисуется из draft через UI слой).
                         return@launch
                     }
 
@@ -935,48 +783,32 @@ class ExplicationViewModel @Inject constructor(
                             "VM Cancel OK pid=$projectId groups=${res.system.groups.size}"
                         )
 
-                        // decisions держим в памяти (для PRO секций), как в обычном auto-recalc
                         repo.setLastDistributionDecisions(res.distributionDecisions)
 
-                        // Теперь можно безопасно выключать manual (снимаем kill-process маркер внутри manualRepo)
                         manualRepo.exitManualMode(projectId)
 
-                        // Убираем хвосты переноса/drag, чтобы UI не завис в "полудраге"
                         _moveDeviceUi.value = null
                         _dragState.value = DragState()
                         _pendingMixedMove.value = null
                         _showMixedWarningDialog.value = false
 
                         _events.value = UiEvent.ShowSnackbar("Ручные изменения отменены")
-                        // Дальше UI сам обновится из DB pipeline (combine(dbGroupsFlow,...,manualSession))
                     }
                 }
             } catch (t: Throwable) {
                 Log.e("MANUAL_CANCEL", "VM Cancel EXCEPTION pid=$projectId", t)
                 _events.value = UiEvent.ShowSnackbar("Ошибка отмены изменений")
-                // manual НЕ выключаем, draft сохраняем
             } finally {
                 _isRecalculating.value = false
             }
         }
     }
 
-    /**
-     * Отмена drag — сбрасываем состояние.
-     * В этом коммите не трогаем _moveDeviceUi, чтобы не менять текущее поведение UI.
-     */
     fun cancelDrag() {
-        // ✅ Коммит 7 (контракт):
-        // cancelDrag() = сброс ghost/activeTarget, НО панель переноса остаётся.
-        // Это критично для edge-scroll: cancel не должен закрывать targets bar.
         Log.d("DRAG_TRACE", "VM cancelDrag -> reset dragState only (panel stays)")
         _dragState.value = DragState()
     }
 
-    /**
-     * Drop в группу: пока только фиксируем target и завершаем drag.
-     * Реальный перенос (manualRepo.apply) подключим в коммите с drop-логикой (позже).
-     */
     fun dropToGroup(targetGroupId: Long) {
         Log.d("DRAG_TRACE", "VM dropToGroup target=$targetGroupId state=$_dragState.value")
 
@@ -985,20 +817,13 @@ class ExplicationViewModel @Inject constructor(
         val deviceId = s.draggingDeviceId ?: return
         val fromGroupId = s.fromGroupId ?: return
 
-        // ✅ Чтобы переиспользовать текущую логику переносов (включая MIXED warning),
-        // делаем вид, что перенос инициирован через панель целей.
         _moveDeviceUi.value = MoveDeviceUi(deviceId = deviceId, fromGroupId = fromGroupId)
 
-        // Реальный перенос
         onMoveDeviceTargetGroupSelected(deviceId = deviceId, targetGroupId = targetGroupId)
 
-        // Завершаем drag
         _dragState.value = DragState()
     }
 
-    /**
-     * Drop в "Нераспределённые": контракт под следующий коммит.
-     */
     fun dropToUnassigned() {
         val s = _dragState.value
         val deviceId = s.draggingDeviceId ?: return
@@ -1010,18 +835,12 @@ class ExplicationViewModel @Inject constructor(
         _dragState.value = DragState()
     }
 
-    /**
-     * Drop "в никуда" = отмена. Сбрасываем и drag, и панель целей (чтобы UI был чистый).
-     */
     fun dropCancel() {
         Log.d(TAG_DND, "dropCancel state=${_dragState.value}")
         _dragState.value = DragState()
         _moveDeviceUi.value = null
     }
 
-    /**
-     * Drop в "Новая группа": контракт под следующий коммит.
-     */
     fun dropToNewGroup() {
         val s = _dragState.value
         val deviceId = s.draggingDeviceId ?: return
@@ -1043,26 +862,12 @@ class ExplicationViewModel @Inject constructor(
     }
 
     fun dismissMoveDevice() {
-        // ✅ Коммит 7 (контракт):
-        // dismissMoveDevice() = закрыть панель переноса
-        // + безопасно сбросить drag (ghost/activeTarget), чтобы UI не зависал в "полудраге".
         Log.d(TAG_MOVE, "dismissMoveDevice -> close panel + reset dragState")
 
         _moveDeviceUi.value = null
-
-        // ✅ ВАЖНО: это НЕ cancelDrag(), потому что cancelDrag() панель НЕ трогает.
-        // Здесь панель уже закрывается, поэтому обязаны зачистить и drag.
         _dragState.value = DragState()
     }
 
-    /**
-     * Перенос устройства в выбранную группу.
-     *
-     * ФИКС:
-     * - Не используем state.devices (может быть пустым) -> берём устройство из БД.
-     * - Не делаем "тихих return": даём snackbar/лог.
-     * - Защита от переноса "в ту же группу" (иначе кажется, что не работает).
-     */
     fun onMoveDeviceTargetGroupSelected(deviceId: Long, targetGroupId: Long) {
         val from = _moveDeviceUi.value?.fromGroupId
         _moveDeviceUi.value = null
@@ -1121,13 +926,11 @@ class ExplicationViewModel @Inject constructor(
         if (pending == null) return
 
         viewModelScope.launch(ioDispatcher) {
-            // ✅ Не опираемся на _moveDeviceUi — это UI-шный стейт и он уже очищен.
             val session = manualRepo.getActiveSession() ?: manualSession.value ?: return@launch
             if (!session.manualModeActive) return@launch
 
             try {
                 if (pending.fromGroupId == FROM_UNASSIGNED) {
-                    // перенос из unassigned -> group (даже если MIXED)
                     manualRepo.apply(
                         ManualEditAction.MoveFromUnassigned(
                             deviceId = pending.deviceId,
@@ -1135,7 +938,6 @@ class ExplicationViewModel @Inject constructor(
                         )
                     )
                 } else {
-                    // перенос group -> group (MIXED)
                     manualRepo.apply(
                         ManualEditAction.MoveDevice(
                             deviceId = pending.deviceId,
@@ -1155,7 +957,6 @@ class ExplicationViewModel @Inject constructor(
         _moveDeviceUi.value = null
 
         viewModelScope.launch(ioDispatcher) {
-            // ✅ Берём активную сессию надёжно (manualSession.value может быть null из-за WhileSubscribed)
             val session = manualRepo.getActiveSession() ?: manualSession.value
             if (session == null) {
                 Log.d(
@@ -1194,7 +995,6 @@ class ExplicationViewModel @Inject constructor(
         _moveDeviceUi.value = null
 
         viewModelScope.launch(ioDispatcher) {
-            // ✅ Надёжно берём активную сессию
             val session = manualRepo.getActiveSession() ?: manualSession.value
             if (session == null) {
                 Log.w(
@@ -1305,7 +1105,6 @@ class ExplicationViewModel @Inject constructor(
         )
     }
 
-    /** ВАЖНО: берём ИНСТАНС устройства по id из репозитория, без дефолтов. */
     fun onDeviceClick(deviceId: Long) {
         viewModelScope.launch(ioDispatcher) {
             _selectedDeviceBreakdown.value = null
@@ -1395,13 +1194,12 @@ class ExplicationViewModel @Inject constructor(
     }
 
     // =========================
-    // Recalc (auto)
+    // Recalc (auto) — ТОЛЬКО user intent
     // =========================
 
     fun recalcAndSaveGroups() {
         viewModelScope.launch(ioDispatcher) {
 
-            // ✅ Надёжный guard: manualSession.value может быть null
             val activeSession = manualRepo.getActiveSession() ?: manualSession.value
             val isManual = activeSession?.manualModeActive == true
             val manualPid = activeSession?.projectId
@@ -1422,11 +1220,9 @@ class ExplicationViewModel @Inject constructor(
                     "AUTO_GATE",
                     "AUTO_RECALC_ABORT reason=NO_ACTIVE_PROJECT (keep current uiState)"
                 )
-                // ❗ Не выставляем Error: проект просто ещё не выбран
                 return@launch
             }
 
-            // ✅ Пользовательский retry тоже должен идти через single-flight, иначе можно сделать двойной запуск.
             if (autoRecalcInFlight.value) {
                 Log.w("AUTO_GATE", "AUTO_RECALC_REJECT reason=IN_FLIGHT pid=$projectId")
                 return@launch
@@ -1445,13 +1241,6 @@ class ExplicationViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Общая реализация пересчёта.
-     *
-     * updateUiSuccess=false — ✅ правильный режим:
-     * - success НЕ пишет в uiState,
-     * - success приходит через DB pipeline (единственный писатель Success).
-     */
     private suspend fun recalcAndSaveGroupsInternal(
         projectId: String,
         reason: String,
@@ -1475,7 +1264,6 @@ class ExplicationViewModel @Inject constructor(
                         "CALC_TRACE",
                         "calculateGroups ERROR pid=$projectId message='${res.message}'"
                     )
-                    // ✅ Error разрешён: пользователь должен видеть Retry
                     _uiState.value = GroupScreenState.Error(res.message)
                 }
 
@@ -1502,7 +1290,6 @@ class ExplicationViewModel @Inject constructor(
                         )
                     )
 
-                    // decisions держим в памяти (как и было)
                     repo.setLastDistributionDecisions(res.distributionDecisions)
 
                     Log.w(
@@ -1511,9 +1298,6 @@ class ExplicationViewModel @Inject constructor(
                     )
 
                     if (updateUiSuccess) {
-                        // ❗ В этом проекте мы НЕ используем этот режим (оставлен на будущее).
-                        // Success должен приходить только из DB pipeline.
-                        // Здесь можно оставить заглушку или удалить ветку вообще.
                         Log.w("AUTO_TRIGGER", "updateUiSuccess=true is not used сейчас")
                     }
                 }
@@ -1529,11 +1313,6 @@ class ExplicationViewModel @Inject constructor(
     // PDF snapshot
     // =========================
 
-    /**
-     * Единый слепок для PDF:
-     * - KPI (installed/calculated) строго из uiState
-     * - фазы/группы/устройства — из детерминированной сборки
-     */
     fun buildReportSnapshotForPdf(): PdfReportSnapshot? {
         val s = uiState.value as? GroupScreenState.Success ?: return null
         val mode = phaseMode.value
@@ -1555,8 +1334,10 @@ class ExplicationViewModel @Inject constructor(
     }
 
     /**
-     * ✅ Запускает auto-recalc строго одиночно.
-     * Важно: не даём параллельных запусков, иначе получаем "двойной писатель" и перетирания стейтов.
+     * Коммит 2: triggerAutoRecalc оставлен только как утилита для явных вызовов (если понадобится),
+     * но НИГДЕ в DB pipeline он не используется.
+     *
+     * Сейчас в проекте можно удалить этот метод полностью и вызывать recalcAndSaveGroups().
      */
     private fun triggerAutoRecalc(projectId: String, reason: String) {
         viewModelScope.launch(ioDispatcher) {
@@ -1643,14 +1424,6 @@ private fun buildWarningsFromGroups(groups: List<CircuitGroup>): List<CalcWarnin
 // Helpers: deterministic report build
 // =========================
 
-/**
- * Детерминированная сборка данных отчёта:
- * - фазы: A/B/C (или только A в SINGLE)
- * - группы: по номеру
- * - устройства: по имени (lowercase, Locale.ROOT) — чтобы PDF не “плавал”
- *
- * date передаётся извне — никаких System.currentTimeMillis() внутри.
- */
 private fun buildReportDataFromDeterministic(
     groups: List<CircuitGroup>,
     incomer: IncomerSpec,
@@ -1747,11 +1520,6 @@ private fun buildReportDataFromDeterministic(
 // PDF snapshot model
 // =========================
 
-/**
- * Слепок данных для PDF:
- * - meta + phases (детерминированные)
- * - installed/calculated — строго из uiState
- */
 data class PdfReportSnapshot(
     val meta: ReportMeta,
     val phases: List<ReportPhase>,
