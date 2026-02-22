@@ -44,6 +44,22 @@ interface RoomRepository {
     suspend fun getAllRoom(): List<Room>
 
     suspend fun addRoomWithDevices(req: RoomCreateRequest): CreatedRoomResult
+
+    /**
+     * ✅ Старый контракт оставляем (чтобы не сломать всех вызывающих).
+     * Внутри реализации можно генерировать opId автоматически.
+     */
     suspend fun addDevicesToRoom(roomId: Long, devices: List<DeviceCreateRequest>): List<Long>
+
+    /**
+     * ✅ Commit 1: новый overload для корреляции логов/диагностики.
+     * UseCase вызывает именно этот метод.
+     */
+    suspend fun addDevicesToRoom(
+        roomId: Long,
+        devices: List<DeviceCreateRequest>,
+        opId: String
+    ): List<Long>
+
     suspend fun deleteDevices(deviceIds: List<Long>) : Unit?
 }

@@ -93,6 +93,17 @@ interface ExplicationRepository {
     suspend fun replaceAllGroupsTransactionalAlreadyLocked(projectId: String, groups: List<CircuitGroup>)
     suspend fun replaceAllGroupsTransactional(groups: List<CircuitGroup>)
 
+    /**
+     * ✅ Явный project-scoped поток групп (VM-правильный вариант).
+     *
+     * Зачем:
+     * - чтобы ViewModel могла жёстко привязать чтение к конкретному projectId
+     *   и не зависеть от того, что репо "само" внутри читает activeProjectId.
+     * - чтобы при смене проекта upstream гарантированно пересоздавался
+     *   (flatMapLatest в VM) и не было "эхо" старых значений.
+     */
+    fun observeAllGroupByProject(projectId: String): Flow<List<CircuitGroup>>
+
     suspend fun getGroupsWithDevices(): List<GroupWithDevices>
     suspend fun getGroupsWithDevicesByProject(projectId: String): List<GroupWithDevices>
 

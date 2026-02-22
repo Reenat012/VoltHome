@@ -58,6 +58,7 @@ import ru.mugalimov.volthome.data.sync.outbox.OutboxPushWorker
 import ru.mugalimov.volthome.data.sync.outbox.toJson
 import ru.mugalimov.volthome.domain.model.DevicePreview
 import ru.mugalimov.volthome.domain.model.RoomWithDevicesPreview
+import ru.mugalimov.volthome.domain.telemetry.CreateDeviceOpBus
 
 class RoomRepositoryImpl @Inject constructor(
     private val roomDao: RoomDao,
@@ -71,9 +72,10 @@ class RoomRepositoryImpl @Inject constructor(
     @IoDispatcher private val dispatchers: CoroutineDispatcher,
     @ApplicationContext private val context: Context,
     private val appDb: AppDatabase,
-    // 🔹 новое:
     private val outboxDao: OutboxDao,
-    private val tombstoneDao: TombstoneDao
+    private val tombstoneDao: TombstoneDao,
+    // ✅ Commit 1: bus корреляции add-devices
+    private val createDeviceOpBus: CreateDeviceOpBus
 ) : ru.mugalimov.volthome.data.repository.RoomRepository {
 
     private val uuidDao get() = appDb.uuidMapDao()
@@ -358,14 +360,52 @@ class RoomRepositoryImpl @Inject constructor(
     override suspend fun addDevicesToRoom(
         roomId: Long,
         devices: List<DeviceCreateRequest>
+    ): List<Long> {
+        // ✅ Не ломаем старых вызывающих: генерируем opId внутри.
+        // Это даст логи/корреляцию даже для legacy вызовов.
+        val opId = "legacy-" + java.util.UUID.randomUUID().toString()
+        return addDevicesToRoom(roomId = roomId, devices = devices, opId = opId)
+    }
+
+    override suspend fun addDevicesToRoom(
+        roomId: Long,
+        devices: List<DeviceCreateRequest>,
+        opId: String
     ): List<Long> = withContext(dispatchers) {
         val room = roomDao.getRoomById(roomId)
             ?: throw RoomNotFoundException("Комната $roomId не найдена")
         val projectId = room.projectId
             ?: throw RoomNotFoundException("У комнаты нет projectId")
 
+        // ✅ Commit 1: tombstone-consistent count ДО
+        val countBefore = deviceDao.countActiveByProjectId(projectId)
+
         val entities = expand(devices, roomId = roomId, projectId = projectId)
         val ids = roomsTxDao.insertDevices(entities)
+
+        // ✅ Commit 1: tombstone-consistent count ПОСЛЕ
+        val countAfter = deviceDao.countActiveByProjectId(projectId)
+        val delta = countAfter - countBefore
+
+        // ✅ Commit 1: CREATE_DEVICE_DB лог (thread + projectIdRecorded + roomId + ids + delta + opId)
+        Log.i(
+            "CREATE_DEVICE_DB",
+            "thread=${Thread.currentThread().name} " +
+                    "projectIdRecorded=$projectId roomId=$roomId " +
+                    "insertedIds(size=${ids.size})=${ids.take(20)} " +
+                    "countBefore=$countBefore countAfter=$countAfter delta=$delta " +
+                    "opId=$opId"
+        )
+
+        // ✅ Commit 1: эмитим событие для VM (тут есть факт projectIdRecorded)
+        createDeviceOpBus.publish(
+            ru.mugalimov.volthome.domain.telemetry.CreateDeviceOpEvent(
+                opId = opId,
+                projectIdRecorded = projectId,
+                roomId = roomId,
+                insertedIds = ids
+            )
+        )
 
         // outbox DEVICE_CREATE для каждого добавленного устройства
         ids.forEachIndexed { index, devId ->

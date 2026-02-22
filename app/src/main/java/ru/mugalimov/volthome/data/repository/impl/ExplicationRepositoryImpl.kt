@@ -101,6 +101,29 @@ class ExplicationRepositoryImpl @Inject constructor(
             }
         }
 
+    override fun observeAllGroupByProject(projectId: String): Flow<List<CircuitGroup>> {
+        val pid = projectId.trim()
+        return if (pid.isBlank()) {
+            flowOf(emptyList())
+        } else {
+            groupDao.observeGroupsWithDevicesByProject(pid)
+                .map { rel ->
+                    // тот же доказательный лог, но уже на явном pid
+                    if (rel.isNotEmpty()) {
+                        val zeros = rel.count { it.devices.isEmpty() }
+                        if (zeros > 0) {
+                            Log.w(
+                                "EXP_OBSERVE",
+                                "observeGroupsWithDevicesByProject pid=$pid groups=${rel.size} emptyDeviceGroups=$zeros"
+                            )
+                        }
+                    }
+                    rel
+                }
+                .map { rel -> rel.map { it.toDomainGroupFromRelation() } }
+        }
+    }
+
     override suspend fun commitManualDraftTransactional(
         projectId: String,
         draftState: ProjectEditState

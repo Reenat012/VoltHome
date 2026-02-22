@@ -20,7 +20,9 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
@@ -54,6 +56,7 @@ import ru.mugalimov.volthome.domain.model.report.ReportGroup
 import ru.mugalimov.volthome.domain.model.report.ReportMeta
 import ru.mugalimov.volthome.domain.model.report.ReportPhase
 import ru.mugalimov.volthome.domain.model.report.professional.ProfessionalSections
+import ru.mugalimov.volthome.domain.telemetry.CreateDeviceOpBus
 import ru.mugalimov.volthome.domain.use_case.CalculateDeviceBreakdownUseCase
 import ru.mugalimov.volthome.domain.use_case.CalculateGroupBreakdownUseCase
 import ru.mugalimov.volthome.domain.use_case.CalculateShieldOverviewUseCase
@@ -95,6 +98,7 @@ class ExplicationViewModel @Inject constructor(
 
     // ✅ Коммит 8: kill-process UX маркер
     private val manualDraftResetNotifier: ManualDraftResetNotifier,
+    private val createDeviceOpBus: CreateDeviceOpBus,
 ) : ViewModel() {
 
     private val TAG_DND = "EXP_DND"
@@ -130,13 +134,16 @@ class ExplicationViewModel @Inject constructor(
     val selectedDeviceBreakdown: StateFlow<DeviceCalcBreakdown?> =
         _selectedDeviceBreakdown.asStateFlow()
 
+    // ✅ Commit 1: последний opId добавления устройств (для корреляции UI visibility)
+    private val _lastCreateOpId = MutableStateFlow<String?>(null)
+    val lastCreateOpId: StateFlow<String?> = _lastCreateOpId.asStateFlow()
+
     // =========================
     // Manual session (scoped by activeProjectId)
     // =========================
 
     val manualSession: StateFlow<ManualEditSession?> =
         activeProjectDs.activeProjectId
-            .distinctUntilChanged()
             .filterNotNull()
             .flatMapLatest { projectId -> manualRepo.observeSession(projectId) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -197,13 +204,30 @@ class ExplicationViewModel @Inject constructor(
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    // ✅ Делаем projectId доступным как StateFlow (чтобы не блокировать first() внутри collect)
+    private val activeProjectIdState: StateFlow<String?> =
+        activeProjectDs.activeProjectId
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
     // =========================
     // DB-driven pipeline (FIX отката)
     // =========================
 
     // ✅ Поток групп из БД (уже project-scoped внутри репозитория)
+    // ✅ Поток групп из БД (ЖЁСТКО scoped по activeProjectId на уровне VM)
+    // ✅ Поток групп из БД (ЖЁСТКО scoped по activeProjectId + instant flush stale)
     private val dbGroupsFlow: StateFlow<List<CircuitGroup>> =
-        repo.observeAllGroup()
+        activeProjectIdState
+            .flatMapLatest { pidNullable ->
+                val pid = pidNullable.orEmpty().trim()
+                if (pid.isBlank()) {
+                    flowOf(emptyList())
+                } else {
+                    repo.observeAllGroupByProject(pid)
+                        // ✅ критично: мгновенно сбрасываем stale-группы при переключении проекта
+                        .onStart { emit(emptyList()) }
+                }
+            }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     // ✅ Последние decisions (в памяти) — пригодится для pro-секций
@@ -214,11 +238,6 @@ class ExplicationViewModel @Inject constructor(
     // ✅ Защита от параллельных запусков явного auto-recalc (user intent)
     private val autoRecalcInFlight = MutableStateFlow(false)
 
-    // ✅ Делаем projectId доступным как StateFlow (чтобы не блокировать first() внутри collect)
-    private val activeProjectIdState: StateFlow<String?> =
-        activeProjectDs.activeProjectId
-            .distinctUntilChanged()
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     data class MoveDeviceUi(
         val deviceId: Long,
@@ -409,6 +428,11 @@ class ExplicationViewModel @Inject constructor(
                 }
         }
 
+        viewModelScope.launch {
+            activeProjectIdState
+                .collect { _lastCreateOpId.value = null }
+        }
+
         // 3) ✅ Главный FIX: uiState строим от БД, когда manual выключен.
         // ✅ Коммит 2: УБРАН DB-triggered auto-recalc.
         // DB pipeline = ТОЛЬКО READ → BUILD UI. Никаких write в БД.
@@ -478,18 +502,75 @@ class ExplicationViewModel @Inject constructor(
                     )
                 }
 
+
+            // ✅ ВАЖНО: весь snapshot строится внутри flatMapLatest(projectId)
+            // => невозможно склеить groups от одного проекта с projectId другого
             val snapshotFlow: Flow<Snapshot> =
-                withManualGroupsFlow.combine(activeProjectIdState) { packed: DbWithSessionAndManualGroups, projectIdNullable: String? ->
-                    val base = packed.base
-                    Snapshot(
-                        groups = base.groups,
-                        mode = base.mode,
-                        decisions = base.decisions,
-                        session = base.session,
-                        manualGroups = packed.manualGroups,
-                        projectId = projectIdNullable.orEmpty()
+                activeProjectIdState
+                    .map { it.orEmpty().trim() }
+                    .distinctUntilChanged()
+                    .flatMapLatest { projectId ->
+                        if (projectId.isBlank()) {
+                            flowOf(
+                                Snapshot(
+                                    groups = emptyList(),
+                                    mode = phaseMode.value,
+                                    decisions = emptyList(),
+                                    session = null,
+                                    manualGroups = emptyList(),
+                                    projectId = ""
+                                )
+                            )
+                        } else {
+                            // 1) groups — строго от этого projectId
+                            val groupsFlow: Flow<List<CircuitGroup>> =
+                                repo.observeAllGroupByProject(projectId)
+                                    .onStart { emit(emptyList()) } // ✅ мгновенный flush на смене проекта
+
+                            // 2) session — уже scoped у тебя (manualSession), но мы всё равно используем тут как вход
+                            // 3) manualGroups — зависят от session/devices, тоже ок
+                            // 4) decisions — если у тебя не project-scoped, оно может быть “общим”,
+                            //    но теперь хотя бы projectId не склеится с чужими groups
+                            combine(
+                                groupsFlow,
+                                phaseMode,
+                                decisionsFlow,
+                                manualSession,
+                                manualDisplayGroups
+                            ) { groups, mode, decisions, session, manualGroups ->
+                                Snapshot(
+                                    groups = groups,
+                                    mode = mode,
+                                    decisions = decisions,
+                                    session = session,
+                                    manualGroups = manualGroups,
+                                    projectId = projectId
+                                )
+                            }
+                        }
+                    }
+
+            // ✅ Commit 1: visibility flow зависит от lastCreateOpId => лог гарантированно появится ПОСЛЕ add-device
+            val uiVisibilityFlow: Flow<Pair<Snapshot, String?>> =
+                snapshotFlow.combine(lastCreateOpId) { snap, opId ->
+                    snap to opId
+                }
+
+            viewModelScope.launch(ioDispatcher) {
+                uiVisibilityFlow.collect { (snap, opId) ->
+                    val manualActive = snap.session?.manualModeActive == true
+
+                    Log.i(
+                        "EXP_UI_VISIBILITY",
+                        "thread=${Thread.currentThread().name} " +
+                                "projectIdUi=${snap.projectId} " +
+                                "groupsCount=${snap.groups.size} " +
+                                "manualActive=$manualActive " +
+                                "draftUnassignedIdsCount=${snap.session?.draftState?.unassignedDeviceIds?.size ?: 0} " +
+                                "lastCreateOpId=$opId"
                     )
                 }
+            }
 
             snapshotFlow.collect { snap: Snapshot ->
 
@@ -542,6 +623,36 @@ class ExplicationViewModel @Inject constructor(
                     title = "Распределение по фазам",
                     message = "Группы пока не созданы"
                 )
+            }
+        }
+
+        // ✅ Commit 1: ловим add-device события и сохраняем lastCreateOpId
+        // ✅ Commit X: защита от дублей (StateFlow может пере-эмитить последнее значение на новую подписку)
+        viewModelScope.launch {
+            var lastLoggedOpId: String? = null
+
+            createDeviceOpBus.state.collect { e ->
+                if (e == null) return@collect
+
+                val activePid = activeProjectIdState.value
+                if (!activePid.isNullOrBlank() && e.projectIdRecorded != activePid) {
+                    Log.w(
+                        "CREATE_DEVICE_UC",
+                        "DROP foreign opId=${e.opId} recordedPid=${e.projectIdRecorded} activePid=$activePid"
+                    )
+                    return@collect
+                }
+
+                if (lastLoggedOpId == e.opId) return@collect
+                if (_lastCreateOpId.value == e.opId) {
+                    lastLoggedOpId = e.opId
+                    return@collect
+                }
+
+                lastLoggedOpId = e.opId
+                _lastCreateOpId.value = e.opId
+
+                Log.i("CREATE_DEVICE_UC", "...") // как у тебя
             }
         }
     }
