@@ -104,6 +104,10 @@ interface ExplicationRepository {
      */
     fun observeAllGroupByProject(projectId: String): Flow<List<CircuitGroup>>
 
+    @Deprecated(
+        message = "Запрещено: нет project boundary. Используйте getGroupsWithDevicesByProject(projectId).",
+        level = DeprecationLevel.ERROR
+    )
     suspend fun getGroupsWithDevices(): List<GroupWithDevices>
     suspend fun getGroupsWithDevicesByProject(projectId: String): List<GroupWithDevices>
 

@@ -647,22 +647,16 @@ class ExplicationRepositoryImpl @Inject constructor(
             replaceAllGroupsTransactional(projectId = projectId, groups = groups)
         }
 
+    @Deprecated(
+        message = "Запрещено: нет project boundary. Используйте getGroupsWithDevicesByProject(projectId).",
+        level = DeprecationLevel.ERROR
+    )
     override suspend fun getGroupsWithDevices(): List<GroupWithDevices> {
-        val projectIdNullable = activeProjectDs.activeProjectId.first()
-        val groups = if (!projectIdNullable.isNullOrBlank()) {
-            groupDao.getAllGroupsByProject(projectIdNullable)
-        } else {
-            groupDao.getAllGroups()
+        val projectId = activeProjectDs.activeProjectId.first().orEmpty()
+        require(projectId.isNotBlank()) {
+            "activeProjectId is null/blank. getGroupsWithDevices запрещён (нет project boundary)."
         }
-
-        return groups.map { entity ->
-            val devices = groupDeviceJoinDao.getDevicesForGroup(entity.groupId)
-            val domainDevices = devices.map { it.toDomainDevice() }
-            GroupWithDevices(
-                group = entity.toDomainGroup(domainDevices),
-                devices = domainDevices
-            )
-        }
+        return getGroupsWithDevicesByProject(projectId)
     }
 
     override suspend fun getGroupsWithDevicesByProject(projectId: String): List<GroupWithDevices> {
