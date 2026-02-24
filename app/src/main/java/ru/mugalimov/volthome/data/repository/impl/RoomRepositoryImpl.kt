@@ -62,6 +62,8 @@ import ru.mugalimov.volthome.domain.model.DevicePreview
 import ru.mugalimov.volthome.domain.model.RoomWithDevicesPreview
 import ru.mugalimov.volthome.domain.telemetry.CreateDeviceOpBus
 import ru.mugalimov.volthome.domain.telemetry.CreateDeviceOpEvent
+import ru.mugalimov.volthome.domain.use_case.AutoRebuildGroupsAfterDeviceInsertUseCase
+import dagger.Lazy
 
 class RoomRepositoryImpl @Inject constructor(
     private val roomDao: RoomDao,
@@ -79,6 +81,7 @@ class RoomRepositoryImpl @Inject constructor(
     private val tombstoneDao: TombstoneDao,
     // ✅ Commit 1: bus корреляции add-devices
     private val createDeviceOpBus: CreateDeviceOpBus,
+    private val autoRebuildAfterInsertUseCase: Lazy<AutoRebuildGroupsAfterDeviceInsertUseCase>,
     private val manualRepo:
     ManualEditSessionRepository,
 ) : RoomRepository {
@@ -421,6 +424,35 @@ class RoomRepositoryImpl @Inject constructor(
                 opId = opId // ✅ корреляция с CREATE_DEVICE_DB
             )
         }
+
+        // ✅ Commit 1: эмитим событие для VM (тут есть факт projectIdRecorded)
+        createDeviceOpBus.publish(
+            CreateDeviceOpEvent(
+                opId = opId,
+                projectIdRecorded = projectId,
+                roomId = roomId,
+                insertedIds = ids
+            )
+        )
+
+        // ✅ Commit 2: MANUAL последствия
+        if (manualRepo.isManualActive(projectId)) {
+            manualRepo.addInsertedDevicesToUnassigned(
+                projectId = projectId,
+                insertedDeviceIds = ids,
+                opId = opId
+            )
+        }
+
+        // ✅ Commit 3: AUTO rebuild после вставки (НЕ из UI)
+        // A: emptyIds -> no-op, B: manual -> suppress, C: full rebuild, D: single-flight logs
+        autoRebuildAfterInsertUseCase.get().execute(
+            ru.mugalimov.volthome.domain.use_case.AutoRebuildGroupsAfterDeviceInsertUseCase.Params(
+                projectIdRecorded = projectId,
+                insertedIds = ids,
+                opId = opId
+            )
+        )
 
         // outbox DEVICE_CREATE для каждого добавленного устройства
         ids.forEachIndexed { index, devId ->

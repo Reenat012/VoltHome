@@ -55,6 +55,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.ViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.collectLatest
@@ -529,7 +530,7 @@ private fun applyPresetFor(
 @HiltViewModel
 class AddRoomSheetPaywallHolder @Inject constructor(
     private val paywallBus: PaywallBus
-) : androidx.lifecycle.ViewModel() {
+) : ViewModel() {
 
     fun onAdvancedEditorLocked() {
         paywallBus.request(ProFeature.ADVANCED_DEVICE_EDITOR)

@@ -644,15 +644,14 @@ class ExplicationViewModel @Inject constructor(
                 }
 
                 if (lastLoggedOpId == e.opId) return@collect
-                if (_lastCreateOpId.value == e.opId) {
-                    lastLoggedOpId = e.opId
-                    return@collect
-                }
 
                 lastLoggedOpId = e.opId
                 _lastCreateOpId.value = e.opId
 
-                Log.i("CREATE_DEVICE_UC", "...") // как у тебя
+                Log.i(
+                    "CREATE_DEVICE_UC",
+                    "opId=${e.opId} pidRecorded=${e.projectIdRecorded} roomId=${e.roomId} inserted=${e.insertedIds.size}"
+                )
             }
         }
     }
