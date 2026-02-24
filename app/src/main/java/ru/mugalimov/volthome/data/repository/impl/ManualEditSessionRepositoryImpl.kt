@@ -21,7 +21,6 @@ import ru.mugalimov.volthome.domain.use_case.manual.ManualDraftSelectors
 import ru.mugalimov.volthome.domain.use_case.manual.RecalculateGroupLineUseCase
 import ru.mugalimov.volthome.ui.utilities.ManualDraftResetNotifier
 
-
 @Singleton
 class ManualEditSessionRepositoryImpl @Inject constructor(
     private val recalculateGroupLineUseCase: RecalculateGroupLineUseCase,
@@ -30,57 +29,63 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
     private val projectLocalStateDao: ProjectLocalStateDao,
     private val structuralWriteCoordinator: StructuralWriteCoordinator,
 ) : ManualEditSessionRepository {
-    private val sessionFlow = MutableStateFlow<ManualEditSession?>(null)
+
+    /**
+     * ✅ Commit 2: сессии по projectId (защита от “manual активен не того проекта”).
+     *
+     * ВАЖНО: persisted marker глобальный => одновременно manual активен только у одного проекта.
+     * Поэтому при успешном enterManualMode(projectId) мы чистим любые другие сессии в памяти,
+     * чтобы не копился мусор и никто случайно не прочитал “чужую” сессию.
+     */
+    private val sessionsFlow = MutableStateFlow<Map<String, ManualEditSession>>(emptyMap())
 
     // Глобальный key для сериализации операций с persisted marker.
-    // Важно: enter/exit manual должны быть глобально последовательны, иначе возможны 2 marker одновременно.
+    // enter/exit manual должны быть глобально последовательны, иначе возможны 2 marker одновременно.
     private val GLOBAL_MARKER_KEY = "__GLOBAL_MANUAL_MARKER__"
 
     override fun observeSession(projectId: String): Flow<ManualEditSession?> {
-        return sessionFlow
-            .map { s -> if (s?.projectId == projectId) s else null }
+        return sessionsFlow
+            .map { map -> map[projectId] }
             .distinctUntilChanged()
     }
 
-    override fun getActiveSession(): ManualEditSession? = sessionFlow.value
+    override fun isManualActive(projectId: String): Boolean =
+        sessionsFlow.value[projectId]?.manualModeActive == true
+
+    override fun getSession(projectId: String): ManualEditSession? =
+        sessionsFlow.value[projectId]
+
+    @Deprecated("Не использовать как SoT. Используйте getSession(projectId)/isManualActive(projectId).")
+    override fun getActiveSession(): ManualEditSession? {
+        val active = sessionsFlow.value.values.filter { it.manualModeActive }
+        if (active.size > 1) {
+            // Это реально не должно случаться при глобальном marker.
+            Log.e("MANUAL_REPO", "INVARIANT: multiple active manual sessions! pids=${active.map { it.projectId }}")
+        }
+        return active.firstOrNull()
+    }
 
     override suspend fun enterManualMode(projectId: String, baseState: ProjectEditState) {
-        val now = System.currentTimeMillis()
-        val base = baseState.deepCopy()
-        val draft = baseState.deepCopy()
-
         val TAG = "MANUAL_REPO"
         require(projectId.isNotBlank()) { "projectId must be non-blank" }
 
         Log.d(TAG, "enterManualMode pid=$projectId baseGroups=${baseState.groups.size} baseDevices=${baseState.devices.size}")
 
-        // 1) Сначала создаём in-memory session (успешный enter = sessionFlow установлен)
-        sessionFlow.value = ManualEditSession(
-            projectId = projectId,
-            manualModeActive = true,
-            baseState = base,
-            draftState = draft,
-            version = 1L,
-            updatedAtEpochMs = now
-        )
-
-        // 2) Persisted marker: делаем “single marker globally” атомарно и с глобальной сериализацией.
-        // Это закрывает гонку “две строки с marker одновременно”.
+        // ✅ Сначала ставим persisted marker (атомарно и глобально), затем создаём in-memory session.
         val markerOut = structuralWriteCoordinator.execute(
             projectId = GLOBAL_MARKER_KEY,
             opName = "MANUAL_MARKER_SET"
         ) {
-            // 1) Guard: если manual уже активен на другом проекте — НЕ воруем.
+            // Guard: если manual уже активен на другом проекте — не воруем marker.
             val marked = projectLocalStateDao.getActiveManualProjectId()
             if (marked != null && marked != projectId) {
-                throw IllegalStateException("Manual already active for another project")
+                throw IllegalStateException("Manual already active for another project (marked=$marked, requested=$projectId)")
             }
 
-            // 2) Санитизация допустима только когда marker пуст или уже наш.
-            // (опционально, но полезно если в БД есть мусор/двойные markers из старых версий)
+            // Санитизация: гарантируем один marker.
             projectLocalStateDao.clearActiveManualMarkerGlobal()
 
-            // 3) Реальная запись marker с гарантией существования строки и rowsUpdated==1
+            // Реальная запись marker (ensureRow + rowsUpdated==1)
             projectLocalStateDao.ensureRow(projectId)
             val rows = projectLocalStateDao.setActiveManualMarker(projectId)
             require(rows == 1) { "Failed to set persisted manual marker (rowsUpdated=$rows)" }
@@ -88,26 +93,39 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
 
         when (markerOut) {
             is StructuralWriteCoordinator.Outcome.Success -> {
-                // Доп. UX marker (не SoT)
+                val now = System.currentTimeMillis()
+                val base = baseState.deepCopy()
+                val draft = baseState.deepCopy()
+
+                val session = ManualEditSession(
+                    projectId = projectId,
+                    manualModeActive = true,
+                    baseState = base,
+                    draftState = draft,
+                    version = 1L,
+                    updatedAtEpochMs = now
+                )
+
+                // ✅ Политика: глобальный marker => держим в памяти только текущий проект.
+                sessionsFlow.value = mapOf(projectId to session)
+
+                // UX маркер
                 manualDraftResetNotifier.markExpected(projectId)
-                Log.d(TAG, "enterManualMode OK pid=$projectId markerSet=1")
+
+                Log.d(TAG, "enterManualMode OK pid=$projectId markerSet=1 sessionsKept=1")
             }
 
             StructuralWriteCoordinator.Outcome.Busy -> {
-                // Теоретически редко, но если кто-то параллельно крутит marker — лучше откатить enter.
-                sessionFlow.value = null
                 Log.w(TAG, "enterManualMode BUSY pid=$projectId")
                 throw IllegalStateException("Busy: marker operation in progress")
             }
 
             StructuralWriteCoordinator.Outcome.Panic -> {
-                sessionFlow.value = null
                 Log.e(TAG, "enterManualMode PANIC pid=$projectId")
                 throw IllegalStateException("Panic: marker operation timed out")
             }
 
             is StructuralWriteCoordinator.Outcome.Error -> {
-                sessionFlow.value = null
                 Log.e(TAG, "enterManualMode ERROR pid=$projectId", markerOut.throwable)
                 throw markerOut.throwable
             }
@@ -115,30 +133,27 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
     }
 
     override suspend fun exitManualMode(projectId: String) {
-        val current = sessionFlow.value
-        if (current?.projectId != projectId) return
-
         val TAG = "MANUAL_REPO"
+        val current = sessionsFlow.value[projectId] ?: return
 
-        // 1) Persisted marker: снимаем глобально (чтобы гарантировать “нет двух marker” после выхода),
-        // но при этом логика “точечная очистка” не нужна — в Commit 1 важнее гарантия single-marker.
+        // Если вдруг сессия есть, но manualModeActive=false — всё равно корректно почистим.
+        Log.d(TAG, "exitManualMode pid=$projectId manualActive=${current.manualModeActive}")
+
         val markerOut = structuralWriteCoordinator.execute(
             projectId = GLOBAL_MARKER_KEY,
             opName = "MANUAL_MARKER_CLEAR"
         ) {
             val cleared = projectLocalStateDao.clearActiveManualMarkerGlobal()
-            // cleared может быть 0, если marker уже снят — это нормально.
             Log.d(TAG, "exitManualMode marker cleared rows=$cleared pid=$projectId")
         }
 
         when (markerOut) {
             is StructuralWriteCoordinator.Outcome.Success -> {
                 manualDraftResetNotifier.clearExpected(projectId)
-                sessionFlow.value = null
+                sessionsFlow.value = sessionsFlow.value - projectId
                 Log.d(TAG, "exitManualMode OK pid=$projectId")
             }
 
-            // Если даже marker-clear не прошёл — не “молча выходим”.
             StructuralWriteCoordinator.Outcome.Busy -> {
                 Log.w(TAG, "exitManualMode BUSY pid=$projectId")
                 throw IllegalStateException("Busy: marker clear in progress")
@@ -156,31 +171,90 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun apply(action: ManualEditAction) {
-        val current = sessionFlow.value ?: run {
-            Log.w("MANUAL_REPO", "apply ignored: session=null action=$action")
+    override suspend fun apply(projectId: String, action: ManualEditAction) {
+        val current = sessionsFlow.value[projectId] ?: run {
+            Log.w("MANUAL_REPO", "apply ignored: no session for pid=$projectId action=$action")
             return
         }
         if (!current.manualModeActive) {
-            Log.w("MANUAL_REPO", "apply ignored: manualModeActive=false action=$action")
+            Log.w("MANUAL_REPO", "apply ignored: manualModeActive=false pid=$projectId action=$action")
             return
         }
 
-        Log.d("MANUAL_REPO", "apply action=$action ver=${current.version} groups=${current.draftState.groups.size}")
+        Log.d("MANUAL_REPO", "apply pid=$projectId action=$action ver=${current.version} groups=${current.draftState.groups.size}")
 
         val before = current.draftState
+
+        // ⚠️ НЕ МЕНЯЕМ фазность в Commit 2: оставляем как было у тебя до этого.
         val newDraft = reduceDraft(before, action, mode = PhaseMode.THREE)
 
-        // Быстрая “диагностика изменения”
         val changed = before != newDraft
-        Log.d("MANUAL_REPO", "apply done changed=$changed newGroups=${newDraft.groups.size} unassigned=${newDraft.unassignedDeviceIds.size}")
+        Log.d("MANUAL_REPO", "apply done pid=$projectId changed=$changed newGroups=${newDraft.groups.size} unassigned=${newDraft.unassignedDeviceIds.size}")
 
-        sessionFlow.value = current.copy(
+        val updated = current.copy(
             draftState = newDraft,
             version = current.version + 1L,
             updatedAtEpochMs = System.currentTimeMillis()
         )
+
+        sessionsFlow.value = sessionsFlow.value + (projectId to updated)
     }
+
+    override suspend fun addInsertedDevicesToUnassigned(
+        projectId: String,
+        insertedDeviceIds: List<Long>,
+        opId: String
+    ) {
+        if (insertedDeviceIds.isEmpty()) return
+
+        val current = sessionsFlow.value[projectId] ?: return
+        if (!current.manualModeActive) return
+
+        val before = current.draftState
+
+        // Быстрый set assigned: чтобы устройство не оказалось и assigned и unassigned одновременно.
+        val assigned: Set<Long> = before.groups
+            .asSequence()
+            .flatMap { it.deviceIds.asSequence() }
+            .toSet()
+
+        // Присоединяем новые ids к unassigned (с защитой от дублей и от assigned)
+        val merged: Set<Long> = buildSet {
+            addAll(before.unassignedDeviceIds)
+            insertedDeviceIds.forEach { add(it) }
+        }
+            .asSequence()
+            .filterNot { it in assigned }
+            .toCollection(LinkedHashSet()) // детерминированно и это Set<Long>
+
+        val newDraft = before.copy(unassignedDeviceIds = merged)
+
+        val updated = current.copy(
+            draftState = newDraft,
+            version = current.version + 1L,
+            updatedAtEpochMs = System.currentTimeMillis()
+        )
+
+        sessionsFlow.value = sessionsFlow.value + (projectId to updated)
+
+        // ✅ DoD корреляции: этот opId должен совпадать с CREATE_DEVICE_DB opId.
+        Log.i(
+            "MANUAL_POST_INSERT",
+            "pid=$projectId opId=$opId inserted=${insertedDeviceIds.size} " +
+                    "unassigned(before=${before.unassignedDeviceIds.size} after=${merged.size})"
+        )
+    }
+
+    @Deprecated("Используйте apply(projectId, action).")
+    override suspend fun apply(action: ManualEditAction) {
+        val active = getActiveSession() ?: run {
+            Log.w("MANUAL_REPO", "legacy apply ignored: activeSession=null action=$action")
+            return
+        }
+        apply(projectId = active.projectId, action = action)
+    }
+
+    // -------------------- Draft reduce logic (твой код, без изменений по сути) --------------------
 
     private fun reduceDraft(
         draft: ProjectEditState,
@@ -189,7 +263,6 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
     ): ProjectEditState {
         return when (action) {
             ManualEditAction.NoOp -> draft
-
             is ManualEditAction.ReplaceDraft -> action.newDraft.deepCopy()
 
             is ManualEditAction.SetGroupPhase -> {
@@ -224,8 +297,6 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
             }
 
             is ManualEditAction.CreateNewGroupAndMove -> {
-                // Мы не знаем id новой группы тут заранее (он генерится внутри),
-                // поэтому проще: bulk-финализация.
                 val changed = createNewGroupAndMove(draft, mode, action.deviceId)
                 finalizeAfterBulkCompositionChange(changed)
             }
@@ -237,29 +308,18 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
         }
     }
 
-    /**
-     * Общая финализация после изменения СОСТАВА групп:
-     * - удаляем пустые группы каскадом
-     * - пересчитываем линию для затронутых групп
-     *
-     * ВАЖНО: порядок именно такой:
-     * 1) сначала удаляем пустые группы (чтобы не пересчитывать мусор),
-     * 2) затем пересчитываем линию для оставшихся.
-     */
     private fun finalizeAfterCompositionChange(
         draft: ProjectEditState,
         touchedGroupIds: Set<Long>
     ): ProjectEditState {
         var cur = draft
 
-        // 1) Удаляем пустые группы (на случай, если они появились после move)
+        // 1) Удаляем пустые группы каскадом
         val emptyGroupIds = cur.groups
             .filter { it.deviceIds.isEmpty() }
             .map { it.groupId }
 
         for (gid in emptyGroupIds) {
-            // Каскадный delete: в нашем кейсе группа пустая => устройства не уедут,
-            // но мы централизуем удаление в одном механизме.
             cur = deleteGroupCascadeUseCase.execute(
                 DeleteGroupCascadeUseCase.Params(state = cur, groupId = gid)
             )
@@ -285,10 +345,6 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
         return cur.copy(groups = newGroups)
     }
 
-    /**
-     * Удобный вариант для автоопераций: пересчитать линию у ВСЕХ групп.
-     * (AutoAssign может трогать много групп, проще и надёжнее пересчитать все.)
-     */
     private fun finalizeAfterBulkCompositionChange(draft: ProjectEditState): ProjectEditState {
         val allIds = draft.groups.map { it.groupId }.toSet()
         return finalizeAfterCompositionChange(draft, allIds)
@@ -363,7 +419,6 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
         mode: PhaseMode,
         deviceId: Long
     ): ProjectEditState {
-        // if device is already in some group: remove it first (also allows "New group" from group)
         val currentGroupId = ManualDraftSelectors.findGroupIdContainingDevice(draft, deviceId)
         val intermediate = if (currentGroupId != null) {
             moveToUnassigned(draft, deviceId, currentGroupId)
@@ -373,7 +428,6 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
         val newGroupId = ManualDraftSelectors.nextTempGroupId(intermediate)
         val newGroupNumber = intermediate.nextGroupNumber
 
-        // roomId/name/type: keep minimal placeholders; you can refine mapping later
         val newGroup = ManualGroupDraft(
             groupId = newGroupId,
             groupNumber = newGroupNumber,
@@ -383,8 +437,8 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
             phase = phase,
             deviceIds = listOf(deviceId),
             nominalCurrent = 0.0,
-            circuitBreaker = 16, // default placeholder: adjust to your domain rules
-            cableSection = 2.5,  // default placeholder
+            circuitBreaker = 16,
+            cableSection = 2.5,
             breakerType = intermediate.groups.firstOrNull()?.breakerType ?: "",
             rcdRequired = false,
             rcdCurrent = null
@@ -409,26 +463,22 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
         val devicesById = ManualDraftSelectors.devicesById(draft)
         var curDraft = draft
 
-        // deterministic order: by deviceId asc
         val unassignedOrdered = draft.unassignedDeviceIds.toList().sorted()
 
         for (deviceId in unassignedOrdered) {
             val device = devicesById[deviceId] ?: continue
 
-            // candidates among existing groups
             val candidates = curDraft.groups.map { g ->
                 g to ManualDraftSelectors.scorePlacement(curDraft, mode, device, g)
             }
 
             val best = candidates
-                .filter { it.second.capacityClass != 2 } // drop impossible
+                .filter { it.second.capacityClass != 2 }
                 .minWithOrNull { a, b -> ManualDraftSelectors.compareScore(a.second, b.second) }
 
             curDraft = if (best == null) {
-                // no feasible group => new group
                 createNewGroupAndMove(curDraft, mode, deviceId)
             } else {
-                // place into best group (from unassigned)
                 moveFromUnassigned(curDraft, deviceId, best.first.groupId)
             }
         }

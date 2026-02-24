@@ -49,6 +49,8 @@ import ru.mugalimov.volthome.data.local.entity.OutboxEntity
 import ru.mugalimov.volthome.data.local.entity.OutboxOpType
 import ru.mugalimov.volthome.data.local.entity.TombstoneEntity
 import ru.mugalimov.volthome.data.local.entity.TombstoneEntityType
+import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
+import ru.mugalimov.volthome.data.repository.RoomRepository
 import ru.mugalimov.volthome.data.sync.outbox.RoomCreatePayload
 import ru.mugalimov.volthome.data.sync.outbox.RoomUpdatePayload
 import ru.mugalimov.volthome.data.sync.outbox.RoomDeletePayload
@@ -59,6 +61,7 @@ import ru.mugalimov.volthome.data.sync.outbox.toJson
 import ru.mugalimov.volthome.domain.model.DevicePreview
 import ru.mugalimov.volthome.domain.model.RoomWithDevicesPreview
 import ru.mugalimov.volthome.domain.telemetry.CreateDeviceOpBus
+import ru.mugalimov.volthome.domain.telemetry.CreateDeviceOpEvent
 
 class RoomRepositoryImpl @Inject constructor(
     private val roomDao: RoomDao,
@@ -75,8 +78,10 @@ class RoomRepositoryImpl @Inject constructor(
     private val outboxDao: OutboxDao,
     private val tombstoneDao: TombstoneDao,
     // ✅ Commit 1: bus корреляции add-devices
-    private val createDeviceOpBus: CreateDeviceOpBus
-) : ru.mugalimov.volthome.data.repository.RoomRepository {
+    private val createDeviceOpBus: CreateDeviceOpBus,
+    private val manualRepo:
+    ManualEditSessionRepository,
+) : RoomRepository {
 
     private val uuidDao get() = appDb.uuidMapDao()
 
@@ -399,13 +404,23 @@ class RoomRepositoryImpl @Inject constructor(
 
         // ✅ Commit 1: эмитим событие для VM (тут есть факт projectIdRecorded)
         createDeviceOpBus.publish(
-            ru.mugalimov.volthome.domain.telemetry.CreateDeviceOpEvent(
+            CreateDeviceOpEvent(
                 opId = opId,
                 projectIdRecorded = projectId,
                 roomId = roomId,
                 insertedIds = ids
             )
         )
+
+        // ✅ Commit 2: MANUAL последствия
+        // ВАЖНО: строго по projectIdRecorded (room.projectId), без activeProjectId и без VM.
+        if (manualRepo.isManualActive(projectId)) {
+            manualRepo.addInsertedDevicesToUnassigned(
+                projectId = projectId,
+                insertedDeviceIds = ids,
+                opId = opId // ✅ корреляция с CREATE_DEVICE_DB
+            )
+        }
 
         // outbox DEVICE_CREATE для каждого добавленного устройства
         ids.forEachIndexed { index, devId ->

@@ -83,9 +83,7 @@ class ManualModeAppBarViewModel @Inject constructor(
                 return@launch
             }
 
-            // Если уже в manual — повторно не входим.
-            val currentSession = manualRepo.getActiveSession()
-            if (currentSession?.projectId == projectId && currentSession.manualModeActive) {
+            if (manualRepo.isManualActive(projectId)) {
                 messages.tryEmit("Ручной режим уже включён")
                 return@launch
             }
