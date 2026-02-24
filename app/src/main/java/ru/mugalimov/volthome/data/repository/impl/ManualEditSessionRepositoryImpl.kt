@@ -238,10 +238,15 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
         sessionsFlow.value = sessionsFlow.value + (projectId to updated)
 
         // ✅ DoD корреляции: этот opId должен совпадать с CREATE_DEVICE_DB opId.
+        val caller = Throwable().stackTrace
+            .take(12)
+            .joinToString(" <- ") { "${it.className}.${it.methodName}:${it.lineNumber}" }
+
         Log.i(
             "MANUAL_POST_INSERT",
             "pid=$projectId opId=$opId inserted=${insertedDeviceIds.size} " +
-                    "unassigned(before=${before.unassignedDeviceIds.size} after=${merged.size})"
+                    "unassigned(before=${before.unassignedDeviceIds.size} after=${merged.size}) " +
+                    "caller=$caller"
         )
     }
 

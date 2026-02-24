@@ -425,25 +425,6 @@ class RoomRepositoryImpl @Inject constructor(
             )
         }
 
-        // ✅ Commit 1: эмитим событие для VM (тут есть факт projectIdRecorded)
-        createDeviceOpBus.publish(
-            CreateDeviceOpEvent(
-                opId = opId,
-                projectIdRecorded = projectId,
-                roomId = roomId,
-                insertedIds = ids
-            )
-        )
-
-        // ✅ Commit 2: MANUAL последствия
-        if (manualRepo.isManualActive(projectId)) {
-            manualRepo.addInsertedDevicesToUnassigned(
-                projectId = projectId,
-                insertedDeviceIds = ids,
-                opId = opId
-            )
-        }
-
         // ✅ Commit 3: AUTO rebuild после вставки (НЕ из UI)
         // A: emptyIds -> no-op, B: manual -> suppress, C: full rebuild, D: single-flight logs
         autoRebuildAfterInsertUseCase.get().execute(

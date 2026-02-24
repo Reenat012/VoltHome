@@ -1,8 +1,6 @@
 package ru.mugalimov.volthome.domain.use_case
 
 import android.util.Log
-import java.nio.ByteBuffer
-import java.security.MessageDigest
 import javax.inject.Inject
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.domain.model.CircuitGroup
@@ -12,20 +10,16 @@ import ru.mugalimov.volthome.domain.model.DistributionDecision
  * Сохранение результата AUTO-пересчёта в локальную БД.
  *
  * ❗STRUCTURE writer:
- * - Это ЯВНЫЙ structural commit (rebuild) по кнопке/сценарию.
+ * - Это ЯВНЫЙ structural commit (rebuild).
  * - Реактивный AUTO-контур НЕ имеет права менять структуру.
  *
  * Коммит v3.1:
  * - Single-flight (Mutex) per projectId
  * - Инварианты до записи
  *
- * ✅ FIX (2026-02-21):
- * - Калькулятор может вернуть группы с groupId=0 (плейсхолдер).
- * - Для БД это недопустимо: groupId используется как стабильная идентичность.
- * - Поэтому перед записью нормализуем id:
- *   - groupId > 0
- *   - уникален внутри набора
- *   - детерминированный (чтобы не плодить "свалку" случайных id)
+ * ✅ FIX (2026-02-24):
+ * - Больше НЕ "нормализуем" groupId и НЕ продолжаем сохранять при невалидных id.
+ * - Любые groupId<=0 или дубли groupId => hard-fail ДО записи в БД.
  *
  * ВАЖНО:
  * - manual режим НЕ трогаем: здесь мы сохраняем только AUTO результат в БД.
@@ -34,6 +28,7 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
     private val explicationRepository: ExplicationRepository,
     private val structuralWriteMutex: ProjectStructuralWriteMutex, // ✅ single-flight
 ) {
+
     data class Params(
         val projectId: String,
         val groups: List<CircuitGroup>,
@@ -57,30 +52,19 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
         require(params.projectId.isNotBlank()) { "projectId must be non-blank" }
 
         val projectId = params.projectId
+        val groups = params.groups
 
         // -------------------------------------------------------------------
-        // ✅ Нормализация id ДО инвариантов:
-        // - лечим groupId=0 и любые дубли groupId
-        // - делаем id детерминированным от projectId + полей группы
+        // ✅ HARD FAIL ДО инвариантов и ДО БД:
+        // - groupId must be > 0
+        // - groupId must be unique
+        // Никаких warning+save, никаких "лечений" тут.
         // -------------------------------------------------------------------
-        val groups = normalizeAutoGroupIds(
-            projectId = projectId,
-            groups = params.groups
-        )
+        failIfInvalidAutoGroupIds(projectId = projectId, groups = groups)
 
         // -------------------------
-        // ✅ Быстрые инварианты (до БД)
+        // ✅ Остальные инварианты (до БД)
         // -------------------------
-        val dupGroupIds = groups.groupBy { it.groupId }.filter { it.value.size > 1 }.keys
-        require(dupGroupIds.isEmpty()) {
-            "AUTO_SAVE invariant failed: duplicate groupId(s)=$dupGroupIds projectId=$projectId"
-        }
-
-        val invalidIds = groups.filter { it.groupId <= 0L }.map { it.groupNumber to it.groupId }
-        require(invalidIds.isEmpty()) {
-            "AUTO_SAVE invariant failed: non-positive groupId(s)=$invalidIds projectId=$projectId"
-        }
-
         val dupNumbers = groups.groupBy { it.groupNumber }.filter { it.value.size > 1 }.keys
         require(dupNumbers.isEmpty()) {
             "AUTO_SAVE invariant failed: duplicate groupNumber(s)=$dupNumbers projectId=$projectId"
@@ -127,84 +111,50 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
         }
     }
 
-    /**
-     * Нормализует groupId для AUTO-результата.
-     *
-     * Правило:
-     * - если ВСЁ ок (все id > 0 и нет дублей) — возвращаем как есть.
-     * - иначе:
-     *   - присваиваем детерминированные id по ключу группы
-     *   - разрешаем коллизии (маловероятно) через suffix-соль
-     *
-     * Почему детерминированно:
-     * - чтобы не плодить "рандомные" id и не превращать БД в свалку
-     * - чтобы одинаковая структура в рамках проекта давала одинаковые id
-     */
+    private fun failIfInvalidAutoGroupIds(projectId: String, groups: List<CircuitGroup>) {
+        if (groups.isEmpty()) return
+
+        // 1) id must be > 0
+        val invalid = groups
+            .asSequence()
+            .filter { it.groupId <= 0L }
+            .map { g -> "num=${g.groupNumber}:id=${g.groupId}" }
+            .take(30)
+            .toList()
+
+        if (invalid.isNotEmpty()) {
+            val caller = Throwable().stackTrace
+                .drop(1)
+                .take(10)
+                .joinToString(" <- ") {
+                    "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}"
+                }
+
+            val sampleIds = groups.asSequence().map { it.groupId }.take(20).toList()
+
+            throw IllegalStateException(
+                "AUTO_SAVE hard-fail: non-positive groupId(s) detected projectId=$projectId " +
+                        "invalid(sample)=$invalid ids(sample)=$sampleIds caller=$caller"
+            )
+        }
+
+        // 2) id must be unique
+        val dupIds = groups.groupBy { it.groupId }.filter { it.value.size > 1 }.keys
+        if (dupIds.isNotEmpty()) {
+            val sample = dupIds.take(30)
+            throw IllegalStateException(
+                "AUTO_SAVE hard-fail: duplicate groupId(s)=$sample projectId=$projectId"
+            )
+        }
+    }
+
+    @Deprecated(
+        message = "Forbidden: AUTO must provide valid stable unique groupId(s). " +
+                "Normalization hides bugs and is not allowed. Use hard-fail.",
+        level = DeprecationLevel.ERROR
+    )
     private fun normalizeAutoGroupIds(
         projectId: String,
         groups: List<CircuitGroup>
-    ): List<CircuitGroup> {
-        if (groups.isEmpty()) return groups
-
-        val hasNonPositive = groups.any { it.groupId <= 0L }
-        val dup = groups.groupBy { it.groupId }.any { (_, v) -> v.size > 1 }
-        if (!hasNonPositive && !dup) return groups
-
-        Log.w(
-            "AUTO_SAVE",
-            "normalizeAutoGroupIds: detected invalid ids. " +
-                    "hasNonPositive=$hasNonPositive dup=$dup sample=${groups.map { it.groupId }.take(12)}"
-        )
-
-        val used = HashSet<Long>(groups.size * 2)
-
-        fun groupStableKey(g: CircuitGroup): String {
-            return buildString {
-                append("pid=").append(projectId)
-                append("|num=").append(g.groupNumber)
-                append("|roomId=").append(g.roomId)
-                append("|roomName=").append(g.roomName)
-                append("|type=").append(g.groupType.name)
-                append("|phase=").append(g.phase?.name ?: "null")
-            }
-        }
-
-        return groups.map { g ->
-            val idOk = g.groupId > 0L && used.add(g.groupId)
-            if (idOk) return@map g
-
-            val baseKey = groupStableKey(g)
-
-            // Пытаемся несколько раз на случай коллизии.
-            var attempt = 0
-            var newId: Long
-            do {
-                val salted = if (attempt == 0) baseKey else "$baseKey|salt=$attempt"
-                newId = stablePositiveLong(salted)
-
-                attempt++
-                if (attempt > 1000) {
-                    throw IllegalStateException(
-                        "AUTO_SAVE failed to allocate unique groupId for key=$baseKey"
-                    )
-                }
-            } while (!used.add(newId))
-
-            // ВАЖНО: копируем только groupId, остальное не трогаем.
-            g.copy(groupId = newId)
-        }
-    }
-
-    /**
-     * Детерминированный Long > 0 на основе строки.
-     * Используем SHA-256 и берём первые 8 байт.
-     */
-    private fun stablePositiveLong(input: String): Long {
-        val md = MessageDigest.getInstance("SHA-256")
-        val hash = md.digest(input.toByteArray(Charsets.UTF_8))
-
-        val value = ByteBuffer.wrap(hash, 0, 8).long
-        val positive = value and Long.MAX_VALUE
-        return if (positive == 0L) 1L else positive
-    }
+    ): List<CircuitGroup> = groups
 }
