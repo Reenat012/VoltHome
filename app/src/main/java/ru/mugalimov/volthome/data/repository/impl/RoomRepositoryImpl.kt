@@ -358,6 +358,24 @@ class RoomRepositoryImpl @Inject constructor(
             )
         )
 
+        // ✅ Commit 4: MANUAL post-insert для room-create (unassigned)
+        // ВАЖНО:
+        // 1) строго по projectIdRecorded (projectId из ensureActiveDraft), без activeProjectId и без VM
+        // 2) это единственная точка, которая "автоматом" кладёт созданные устройства в draft.unassignedDeviceIds
+        // 3) лог-гейт: должен быть ровно один на операцию (как и CREATE_DEVICE_DB)
+        if (manualRepo.isManualActive(projectId)) {
+            Log.i(
+                "MANUAL_POST_INSERT",
+                "pid=$projectId opId=$opId inserted=${deviceIds.size} roomId=$roomId"
+            )
+
+            manualRepo.addInsertedDevicesToUnassigned(
+                projectId = projectId,
+                insertedDeviceIds = deviceIds,
+                opId = opId // ✅ корреляция с CREATE_DEVICE_DB / CreateDeviceOpBus
+            )
+        }
+
         loadDao.addLoad(
             LoadEntity(
                 name = req.name,
