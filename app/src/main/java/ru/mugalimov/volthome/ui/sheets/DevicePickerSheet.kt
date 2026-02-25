@@ -1,4 +1,4 @@
-// File: volthome/ui/sheets/DevicePickerSheet.kt
+
 package ru.mugalimov.volthome.ui.sheets
 
 import android.annotation.SuppressLint
