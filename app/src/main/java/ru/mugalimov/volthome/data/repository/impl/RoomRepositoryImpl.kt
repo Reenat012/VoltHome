@@ -64,6 +64,7 @@ import ru.mugalimov.volthome.domain.telemetry.CreateDeviceOpBus
 import ru.mugalimov.volthome.domain.telemetry.CreateDeviceOpEvent
 import ru.mugalimov.volthome.domain.use_case.AutoRebuildGroupsAfterDeviceInsertUseCase
 import dagger.Lazy
+import java.util.UUID
 
 class RoomRepositoryImpl @Inject constructor(
     private val roomDao: RoomDao,
@@ -295,75 +296,99 @@ class RoomRepositoryImpl @Inject constructor(
     override suspend fun getAllRoom(): List<Room> =
         withContext(dispatchers) { roomDao.getAllRooms().mapToDomainRooms() }
 
-    override suspend fun addRoomWithDevices(req: RoomCreateRequest): CreatedRoomResult =
-        withContext(dispatchers) {
-            val projectId = projectsRepo.ensureActiveDraft()
-            Log.i("AddRoomWD", "CLICK name='${req.name}' projectId=$projectId")
+    override suspend fun addRoomWithDevices(req: RoomCreateRequest): CreatedRoomResult {
+        // ✅ Commit 2: старый контракт не ломаем — генерируем legacy-opId и делегируем в новый overload.
+        val opId = "legacy-" + UUID.randomUUID().toString()
+        return addRoomWithDevices(req = req, opId = opId)
+    }
 
-            val exists = roomDao.existsByNameInProject(req.name, projectId)
-            if (exists) throw IllegalArgumentException("Комната '${req.name}' уже существует")
+    override suspend fun addRoomWithDevices(
+        req: RoomCreateRequest,
+        opId: String
+    ): CreatedRoomResult = withContext(dispatchers) {
+        val projectId = projectsRepo.ensureActiveDraft()
 
-            val createdAt = Date()
-            val room = RoomEntity(
-                id = 0L, name = req.name, roomType = req.roomType, createdAt = createdAt, projectId = projectId
+        // ✅ Commit 2: логируем opId прямо в repo (как требование gates)
+        Log.i(
+            "AddRoomWD",
+            "CLICK name='${req.name}' projectId=$projectId opId=$opId"
+        )
+
+        val exists = roomDao.existsByNameInProject(req.name, projectId)
+        if (exists) throw IllegalArgumentException("Комната '${req.name}' уже существует")
+
+        val createdAt = Date()
+        val room = RoomEntity(
+            id = 0L,
+            name = req.name,
+            roomType = req.roomType,
+            createdAt = createdAt,
+            projectId = projectId
+        )
+
+        val devices = expand(req.devices, roomId = null, projectId = projectId)
+        val (roomId, deviceIds) = roomsTxDao.insertRoomWithDevices(room, devices)
+
+        loadDao.addLoad(
+            LoadEntity(
+                name = req.name,
+                currentRoom = 0.0,
+                powerRoom = 0,
+                countDevices = 0,
+                createdAt = createdAt,
+                roomId = roomId,
+                projectId = projectId
             )
+        )
 
-            val devices = expand(req.devices, roomId = null, projectId = projectId)
-            val (roomId, deviceIds) = roomsTxDao.insertRoomWithDevices(room, devices)
-
-            loadDao.addLoad(
-                LoadEntity(
-                    name = req.name, currentRoom = 0.0, powerRoom = 0,
-                    countDevices = 0, createdAt = createdAt, roomId = roomId, projectId = projectId
-                )
+        // outbox ROOM_CREATE
+        outboxDao.insert(
+            OutboxEntity(
+                project_id = projectId,
+                op_type = OutboxOpType.ROOM_CREATE,
+                payload_json = RoomCreatePayload(
+                    projectId = projectId,
+                    localId = roomId,
+                    name = req.name,
+                    roomType = req.roomType,
+                    createdAt = createdAt.time
+                ).toJson(),
+                group_key = "room:create:$projectId:$roomId"
             )
+        )
 
-            // outbox ROOM_CREATE
+        // outbox DEVICE_CREATE для каждого устройства (сопоставляем ids с исходными entities)
+        deviceIds.forEachIndexed { index, devId ->
+            val dev = devices[index]
             outboxDao.insert(
                 OutboxEntity(
                     project_id = projectId,
-                    op_type = OutboxOpType.ROOM_CREATE,
-                    payload_json = RoomCreatePayload(
+                    op_type = OutboxOpType.DEVICE_CREATE,
+                    payload_json = DeviceCreatePayload(
                         projectId = projectId,
-                        localId = roomId,
-                        name = req.name,
-                        roomType = req.roomType,
-                        createdAt = createdAt.time
+                        localId = devId,
+                        roomLocalId = roomId,
+                        name = dev.name,
+                        power = dev.power,
+                        voltage = dev.voltage,
+                        demandRatio = dev.demandRatio,
+                        createdAt = dev.createdAt.time,
+                        deviceType = dev.deviceType,
+                        powerFactor = dev.powerFactor,
+                        hasMotor = dev.hasMotor,
+                        requiresDedicatedCircuit = dev.requiresDedicatedCircuit,
+                        requiresSocketConnection = dev.requiresSocketConnection
                     ).toJson(),
-                    group_key = "room:create:$projectId:$roomId"
+                    group_key = "device:create:$projectId:$devId"
                 )
             )
-
-            // outbox DEVICE_CREATE для каждого устройства (сопоставляем ids с исходными entities)
-            deviceIds.forEachIndexed { index, devId ->
-                val dev = devices[index]
-                outboxDao.insert(
-                    OutboxEntity(
-                        project_id = projectId,
-                        op_type = OutboxOpType.DEVICE_CREATE,
-                        payload_json = DeviceCreatePayload(
-                            projectId = projectId,
-                            localId = devId,
-                            roomLocalId = roomId,
-                            name = dev.name,
-                            power = dev.power,
-                            voltage = dev.voltage,
-                            demandRatio = dev.demandRatio,
-                            createdAt = dev.createdAt.time,
-                            deviceType = dev.deviceType,
-                            powerFactor = dev.powerFactor,
-                            hasMotor = dev.hasMotor,
-                            requiresDedicatedCircuit = dev.requiresDedicatedCircuit,
-                            requiresSocketConnection = dev.requiresSocketConnection
-                        ).toJson(),
-                        group_key = "device:create:$projectId:$devId"
-                    )
-                )
-            }
-
-            OutboxPushWorker.enqueueProject(context, projectId)
-            CreatedRoomResult(roomId = roomId, deviceIds = deviceIds)
         }
+
+        OutboxPushWorker.enqueueProject(context, projectId)
+
+        // ✅ Возвращаем результат как и раньше
+        CreatedRoomResult(roomId = roomId, deviceIds = deviceIds)
+    }
 
     override suspend fun addDevicesToRoom(
         roomId: Long,
