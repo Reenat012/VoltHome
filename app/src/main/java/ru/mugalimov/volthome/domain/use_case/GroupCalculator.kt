@@ -17,6 +17,8 @@ import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.domain.model.SafetyProfile
 import ru.mugalimov.volthome.domain.use_case.PhaseDistributor.distributeGroupsBalanced
 import ru.mugalimov.volthome.domain.use_case.PhaseDistributor.distributeGroupsBalancedWithLog
+import java.nio.ByteBuffer
+import java.security.MessageDigest
 import kotlin.math.ceil
 
 
@@ -86,14 +88,17 @@ class GroupCalculator(
                 .sortedWith(compareBy<CircuitGroup> { it.roomId }.thenBy { it.groupNumber })
                 .mapIndexed { idx, g -> g.copy(groupNumber = idx + 1) }
 
+            // 3.1) ✅ Генерируем стабильные groupId (валидные, уникальные, детерминированные)
+            // Важно: НЕ используем groupNumber как ключ — он может измениться при добавлении/удалении устройств.
+            val withStableIds = assignStableGroupIds(normalized)
+
             // 4) Балансировка фаз / режим 1 фаза
             val (distributed, decisionLog) =
                 if (mode == PhaseMode.THREE) {
-                    distributeGroupsBalancedWithLog(normalized)
+                    distributeGroupsBalancedWithLog(withStableIds)
                 } else {
-                    normalized.map { it.copy(phase = Phase.A) } to emptyList()
+                    withStableIds.map { it.copy(phase = Phase.A) } to emptyList()
                 }
-
 
             // 5) Валидация до сохранения
             validateBeforeSave(distributed)
@@ -269,6 +274,7 @@ class GroupCalculator(
     private fun validateBeforeSave(groups: List<CircuitGroup>) {
         val eps = 1e-6
         groups.forEach { g ->
+            // phase в модели не nullable, но оставляем проверку как инвариант (если модель поменяют — поймаем сразу)
             requireNotNull(g.phase) { "Группа №${g.groupNumber} без фазы" }
             require(g.nominalCurrent <= g.circuitBreaker + eps) {
                 "Группа №${g.groupNumber}: ${"%.2f".format(g.nominalCurrent)} А > ${g.circuitBreaker} А"
@@ -278,6 +284,97 @@ class GroupCalculator(
                 "Группа №${g.groupNumber}: тип группы ${g.groupType} не совпадает с типами устройств"
             }
         }
+    }
+
+// ------------------------------------------------------------------------
+// ✅ Stable groupId allocator (Commit B1)
+// ------------------------------------------------------------------------
+
+    /**
+     * Генерирует стабильные groupId для AUTO-результата.
+     *
+     * Гарантии:
+     * - id > 0
+     * - unique в пределах списка
+     * - stable (детерминированно): одинаковая структура => одинаковые id
+     *
+     * Ключ НЕ использует groupNumber (он может меняться при добавлении/удалении устройств).
+     * Основа ключа:
+     *   roomId + groupType + sorted(deviceIds) + breaker/cable/rcd
+     */
+    private fun assignStableGroupIds(groups: List<CircuitGroup>): List<CircuitGroup> {
+        if (groups.isEmpty()) return groups
+
+        // Сохраняем порядок стабильным: от этого зависит детерминированное разрешение коллизий.
+        val ordered = groups.sortedWith(
+            compareBy<CircuitGroup> { it.roomId }
+                .thenBy { it.groupType.name }
+                .thenBy { stableDevicesKey(it) }
+                .thenBy { it.circuitBreaker }
+                .thenBy { it.cableSection }
+                .thenBy { it.rcdRequired }
+                .thenBy { it.rcdCurrent }
+        )
+
+        val used = HashSet<Long>(ordered.size * 2)
+
+        return ordered.map { g ->
+            val baseKey = buildStableKey(g)
+
+            // На случай коллизий добавляем соль детерминированно.
+            var attempt = 0
+            var newId: Long
+            do {
+                val saltedKey = if (attempt == 0) baseKey else "$baseKey|salt=$attempt"
+                newId = stablePositiveLong(saltedKey)
+                attempt++
+                if (attempt > 1000) {
+                    // Это уже "вселенной конец": значит ключи реально совпали массово.
+                    throw IllegalStateException("Failed to allocate unique stable groupId for key=$baseKey")
+                }
+            } while (!used.add(newId))
+
+            // ВАЖНО: меняем ТОЛЬКО groupId. Всё остальное — как рассчитано.
+            g.copy(groupId = newId)
+        }
+    }
+
+    /**
+     * Стабильный ключ устройств:
+     * - используем device.id (локальный id > 0 после insert)
+     * - сортируем, чтобы порядок не влиял
+     */
+    private fun stableDevicesKey(g: CircuitGroup): String =
+        g.devices
+            .asSequence()
+            .map { it.id }
+            .sorted()
+            .joinToString(separator = ",")
+
+    /**
+     * Базовый stable key группы.
+     * Здесь сознательно нет groupNumber.
+     */
+    private fun buildStableKey(g: CircuitGroup): String = buildString {
+        append("roomId=").append(g.roomId)
+        append("|type=").append(g.groupType.name)
+        append("|devs=").append(stableDevicesKey(g))
+        append("|breaker=").append(g.circuitBreaker)
+        append("|cable=").append(g.cableSection)
+        append("|rcdReq=").append(g.rcdRequired)
+        append("|rcdCur=").append(g.rcdCurrent)
+    }
+
+    /**
+     * Детерминированный Long > 0 на основе строки.
+     * Используем SHA-256 и берём первые 8 байт.
+     */
+    private fun stablePositiveLong(input: String): Long {
+        val md = MessageDigest.getInstance("SHA-256")
+        val hash = md.digest(input.toByteArray(Charsets.UTF_8))
+        val value = ByteBuffer.wrap(hash, 0, 8).long
+        val positive = value and Long.MAX_VALUE
+        return if (positive == 0L) 1L else positive
     }
 }
 
