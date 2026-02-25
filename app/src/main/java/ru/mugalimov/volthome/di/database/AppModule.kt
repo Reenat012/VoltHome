@@ -58,7 +58,8 @@ object DatabaseModule {
                 AppDatabase.MIGRATION_23_24,
                 AppDatabase.MIGRATION_24_25, // «санитарная» миграция: выравнивание индексов под Entity
                 AppDatabase.MIGRATION_25_26,
-                AppDatabase.MIGRATION_26_27
+                AppDatabase.MIGRATION_26_27,
+                AppDatabase.MIGRATION_27_28 // ownership lock + bootstrap version
             )
             // Для клиентов с очень старыми версиями (<16) просто пересоздаём БД
             .fallbackToDestructiveMigrationFrom(

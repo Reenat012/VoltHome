@@ -61,7 +61,7 @@ import java.util.UUID
         TombstoneEntity::class,
         GroupPhaseOverrideEntity::class
     ],
-    version = 27,
+    version = 28,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -902,6 +902,52 @@ abstract class AppDatabase : RoomDatabase() {
                         ALTER TABLE project_local_state
                         ADD COLUMN active_manual_project_id TEXT
                         """.trimIndent()
+                        )
+                    }
+                }
+            }
+        }
+
+        /**
+         * 27 -> 28: добавляем persisted ownership поля:
+         * - manual_overrides_present (SoT lock)
+         * - manual_lock_bootstrap_version (версия bootstrap/backfill)
+         *
+         * Safe: проверяем PRAGMA table_info, чтобы не падать на "кривых" базах.
+         */
+        val MIGRATION_27_28 = object : Migration(27, 28) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.query("PRAGMA table_info(project_local_state)").use { cursor ->
+                    val nameIndex = cursor.getColumnIndex("name")
+
+                    var hasManualOverrides = false
+                    var hasBootstrapVersion = false
+
+                    while (cursor.moveToNext()) {
+                        val col = if (nameIndex >= 0) cursor.getString(nameIndex) else null
+                        when (col) {
+                            "manual_overrides_present" -> hasManualOverrides = true
+                            "manual_lock_bootstrap_version" -> hasBootstrapVersion = true
+                        }
+                    }
+
+                    // ownership lock: INTEGER 0/1 (Room будет маппить в Boolean)
+                    if (!hasManualOverrides) {
+                        db.execSQL(
+                            """
+                            ALTER TABLE project_local_state
+                            ADD COLUMN manual_overrides_present INTEGER NOT NULL DEFAULT 0
+                            """.trimIndent()
+                        )
+                    }
+
+                    // bootstrap version: INTEGER
+                    if (!hasBootstrapVersion) {
+                        db.execSQL(
+                            """
+                            ALTER TABLE project_local_state
+                            ADD COLUMN manual_lock_bootstrap_version INTEGER NOT NULL DEFAULT 0
+                            """.trimIndent()
                         )
                     }
                 }
