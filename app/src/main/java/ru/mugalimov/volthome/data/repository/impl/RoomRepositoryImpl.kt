@@ -363,7 +363,8 @@ class RoomRepositoryImpl @Inject constructor(
         // 1) строго по projectIdRecorded (projectId из ensureActiveDraft), без activeProjectId и без VM
         // 2) это единственная точка, которая "автоматом" кладёт созданные устройства в draft.unassignedDeviceIds
         // 3) лог-гейт: должен быть ровно один на операцию (как и CREATE_DEVICE_DB)
-        if (manualRepo.isManualActive(projectId)) {
+        val manualActive = manualRepo.isManualActive(projectId)
+        if (manualActive) {
             Log.i(
                 "MANUAL_POST_INSERT",
                 "pid=$projectId opId=$opId inserted=${deviceIds.size} roomId=$roomId"
@@ -375,6 +376,20 @@ class RoomRepositoryImpl @Inject constructor(
                 opId = opId // ✅ корреляция с CREATE_DEVICE_DB / CreateDeviceOpBus
             )
         }
+
+        // ✅ Commit 5: AUTO post-insert для room-create (rebuild/suppress/busy/panic)
+        // Требование: это должно жить в repo, не в UI.
+        // Политика:
+        //  - manualActive=true  -> suppress (usecase сам залогирует SUPPRESS manualActive)
+        //  - manualActive=false -> rebuild (usecase залогирует DONE)
+        //  - Busy/Panic/Error   -> логируется внутри usecase (у тебя уже единый формат)
+        autoRebuildAfterInsertUseCase.get().execute(
+            AutoRebuildGroupsAfterDeviceInsertUseCase.Params(
+                projectIdRecorded = projectId,
+                insertedIds = deviceIds,
+                opId = opId
+            )
+        )
 
         loadDao.addLoad(
             LoadEntity(
