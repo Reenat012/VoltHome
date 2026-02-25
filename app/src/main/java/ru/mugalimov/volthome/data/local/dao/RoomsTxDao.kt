@@ -34,16 +34,19 @@ interface RoomsTxDao {
         val roomId = insertRoom(room)
         android.util.Log.i("RoomsTxDao", "room inserted result=$roomId (<=0 means conflict)")
 
-        if (roomId <= 0L) {
-            android.util.Log.w("RoomsTxDao", "room conflict (unique name+project). returning -1")
-            return -1L to emptyList()
-        }
+        // ✅ Commit 6: НИКАКИХ "тихих -1". Конфликт = ошибка (repo превратит в понятную UI-ошибку).
+        require(roomId > 0L) { "ROOM_TX failed: insertRoom returned roomId=$roomId (conflict?)" }
 
         val withFk = devices.map { it.copy(roomId = roomId) }
         android.util.Log.i("RoomsTxDao", "devices toInsert=${withFk.size}")
 
         val ids = insertDevicesInternal(withFk)
         android.util.Log.i("RoomsTxDao", "devices inserted count=${ids.size}")
+
+        // ✅ Commit 6: инвариант соответствия количества
+        require(ids.size == withFk.size) {
+            "ROOM_TX invariant failed: insertedIds=${ids.size} expected=${withFk.size} roomId=$roomId"
+        }
 
         android.util.Log.i("RoomsTxDao", "TX end")
         return roomId to ids

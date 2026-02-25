@@ -315,7 +315,7 @@ class RoomRepositoryImpl @Inject constructor(
         )
 
         val exists = roomDao.existsByNameInProject(req.name, projectId)
-        if (exists) throw IllegalArgumentException("Комната '${req.name}' уже существует")
+        if (exists) throw RoomAlreadyExistsException("Комната '${req.name}' уже существует")
 
         // ✅ Commit 3: tombstone-consistent count ДО (как в add-devices)
         val countBefore = deviceDao.countActiveByProjectId(projectId)
@@ -331,6 +331,19 @@ class RoomRepositoryImpl @Inject constructor(
 
         val devices = expand(req.devices, roomId = null, projectId = projectId)
         val (roomId, deviceIds) = roomsTxDao.insertRoomWithDevices(room, devices)
+
+        // ✅ Commit 6: repo-level guards (вдобавок к require в TX — двойной замок, чтобы не было "id=-1" нигде)
+        require(roomId > 0L) { "ROOM_CREATE failed: roomId=$roomId pid=$projectId opId=$opId" }
+        require(deviceIds.size == devices.size) {
+            "ROOM_CREATE invariant failed: insertedIds=${deviceIds.size} expectedDevices=${devices.size} " +
+                    "pid=$projectId roomId=$roomId opId=$opId"
+        }
+
+        // ✅ Commit 6: короткий TX summary (по opId)
+        Log.i(
+            "ROOM_CREATE_TX",
+            "opId=$opId pid=$projectId roomId=$roomId devicesExpected=${devices.size} devicesInserted=${deviceIds.size}"
+        )
 
         // ✅ Commit 3: tombstone-consistent count ПОСЛЕ
         val countAfter = deviceDao.countActiveByProjectId(projectId)
