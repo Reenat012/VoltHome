@@ -508,6 +508,13 @@ class RoomRepositoryImpl @Inject constructor(
     ): List<DeviceEntity> = reqs.flatMap { r ->
         val def = deviceDefaults[r.type]
         val qty = r.count.coerceAtLeast(0)
+
+        // ✅ Commit 0: берём кастомные флаги из запроса, если они заданы в UI.
+        // Если UI не задавал — используем дефолты из каталога (provider).
+        val hasMotor = r.hasMotor ?: def.hasMotor
+        val requiresDedicated = r.requiresDedicatedCircuit ?: def.requiresDedicatedCircuit
+        val requiresSocket = r.requiresSocketConnection ?: def.requiresSocketConnection
+
         (0 until qty).map {
             DeviceEntity(
                 deviceId = 0L,
@@ -519,9 +526,12 @@ class RoomRepositoryImpl @Inject constructor(
                 roomId = roomId ?: 0L,
                 deviceType = r.type,
                 powerFactor = r.powerFactor ?: def.powerFactor,
-                hasMotor = def.hasMotor,
-                requiresDedicatedCircuit = def.requiresDedicatedCircuit,
-                requiresSocketConnection = def.requiresSocketConnection,
+
+                // ✅ Commit 0: НЕ игнорируем кастомизацию, которую ввёл пользователь в UI
+                hasMotor = hasMotor,
+                requiresDedicatedCircuit = requiresDedicated,
+                requiresSocketConnection = requiresSocket,
+
                 projectId = projectId
             )
         }
