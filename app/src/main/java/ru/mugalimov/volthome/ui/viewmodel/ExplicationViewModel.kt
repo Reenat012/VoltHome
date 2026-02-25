@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
@@ -57,6 +58,7 @@ import ru.mugalimov.volthome.domain.model.report.ReportMeta
 import ru.mugalimov.volthome.domain.model.report.ReportPhase
 import ru.mugalimov.volthome.domain.model.report.professional.ProfessionalSections
 import ru.mugalimov.volthome.domain.telemetry.CreateDeviceOpBus
+import ru.mugalimov.volthome.domain.use_case.BootstrapManualLockUseCase
 import ru.mugalimov.volthome.domain.use_case.CalculateDeviceBreakdownUseCase
 import ru.mugalimov.volthome.domain.use_case.CalculateGroupBreakdownUseCase
 import ru.mugalimov.volthome.domain.use_case.CalculateShieldOverviewUseCase
@@ -92,11 +94,12 @@ class ExplicationViewModel @Inject constructor(
     private val activeProjectDs: ActiveProjectDataStore,
     private val manualRepo: ManualEditSessionRepository,
 
+    // ✅ Commit 2: single entry-point bootstrap hook
+    private val bootstrapManualLockUseCase: BootstrapManualLockUseCase,
+
     private val commitManualDraftToLocalDbUseCase: CommitManualDraftToLocalDbUseCase,
     private val cancelManualAndAutoRecalcUseCase: CancelManualAndAutoRecalcUseCase,
     private val saveAutoCalculatedGroupsToLocalDbUseCase: SaveAutoCalculatedGroupsToLocalDbUseCase,
-
-    // ✅ Коммит 8: kill-process UX маркер
     private val manualDraftResetNotifier: ManualDraftResetNotifier,
     private val createDeviceOpBus: CreateDeviceOpBus,
 ) : ViewModel() {
@@ -336,6 +339,20 @@ class ExplicationViewModel @Inject constructor(
             preferencesRepository.phaseMode.collect { mode ->
                 _phaseMode.value = mode
             }
+        }
+
+        // ✅ Commit 2: BOOTSTRAP — строго единственный entry-point
+        // Запускаем на смене activeProjectId.
+        // Дедуп обеспечивается persisted bootstrapVersion внутри usecase.
+        viewModelScope.launch(ioDispatcher) {
+            activeProjectIdState
+                .filterNotNull()
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .distinctUntilChanged()
+                .collectLatest { pid ->
+                    bootstrapManualLockUseCase.execute(pid)
+                }
         }
 
         // 2) Kill-process UX:

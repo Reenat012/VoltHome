@@ -38,12 +38,18 @@ abstract class ProjectLocalStateDao {
 
     /**
      * Гарантирует существование строки проекта. Если строки нет — создаёт.
-     * Важно: используем РЕАЛЬНЫЕ имена полей сущности (snake_case).
+     *
+     * ВАЖНО:
+     * - projectId может прилететь с пробелами.
+     * - пустой projectId нельзя вставлять в таблицу (это будет мусорная строка).
      */
     suspend fun ensureRow(projectId: String) {
+        val pid = projectId.trim()
+        if (pid.isBlank()) return
+
         insertIgnore(
             ProjectLocalStateEntity(
-                project_id = projectId,
+                project_id = pid,
                 remote_version = 0,
                 last_sync_at = null,
                 has_local_changes = false,

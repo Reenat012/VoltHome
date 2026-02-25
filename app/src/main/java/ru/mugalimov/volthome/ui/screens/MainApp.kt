@@ -19,6 +19,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,6 +47,7 @@ import ru.mugalimov.volthome.domain.model.ProFeature
 import ru.mugalimov.volthome.domain.model.manual.ManualEditSession
 import ru.mugalimov.volthome.domain.use_case.manual.CancelManualAndAutoRecalcUseCase
 import ru.mugalimov.volthome.domain.use_case.manual.CommitManualDraftToLocalDbUseCase
+import ru.mugalimov.volthome.domain.use_case.manual.ReconcileManualMarkerOnStartupUseCase
 import ru.mugalimov.volthome.ui.manual.LocalManualModeGuard
 import ru.mugalimov.volthome.ui.manual.ManualModeGuard
 import ru.mugalimov.volthome.ui.manual.ManualModeGuardDialog
@@ -64,13 +66,6 @@ import ru.mugalimov.volthome.ui.viewmodel.ManualModeAppBarViewModel
 import ru.mugalimov.volthome.ui.viewmodel.ProfileViewModel
 import ru.mugalimov.volthome.ui.viewmodel.ProjectsViewModel
 import ru.mugalimov.volthome.ui.viewmodel.UserPlanViewModel
-import androidx.compose.runtime.rememberCoroutineScope
-import ru.mugalimov.volthome.data.local.dao.ProjectLocalStateDao
-import ru.mugalimov.volthome.domain.use_case.StructuralWriteCoordinator
-
-// ✅ Единый ключ для GLOBAL writer-операций по persisted marker ручного режима.
-// Должен совпадать со строкой, используемой в репозитории/писателе.
-private const val GLOBAL_MARKER_KEY = "__GLOBAL_MANUAL_MARKER__"
 
 @Composable
 fun MainApp(
@@ -122,8 +117,8 @@ fun MainApp(
     val commitUseCase = remember { commitEp.commitManualDraftToLocalDbUseCase() }
     val cancelUseCase = remember { commitEp.cancelManualAndAutoRecalcUseCase() }
 
-    val coordinator: StructuralWriteCoordinator = remember { commitEp.structuralWriteCoordinator() }
-    val projectLocalStateDao: ProjectLocalStateDao = remember { commitEp.projectLocalStateDao() }
+    // ✅ Reconcile вынесли в usecase: UI не знает про DAO и persisted marker
+    val reconcileManualMarkerUseCase = remember { commitEp.reconcileManualMarkerOnStartupUseCase() }
 
     // ✅ КРИТИЧНО: overrides живут отдельно и в AUTO перетирают фазы поверх сохранённых групп.
     // После manual-save их нужно чистить, иначе получаешь "откат" в AUTO.
@@ -202,75 +197,14 @@ fun MainApp(
     // -----------------------------
     LaunchedEffect(Unit) {
         try {
-            // Все операции с persisted marker — ТОЛЬКО под coordinator GLOBAL_MARKER_KEY
-            val out = coordinator.execute(
-                projectId = GLOBAL_MARKER_KEY,
-                opName = "MANUAL_RECONCILE_STARTUP"
-            ) {
-                // ✅ Внутри execute перечитываем session, чтобы не работать с устаревшими значениями.
-                val session = manualRepo.getActiveSession()
-                val hasInMemory = session?.manualModeActive == true
-                val sessionPid = session?.projectId
+            when (val action = reconcileManualMarkerUseCase.execute()) {
+                ReconcileManualMarkerOnStartupUseCase.Action.RESET ->
+                    snackbarHostState.showSnackbar("Ручной режим был сброшен (перезапуск приложения)")
 
-                val marked = projectLocalStateDao.getActiveManualProjectId()
+                ReconcileManualMarkerOnStartupUseCase.Action.RESTORE ->
+                    snackbarHostState.showSnackbar("Ручной режим восстановлен после перезапуска")
 
-                // ⚠️ Нельзя return@execute — не компилируется. Поэтому возвращаем через переменную.
-                var action = "NOOP"
-
-                // 1) marker есть, session нет -> чистим marker
-                if (marked != null && !hasInMemory) {
-                    val cleared = projectLocalStateDao.clearActiveManualMarkerGlobal()
-                    Log.w(
-                        "MANUAL_RECON",
-                        "op=MANUAL_RECONCILE_STARTUP pid=$GLOBAL_MARKER_KEY case=marker_without_session " +
-                                "marked=$marked sessionPid=null clearedRows=$cleared"
-                    )
-                    action = "RESET" // сигнал наружу для snackbar
-                }
-                // 2) mismatch: marker=A, session=B -> приводим marker к sessionPid
-                else if (marked != null && hasInMemory && sessionPid != null && marked != sessionPid) {
-                    val cleared = projectLocalStateDao.clearActiveManualMarkerGlobal()
-                    projectLocalStateDao.ensureRow(sessionPid)
-                    val rows = projectLocalStateDao.setActiveManualMarker(sessionPid)
-                    require(rows == 1) { "Failed to fix marker on startup (rowsUpdated=$rows)" }
-
-                    Log.w(
-                        "MANUAL_RECON",
-                        "op=MANUAL_RECONCILE_STARTUP pid=$GLOBAL_MARKER_KEY case=mismatch " +
-                                "marked=$marked sessionPid=$sessionPid clearedRows=$cleared setRows=$rows"
-                    )
-                    action = "RESTORE"
-                }
-                // 3) консистентно или ничего не нужно делать
-                else {
-                    if (marked != null || hasInMemory) {
-                        Log.d(
-                            "MANUAL_RECON",
-                            "op=MANUAL_RECONCILE_STARTUP pid=$GLOBAL_MARKER_KEY case=ok " +
-                                    "marked=$marked sessionPid=$sessionPid"
-                        )
-                    }
-                }
-
-                action
-            }
-
-            when (out) {
-                is StructuralWriteCoordinator.Outcome.Success -> {
-                    when (out.value) {
-                        "RESET" -> snackbarHostState.showSnackbar("Ручной режим был сброшен (перезапуск приложения)")
-                        "RESTORE" -> snackbarHostState.showSnackbar("Ручной режим восстановлен после перезапуска")
-                    }
-                }
-                StructuralWriteCoordinator.Outcome.Busy -> {
-                    Log.w("MANUAL_RECON", "startup reconcile BUSY")
-                }
-                StructuralWriteCoordinator.Outcome.Panic -> {
-                    Log.e("MANUAL_RECON", "startup reconcile PANIC")
-                }
-                is StructuralWriteCoordinator.Outcome.Error -> {
-                    Log.e("MANUAL_RECON", "startup reconcile ERROR", out.throwable)
-                }
+                ReconcileManualMarkerOnStartupUseCase.Action.NOOP -> Unit
             }
         } catch (t: Throwable) {
             Log.e("MANUAL_RECON", "reconciliation outer failed", t)
@@ -673,6 +607,7 @@ interface ManualCommitEntryPoint {
     fun commitManualDraftToLocalDbUseCase(): CommitManualDraftToLocalDbUseCase
     fun cancelManualAndAutoRecalcUseCase(): CancelManualAndAutoRecalcUseCase
     fun groupPhaseOverrideDao(): GroupPhaseOverrideDao
-    fun structuralWriteCoordinator(): ru.mugalimov.volthome.domain.use_case.StructuralWriteCoordinator
-    fun projectLocalStateDao(): ru.mugalimov.volthome.data.local.dao.ProjectLocalStateDao
+
+    // ✅ вместо прямого DAO/coordinator отдаём usecase
+    fun reconcileManualMarkerOnStartupUseCase(): ReconcileManualMarkerOnStartupUseCase
 }
