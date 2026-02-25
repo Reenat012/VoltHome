@@ -317,6 +317,9 @@ class RoomRepositoryImpl @Inject constructor(
         val exists = roomDao.existsByNameInProject(req.name, projectId)
         if (exists) throw IllegalArgumentException("Комната '${req.name}' уже существует")
 
+        // ✅ Commit 3: tombstone-consistent count ДО (как в add-devices)
+        val countBefore = deviceDao.countActiveByProjectId(projectId)
+
         val createdAt = Date()
         val room = RoomEntity(
             id = 0L,
@@ -328,6 +331,32 @@ class RoomRepositoryImpl @Inject constructor(
 
         val devices = expand(req.devices, roomId = null, projectId = projectId)
         val (roomId, deviceIds) = roomsTxDao.insertRoomWithDevices(room, devices)
+
+        // ✅ Commit 3: tombstone-consistent count ПОСЛЕ
+        val countAfter = deviceDao.countActiveByProjectId(projectId)
+        val delta = countAfter - countBefore
+
+        // ✅ Commit 3: единый CREATE_DEVICE_DB лог (формат один-в-один с add-devices)
+        // ВАЖНО: room-create вставляет устройства "внутри" room TX, но лог должен выглядеть одинаково.
+        Log.i(
+            "CREATE_DEVICE_DB",
+            "thread=${Thread.currentThread().name} " +
+                    "projectIdRecorded=$projectId roomId=$roomId " +
+                    "insertedIds(size=${deviceIds.size})=${deviceIds.take(20)} " +
+                    "countBefore=$countBefore countAfter=$countAfter delta=$delta " +
+                    "opId=$opId"
+        )
+
+        // ✅ Commit 3: publish в CreateDeviceOpBus (чтобы UI мог коррелировать видимость)
+        // Это "последний снимок операции", не бизнес-логика.
+        createDeviceOpBus.publish(
+            CreateDeviceOpEvent(
+                opId = opId,
+                projectIdRecorded = projectId,
+                roomId = roomId,
+                insertedIds = deviceIds
+            )
+        )
 
         loadDao.addLoad(
             LoadEntity(
