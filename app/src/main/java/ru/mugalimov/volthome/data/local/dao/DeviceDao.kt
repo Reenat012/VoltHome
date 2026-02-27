@@ -126,9 +126,9 @@ interface DeviceDao {
     suspend fun getAllDevicesByProject(projectId: String): List<DeviceEntity>
 
     @Query("""
-    SELECT COUNT(*) FROM devices d
-    WHERE d.project_id = :projectId
-""")
+        SELECT COUNT(*) FROM devices d
+        WHERE d.project_id = :projectId
+    """)
     suspend fun countByProjectId(projectId: String): Int
 
     @Query("""
@@ -145,11 +145,6 @@ interface DeviceDao {
     /**
      * ✅ Commit 1: tombstone-consistent count по проекту.
      * Считаем только "живые" устройства, исключая помеченные tombstone.
-     *
-     * ВАЖНО:
-     * - t.entity_type должен реально хранить строку 'DEVICE'
-     * - t.local_id должен реально быть равен device_id
-     * - имя колонки device_id должно совпадать со схемой
      */
     @Query("""
         SELECT COUNT(*) FROM devices d

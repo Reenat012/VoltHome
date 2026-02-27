@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.data.repository.impl
 
+import android.util.Log
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
@@ -9,27 +10,26 @@ import ru.mugalimov.volthome.data.repository.ProjectOwnershipRepository
 /**
  * Реализация ownership-хранилища на базе ProjectLocalStateEntity.
  *
- * Комментарий:
- * - manual lock = manual_overrides_present
- * - bootstrapVersion = manual_lock_bootstrap_version
+ * manual lock = manual_overrides_present
+ * bootstrapVersion = manual_lock_bootstrap_version
  *
  * ВАЖНО:
- * - DAO возвращает nullable (Boolean?/Int?/Flow<Boolean?>), потому что строка проекта может отсутствовать.
- * - Репозиторий обязан выдавать НЕ-null и нормализовать значение.
- * - Поэтому здесь: ensureRow(projectId) + дефолты.
+ * - Репозиторий нормализует null -> дефолт.
+ * - ensureRow(pid) обязателен перед чтением/записью.
  */
 class ProjectOwnershipRepositoryImpl @Inject constructor(
     private val projectLocalStateDao: ProjectLocalStateDao
 ) : ProjectOwnershipRepository {
 
+    companion object {
+        private const val TAG = "MANUAL_LOCK"
+    }
+
     override suspend fun isManualLock(projectId: String): Boolean {
         val pid = projectId.trim()
         if (pid.isBlank()) return false
 
-        // ✅ Гарантируем наличие строки, иначе DAO вернёт null
         projectLocalStateDao.ensureRow(pid)
-
-        // ✅ Нормализуем nullable -> non-null
         return projectLocalStateDao.getManualOverridesPresent(pid) ?: false
     }
 
@@ -37,30 +37,23 @@ class ProjectOwnershipRepositoryImpl @Inject constructor(
         val pid = projectId.trim()
         if (pid.isBlank()) return
 
-        // ✅ ensureRow, иначе UPDATE может вернуть 0 строк
         projectLocalStateDao.ensureRow(pid)
 
         val rows = projectLocalStateDao.setManualOverridesPresent(pid, locked)
-        // Комментарий: rows должен быть 1. Если 0 — значит ensureRow не сработал или projectId грязный.
-        // Здесь не падаем, чтобы не ломать UX, но логировать лучше на уровне usecase.
         if (rows != 1) {
-            // intentionally empty
+            // ✅ Не молчим — это потенциальная потеря инварианта
+            Log.e(TAG, "OWNERSHIP WRITE FAILED pid=$pid op=setManualLock locked=$locked rowsUpdated=$rows")
         }
     }
 
     override fun observeManualLock(projectId: String): Flow<Boolean> {
         val pid = projectId.trim()
         if (pid.isBlank()) {
-            // Нельзя вернуть emptyFlow без импорта, поэтому делаем map от DAO через ensureRow в другом контуре.
-            // Но blank pid — это ошибка вызова, возвращаем "всегда false".
             return projectLocalStateDao.observeManualOverridesPresent(projectId)
-                .map { false } // projectId пустой -> считаем, что лока нет
+                .map { false }
         }
 
-        // Важно: observe* не может вызвать suspend ensureRow прямо тут.
-        // Поэтому:
-        // - В нормальном контуре ensureRow(pid) должен происходить при выборе активного проекта (bootstrap).
-        // - Но даже если его забыли, мы всё равно нормализуем null -> false, чтобы UI не падал.
+        // observe* не вызывает ensureRow (suspend). Нормализуем null->false.
         return projectLocalStateDao.observeManualOverridesPresent(pid)
             .map { it ?: false }
     }
@@ -69,10 +62,7 @@ class ProjectOwnershipRepositoryImpl @Inject constructor(
         val pid = projectId.trim()
         if (pid.isBlank()) return 0
 
-        // ✅ Гарантируем наличие строки
         projectLocalStateDao.ensureRow(pid)
-
-        // ✅ Нормализуем nullable -> 0
         return projectLocalStateDao.getManualLockBootstrapVersion(pid) ?: 0
     }
 
@@ -80,12 +70,11 @@ class ProjectOwnershipRepositoryImpl @Inject constructor(
         val pid = projectId.trim()
         if (pid.isBlank()) return
 
-        // ✅ ensureRow, иначе UPDATE может вернуть 0 строк
         projectLocalStateDao.ensureRow(pid)
 
         val rows = projectLocalStateDao.setManualLockBootstrapVersion(pid, version)
         if (rows != 1) {
-            // intentionally empty
+            Log.e(TAG, "OWNERSHIP WRITE FAILED pid=$pid op=setBootstrapVersion version=$version rowsUpdated=$rows")
         }
     }
 }
