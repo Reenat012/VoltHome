@@ -172,7 +172,7 @@ interface GroupDao {
     @Query("DELETE FROM `groups` WHERE project_id = :projectId")
     suspend fun deleteAllGroupsByProject(projectId: String): Int
 
-// -------------------- DERIVED WHITELIST UPDATES --------------------
+    // -------------------- DERIVED WHITELIST UPDATES --------------------
 
     /**
      * ✅ Whitelist-апдейт derived-поля nominal_current:
@@ -183,15 +183,15 @@ interface GroupDao {
      */
     @Query(
         """
-    UPDATE `groups`
-    SET nominal_current = :nominalCurrent
-    WHERE project_id = :projectId
-      AND group_id = :groupId
-      AND (
-          nominal_current IS NULL
-          OR ABS(nominal_current - :nominalCurrent) > :epsilon
-      )
-    """
+        UPDATE `groups`
+        SET nominal_current = :nominalCurrent
+        WHERE project_id = :projectId
+          AND group_id = :groupId
+          AND (
+              nominal_current IS NULL
+              OR ABS(nominal_current - :nominalCurrent) > :epsilon
+          )
+        """
     )
     suspend fun updateDerivedNominalCurrentOnly(
         projectId: String,

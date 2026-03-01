@@ -21,7 +21,6 @@ import androidx.room.ForeignKey
             onDelete = ForeignKey.CASCADE
         )
     ]
-
 )
 data class GroupDeviceJoin(
     @ColumnInfo(name = "group_id")

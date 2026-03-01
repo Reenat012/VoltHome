@@ -7,20 +7,16 @@ import ru.mugalimov.volthome.data.repository.RoomRepository
 import ru.mugalimov.volthome.domain.mapper.toDomainDevice
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.DeviceType
-import ru.mugalimov.volthome.domain.model.DistributionDecision
-import ru.mugalimov.volthome.domain.model.ElectricalSystem
 import ru.mugalimov.volthome.domain.model.GroupProfile
 import ru.mugalimov.volthome.domain.model.GroupingResult
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.domain.model.SafetyProfile
-import ru.mugalimov.volthome.domain.use_case.PhaseDistributor.distributeGroupsBalanced
 import ru.mugalimov.volthome.domain.use_case.PhaseDistributor.distributeGroupsBalancedWithLog
 import java.nio.ByteBuffer
 import java.security.MessageDigest
 import kotlin.math.ceil
-
 
 class GroupCalculator(
     private val roomRepository: RoomRepository,
@@ -103,16 +99,15 @@ class GroupCalculator(
             // 5) Валидация до сохранения
             validateBeforeSave(distributed)
 
-            // 6) НИКАКОГО сохранения здесь (если сохраняешь в VM)
+            // 6) НИКАКОГО сохранения здесь
             GroupingResult.Success(
-                system = ElectricalSystem(distributed),
+                system = ru.mugalimov.volthome.domain.model.ElectricalSystem(distributed),
                 distributionDecisions = decisionLog
             )
         } catch (e: Exception) {
             GroupingResult.Error("Ошибка расчёта: ${e.message}")
         }
     }
-
 
     /** Явные критерии выделенных линий. */
     private fun isHeavy(d: DeviceEntity): Boolean =
@@ -121,8 +116,7 @@ class GroupCalculator(
             DeviceType.AIR_CONDITIONER,
             DeviceType.ELECTRIC_STOVE,
             DeviceType.HEAVY_DUTY -> true
-
-            else -> false // розетки/освещение не уносим только из‑за мощности
+            else -> false
         }
 
     /** Подбор автомата/кабеля/кривой по подгруппе. */
@@ -175,7 +169,7 @@ class GroupCalculator(
         )
     }
 
-    /** FFD‑упаковка устройств в группы с лимитом по номиналу автомата. */
+    /** FFD-упаковка устройств в группы с лимитом по номиналу автомата. */
     private fun createCircuitGroups(
         devices: List<DeviceEntity>,
         profile: GroupProfile,
@@ -229,7 +223,7 @@ class GroupCalculator(
         room: RoomEntity
     ): CircuitGroup {
         val nominalCurrent = devices.sumOf { it.nominalCurrent() }
-        val installedPowerW = devices.sumOf { it.power } // ✅ домен, не UI
+        val installedPowerW = devices.sumOf { it.power }
         return CircuitGroup(
             roomName = room.name,
             groupType = devices.first().deviceType,
@@ -257,7 +251,7 @@ class GroupCalculator(
         val installedPowerW = device.power
         return CircuitGroup(
             roomName = room.name,
-            groupType = device.deviceType, // НЕ хардкодим HEAVY_DUTY
+            groupType = device.deviceType,
             devices = listOf(device.toDomainDevice()),
             nominalCurrent = nominalCurrent,
             circuitBreaker = profile.breakerRating,
@@ -274,7 +268,6 @@ class GroupCalculator(
     private fun validateBeforeSave(groups: List<CircuitGroup>) {
         val eps = 1e-6
         groups.forEach { g ->
-            // phase в модели не nullable, но оставляем проверку как инвариант (если модель поменяют — поймаем сразу)
             requireNotNull(g.phase) { "Группа №${g.groupNumber} без фазы" }
             require(g.nominalCurrent <= g.circuitBreaker + eps) {
                 "Группа №${g.groupNumber}: ${"%.2f".format(g.nominalCurrent)} А > ${g.circuitBreaker} А"
@@ -286,9 +279,9 @@ class GroupCalculator(
         }
     }
 
-// ------------------------------------------------------------------------
-// ✅ Stable groupId allocator (Commit B1)
-// ------------------------------------------------------------------------
+    // ------------------------------------------------------------------------
+    // ✅ Stable groupId allocator (Commit B1)
+    // ------------------------------------------------------------------------
 
     /**
      * Генерирует стабильные groupId для AUTO-результата.
@@ -329,7 +322,6 @@ class GroupCalculator(
                 newId = stablePositiveLong(saltedKey)
                 attempt++
                 if (attempt > 1000) {
-                    // Это уже "вселенной конец": значит ключи реально совпали массово.
                     throw IllegalStateException("Failed to allocate unique stable groupId for key=$baseKey")
                 }
             } while (!used.add(newId))
@@ -378,7 +370,6 @@ class GroupCalculator(
     }
 }
 
-
 // --- Extensions / мапперы ---
 
 fun DeviceEntity.nominalCurrent(): Double =
@@ -389,4 +380,3 @@ fun DeviceEntity.nominalCurrent(): Double =
         demandRatio = demandRatio,
         voltageType = voltage.type
     )
-

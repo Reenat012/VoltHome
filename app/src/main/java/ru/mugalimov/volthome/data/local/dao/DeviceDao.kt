@@ -156,4 +156,23 @@ interface DeviceDao {
           )
     """)
     suspend fun countActiveByProjectId(projectId: String): Int
+
+    /**
+     * ✅ Commit 3: ЕДИНЫЙ критерий activeIds для bootstrap diff.
+     *
+     * Важно:
+     * - Используется только в read-only bootstrapping/diff.
+     * - Никаких "фильтров по месту" — чтобы diff был детерминированный.
+     */
+    @Query("""
+        SELECT d.device_id FROM devices d
+        WHERE d.project_id = :projectId
+          AND NOT EXISTS (
+              SELECT 1 FROM tombstones t
+              WHERE t.entity_type = 'DEVICE'
+                AND t.local_id = d.device_id
+          )
+        ORDER BY d.created_at ASC, d.device_id ASC
+    """)
+    suspend fun getActiveIdsByProjectId(projectId: String): List<Long>
 }

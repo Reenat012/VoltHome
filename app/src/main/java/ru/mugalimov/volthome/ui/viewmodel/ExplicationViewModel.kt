@@ -351,7 +351,12 @@ class ExplicationViewModel @Inject constructor(
                 .filter { it.isNotBlank() }
                 .distinctUntilChanged()
                 .collectLatest { pid ->
-                    bootstrapManualLockUseCase.execute(pid)
+                    Log.w("MANUAL_BOOTSTRAP", "VM trigger pid=$pid thread=${Thread.currentThread().name}")
+                    try {
+                        bootstrapManualLockUseCase.execute(pid)
+                    } catch (t: Throwable) {
+                        Log.e("MANUAL_BOOTSTRAP", "VM bootstrap FAILED pid=$pid", t)
+                    }
                 }
         }
 

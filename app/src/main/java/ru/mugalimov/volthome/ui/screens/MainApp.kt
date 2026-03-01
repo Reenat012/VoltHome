@@ -47,7 +47,6 @@ import ru.mugalimov.volthome.domain.model.ProFeature
 import ru.mugalimov.volthome.domain.model.manual.ManualEditSession
 import ru.mugalimov.volthome.domain.use_case.manual.CancelManualAndAutoRecalcUseCase
 import ru.mugalimov.volthome.domain.use_case.manual.CommitManualDraftToLocalDbUseCase
-import ru.mugalimov.volthome.domain.use_case.manual.ReconcileManualMarkerOnStartupUseCase
 import ru.mugalimov.volthome.ui.manual.LocalManualModeGuard
 import ru.mugalimov.volthome.ui.manual.ManualModeGuard
 import ru.mugalimov.volthome.ui.manual.ManualModeGuardDialog
@@ -116,9 +115,6 @@ fun MainApp(
     }
     val commitUseCase = remember { commitEp.commitManualDraftToLocalDbUseCase() }
     val cancelUseCase = remember { commitEp.cancelManualAndAutoRecalcUseCase() }
-
-    // ✅ Reconcile вынесли в usecase: UI не знает про DAO и persisted marker
-    val reconcileManualMarkerUseCase = remember { commitEp.reconcileManualMarkerOnStartupUseCase() }
 
     // ✅ КРИТИЧНО: overrides живут отдельно и в AUTO перетирают фазы поверх сохранённых групп.
     // После manual-save их нужно чистить, иначе получаешь "откат" в AUTO.
@@ -191,25 +187,6 @@ fun MainApp(
     // --- тариф (free/pro)
     val userPlanVm: UserPlanViewModel = hiltViewModel()
     val userPlan = userPlanVm.plan.collectAsState().value
-
-    // -----------------------------
-    // ✅ Startup reconciliation persisted marker (ровно 1 раз на старте)
-    // -----------------------------
-    LaunchedEffect(Unit) {
-        try {
-            when (val action = reconcileManualMarkerUseCase.execute()) {
-                ReconcileManualMarkerOnStartupUseCase.Action.RESET ->
-                    snackbarHostState.showSnackbar("Ручной режим был сброшен (перезапуск приложения)")
-
-                ReconcileManualMarkerOnStartupUseCase.Action.RESTORE ->
-                    snackbarHostState.showSnackbar("Ручной режим восстановлен после перезапуска")
-
-                ReconcileManualMarkerOnStartupUseCase.Action.NOOP -> Unit
-            }
-        } catch (t: Throwable) {
-            Log.e("MANUAL_RECON", "reconciliation outer failed", t)
-        }
-    }
 
     // -----------------------------
     // ✅ Kill-process UX: marker + one-shot snackbar
@@ -607,7 +584,4 @@ interface ManualCommitEntryPoint {
     fun commitManualDraftToLocalDbUseCase(): CommitManualDraftToLocalDbUseCase
     fun cancelManualAndAutoRecalcUseCase(): CancelManualAndAutoRecalcUseCase
     fun groupPhaseOverrideDao(): GroupPhaseOverrideDao
-
-    // ✅ вместо прямого DAO/coordinator отдаём usecase
-    fun reconcileManualMarkerOnStartupUseCase(): ReconcileManualMarkerOnStartupUseCase
 }
