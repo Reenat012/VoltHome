@@ -31,6 +31,7 @@ import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
 import ru.mugalimov.volthome.data.repository.PreferencesRepository
+import ru.mugalimov.volthome.data.repository.ProjectOwnershipRepository
 import ru.mugalimov.volthome.data.repository.UserPlanRepository
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.formatter.GroupMetaFormatter
@@ -70,6 +71,7 @@ import ru.mugalimov.volthome.domain.use_case.phaseCurrents
 import ru.mugalimov.volthome.domain.use_case.report.BuildProfessionalSectionsUseCase
 import ru.mugalimov.volthome.domain.use_case.manual.CancelManualAndAutoRecalcUseCase
 import ru.mugalimov.volthome.domain.use_case.manual.CommitManualDraftToLocalDbUseCase
+import ru.mugalimov.volthome.domain.use_case.manual.ResetManualOverridesAndAutoRecalcUseCase
 import ru.mugalimov.volthome.domain.util.PowerCurrentNormalizer
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
 import ru.mugalimov.volthome.ui.screens.explication.sheets.CalcBlocksMapper
@@ -102,6 +104,8 @@ class ExplicationViewModel @Inject constructor(
     private val saveAutoCalculatedGroupsToLocalDbUseCase: SaveAutoCalculatedGroupsToLocalDbUseCase,
     private val manualDraftResetNotifier: ManualDraftResetNotifier,
     private val createDeviceOpBus: CreateDeviceOpBus,
+    private val projectOwnershipRepository: ProjectOwnershipRepository,
+    private val resetManualOverridesAndAutoRecalcUseCase: ResetManualOverridesAndAutoRecalcUseCase,
 ) : ViewModel() {
 
     private val TAG_DND = "EXP_DND"
@@ -121,6 +125,10 @@ class ExplicationViewModel @Inject constructor(
     // последний известный режим фаз (для buildReportSnapshotForPdf)
     private val _phaseMode = MutableStateFlow(PhaseMode.THREE)
     val phaseMode: StateFlow<PhaseMode> = _phaseMode.asStateFlow()
+
+    private val _showResetManualConfirmDialog = MutableStateFlow(false)
+    val showResetManualConfirmDialog: StateFlow<Boolean> = _showResetManualConfirmDialog.asStateFlow()
+
 
     // выбранный инстанс устройства для шита
     private val _selectedDevice = MutableStateFlow<Device?>(null)
@@ -211,6 +219,26 @@ class ExplicationViewModel @Inject constructor(
     private val activeProjectIdState: StateFlow<String?> =
         activeProjectDs.activeProjectId
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    private val manualLockFlow: StateFlow<Boolean> =
+        activeProjectIdState
+            .filterNotNull()
+            .map { it.trim() }
+            .distinctUntilChanged()
+            .flatMapLatest { pid ->
+                if (pid.isBlank()) flowOf(false)
+                else projectOwnershipRepository.observeManualLock(pid)
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    val showResetManualButton: StateFlow<Boolean> =
+        combine(manualSession, manualLockFlow) { session, locked ->
+            val isManual = session?.manualModeActive == true
+            // ТЗ: кнопка только в AUTO, если есть сохранённая ручная структура
+            (!isManual) && locked
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+
 
     // =========================
     // DB-driven pipeline (FIX отката)
@@ -842,6 +870,68 @@ class ExplicationViewModel @Inject constructor(
         )
     }
 
+    fun onResetManualOverridesClick() {
+        // защита: в manual нельзя
+        val isManual = manualSession.value?.manualModeActive == true
+        if (isManual) {
+            _events.value = UiEvent.ShowSnackbar("Сначала выйдите из ручного режима")
+            return
+        }
+        _showResetManualConfirmDialog.value = true
+    }
+
+    fun onResetManualOverridesDismiss() {
+        _showResetManualConfirmDialog.value = false
+    }
+
+    fun onResetManualOverridesConfirm() {
+        viewModelScope.launch(ioDispatcher) {
+            _showResetManualConfirmDialog.value = false
+
+            val projectId = activeProjectIdState.value.orEmpty().trim()
+            if (projectId.isBlank()) {
+                _events.value = UiEvent.ShowSnackbar("Не выбран проект")
+                return@launch
+            }
+
+            // manual сейчас выключен — ок
+            _isRecalculating.value = true
+            _uiState.value = GroupScreenState.Loading
+
+            try {
+                val mode = phaseMode.value
+
+                Log.w("MANUAL_RESET", "RESET START pid=$projectId mode=$mode")
+
+                when (val res = resetManualOverridesAndAutoRecalcUseCase.execute(
+                    ResetManualOverridesAndAutoRecalcUseCase.Params(
+                        projectId = projectId,
+                        phaseMode = mode
+                    )
+                )) {
+                    is GroupingResult.Error -> {
+                        Log.e("MANUAL_RESET", "RESET FAILED pid=$projectId msg=${res.message}")
+                        _uiState.value = GroupScreenState.Error(res.message)
+                        _events.value = UiEvent.ShowSnackbar("Не удалось сбросить: ${res.message}")
+                    }
+
+                    is GroupingResult.Success -> {
+                        Log.w("MANUAL_RESET", "RESET OK pid=$projectId groups=${res.system.groups.size}")
+                        repo.setLastDistributionDecisions(res.distributionDecisions)
+                        _events.value = UiEvent.ShowSnackbar("Ручные изменения сброшены")
+                        // uiState сам восстановится из DB pipeline
+                    }
+                }
+            } catch (t: Throwable) {
+                Log.e("MANUAL_RESET", "RESET EXCEPTION pid=$projectId", t)
+                _uiState.value = GroupScreenState.Error("Ошибка сброса ручных изменений")
+                _events.value = UiEvent.ShowSnackbar("Ошибка сброса ручных изменений")
+            } finally {
+                _isRecalculating.value = false
+            }
+        }
+    }
+
     fun setActiveDragTarget(target: DragTarget?) {
         val s = _dragState.value
         if (!s.isActive) {
@@ -879,59 +969,51 @@ class ExplicationViewModel @Inject constructor(
     fun onCancelManualClicked() {
         viewModelScope.launch(ioDispatcher) {
 
-            val projectId = activeProjectDs.activeProjectId.first().orEmpty()
+            // ✅ Берём projectId без first(): это быстрее и без лишних suspend-ловушек
+            val projectId = activeProjectIdState.value.orEmpty().trim()
 
             if (projectId.isBlank()) {
                 _events.value = UiEvent.ShowSnackbar("Не выбран проект")
                 return@launch
             }
 
+            // Берём сессию: либо активная (глобальная), либо scoped-стейт
             val session = manualRepo.getActiveSession() ?: manualSession.value
             val isManual = session?.manualModeActive == true && session.projectId == projectId
+
             if (!isManual) {
                 _events.value = UiEvent.ShowSnackbar("Ручной режим не активен")
                 return@launch
             }
 
-            Log.w("MANUAL_CANCEL", "VM Cancel START pid=$projectId ver=${session?.version}")
+            Log.w("MANUAL_CANCEL", "VM Cancel START (NO RECALC) pid=$projectId ver=${session?.version}")
 
-            _isRecalculating.value = true
-            _uiState.value = GroupScreenState.Loading
-
+            /**
+             * ✅ ВАЖНО (ТЗ):
+             * "Отмена" в попапе выхода из ручного режима НЕ должна:
+             * - запускать calculateGroups()
+             * - писать авто-группы в БД
+             *
+             * Она должна просто:
+             * - выйти из manual (снять marker + удалить in-memory draft)
+             * - вернуть отображение к данным из БД (db pipeline сам подхватит)
+             */
             try {
-                when (val res = cancelManualAndAutoRecalcUseCase.execute(
-                    CancelManualAndAutoRecalcUseCase.Params(projectId = projectId)
-                )) {
-                    is GroupingResult.Error -> {
-                        Log.e("MANUAL_CANCEL", "VM Cancel FAILED pid=$projectId msg=${res.message}")
-                        _events.value =
-                            UiEvent.ShowSnackbar("Не удалось отменить изменения: ${res.message}")
-                        return@launch
-                    }
+                // 1) Выход из manual: чистит persisted marker + очищает сессию в памяти
+                manualRepo.exitManualMode(projectId)
 
-                    is GroupingResult.Success -> {
-                        Log.w(
-                            "MANUAL_CANCEL",
-                            "VM Cancel OK pid=$projectId groups=${res.system.groups.size}"
-                        )
+                // 2) Локальный UI-cleanup (чтобы не оставались панели/drag state)
+                _moveDeviceUi.value = null
+                _dragState.value = DragState()
+                _pendingMixedMove.value = null
+                _showMixedWarningDialog.value = false
 
-                        repo.setLastDistributionDecisions(res.distributionDecisions)
-
-                        manualRepo.exitManualMode(projectId)
-
-                        _moveDeviceUi.value = null
-                        _dragState.value = DragState()
-                        _pendingMixedMove.value = null
-                        _showMixedWarningDialog.value = false
-
-                        _events.value = UiEvent.ShowSnackbar("Ручные изменения отменены")
-                    }
-                }
+                // 3) Никакой Loading и никакой _isRecalculating — мы ничего не считаем
+                _events.value = UiEvent.ShowSnackbar("Ручные изменения отменены")
+                Log.w("MANUAL_CANCEL", "VM Cancel OK (NO RECALC) pid=$projectId")
             } catch (t: Throwable) {
                 Log.e("MANUAL_CANCEL", "VM Cancel EXCEPTION pid=$projectId", t)
                 _events.value = UiEvent.ShowSnackbar("Ошибка отмены изменений")
-            } finally {
-                _isRecalculating.value = false
             }
         }
     }
@@ -1418,7 +1500,9 @@ class ExplicationViewModel @Inject constructor(
                         SaveAutoCalculatedGroupsToLocalDbUseCase.Params(
                             projectId = projectId,
                             groups = groups,
-                            distributionDecisions = res.distributionDecisions
+                            distributionDecisions = res.distributionDecisions,
+                            source = "ExplicationViewModel.recalcAndSaveGroupsInternal",
+                            opId = null
                         )
                     )
 

@@ -114,7 +114,9 @@ fun MainApp(
         )
     }
     val commitUseCase = remember { commitEp.commitManualDraftToLocalDbUseCase() }
-    val cancelUseCase = remember { commitEp.cancelManualAndAutoRecalcUseCase() }
+
+    // ❗️Cancel больше НЕ делает пересчёт (ТЗ): поэтому cancelUseCase не нужен
+    // val cancelUseCase = remember { commitEp.cancelManualAndAutoRecalcUseCase() }
 
     // ✅ КРИТИЧНО: overrides живут отдельно и в AUTO перетирают фазы поверх сохранённых групп.
     // После manual-save их нужно чистить, иначе получаешь "откат" в AUTO.
@@ -422,27 +424,16 @@ fun MainApp(
                         }
 
                         try {
-                            Log.w("MANUAL_CANCEL", "MAINAPP Cancel START pid=$projectId")
+                            // ✅ ТЗ: Cancel НЕ запускает calculateGroups() и НЕ пишет auto-группы в БД.
+                            // Cancel = просто выкинуть черновик и выйти из ручного режима.
+                            Log.w("MANUAL_CANCEL", "MAINAPP Cancel START (NO_RECALC) pid=$projectId")
 
-                            when (val res = cancelUseCase.execute(
-                                CancelManualAndAutoRecalcUseCase.Params(projectId = projectId)
-                            )) {
-                                is GroupingResult.Error -> {
-                                    Log.e("MANUAL_CANCEL", "Cancel FAILED pid=$projectId msg=${res.message}")
-                                    snackbarHostState.showSnackbar("Ошибка пересчёта: ${res.message}")
-                                    return@launch
-                                }
-
-                                is GroupingResult.Success -> {
-                                    Log.w("MANUAL_CANCEL", "Cancel OK pid=$projectId groups=${res.system.groups.size}")
-                                }
-                            }
-
-                            // ⚠️ ВАЖНО: чистим overrides ДО выхода из manual
+                            // ⚠️ ВАЖНО: overrides могли быть выставлены вручную и в AUTO перетирать фазы.
+                            // Поэтому чистим их при выходе из manual, даже если пересчёта нет.
                             val deleted = groupPhaseOverrideDao.deleteByProject(projectId)
-                            Log.w("OVERRIDES", "DELETE overrides pid=$projectId (manual CANCEL) deletedRows=$deleted")
+                            Log.w("OVERRIDES", "DELETE overrides pid=$projectId (manual CANCEL NO_RECALC) deletedRows=$deleted")
 
-                            // Теперь безопасно выключаем manual
+                            // Выходим из manual: UI вернётся к данным из DB (последнее сохранённое состояние)
                             manualRepo.exitManualMode(projectId)
 
                             val proceed = pendingProceed
@@ -450,7 +441,6 @@ fun MainApp(
                             proceed?.invoke()
 
                             snackbarHostState.showSnackbar("Ручные изменения отменены")
-
                         } catch (t: Throwable) {
                             Log.e("MANUAL_CANCEL", "Cancel EXCEPTION pid=$projectId", t)
                             snackbarHostState.showSnackbar("Ошибка отмены: ${t.message ?: "неизвестно"}")
@@ -582,6 +572,10 @@ interface ManualDraftResetEntryPoint {
 @InstallIn(SingletonComponent::class)
 interface ManualCommitEntryPoint {
     fun commitManualDraftToLocalDbUseCase(): CommitManualDraftToLocalDbUseCase
-    fun cancelManualAndAutoRecalcUseCase(): CancelManualAndAutoRecalcUseCase
+
+    // Сейчас в MainApp не используется: Cancel по ТЗ без пересчёта.
+    // Оставляем, чтобы не трогать DI/EntryPoint шире, чем нужно.
+    // fun cancelManualAndAutoRecalcUseCase(): CancelManualAndAutoRecalcUseCase
+
     fun groupPhaseOverrideDao(): GroupPhaseOverrideDao
 }

@@ -10,7 +10,6 @@ import ru.mugalimov.volthome.domain.model.GroupingResult
 
 /**
  * Commit 3 (v3):
- *
  * AUTO rebuild после add-device.
  *
  * A) insertedIds.isEmpty() -> SKIP
@@ -18,11 +17,13 @@ import ru.mugalimov.volthome.domain.model.GroupingResult
  * C) full rebuild через calculator + SaveAuto...
  * D) single-flight BEGIN/END с opId
  *
+ * Commit 4 (BASTION):
+ * - прокидываем source/opId в SaveAutoCalculatedGroupsToLocalDbUseCase,
+ *   чтобы "AUTO_SAVE SUPPRESS" коррелировался с opId и source.
+ *
  * ВАЖНО:
  * - mismatch activeProjectId НЕ SKIP
- * - временное переключение activeProjectId происходит
- *   ВНЕ writer-блока (coordinator.execute)
- * - restore защищён runCatching
+ * - временное переключение activeProjectId происходит ВНЕ writer-блока
  */
 class AutoRebuildGroupsAfterDeviceInsertUseCase @Inject constructor(
     private val activeProjectDs: ActiveProjectDataStore,
@@ -49,20 +50,15 @@ class AutoRebuildGroupsAfterDeviceInsertUseCase @Inject constructor(
             return
         }
 
-        // B) Suppress manual
+        // B) Suppress manual (in-memory)
         if (manualRepo.isManualActive(pid)) {
-            Log.i(
-                "AUTO_POST_INSERT",
-                "SUPPRESS manualActive pid=$pid opId=${params.opId}"
-            )
+            Log.i("AUTO_POST_INSERT", "SUPPRESS manualActive pid=$pid opId=${params.opId}")
             return
         }
 
         val mode = preferencesRepository.phaseMode.first()
 
-        val previousActivePid =
-            activeProjectDs.activeProjectId.first().orEmpty().trim()
-
+        val previousActivePid = activeProjectDs.activeProjectId.first().orEmpty().trim()
         val needSwitch = previousActivePid != pid
 
         if (needSwitch) {
@@ -83,16 +79,19 @@ class AutoRebuildGroupsAfterDeviceInsertUseCase @Inject constructor(
                     opId = params.opId
                 )
             ) {
-                // 🔒 ВНУТРИ writer-блока — только чистая структура
+                // 🔒 Внутри writer-блока — только чистая структура
                 val result = calculatorFactory.create().calculateGroups(mode)
 
                 when (result) {
                     is GroupingResult.Success -> {
+                        // ✅ Commit 4: source/opId прокинуты до AUTO_SAVE
                         saveAutoUseCase.execute(
                             SaveAutoCalculatedGroupsToLocalDbUseCase.Params(
                                 projectId = pid,
                                 groups = result.system.groups,
-                                distributionDecisions = result.distributionDecisions
+                                distributionDecisions = result.distributionDecisions,
+                                source = "RoomRepositoryImpl.addDevicesToRoom",
+                                opId = params.opId
                             )
                         )
                         Log.i(
@@ -119,7 +118,6 @@ class AutoRebuildGroupsAfterDeviceInsertUseCase @Inject constructor(
                 is StructuralWriteCoordinator.Outcome.Error ->
                     Log.e("AUTO_POST_INSERT", "ERROR pid=$pid opId=${params.opId}", out.throwable)
             }
-
         } finally {
             if (needSwitch) {
                 runCatching {

@@ -7,12 +7,14 @@ import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
 import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
+import ru.mugalimov.volthome.data.repository.ManualOverridesCleanerRepository
 import ru.mugalimov.volthome.data.repository.ProjectsRepository
 import ru.mugalimov.volthome.data.repository.RoomRepository
 import ru.mugalimov.volthome.data.repository.SubscriptionRepository
 import ru.mugalimov.volthome.data.repository.UserPlanRepository
 import ru.mugalimov.volthome.data.repository.impl.DeviceRepositoryImpl
 import ru.mugalimov.volthome.data.repository.impl.ExplicationRepositoryImpl
+import ru.mugalimov.volthome.data.repository.impl.ManualOverridesCleanerRepositoryImpl
 import ru.mugalimov.volthome.data.repository.impl.ProjectsRepositoryImpl
 import ru.mugalimov.volthome.data.repository.impl.RoomRepositoryImpl
 import ru.mugalimov.volthome.data.repository.impl.SubscriptionRepositoryImpl
@@ -49,4 +51,10 @@ abstract class RepositoryModule {
     abstract fun bindSubscriptionRepository(
         impl: SubscriptionRepositoryImpl
     ): SubscriptionRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindManualOverridesCleanerRepository(
+        impl: ManualOverridesCleanerRepositoryImpl
+    ): ManualOverridesCleanerRepository
 }

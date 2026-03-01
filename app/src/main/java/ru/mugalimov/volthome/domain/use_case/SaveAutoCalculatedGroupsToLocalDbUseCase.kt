@@ -30,18 +30,22 @@ import ru.mugalimov.volthome.domain.model.DistributionDecision
 class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
     private val explicationRepository: ExplicationRepository,
     private val structuralWriteMutex: ProjectStructuralWriteMutex, // ✅ single-flight
+    private val projectOwnershipRepository: ru.mugalimov.volthome.data.repository.ProjectOwnershipRepository, // ✅ bastion lock SoT
 ) {
 
     data class Params(
         val projectId: String,
         val groups: List<CircuitGroup>,
-        val distributionDecisions: List<DistributionDecision>
+        val distributionDecisions: List<DistributionDecision>,
+        // ✅ Commit 4: корреляция источника и операции
+        val source: String,
+        val opId: String?
     )
 
     suspend fun execute(params: Params) {
         require(params.projectId.isNotBlank()) { "projectId must be non-blank" }
+        require(params.source.isNotBlank()) { "source must be non-blank" }
 
-        // ✅ Обычный вход: берём lock здесь
         structuralWriteMutex.withLock(params.projectId) {
             executeAlreadyLocked(params)
         }
@@ -53,25 +57,32 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
      */
     suspend fun executeAlreadyLocked(params: Params) {
         require(params.projectId.isNotBlank()) { "projectId must be non-blank" }
+        require(params.source.isNotBlank()) { "source must be non-blank" } // ✅ обязателен и тут
 
-        val projectId = params.projectId
+        val projectId = params.projectId.trim()
+        val opId = params.opId
+        val source = params.source.trim()
+        val wanted = params.groups.size
 
         // -------------------------------------------------------------------
-        // ✅ B2: "умная" нормализация перед hard-fail.
-        // - Если groupId валиден => no-op
-        // - Если groupId<=0 => поднимаем детерминированно и пишем ERROR (не warning)
+        // ✅ Commit 4 BASTION:
+        // Самый первый шаг — жёсткое подавление AUTO_SAVE, если проект под manual lock.
+        // Важно: после SUPPRESS здесь не должно быть вообще никаких "writer" логов.
         // -------------------------------------------------------------------
+        val manualLock = projectOwnershipRepository.isManualLock(projectId)
+        if (manualLock) {
+            Log.w(
+                "AUTO_SAVE",
+                "AUTO_SAVE SUPPRESS manualLock=true pid=$projectId opId=$opId source=$source groupsWanted=$wanted"
+            )
+            return
+        }
+
+        // ↓↓↓ ниже — старый код, но теперь всегда гарантировано: lock=false
         val groups = ensureValidAutoIds(projectId = projectId, groups = params.groups)
-
-        // -------------------------------------------------------------------
-        // ✅ HARD FAIL ДО инвариантов и ДО БД:
-        // - groupId must be > 0
-        // - groupId must be unique
-        // Теперь это реально ловит "невозможные" кейсы:
-        // - дубли после нормализации
-        // - ошибки логики, когда нормализация не смогла обеспечить валидность
-        // -------------------------------------------------------------------
         failIfInvalidAutoGroupIds(projectId = projectId, groups = groups)
+
+        // ... остальные инварианты ...
 
         // -------------------------
         // ✅ Остальные инварианты (до БД)
@@ -81,19 +92,20 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
             "AUTO_SAVE invariant failed: duplicate groupNumber(s)=$dupNumbers projectId=$projectId"
         }
 
-        // phase у тебя non-nullable в модели, но оставляем guard как предохранитель от будущих регрессий/рефакторов.
-        val nullPhase = groups.filter { it.phase == null }.map { it.groupId }
-        require(nullPhase.isEmpty()) {
-            "AUTO_SAVE invariant failed: null phase for groupId(s)=$nullPhase projectId=$projectId"
-        }
+        // -------------------------------------------------------------------
+        // ✅ FIX: summary/caller обязаны быть объявлены ДО логов
+        // -------------------------------------------------------------------
 
+        // Короткая сводка: стабильный порядок по groupNumber.
+        // Формат: "id#num#phase(devs=n)"
         val summary = groups
             .sortedBy { it.groupNumber }
             .joinToString { g ->
-                val ph = g.phase?.name ?: "null"
+                val ph = g.phase.name
                 "${g.groupId}#${g.groupNumber}#$ph(devs=${g.devices.size})"
             }
 
+        // Короткий caller trace: чтобы видеть источник без 500 строк стектрейса
         val caller = Throwable().stackTrace
             .drop(1)
             .take(8)
@@ -103,22 +115,20 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
 
         Log.w(
             "AUTO_SAVE",
-            "AUTO_SAVE BEGIN source=AUTO_SAVE reason=EXPLICIT_REBUILD projectId=$projectId " +
+            "AUTO_SAVE BEGIN source=$source reason=EXPLICIT_REBUILD projectId=$projectId opId=$opId " +
                     "groups=${groups.size} summary=[$summary] caller=$caller"
         )
 
         try {
-            // ✅ ЕДИНСТВЕННАЯ structural запись (внутри неё DB-sanity)
-            Log.w("AUTO_SAVE", "AUTO_SAVE BEFORE repo replace projectId=$projectId")
+            Log.w("AUTO_SAVE", "AUTO_SAVE BEFORE repo replace projectId=$projectId opId=$opId source=$source")
             explicationRepository.replaceAllGroupsTransactionalAlreadyLocked(projectId, groups)
-            Log.w("AUTO_SAVE", "AUTO_SAVE AFTER repo replace projectId=$projectId")
+            Log.w("AUTO_SAVE", "AUTO_SAVE AFTER repo replace projectId=$projectId opId=$opId source=$source")
 
-            // decisions держим в памяти (не БД)
             explicationRepository.setLastDistributionDecisions(params.distributionDecisions)
 
-            Log.w("AUTO_SAVE", "AUTO_SAVE END projectId=$projectId groups=${groups.size}")
+            Log.w("AUTO_SAVE", "AUTO_SAVE END projectId=$projectId opId=$opId source=$source groups=${groups.size}")
         } catch (t: Throwable) {
-            Log.e("AUTO_SAVE", "AUTO_SAVE FAILED projectId=$projectId groups=${groups.size}", t)
+            Log.e("AUTO_SAVE", "AUTO_SAVE FAILED projectId=$projectId opId=$opId source=$source groups=${groups.size}", t)
             throw t
         }
     }

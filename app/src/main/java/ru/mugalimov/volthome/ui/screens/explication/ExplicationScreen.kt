@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
@@ -68,6 +69,12 @@ fun ExplicationScreen(
     viewModel: ExplicationViewModel = hiltViewModel()
 ) {
 
+    // ✅ больше не нужен: кнопка теперь всегда видна
+    // val showResetManualButton by viewModel.showResetManualButton.collectAsState(initial = false)
+
+    val showResetManualConfirmDialog by viewModel.showResetManualConfirmDialog.collectAsState(
+        initial = false
+    )
 
     val selectedBreakdown by viewModel.selectedDeviceBreakdown.collectAsState()
     val sheetPayload by viewModel.infoSheetPayload.collectAsState()
@@ -136,7 +143,8 @@ fun ExplicationScreen(
                 isManual = (s.mode == GroupScreenState.Empty.EmptyMode.MANUAL),
                 title = s.title,
                 message = s.message,
-                onRecalc = { viewModel.recalcAndSaveGroups() } // в MANUAL VM покажет snackbar/guard
+                onRecalc = { viewModel.recalcAndSaveGroups() }, // в MANUAL VM покажет snackbar/guard
+                onResetManual = { viewModel.onResetManualOverridesClick() }
             )
         }
 
@@ -164,12 +172,16 @@ fun ExplicationScreen(
                         .sortedBy { it.groupNumber }
                         .joinToString { g -> "${g.groupId}#${g.groupNumber}#${(g.phase ?: Phase.A).name}(devs=${g.devices.size})" }
 
-                    Log.d("MANUAL_UI", "MANUAL displayGroups size=${displayGroups.size} summary=[$summary]")
+                    Log.d(
+                        "MANUAL_UI",
+                        "MANUAL displayGroups size=${displayGroups.size} summary=[$summary]"
+                    )
                 }
             }
 
             // Bounds целей drop (в root-координатах)
-            val targetBounds = remember { mutableStateMapOf<ExplicationViewModel.DragTarget, Rect>() }
+            val targetBounds =
+                remember { mutableStateMapOf<ExplicationViewModel.DragTarget, Rect>() }
 
             // ✅ ВАЖНО: когда панель целей скрылась — чистим bounds,
             // иначе остаются "старые" прямоугольники и activeTarget может врать.
@@ -181,7 +193,8 @@ fun ExplicationScreen(
             }
 
             fun resolveActiveTarget(pointerRoot: Offset): ExplicationViewModel.DragTarget? {
-                val hit = targetBounds.entries.firstOrNull { (_, rect) -> rect.contains(pointerRoot) }?.key
+                val hit =
+                    targetBounds.entries.firstOrNull { (_, rect) -> rect.contains(pointerRoot) }?.key
                 if (hit != null) {
                     Log.d("DRAG_HIT", "HIT pointerRoot=$pointerRoot -> $hit")
                 }
@@ -201,7 +214,7 @@ fun ExplicationScreen(
             val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             val scope = rememberCoroutineScope()
 
-            androidx.compose.foundation.layout.Box(
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(bg)
@@ -262,6 +275,15 @@ fun ExplicationScreen(
                             onCalculatedPowerClick = { viewModel.onCalculatedPowerClick(it) }
                         )
                         Spacer(Modifier.height(12.dp))
+
+                    }
+
+
+                    item {
+                        ResetManualOverridesButton(
+                            onClick = { viewModel.onResetManualOverridesClick() }
+                        )
+                        Spacer(Modifier.height(12.dp))
                     }
 
                     // Нераспределённые — только в manual
@@ -274,7 +296,10 @@ fun ExplicationScreen(
                                 // ✅ Drag из unassigned: fromGroupId виртуальный
                                 onDeviceDragStart = { deviceId, itemStartRoot, pointerStartRoot ->
                                     // 1) включаем панель целей
-                                    viewModel.onDeviceLongPressed(deviceId, ExplicationViewModel.FROM_UNASSIGNED)
+                                    viewModel.onDeviceLongPressed(
+                                        deviceId,
+                                        ExplicationViewModel.FROM_UNASSIGNED
+                                    )
 
                                     // 2) запускаем dragState
                                     viewModel.startDrag(
@@ -290,10 +315,16 @@ fun ExplicationScreen(
                                     viewModel.setActiveDragTarget(active)
                                 },
                                 onDeviceDragEnd = {
-                                    Log.d("DRAG_TRACE", "SCREEN onDeviceDragEnd activeTarget=${dragStateLatest.value.activeTarget}")
+                                    Log.d(
+                                        "DRAG_TRACE",
+                                        "SCREEN onDeviceDragEnd activeTarget=${dragStateLatest.value.activeTarget}"
+                                    )
                                     val latest = dragStateLatest.value
                                     when (val t = latest.activeTarget) {
-                                        is ExplicationViewModel.DragTarget.Group -> viewModel.dropToGroup(t.groupId)
+                                        is ExplicationViewModel.DragTarget.Group -> viewModel.dropToGroup(
+                                            t.groupId
+                                        )
+
                                         ExplicationViewModel.DragTarget.Unassigned -> viewModel.dropToUnassigned()
                                         ExplicationViewModel.DragTarget.NewGroup -> viewModel.dropToNewGroup()
                                         null -> viewModel.dropCancel()
@@ -357,7 +388,10 @@ fun ExplicationScreen(
                                     onDeviceDragEnd = {
                                         val latest = dragStateLatest.value
                                         when (val t = latest.activeTarget) {
-                                            is ExplicationViewModel.DragTarget.Group -> viewModel.dropToGroup(t.groupId)
+                                            is ExplicationViewModel.DragTarget.Group -> viewModel.dropToGroup(
+                                                t.groupId
+                                            )
+
                                             ExplicationViewModel.DragTarget.Unassigned -> viewModel.dropToUnassigned()
                                             ExplicationViewModel.DragTarget.NewGroup -> viewModel.dropToNewGroup()
                                             null -> viewModel.dropCancel() // палец подняли “в никуда” — можно закрыть панель
@@ -439,6 +473,24 @@ fun ExplicationScreen(
                         InfoSheetContent(payload = sheetPayload!!)
                     }
                 }
+
+                if (showResetManualConfirmDialog) {
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = { viewModel.onResetManualOverridesDismiss() },
+                        title = { Text("Сбросить ручные изменения?") },
+                        text = { Text("Проект будет полностью пересчитан автоматически.") },
+                        confirmButton = {
+                            Button(onClick = { viewModel.onResetManualOverridesConfirm() }) {
+                                Text("Подтвердить")
+                            }
+                        },
+                        dismissButton = {
+                            Button(onClick = { viewModel.onResetManualOverridesDismiss() }) {
+                                Text("Отмена")
+                            }
+                        }
+                    )
+                }
             }
         }
     }
@@ -463,25 +515,55 @@ private fun ExplicationEmptyState(
     isManual: Boolean,
     title: String,
     message: String,
-    onRecalc: () -> Unit
+    onRecalc: () -> Unit,
+    onResetManual: () -> Unit
 ) {
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        // ✅ Важно: Column должен иметь ширину, иначе fillMaxWidth у кнопок бессмысленный
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(8.dp))
             Text(message)
+
             Spacer(modifier = Modifier.height(16.dp))
             Button(
-                onClick = {
-                    // В MANUAL VM уже покажет guard/snackbar — ок
-                    onRecalc()
-                }
+                onClick = { onRecalc() },
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Text(if (isManual) "Понятно" else "Пересчитать")
             }
+
+            // ✅ Теперь ВСЕГДА
+            Spacer(modifier = Modifier.height(12.dp))
+            ResetManualOverridesButton(
+                onClick = onResetManual,
+                modifier = Modifier
+            )
         }
+    }
+}
+
+@Composable
+private fun ResetManualOverridesButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Button(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth(),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer
+        )
+    ) {
+        Text("Сбросить ручные изменения")
     }
 }

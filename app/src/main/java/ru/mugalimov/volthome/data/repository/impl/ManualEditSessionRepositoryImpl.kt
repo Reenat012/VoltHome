@@ -134,10 +134,13 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
 
     override suspend fun exitManualMode(projectId: String) {
         val TAG = "MANUAL_REPO"
-        val current = sessionsFlow.value[projectId] ?: return
+        require(projectId.isNotBlank()) { "projectId must be non-blank" }
 
-        // Если вдруг сессия есть, но manualModeActive=false — всё равно корректно почистим.
-        Log.d(TAG, "exitManualMode pid=$projectId manualActive=${current.manualModeActive}")
+        // ✅ КРИТИЧНО:
+        // exitManualMode обязан очищать persisted marker даже если in-memory сессии нет.
+        // Иначе после kill-process получаем "manual активен" в БД и NULL в памяти → рассинхрон.
+        val current = sessionsFlow.value[projectId]
+        Log.d(TAG, "exitManualMode START pid=$projectId hasSession=${current != null} manualActive=${current?.manualModeActive}")
 
         val markerOut = structuralWriteCoordinator.execute(
             projectId = GLOBAL_MARKER_KEY,
@@ -149,9 +152,15 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
 
         when (markerOut) {
             is StructuralWriteCoordinator.Outcome.Success -> {
+                // ✅ UX маркер снимаем всегда
                 manualDraftResetNotifier.clearExpected(projectId)
-                sessionsFlow.value = sessionsFlow.value - projectId
-                Log.d(TAG, "exitManualMode OK pid=$projectId")
+
+                // ✅ Сессию удаляем, если была
+                if (current != null) {
+                    sessionsFlow.value = sessionsFlow.value - projectId
+                }
+
+                Log.d(TAG, "exitManualMode OK pid=$projectId sessionRemoved=${current != null}")
             }
 
             StructuralWriteCoordinator.Outcome.Busy -> {

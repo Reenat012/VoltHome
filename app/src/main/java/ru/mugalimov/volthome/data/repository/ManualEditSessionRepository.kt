@@ -25,7 +25,13 @@ interface ManualEditSessionRepository {
     /** Вход в manual: создаём in-memory base/draft и включаем manualModeActive. */
     suspend fun enterManualMode(projectId: String, baseState: ProjectEditState)
 
-    /** Выход из manual: сессия проекта удаляется. */
+    /**
+     * ✅ Выход из manual.
+     *
+     * ВАЖНО: реализация обязана очищать persisted marker даже если in-memory сессии нет
+     * (например, после kill-process или рассинхрона).
+     * После этого in-memory сессия проекта должна быть удалена (если была).
+     */
     suspend fun exitManualMode(projectId: String)
 
     /** Применение действия к draftState строго по projectId. */

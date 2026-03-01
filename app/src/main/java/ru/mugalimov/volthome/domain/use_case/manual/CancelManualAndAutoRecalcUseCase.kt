@@ -19,12 +19,16 @@ class CancelManualAndAutoRecalcUseCase @Inject constructor(
 ) {
 
     data class Params(
-        val projectId: String
+        val projectId: String,
+        // ✅ Commit 4: корреляция операции (может быть null, если вызывающий контур не даёт opId)
+        val opId: String? = null
     )
 
     suspend fun execute(params: Params): GroupingResult {
-        val projectId = params.projectId
-        Log.w("MANUAL_CANCEL", "CANCEL_USE_CASE EXECUTE pid=$projectId")
+        val projectId = params.projectId.trim()
+        val opId = params.opId
+
+        Log.w("MANUAL_CANCEL", "CANCEL_USE_CASE EXECUTE pid=$projectId opId=$opId")
 
         if (projectId.isBlank()) {
             return GroupingResult.Error("projectId пуст")
@@ -34,9 +38,6 @@ class CancelManualAndAutoRecalcUseCase @Inject constructor(
          * ✅ ВАЖНО:
          * Мы уже под structural lock, поэтому внутри НЕЛЬЗЯ звать методы,
          * которые снова пытаются взять тот же Mutex (он не реентерабельный).
-         *
-         * Раньше тут был self-deadlock:
-         * Cancel withLock -> SaveAuto.execute withLock -> вечное ожидание.
          */
         return structuralWriteMutex.withLock(projectId) {
             val mode = preferencesRepository.phaseMode.first()
@@ -46,11 +47,14 @@ class CancelManualAndAutoRecalcUseCase @Inject constructor(
                 is GroupingResult.Error -> res
                 is GroupingResult.Success -> {
                     // ✅ Вызываем вариант "я уже под lock"
+                    // ✅ Commit 4: source/opId прокидываем в AUTO_SAVE
                     saveAutoCalculatedGroupsToLocalDbUseCase.executeAlreadyLocked(
                         SaveAutoCalculatedGroupsToLocalDbUseCase.Params(
                             projectId = projectId,
                             groups = res.system.groups,
-                            distributionDecisions = res.distributionDecisions
+                            distributionDecisions = res.distributionDecisions,
+                            source = "CancelManualAndAutoRecalcUseCase",
+                            opId = opId
                         )
                     )
                     res
