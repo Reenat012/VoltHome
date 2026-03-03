@@ -41,11 +41,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.local.dao.GroupPhaseOverrideDao
 import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
-import ru.mugalimov.volthome.domain.model.GroupingResult
 import ru.mugalimov.volthome.domain.model.PlanCapabilities
 import ru.mugalimov.volthome.domain.model.ProFeature
 import ru.mugalimov.volthome.domain.model.manual.ManualEditSession
-import ru.mugalimov.volthome.domain.use_case.manual.CancelManualAndAutoRecalcUseCase
 import ru.mugalimov.volthome.domain.use_case.manual.CommitManualDraftToLocalDbUseCase
 import ru.mugalimov.volthome.ui.manual.LocalManualModeGuard
 import ru.mugalimov.volthome.ui.manual.ManualModeGuard

@@ -5,7 +5,6 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import ru.mugalimov.volthome.data.local.dao.GroupPhaseOverrideDao
 import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
-import ru.mugalimov.volthome.domain.use_case.manual.CancelManualAndAutoRecalcUseCase
 import ru.mugalimov.volthome.domain.use_case.manual.CommitManualDraftToLocalDbUseCase
 
 @EntryPoint
@@ -13,7 +12,6 @@ import ru.mugalimov.volthome.domain.use_case.manual.CommitManualDraftToLocalDbUs
 interface ManualModeGuardEntryPoint {
     fun manualRepo(): ManualEditSessionRepository
     fun commitManualDraftToLocalDb(): CommitManualDraftToLocalDbUseCase
-    fun cancelManualAndAutoRecalc(): CancelManualAndAutoRecalcUseCase
 
     // ✅ Коммит 8: иначе получишь "откат" фаз при возврате в AUTO
     fun groupPhaseOverrideDao(): GroupPhaseOverrideDao

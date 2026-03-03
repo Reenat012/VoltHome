@@ -280,9 +280,16 @@ class RoomRepositoryImpl @Inject constructor(
         withContext(dispatchers) {
             val projectId = activeProjectDs.activeProjectId.first()
             if (projectId.isNullOrBlank()) return@withContext emptyList()
+            getRoomsWithDevicesByProject(projectId)
+        }
+
+    override suspend fun getRoomsWithDevicesByProject(projectId: String): List<RoomWithDevice> =
+        withContext(dispatchers) {
+            val pid = projectId.trim()
+            if (pid.isBlank()) return@withContext emptyList()
 
             val result = mutableListOf<RoomWithDevice>()
-            val roomEntities = roomDao.getAllRoomsByProject(projectId)
+            val roomEntities = roomDao.getAllRoomsByProject(pid)
             for (roomEntity in roomEntities) {
                 val devEntities = deviceDao.getAllDevicesByRoomId(roomEntity.id)
                 result += RoomWithDevice(room = roomEntity, devices = devEntities)

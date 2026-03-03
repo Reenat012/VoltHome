@@ -49,6 +49,7 @@ rustoreSdkBom = "2025.08.01"
 foundationLayout = "1.10.0"
 foundation = "1.10.0"
 foundationVersion = "1.10.1"
+media3CommonKtx = "1.9.2"
 
 
 [libraries]
@@ -109,6 +110,7 @@ rustore-sdk-pay = { module = "ru.rustore.sdk:pay" }
 androidx-compose-foundation-layout = { group = "androidx.compose.foundation", name = "foundation-layout", version.ref = "foundationLayout" }
 androidx-compose-foundation = { group = "androidx.compose.foundation", name = "foundation", version.ref = "foundation" }
 androidx-foundation = { group = "androidx.compose.foundation", name = "foundation", version.ref = "foundationVersion" }
+androidx-media3-common-ktx = { group = "androidx.media3", name = "media3-common-ktx", version.ref = "media3CommonKtx" }
 
 
 [plugins]

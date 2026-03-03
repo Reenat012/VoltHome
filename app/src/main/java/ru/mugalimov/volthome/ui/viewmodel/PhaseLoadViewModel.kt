@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
 import ru.mugalimov.volthome.data.repository.DeviceRepository
@@ -38,7 +39,7 @@ import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadMode
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadUiState
 import ru.mugalimov.volthome.domain.use_case.GetPhaseLoadUiUseCase
 import ru.mugalimov.volthome.domain.use_case.IncomerSelector
-import ru.mugalimov.volthome.domain.use_case.manual.CancelManualAndAutoRecalcUseCase
+import ru.mugalimov.volthome.domain.use_case.manual.ResetManualOverridesAndAutoRecalcUseCase
 import ru.mugalimov.volthome.domain.use_case.phase_load.PhaseLoadItemsBuilder
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
 import ru.mugalimov.volthome.ui.utilities.ManualDraftResetNotifier
@@ -54,8 +55,8 @@ class PhaseLoadViewModel @Inject constructor(
     private val activeProjectDs: ActiveProjectDataStore,
     private val userPlanRepository: UserPlanRepository,
     private val paywallBus: PaywallBus,
-    private val cancelManualAndAutoRecalcUseCase: CancelManualAndAutoRecalcUseCase,
     private val manualDraftResetNotifier: ManualDraftResetNotifier,
+    private val resetManualOverridesAndAutoRecalcUseCase: ResetManualOverridesAndAutoRecalcUseCase,
 ) : ViewModel() {
 
     // =========================
@@ -316,8 +317,14 @@ class PhaseLoadViewModel @Inject constructor(
                 manualDraftResetNotifier.clearExpected(session.projectId)
 
                 // 2) полный авто-recalc + commit в БД (строго по projectId)
-                cancelManualAndAutoRecalcUseCase.execute(
-                    CancelManualAndAutoRecalcUseCase.Params(projectId = session.projectId)
+                // ✅ стало
+                val phaseMode = preferencesRepository.phaseMode.first()
+
+                resetManualOverridesAndAutoRecalcUseCase.execute(
+                    ResetManualOverridesAndAutoRecalcUseCase.Params(
+                        projectId = session.projectId,
+                        phaseMode = phaseMode
+                    )
                 )
 
                 _events.tryEmit("Ручные изменения сброшены, вернулись в авто-режим")

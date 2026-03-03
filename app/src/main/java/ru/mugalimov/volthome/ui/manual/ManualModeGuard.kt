@@ -15,7 +15,6 @@ import kotlinx.coroutines.withContext
 import ru.mugalimov.volthome.data.local.dao.GroupPhaseOverrideDao
 import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
 import ru.mugalimov.volthome.domain.model.GroupingResult
-import ru.mugalimov.volthome.domain.use_case.manual.CancelManualAndAutoRecalcUseCase
 import ru.mugalimov.volthome.domain.use_case.manual.CommitManualDraftToLocalDbUseCase
 
 /**
@@ -37,7 +36,6 @@ import ru.mugalimov.volthome.domain.use_case.manual.CommitManualDraftToLocalDbUs
 class ManualModeGuard private constructor(
     private val manualRepo: ManualEditSessionRepository,
     private val commitManualDraftToLocalDb: CommitManualDraftToLocalDbUseCase,
-    private val cancelManualAndAutoRecalc: CancelManualAndAutoRecalcUseCase,
     private val groupPhaseOverrideDao: GroupPhaseOverrideDao,
 ) {
 
@@ -146,7 +144,6 @@ class ManualModeGuard private constructor(
         scope.launch {
             val session = runCatching { manualRepo.getActiveSession() }.getOrNull()
 
-            // Если сессии нет (kill-process или manual уже выключен) — считаем cancel успешным.
             if (session == null) {
                 withContext(Dispatchers.Main.immediate) {
                     _dialogState.value = null
@@ -158,19 +155,11 @@ class ManualModeGuard private constructor(
             val projectId = session.projectId
 
             val ok = runCatching {
-                // 1) Авто-пересчёт + коммит результата (внутренняя логика usecase)
-                when (val res = cancelManualAndAutoRecalc.execute(
-                    CancelManualAndAutoRecalcUseCase.Params(projectId = projectId)
-                )) {
-                    is GroupingResult.Error -> error("CancelManual failed: ${res.message}")
-                    is GroupingResult.Success -> Unit
-                }
-
-                // 2) КРИТИЧНО: чистим overrides, иначе AUTO перетрёт то, что мы только что пересчитали
+                // ✅ 1) чистим overrides (это не auto-recalc, не запись групп)
                 val deleted = groupPhaseOverrideDao.deleteByProject(projectId)
                 Log.w(TAG, "DELETE overrides pid=$projectId (guard CANCEL) deletedRows=$deleted")
 
-                // 3) Выходим из manual
+                // ✅ 2) выходим из manual (draft отбрасывается логикой repo)
                 manualRepo.exitManualMode(projectId)
             }.onFailure {
                 Log.e(TAG, "onCancelClicked failed. projectId=$projectId", it)
@@ -199,7 +188,6 @@ class ManualModeGuard private constructor(
             return ManualModeGuard(
                 manualRepo = ep.manualRepo(),
                 commitManualDraftToLocalDb = ep.commitManualDraftToLocalDb(),
-                cancelManualAndAutoRecalc = ep.cancelManualAndAutoRecalc(),
                 groupPhaseOverrideDao = ep.groupPhaseOverrideDao()
             )
         }

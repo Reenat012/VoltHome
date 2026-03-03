@@ -2,6 +2,7 @@ package ru.mugalimov.volthome.domain.use_case
 
 import android.util.Log
 import javax.inject.Inject
+import ru.mugalimov.volthome.data.local.dao.DeviceDao
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.DistributionDecision
@@ -31,6 +32,7 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
     private val explicationRepository: ExplicationRepository,
     private val structuralWriteMutex: ProjectStructuralWriteMutex, // ✅ single-flight
     private val projectOwnershipRepository: ru.mugalimov.volthome.data.repository.ProjectOwnershipRepository, // ✅ bastion lock SoT
+    private val deviceDao: DeviceDao, // ✅ NEW: инвариант "не сохранять пустые devices при наличии устройств"
 ) {
 
     data class Params(
@@ -82,7 +84,34 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
         val groups = ensureValidAutoIds(projectId = projectId, groups = params.groups)
         failIfInvalidAutoGroupIds(projectId = projectId, groups = groups)
 
-        // ... остальные инварианты ...
+        // -------------------------------------------------------------------
+        // ✅ NEW INVARIANT:
+        // AUTO_SAVE запрещён, если groups содержат пустые devices, но в проекте есть "живые" устройства.
+        //
+        // Почему это критично:
+        // replaceAllGroupsTransactionalAlreadyLocked() сначала удаляет старые joins,
+        // затем вставляет новые joins на основе g.devices. Если devices пустые — joins не вставятся,
+        // и ты получишь "groups>0 & devices=0" (классическая поломка).
+        // -------------------------------------------------------------------
+        val activeDeviceCount = deviceDao.countActiveByProjectId(projectId)
+        val emptyDeviceGroups = groups.count { it.devices.isEmpty() }
+
+        if (activeDeviceCount > 0 && groups.isNotEmpty() && emptyDeviceGroups > 0) {
+            val sample = groups.asSequence()
+                .filter { it.devices.isEmpty() }
+                .take(5)
+                .joinToString { g ->
+                    "gid=${g.groupId} num=${g.groupNumber} roomId=${g.roomId} type=${g.groupType} phase=${g.phase.name}"
+                }
+
+            val msg =
+                "AUTO_SAVE invariant failed: groups contain empty devices while project has active devices. " +
+                        "pid=$projectId activeDevices=$activeDeviceCount groups=${groups.size} emptyGroups=$emptyDeviceGroups " +
+                        "source=$source opId=$opId sample=[$sample]"
+
+            Log.e("AUTO_SAVE", msg, Throwable("STACK"))
+            throw IllegalStateException(msg)
+        }
 
         // -------------------------
         // ✅ Остальные инварианты (до БД)
@@ -96,8 +125,6 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
         // ✅ FIX: summary/caller обязаны быть объявлены ДО логов
         // -------------------------------------------------------------------
 
-        // Короткая сводка: стабильный порядок по groupNumber.
-        // Формат: "id#num#phase(devs=n)"
         val summary = groups
             .sortedBy { it.groupNumber }
             .joinToString { g ->
@@ -105,7 +132,6 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
                 "${g.groupId}#${g.groupNumber}#$ph(devs=${g.devices.size})"
             }
 
-        // Короткий caller trace: чтобы видеть источник без 500 строк стектрейса
         val caller = Throwable().stackTrace
             .drop(1)
             .take(8)
@@ -133,28 +159,14 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
         }
     }
 
-    /**
-     * ✅ B2: Поднимаем groupId<=0 детерминированно.
-     *
-     * Правила:
-     * - если все groupId > 0 => возвращаем исходный список без изменений (no-op)
-     * - иначе:
-     *   - выдаём новые id строго > 0
-     *   - детерминированно: зависит только от (projectId + stableKey группы)
-     *   - при коллизиях: salt++ детерминированно
-     *   - логируем ERROR, потому что это не "нормально", но мы не валим приложение
-     *
-     * Почему без падения:
-     * - groupId=0 тут может прилететь при регрессии калькулятора/интеграции.
-     * - падать на проде из-за этого — больно, лучше пережить и логом подсветить.
-     */
+    // --- остальной код без изменений (ensureValidAutoIds / failIfInvalidAutoGroupIds / normalizeAutoGroupIds) ---
+
     private fun ensureValidAutoIds(projectId: String, groups: List<CircuitGroup>): List<CircuitGroup> {
         if (groups.isEmpty()) return groups
 
         val hasInvalid = groups.any { it.groupId <= 0L }
         if (!hasInvalid) return groups // ✅ no-op
 
-        // Логируем ERROR (не warning): это сигнал регрессии/дырки в расчёте.
         val invalidSample = groups.asSequence()
             .filter { it.groupId <= 0L }
             .map { "num=${it.groupNumber}:id=${it.groupId}" }
@@ -167,19 +179,13 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
                     "projectId=$projectId invalid(sample)=$invalidSample totalInvalid=${groups.count { it.groupId <= 0L }}"
         )
 
-        // Чтобы не получить дубли:
-        // 1) сохраняем все уже валидные id
-        // 2) генерим новые только для невалидных
         val used = HashSet<Long>(groups.size * 2)
         groups.asSequence().map { it.groupId }.filter { it > 0L }.forEach { used.add(it) }
 
-        // Детерминированный ключ группы:
-        // ⚠️ здесь мы НЕ используем groupNumber (он плавает).
-        // Используем то, что максимально стабильно и уже есть в модели.
         fun stableKey(g: CircuitGroup): String {
             val deviceIds = g.devices
                 .asSequence()
-                .map { it.id } // ⚠️ предполагаем, что в доменной Device есть id
+                .map { it.id }
                 .sorted()
                 .joinToString(",")
 
@@ -197,12 +203,9 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
             }
         }
 
-        // Генератор стабильного id на базе FNV-1a 64-bit.
-// ⚠️ Важно: offset basis не влезает в signed Long literal, поэтому считаем в ULong.
         fun fnv1a64(input: String): ULong {
-            var hash = 0xcbf29ce484222325uL // offset basis (ULong)
-            val prime = 0x100000001b3uL     // FNV prime (ULong)
-
+            var hash = 0xcbf29ce484222325uL
+            val prime = 0x100000001b3uL
             for (ch in input) {
                 hash = hash xor ch.code.toULong()
                 hash *= prime
@@ -210,19 +213,8 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
             return hash
         }
 
-        /**
-         * Переводим ULong-хеш в Long > 0 детерминированно:
-         * - режем до Long.MAX_VALUE (чтобы не получить отрицательное)
-         * - 0 запрещён, заменяем на 1
-         */
         fun toPositiveNonZero(x: ULong): Long {
             val p = (x and Long.MAX_VALUE.toULong()).toLong()
-            return if (p == 0L) 1L else p
-        }
-
-        fun toPositiveNonZero(x: Long): Long {
-            // Убираем отрицательность и 0. Не используем abs(Long.MIN_VALUE).
-            val p = x and Long.MAX_VALUE
             return if (p == 0L) 1L else p
         }
 
@@ -246,7 +238,6 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
                     break
                 }
                 salt++
-                // Защита от теоретического зацикливания (на практике не должно случиться).
                 if (salt > 10_000) {
                     throw IllegalStateException(
                         "AUTO_SAVE hard-fail: cannot resolve groupId collision during normalization " +
@@ -255,7 +246,6 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
                 }
             }
 
-            // Важно: меняем только groupId, остальное не трогаем.
             out.add(g.copy(groupId = newId))
         }
 
@@ -265,7 +255,6 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
     private fun failIfInvalidAutoGroupIds(projectId: String, groups: List<CircuitGroup>) {
         if (groups.isEmpty()) return
 
-        // 1) id must be > 0
         val invalid = groups
             .asSequence()
             .filter { it.groupId <= 0L }
@@ -289,7 +278,6 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
             )
         }
 
-        // 2) id must be unique
         val dupIds = groups.groupBy { it.groupId }.filter { it.value.size > 1 }.keys
         if (dupIds.isNotEmpty()) {
             val sample = dupIds.take(30)

@@ -69,7 +69,6 @@ import ru.mugalimov.volthome.domain.use_case.SaveAutoCalculatedGroupsToLocalDbUs
 import ru.mugalimov.volthome.domain.use_case.getOrZero
 import ru.mugalimov.volthome.domain.use_case.phaseCurrents
 import ru.mugalimov.volthome.domain.use_case.report.BuildProfessionalSectionsUseCase
-import ru.mugalimov.volthome.domain.use_case.manual.CancelManualAndAutoRecalcUseCase
 import ru.mugalimov.volthome.domain.use_case.manual.CommitManualDraftToLocalDbUseCase
 import ru.mugalimov.volthome.domain.use_case.manual.ResetManualOverridesAndAutoRecalcUseCase
 import ru.mugalimov.volthome.domain.util.PowerCurrentNormalizer
@@ -100,7 +99,6 @@ class ExplicationViewModel @Inject constructor(
     private val bootstrapManualLockUseCase: BootstrapManualLockUseCase,
 
     private val commitManualDraftToLocalDbUseCase: CommitManualDraftToLocalDbUseCase,
-    private val cancelManualAndAutoRecalcUseCase: CancelManualAndAutoRecalcUseCase,
     private val saveAutoCalculatedGroupsToLocalDbUseCase: SaveAutoCalculatedGroupsToLocalDbUseCase,
     private val manualDraftResetNotifier: ManualDraftResetNotifier,
     private val createDeviceOpBus: CreateDeviceOpBus,
@@ -1470,7 +1468,7 @@ class ExplicationViewModel @Inject constructor(
 
             Log.w("AUTO_TRIGGER", "AUTO_RECALC_START reason=$reason pid=$projectId mode=$mode")
 
-            val calc = groupCalculatorFactory.create()
+            val calc = groupCalculatorFactory.create(projectId)
             Log.e("CALC_TRACE", "calculateGroups START pid=$projectId mode=$mode")
             when (val res = calc.calculateGroups(mode)) {
                 is GroupingResult.Error -> {

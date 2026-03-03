@@ -94,6 +94,7 @@ dependencies {
     implementation(libs.androidx.compose.foundation.layout)
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.foundation)
+    implementation(libs.androidx.media3.common.ktx)
 //    implementation(libs.compose.material3)
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 

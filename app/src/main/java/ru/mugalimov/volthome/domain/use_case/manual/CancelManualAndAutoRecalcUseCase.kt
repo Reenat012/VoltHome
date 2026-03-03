@@ -11,11 +11,16 @@ import ru.mugalimov.volthome.domain.use_case.ProjectStructuralWriteMutex
 import ru.mugalimov.volthome.domain.use_case.SaveAutoCalculatedGroupsToLocalDbUseCase
 
 @Singleton
+@Deprecated(
+    message = "Запрещено по ТЗ: Cancel НЕ должен запускать auto-recalc и писать группы. " +
+            "Используйте manualRepo.exitManualMode(projectId) и возвращайтесь к DB pipeline.",
+    level = DeprecationLevel.ERROR
+)
 class CancelManualAndAutoRecalcUseCase @Inject constructor(
     private val groupCalculatorFactory: GroupCalculatorFactory,
     private val preferencesRepository: PreferencesRepository,
     private val saveAutoCalculatedGroupsToLocalDbUseCase: SaveAutoCalculatedGroupsToLocalDbUseCase,
-    private val structuralWriteMutex: ProjectStructuralWriteMutex, // ✅ single-flight
+    private val structuralWriteMutex: ProjectStructuralWriteMutex,
 ) {
 
     data class Params(
@@ -41,7 +46,7 @@ class CancelManualAndAutoRecalcUseCase @Inject constructor(
          */
         return structuralWriteMutex.withLock(projectId) {
             val mode = preferencesRepository.phaseMode.first()
-            val calc = groupCalculatorFactory.create()
+            val calc = groupCalculatorFactory.create(projectId)
 
             when (val res = calc.calculateGroups(mode)) {
                 is GroupingResult.Error -> res

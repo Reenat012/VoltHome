@@ -192,7 +192,8 @@ class RecalculateGroupsOnDeviceChangeUseCase @Inject constructor(
 
                         // ВАЖНО: тут ТОЛЬКО расчёт. Никаких STRUCTURE-сохранений.
                         val result = withContext(Dispatchers.IO) {
-                            calculatorFactory.create().calculateGroups(curr.mode)
+                            // ВАЖНО: считаем строго в curr.projectId, а не “какой сейчас активный”
+                            calculatorFactory.create(curr.projectId).calculateGroups(curr.mode)
                         }
 
                         // ✅ Коммит 4: whitelist derived write (пример: nominal_current)

@@ -2,14 +2,17 @@ package ru.mugalimov.volthome.data.repository.impl
 
 import android.util.Log
 import javax.inject.Inject
-import ru.mugalimov.volthome.data.local.dao.GroupDao
-import ru.mugalimov.volthome.data.local.dao.GroupDeviceJoinDao
 import ru.mugalimov.volthome.data.local.dao.GroupPhaseOverrideDao
 import ru.mugalimov.volthome.data.repository.ManualOverridesCleanerRepository
 
+/**
+ * Чистит ТОЛЬКО ручные overrides (project-scoped).
+ *
+ * Важно:
+ * - membership (group_device_join) — это SoT структуры, поэтому joins НЕ трогаем вообще.
+ * - Никаких тяжелых SELECT ради "joinsCount": доказательность даём текстом лога.
+ */
 class ManualOverridesCleanerRepositoryImpl @Inject constructor(
-    private val groupDao: GroupDao,
-    private val groupDeviceJoinDao: GroupDeviceJoinDao,
     private val groupPhaseOverrideDao: GroupPhaseOverrideDao
 ) : ManualOverridesCleanerRepository {
 
@@ -18,18 +21,12 @@ class ManualOverridesCleanerRepositoryImpl @Inject constructor(
         if (pid.isBlank()) return false
 
         return try {
-            // 1) groupIds проекта (потому что join без project boundary)
-            val groupIds = groupDao.getGroupIdsByProject(pid)
-
-            // 2) phase overrides (project-scoped)
+            // ✅ Вариант A: удаляем только project-scoped overrides
             val deletedPhase = groupPhaseOverrideDao.deleteByProject(pid)
-
-            // 3) joins для groupIds
-            val deletedJoins = if (groupIds.isEmpty()) 0 else groupDeviceJoinDao.deleteJoinsForGroupIds(groupIds)
 
             Log.w(
                 "OVERRIDES",
-                "RESET overrides pid=$pid groupIds=${groupIds.size} deletedPhase=$deletedPhase deletedJoins=$deletedJoins"
+                "RESET overrides pid=$pid deletedPhase=$deletedPhase (joins untouched)"
             )
             true
         } catch (t: Throwable) {

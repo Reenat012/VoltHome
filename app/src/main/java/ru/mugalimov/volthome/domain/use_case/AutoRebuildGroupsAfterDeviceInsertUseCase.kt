@@ -6,33 +6,43 @@ import kotlinx.coroutines.flow.first
 import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
 import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
 import ru.mugalimov.volthome.data.repository.PreferencesRepository
+import ru.mugalimov.volthome.data.repository.ProjectOwnershipRepository
 import ru.mugalimov.volthome.domain.model.GroupingResult
 
 /**
- * Commit 3 (v3):
+ * Commit 5:
  * AUTO rebuild после add-device.
  *
- * A) insertedIds.isEmpty() -> SKIP
- * B) manualActive(pid) -> SUPPRESS
- * C) full rebuild через calculator + SaveAuto...
- * D) single-flight BEGIN/END с opId
- *
- * Commit 4 (BASTION):
- * - прокидываем source/opId в SaveAutoCalculatedGroupsToLocalDbUseCase,
- *   чтобы "AUTO_SAVE SUPPRESS" коррелировался с opId и source.
+ * Порядок suppress (ранний выход, чтобы НЕ считать зря):
+ * 1) insertedIds.isEmpty() -> SKIP
+ * 2) manualLock(pid)==true -> SUPPRESS (persisted ownership: ручные правки присутствуют)
+ * 3) manualActive(pid)==true -> SUPPRESS (in-memory session: прямо сейчас в ручном режиме)
  *
  * ВАЖНО:
  * - mismatch activeProjectId НЕ SKIP
  * - временное переключение activeProjectId происходит ВНЕ writer-блока
+ *
+ * Логи для grep/диагностики:
+ * - "AUTO_REBUILD SUPPRESS manualLock=true ..."
+ * - "AUTO_REBUILD SUPPRESS manualActive=true ..."
  */
 class AutoRebuildGroupsAfterDeviceInsertUseCase @Inject constructor(
     private val activeProjectDs: ActiveProjectDataStore,
     private val manualRepo: ManualEditSessionRepository,
+    private val ownershipRepo: ProjectOwnershipRepository,
     private val preferencesRepository: PreferencesRepository,
     private val calculatorFactory: GroupCalculatorFactory,
     private val saveAutoUseCase: SaveAutoCalculatedGroupsToLocalDbUseCase,
     private val coordinator: StructuralWriteCoordinator
 ) {
+
+    companion object {
+        // Единый тег, чтобы быстро grep'ать по логам.
+        private const val TAG = "AUTO_REBUILD"
+        private const val SOURCE = "RoomRepositoryImpl.addDevicesToRoom"
+        private const val REASON = "DEVICE_CREATED_AUTO_REBUILD"
+        private const val OP_NAME = "DEVICE_CREATED_AUTO_REBUILD"
+    }
 
     data class Params(
         val projectIdRecorded: String,
@@ -44,26 +54,41 @@ class AutoRebuildGroupsAfterDeviceInsertUseCase @Inject constructor(
         val pid = params.projectIdRecorded.trim()
         if (pid.isBlank()) return
 
-        // A) Guard
+        // 1) Guard: пустой список -> нечего делать.
         if (params.insertedIds.isEmpty()) {
-            Log.i("AUTO_POST_INSERT", "SKIP emptyIds pid=$pid opId=${params.opId}")
+            Log.i(TAG, "SKIP emptyIds pid=$pid opId=${params.opId}")
             return
         }
 
-        // B) Suppress manual (in-memory)
+        // 2) Suppress по persisted lock: ручные overrides уже есть, AUTO не должен трогать структуру.
+        // Важно: это не "manualActive", это именно ownership/SoT (персистентный маркер).
+        if (ownershipRepo.isManualLock(pid)) {
+            Log.i(
+                TAG,
+                "SUPPRESS manualLock=true pid=$pid opId=${params.opId} inserted=${params.insertedIds.size}"
+            )
+            return
+        }
+
+        // 3) Suppress по текущей ручной сессии (in-memory): пользователь прямо сейчас редактирует.
         if (manualRepo.isManualActive(pid)) {
-            Log.i("AUTO_POST_INSERT", "SUPPRESS manualActive pid=$pid opId=${params.opId}")
+            Log.i(
+                TAG,
+                "SUPPRESS manualActive=true pid=$pid opId=${params.opId} inserted=${params.insertedIds.size}"
+            )
             return
         }
 
+        // Фаза/режим считаем один раз, снаружи writer-блока.
         val mode = preferencesRepository.phaseMode.first()
 
+        // ВАЖНО: rebuild делаем в контексте projectIdRecorded, а не активного проекта UI.
         val previousActivePid = activeProjectDs.activeProjectId.first().orEmpty().trim()
         val needSwitch = previousActivePid != pid
 
         if (needSwitch) {
             Log.w(
-                "AUTO_POST_INSERT",
+                TAG,
                 "ACTIVE_PID_MISMATCH switching activeProjectId from=$previousActivePid to=$pid opId=${params.opId}"
             )
             activeProjectDs.setActiveProjectId(pid)
@@ -72,39 +97,34 @@ class AutoRebuildGroupsAfterDeviceInsertUseCase @Inject constructor(
         try {
             val out = coordinator.execute(
                 projectId = pid,
-                opName = "DEVICE_CREATED_AUTO_REBUILD",
+                opName = OP_NAME,
                 meta = StructuralWriteCoordinator.Meta(
-                    reason = "DEVICE_CREATED_AUTO_REBUILD",
-                    source = "RoomRepositoryImpl.addDevicesToRoom",
+                    reason = REASON,
+                    source = SOURCE,
                     opId = params.opId
                 )
             ) {
-                // 🔒 Внутри writer-блока — только чистая структура
-                val result = calculatorFactory.create().calculateGroups(mode)
+                // 🔒 Внутри writer-блока — только чистая структура (никаких UI-зависимостей).
+                // ВАЖНО: считаем строго в recorded projectId
+                val result = calculatorFactory.create(pid).calculateGroups(mode)
 
                 when (result) {
                     is GroupingResult.Success -> {
-                        // ✅ Commit 4: source/opId прокинуты до AUTO_SAVE
+                        // ✅ source/opId прокинуты до AUTO_SAVE (корреляция).
                         saveAutoUseCase.execute(
                             SaveAutoCalculatedGroupsToLocalDbUseCase.Params(
                                 projectId = pid,
                                 groups = result.system.groups,
                                 distributionDecisions = result.distributionDecisions,
-                                source = "RoomRepositoryImpl.addDevicesToRoom",
+                                source = SOURCE,
                                 opId = params.opId
                             )
                         )
-                        Log.i(
-                            "AUTO_POST_INSERT",
-                            "DONE pid=$pid opId=${params.opId} groups=${result.system.groups.size}"
-                        )
+                        Log.i(TAG, "DONE pid=$pid opId=${params.opId} groups=${result.system.groups.size}")
                     }
 
                     is GroupingResult.Error -> {
-                        Log.e(
-                            "AUTO_POST_INSERT",
-                            "FAILED_CALC pid=$pid opId=${params.opId} msg=${result.message}"
-                        )
+                        Log.e(TAG, "FAILED_CALC pid=$pid opId=${params.opId} msg=${result.message}")
                     }
                 }
             }
@@ -112,27 +132,21 @@ class AutoRebuildGroupsAfterDeviceInsertUseCase @Inject constructor(
             when (out) {
                 is StructuralWriteCoordinator.Outcome.Success -> Unit
                 StructuralWriteCoordinator.Outcome.Busy ->
-                    Log.w("AUTO_POST_INSERT", "BUSY pid=$pid opId=${params.opId}")
+                    Log.w(TAG, "BUSY pid=$pid opId=${params.opId}")
                 StructuralWriteCoordinator.Outcome.Panic ->
-                    Log.e("AUTO_POST_INSERT", "PANIC pid=$pid opId=${params.opId}")
+                    Log.e(TAG, "PANIC pid=$pid opId=${params.opId}")
                 is StructuralWriteCoordinator.Outcome.Error ->
-                    Log.e("AUTO_POST_INSERT", "ERROR pid=$pid opId=${params.opId}", out.throwable)
+                    Log.e(TAG, "ERROR pid=$pid opId=${params.opId}", out.throwable)
             }
         } finally {
+            // Возвращаем activeProjectId назад (если переключали), чтобы не ломать UI-контекст.
             if (needSwitch) {
                 runCatching {
                     activeProjectDs.setActiveProjectId(previousActivePid)
                 }.onFailure {
-                    Log.e(
-                        "AUTO_POST_INSERT",
-                        "ACTIVE_PID_RESTORE_FAILED previous=$previousActivePid opId=${params.opId}",
-                        it
-                    )
+                    Log.e(TAG, "ACTIVE_PID_RESTORE_FAILED previous=$previousActivePid opId=${params.opId}", it)
                 }.onSuccess {
-                    Log.w(
-                        "AUTO_POST_INSERT",
-                        "ACTIVE_PID_RESTORE restored=$previousActivePid opId=${params.opId}"
-                    )
+                    Log.w(TAG, "ACTIVE_PID_RESTORE restored=$previousActivePid opId=${params.opId}")
                 }
             }
         }

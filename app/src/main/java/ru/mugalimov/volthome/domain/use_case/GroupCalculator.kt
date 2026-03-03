@@ -19,6 +19,7 @@ import java.security.MessageDigest
 import kotlin.math.ceil
 
 class GroupCalculator(
+    private val projectId: String,
     private val roomRepository: RoomRepository,
     private val groupRepository: ExplicationRepository
 ) {
@@ -32,7 +33,9 @@ class GroupCalculator(
 
     suspend fun calculateGroups(mode: PhaseMode): GroupingResult {
         return try {
-            val rooms = roomRepository.getRoomsWithDevices()
+            // ✅ ВАЖНО: больше не “в воздухе”. Всегда считаем по конкретному projectId.
+            val rooms = roomRepository.getRoomsWithDevicesByProject(projectId)
+
             var totalGroupNumber = 1
             val allGroups = mutableListOf<CircuitGroup>()
 
@@ -79,13 +82,15 @@ class GroupCalculator(
                 }
             }
 
-            // 3) Нормализуем номера один раз
+            // 3) Нормализуем номера один раз (детерминированно)
             val normalized = allGroups
                 .sortedWith(compareBy<CircuitGroup> { it.roomId }.thenBy { it.groupNumber })
                 .mapIndexed { idx, g -> g.copy(groupNumber = idx + 1) }
 
             // 3.1) ✅ Генерируем стабильные groupId (валидные, уникальные, детерминированные)
-            // Важно: НЕ используем groupNumber как ключ — он может измениться при добавлении/удалении устройств.
+            // ВАЖНО:
+            // - НЕ используем groupNumber как ключ (он плавает)
+            // - НЕ меняем порядок списка (иначе downstream распределение фаз будет “плясать”)
             val withStableIds = assignStableGroupIds(normalized)
 
             // 4) Балансировка фаз / режим 1 фаза
@@ -116,6 +121,7 @@ class GroupCalculator(
             DeviceType.AIR_CONDITIONER,
             DeviceType.ELECTRIC_STOVE,
             DeviceType.HEAVY_DUTY -> true
+
             else -> false
         }
 
@@ -292,50 +298,47 @@ class GroupCalculator(
      * - stable (детерминированно): одинаковая структура => одинаковые id
      *
      * Ключ НЕ использует groupNumber (он может меняться при добавлении/удалении устройств).
-     * Основа ключа:
-     *   roomId + groupType + sorted(deviceIds) + breaker/cable/rcd
+     *
+     * ВАЖНО:
+     * - порядок списка НЕ меняем (иначе downstream распределение фаз/решений станет недетерминированным)
+     * - разрешение коллизий делаем “salt++” в порядке прохода списка (а сам список уже детерминирован выше)
      */
     private fun assignStableGroupIds(groups: List<CircuitGroup>): List<CircuitGroup> {
         if (groups.isEmpty()) return groups
 
-        // Сохраняем порядок стабильным: от этого зависит детерминированное разрешение коллизий.
-        val ordered = groups.sortedWith(
-            compareBy<CircuitGroup> { it.roomId }
-                .thenBy { it.groupType.name }
-                .thenBy { stableDevicesKey(it) }
-                .thenBy { it.circuitBreaker }
-                .thenBy { it.cableSection }
-                .thenBy { it.rcdRequired }
-                .thenBy { it.rcdCurrent }
-        )
+        // ✅ HARD FAIL: стабильный id на базе device.id имеет смысл только если id > 0.
+        // Если сюда пришли 0/-1 — значит калькулятор вызвали “не в том контексте” или модель битая.
+        val badDeviceIdGroup = groups.firstOrNull { g -> g.devices.any { it.id <= 0L } }
+        require(badDeviceIdGroup == null) {
+            val badIds = badDeviceIdGroup!!.devices.filter { it.id <= 0L }.map { it.id }.take(20)
+            "AUTO_CALC invariant failed: device.id must be > 0 for stable groupId. " +
+                    "pid=$projectId groupNumber=${badDeviceIdGroup.groupNumber} roomId=${badDeviceIdGroup.roomId} badDeviceIds=$badIds"
+        }
 
-        val used = HashSet<Long>(ordered.size * 2)
+        val used = HashSet<Long>(groups.size * 2)
 
-        return ordered.map { g ->
+        return groups.map { g ->
             val baseKey = buildStableKey(g)
 
             // На случай коллизий добавляем соль детерминированно.
             var attempt = 0
             var newId: Long
-            do {
+            while (true) {
                 val saltedKey = if (attempt == 0) baseKey else "$baseKey|salt=$attempt"
                 newId = stablePositiveLong(saltedKey)
+                if (used.add(newId)) break
                 attempt++
-                if (attempt > 1000) {
-                    throw IllegalStateException("Failed to allocate unique stable groupId for key=$baseKey")
+                if (attempt > 10_000) {
+                    throw IllegalStateException("Failed to allocate unique stable groupId for key=$baseKey pid=$projectId")
                 }
-            } while (!used.add(newId))
+            }
 
-            // ВАЖНО: меняем ТОЛЬКО groupId. Всё остальное — как рассчитано.
+            // Меняем ТОЛЬКО groupId.
             g.copy(groupId = newId)
         }
     }
 
-    /**
-     * Стабильный ключ устройств:
-     * - используем device.id (локальный id > 0 после insert)
-     * - сортируем, чтобы порядок не влиял
-     */
+    /** Стабильный ключ устройств: сортируем device.id, чтобы порядок не влиял. */
     private fun stableDevicesKey(g: CircuitGroup): String =
         g.devices
             .asSequence()
@@ -343,18 +346,18 @@ class GroupCalculator(
             .sorted()
             .joinToString(separator = ",")
 
-    /**
-     * Базовый stable key группы.
-     * Здесь сознательно нет groupNumber.
-     */
+    /** Базовый stable key группы. Здесь сознательно нет groupNumber. */
     private fun buildStableKey(g: CircuitGroup): String = buildString {
-        append("roomId=").append(g.roomId)
+        append("pid=").append(projectId)
+        append("|roomId=").append(g.roomId)
         append("|type=").append(g.groupType.name)
         append("|devs=").append(stableDevicesKey(g))
         append("|breaker=").append(g.circuitBreaker)
         append("|cable=").append(g.cableSection)
-        append("|rcdReq=").append(g.rcdRequired)
+        append("|rcdReq=").append(if (g.rcdRequired) 1 else 0)
         append("|rcdCur=").append(g.rcdCurrent)
+        append("|bt=").append(g.breakerType)
+        append("|pW=").append(g.installedPowerW)
     }
 
     /**
