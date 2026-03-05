@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.data.local.dao
 
+import android.util.Log
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -18,7 +19,7 @@ interface RoomsTxDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertRoom(entity: RoomEntity): Long
 
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertDevicesInternal(entities: List<DeviceEntity>): List<Long>
 
     @Query("DELETE FROM devices WHERE device_id IN (:deviceIds)")
@@ -29,16 +30,16 @@ interface RoomsTxDao {
         room: RoomEntity,
         devices: List<DeviceEntity>
     ): Pair<Long, List<Long>> {
-        android.util.Log.i("RoomsTxDao", "TX start")
+        Log.i("RoomsTxDao", "TX start")
 
         val roomId = insertRoom(room)
-        android.util.Log.i("RoomsTxDao", "room inserted result=$roomId (<=0 means conflict)")
+        Log.i("RoomsTxDao", "room inserted result=$roomId (<=0 means conflict)")
 
         // ✅ Commit 6: НИКАКИХ "тихих -1". Конфликт = ошибка (repo превратит в понятную UI-ошибку).
         require(roomId > 0L) { "ROOM_TX failed: insertRoom returned roomId=$roomId (conflict?)" }
 
         val withFk = devices.map { it.copy(roomId = roomId) }
-        android.util.Log.i("RoomsTxDao", "devices toInsert=${withFk.size}")
+        Log.i("RoomsTxDao", "devices toInsert=${withFk.size}")
 
         val ids = insertDevicesInternal(withFk)
         android.util.Log.i("RoomsTxDao", "devices inserted count=${ids.size}")
@@ -56,7 +57,16 @@ interface RoomsTxDao {
     suspend fun insertDevices(entities: List<DeviceEntity>): List<Long> {
         android.util.Log.i("RoomsTxDao", "insertDevices start size=${entities.size}")
         val ids = insertDevicesInternal(entities)
-        android.util.Log.i("RoomsTxDao", "insertDevices end inserted=${ids.size}")
+
+
+
+// никаких -1 и 0 — иначе это не insert
+        require(ids.isNotEmpty()) { "DEV_TX failed: insertedIds empty size=${entities.size}" }
+        require(ids.all { it > 0L }) { "DEV_TX failed: has non-positive ids=$ids size=${entities.size}" }
+
+        Log.i("RoomsTxDao", "insertDevices end inserted=${ids.size}")
         return ids
+
+
     }
 }

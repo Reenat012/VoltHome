@@ -433,27 +433,55 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
         mode: PhaseMode,
         deviceId: Long
     ): ProjectEditState {
+
         val currentGroupId = ManualDraftSelectors.findGroupIdContainingDevice(draft, deviceId)
         val intermediate = if (currentGroupId != null) {
             moveToUnassigned(draft, deviceId, currentGroupId)
         } else draft
 
+        // ✅ Берём устройство из draft (это SoT для manual режима)
+        val device = intermediate.devices.firstOrNull { it.deviceId == deviceId }
+            ?: return intermediate // устройство пропало из draft -> ничего не делаем
+
         val phase = ManualDraftSelectors.choosePhaseForNewGroup(intermediate, mode)
         val newGroupId = ManualDraftSelectors.nextTempGroupId(intermediate)
         val newGroupNumber = intermediate.nextGroupNumber
 
+        // ✅ roomId обязателен, иначе FK на groups.room_id упадёт при сохранении
+        val roomId = device.roomId
+        if (roomId <= 0L) {
+            // Жёстко валим, чтобы не получить “тихий” крэш в транзакции
+            throw IllegalStateException("MANUAL: cannot create group for deviceId=$deviceId because roomId=$roomId (invalid)")
+        }
+
+        // ✅ roomName в draft-девайсе нет — вытаскиваем из любой существующей группы этой комнаты
+        // Если нет — оставляем пустым (это НЕ ломает FK, FK только по roomId)
+        val roomName = intermediate.groups.firstOrNull { it.roomId == roomId }?.roomName.orEmpty()
+
+        // ✅ groupType логичнее брать от устройства, а не от первой группы в проекте
+        val groupType = when (device.deviceType) {
+            DeviceType.LIGHTING -> DeviceType.LIGHTING
+            DeviceType.SOCKET -> DeviceType.SOCKET
+            DeviceType.HEAVY_DUTY -> DeviceType.HEAVY_DUTY
+            else -> intermediate.groups.firstOrNull()?.groupType ?: DeviceType.OTHER
+        }
+
+        val breakerTypeFallback = intermediate.groups.firstOrNull()?.breakerType ?: ""
+
         val newGroup = ManualGroupDraft(
             groupId = newGroupId,
             groupNumber = newGroupNumber,
-            roomId = 0L,
-            roomName = "",
-            groupType = intermediate.groups.firstOrNull()?.groupType ?: DeviceType.OTHER,
+            roomId = roomId,
+            roomName = roomName,
+            groupType = groupType,
             phase = phase,
             deviceIds = listOf(deviceId),
-            nominalCurrent = 0.0,
+
+            // derived позже пересчитается usecase'ом
+            nominalCurrent = null,
             circuitBreaker = 16,
             cableSection = 2.5,
-            breakerType = intermediate.groups.firstOrNull()?.breakerType ?: "",
+            breakerType = breakerTypeFallback,
             rcdRequired = false,
             rcdCurrent = null
         )

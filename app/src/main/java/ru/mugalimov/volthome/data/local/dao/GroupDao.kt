@@ -69,7 +69,7 @@ interface GroupDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun addGroup(group: CircuitGroupEntity): Long
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertGroups(groups: List<CircuitGroupEntity>): List<Long>
 
     // -------------------- UPDATE (без REPLACE, чтобы не сносить joins каскадом) --------------------

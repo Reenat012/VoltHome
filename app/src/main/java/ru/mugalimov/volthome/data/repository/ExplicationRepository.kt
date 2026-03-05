@@ -41,36 +41,26 @@ interface ExplicationRepository {
     fun observeGroupsWithDevices(): Flow<List<ru.mugalimov.volthome.data.local.entity.CircuitGroupWithDevices>>
 
     /**
+     * ✅ Project-scoped поток групп (VM-правильный вариант).
+     */
+    fun observeAllGroupByProject(projectId: String): Flow<List<CircuitGroup>>
+
+    /**
+     * ✅ Project-scoped snapshot: группы + устройства по membership (join).
+     * ВАЖНО: сюда НЕ попадут устройства без join (unassigned) — это нормально.
+     */
+    suspend fun getGroupsWithDevicesByProject(projectId: String): List<GroupWithDevices>
+
+    /**
+     * ✅ Project-scoped snapshot: ВСЕ устройства проекта (живые, tombstones filtered).
+     *
+     * Нужен для Manual baseState, чтобы после MANUAL_SAVE устройства без join
+     * появлялись в "Нераспределённые".
+     */
+    suspend fun getAllDevicesByProject(projectId: String): List<Device>
+
+    /**
      * ## Manual Save (v1.1): DIFF-COMMIT контракт (Вариант B / идеальный)
-     *
-     * Источник истины при сохранении — `draftState` (группы + membership + unassigned).
-     *
-     * ### Что должен сделать репозиторий (контракт)
-     * - Сравнить `dbState(projectId)` (groups + joins) и `desiredState(draftState)`.
-     * - Выполнить **только дифф-операции**:
-     *   - `update` существующих групп (ВАЖНО: `group_id` сохраняется),
-     *   - `insert` новых групп (получают новый `group_id`),
-     *   - `delete` удалённых групп (каскадно: сначала joins → потом groups),
-     *   - membership фиксируется операциями над `group_device_join`.
-     * - `unassignedDeviceIds` в draft — это **виртуальный контейнер**:
-     *   - после Save в БД **не должно** остаться join-записей для этих устройств.
-     *
-     * ### Порядок транзакции (обязателен)
-     * 1) загрузить dbGroups/dbJoins (строго по projectId),
-     * 2) посчитать diff,
-     * 3) применить удаления (joins → groups),
-     * 4) применить insert/update групп,
-     * 5) применить joins,
-     * 6) sanity-check (dbState == desiredState), иначе ошибка.
-     *
-     * ### Границы и запреты
-     * - Всё строго в рамках `projectId`.
-     * - В manual Save **запрещено** использовать `replaceAllGroupsTransactional`.
-     * - При ошибке Save **не должен** выключать manual.
-     *
-     * ### После Save (политика, закрепляем контрактом)
-     * - Можно чистить override-таблицы, которые способны "накрыть" сохранённую структуру (например phase overrides),
-     *   но нельзя запускать полный auto recalc, который перетрёт ручную структуру.
      */
     suspend fun commitManualDraftTransactional(
         projectId: String,
@@ -81,41 +71,25 @@ interface ExplicationRepository {
      * AUTO-путь (исторический): replace-by-delete+insert.
      * В manual Save этот метод использовать нельзя.
      */
-    /**
-     * ✅ Обычный вход: сам берёт structural lock.
-     */
     suspend fun replaceAllGroupsTransactional(projectId: String, groups: List<CircuitGroup>)
-
-    /**
-     * ⚠️ Вызов ТОЛЬКО если ВНЕ уже есть structuralWriteMutex.withLock(projectId).
-     * Нужен, чтобы избежать self-deadlock (Mutex не реентерабелен).
-     */
     suspend fun replaceAllGroupsTransactionalAlreadyLocked(projectId: String, groups: List<CircuitGroup>)
     suspend fun replaceAllGroupsTransactional(groups: List<CircuitGroup>)
-
-    /**
-     * ✅ Явный project-scoped поток групп (VM-правильный вариант).
-     *
-     * Зачем:
-     * - чтобы ViewModel могла жёстко привязать чтение к конкретному projectId
-     *   и не зависеть от того, что репо "само" внутри читает activeProjectId.
-     * - чтобы при смене проекта upstream гарантированно пересоздавался
-     *   (flatMapLatest в VM) и не было "эхо" старых значений.
-     */
-    fun observeAllGroupByProject(projectId: String): Flow<List<CircuitGroup>>
 
     @Deprecated(
         message = "Запрещено: нет project boundary. Используйте getGroupsWithDevicesByProject(projectId).",
         level = DeprecationLevel.ERROR
     )
     suspend fun getGroupsWithDevices(): List<GroupWithDevices>
-    suspend fun getGroupsWithDevicesByProject(projectId: String): List<GroupWithDevices>
 
     suspend fun addGroup(circuitGroups: List<CircuitGroup>)
     suspend fun updateGroup(groupId: Long)
 
     suspend fun getAllGroups(): List<CircuitGroup>
 
+    @Deprecated(
+        message = "deleteAllGroups() запрещён. Используйте replaceAllGroupsTransactional(projectId, emptyList())",
+        level = DeprecationLevel.ERROR
+    )
     suspend fun deleteAllGroups()
 
     suspend fun addDeviceToGroup(deviceId: Long, groupId: Long)

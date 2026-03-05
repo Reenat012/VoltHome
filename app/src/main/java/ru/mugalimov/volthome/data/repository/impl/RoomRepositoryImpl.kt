@@ -383,6 +383,7 @@ class RoomRepositoryImpl @Inject constructor(
         // 1) строго по projectIdRecorded (projectId из ensureActiveDraft), без activeProjectId и без VM
         // 2) это единственная точка, которая "автоматом" кладёт созданные устройства в draft.unassignedDeviceIds
         // 3) лог-гейт: должен быть ровно один на операцию (как и CREATE_DEVICE_DB)
+        // ✅ Commit 4: MANUAL post-insert для room-create (unassigned)
         val manualActive = manualRepo.isManualActive(projectId)
         if (manualActive) {
             Log.i(
@@ -393,7 +394,22 @@ class RoomRepositoryImpl @Inject constructor(
             manualRepo.addInsertedDevicesToUnassigned(
                 projectId = projectId,
                 insertedDeviceIds = deviceIds,
-                opId = opId // ✅ корреляция с CREATE_DEVICE_DB / CreateDeviceOpBus
+                opId = opId
+            )
+
+            // ✅ FIX по ТЗ v1.2: в MANUAL запрещён любой AUTO-rebuild
+            Log.w(
+                "AUTO_POST_INSERT",
+                "AUTO_POST_INSERT SUPPRESS reason=manualActive pid=$projectId opId=$opId inserted=${deviceIds.size} roomId=$roomId"
+            )
+        } else {
+            // ✅ AUTO post-insert только если manualActive=false
+            autoRebuildAfterInsertUseCase.get().execute(
+                AutoRebuildGroupsAfterDeviceInsertUseCase.Params(
+                    projectIdRecorded = projectId,
+                    insertedIds = deviceIds,
+                    opId = opId
+                )
             )
         }
 
@@ -479,6 +495,8 @@ class RoomRepositoryImpl @Inject constructor(
         // ✅ Не ломаем старых вызывающих: генерируем opId внутри.
         // Это даст логи/корреляцию даже для legacy вызовов.
         val opId = "legacy-" + java.util.UUID.randomUUID().toString()
+
+
         return addDevicesToRoom(roomId = roomId, devices = devices, opId = opId)
     }
 
@@ -522,25 +540,31 @@ class RoomRepositoryImpl @Inject constructor(
             )
         )
 
-        // ✅ Commit 2: MANUAL последствия
-        // ВАЖНО: строго по projectIdRecorded (room.projectId), без activeProjectId и без VM.
-        if (manualRepo.isManualActive(projectId)) {
+        val manualActive = manualRepo.isManualActive(projectId)
+
+        // ✅ MANUAL последствия (по ТЗ)
+        if (manualActive) {
             manualRepo.addInsertedDevicesToUnassigned(
                 projectId = projectId,
                 insertedDeviceIds = ids,
-                opId = opId // ✅ корреляция с CREATE_DEVICE_DB
-            )
-        }
-
-        // ✅ Commit 3: AUTO rebuild после вставки (НЕ из UI)
-        // A: emptyIds -> no-op, B: manual -> suppress, C: full rebuild, D: single-flight logs
-        autoRebuildAfterInsertUseCase.get().execute(
-            ru.mugalimov.volthome.domain.use_case.AutoRebuildGroupsAfterDeviceInsertUseCase.Params(
-                projectIdRecorded = projectId,
-                insertedIds = ids,
                 opId = opId
             )
-        )
+
+            // ✅ FIX по ТЗ v1.2: в MANUAL запрещён любой AUTO-rebuild
+            Log.w(
+                "AUTO_POST_INSERT",
+                "AUTO_POST_INSERT SUPPRESS reason=manualActive pid=$projectId opId=$opId inserted=${ids.size} roomId=$roomId"
+            )
+        } else {
+            // ✅ AUTO rebuild только если manualActive=false
+            autoRebuildAfterInsertUseCase.get().execute(
+                AutoRebuildGroupsAfterDeviceInsertUseCase.Params(
+                    projectIdRecorded = projectId,
+                    insertedIds = ids,
+                    opId = opId
+                )
+            )
+        }
 
         // outbox DEVICE_CREATE для каждого добавленного устройства
         ids.forEachIndexed { index, devId ->

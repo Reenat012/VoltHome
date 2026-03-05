@@ -41,6 +41,7 @@ import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.DistributionDecision
+import ru.mugalimov.volthome.domain.model.manual.ManualGroupDraft
 import ru.mugalimov.volthome.domain.model.manual.ProjectEditState
 import ru.mugalimov.volthome.domain.model.phase_load.GroupWithDevices
 import ru.mugalimov.volthome.domain.use_case.CurrentCalculator
@@ -192,6 +193,15 @@ class ExplicationRepositoryImpl @Inject constructor(
                             // 0) MANUAL_SAVE: входные данные (draft)
                             // =========================
                             val desiredDraftGroups = draftState.groups
+
+                            // ✅ Жёсткий инвариант: каждая группа должна ссылаться на существующую комнату
+                            val invalidRoomGroups = desiredDraftGroups.filter { it.roomId <= 0L }
+                            if (invalidRoomGroups.isNotEmpty()) {
+                                val sample = invalidRoomGroups.take(5).joinToString { "${it.groupId}#${it.groupNumber}(roomId=${it.roomId})" }
+                                Log.e(tag, "SANITY FAILED: invalid roomId in draft groups: $sample")
+                                throw IllegalStateException("MANUAL_SAVE: draft has groups with invalid roomId (<=0). sample=$sample")
+                            }
+
                             val desiredGroupCount = desiredDraftGroups.size
 
                             val desiredUnassignedIds = draftState.unassignedDeviceIds.toSet()
@@ -325,9 +335,15 @@ class ExplicationRepositoryImpl @Inject constructor(
                                 )
                             }
 
-                            val groupsToInsertEntities = desiredNewDraft.map { gDraft ->
+                            // tempId(-1) -> realId(после insertGroups)
+                            val tempToNewId = LinkedHashMap<Long, Long>()
+
+                            // ВАЖНО: фиксируем порядок, чтобы newIds[idx] соответствовал draft'у
+                            val desiredNewDraftOrdered = desiredNewDraft.sortedBy { it.groupNumber }
+
+                            val groupsToInsertEntities = desiredNewDraftOrdered.map { gDraft ->
                                 CircuitGroupEntity(
-                                    groupId = 0L,
+                                    groupId = 0L, // ✅ Room назначает PK сам
                                     groupNumber = gDraft.groupNumber,
                                     roomId = gDraft.roomId,
                                     roomName = gDraft.roomName,
@@ -383,21 +399,39 @@ class ExplicationRepositoryImpl @Inject constructor(
                                 Log.d(tag, "APPLY_DIFF Applied update: groups=${groupsToUpdateEntities.size}")
                             }
 
-                            val tempToNewId = LinkedHashMap<Long, Long>()
                             if (groupsToInsertEntities.isNotEmpty()) {
+                                Log.d(tag, "APPLY_DIFF BEFORE insert newGroups=${groupsToInsertEntities.size}")
+
+                                Log.e(
+                                    tag,
+                                    "INSERT CHECK: newGroups=" + groupsToInsertEntities.joinToString { g ->
+                                        "gid=${g.groupId} roomId=${g.roomId} roomName='${g.roomName}' pid=${g.projectId}"
+                                    }
+                                )
+
                                 val newIds = groupDao.insertGroups(groupsToInsertEntities)
+
+                                Log.d(tag, "APPLY_DIFF AFTER insert newGroups=${groupsToInsertEntities.size} newIds(sample)=${newIds.take(12)}")
+
                                 if (newIds.size != groupsToInsertEntities.size) {
                                     sanityFail("insertGroups returned ${newIds.size} ids for ${groupsToInsertEntities.size} groups")
                                 }
 
-                                desiredNewDraft.forEachIndexed { idx, draft ->
+                                // ✅ tempId -> realId (Room)
+                                desiredNewDraftOrdered.forEachIndexed { idx, draft ->
                                     tempToNewId[draft.groupId] = newIds[idx]
+                                }
+
+                                // ✅ sanity: новые ids реально есть в boundary проекта
+                                val afterInsertIds = groupDao.getGroupIdsByProject(projectId).toSet()
+                                val missing = newIds.toSet() - afterInsertIds
+                                if (missing.isNotEmpty()) {
+                                    sanityFail("insertGroups missing ids after insert. missing=${missing.take(30)}")
                                 }
 
                                 Log.d(
                                     tag,
-                                    "APPLY_DIFF Applied insert: groups=${newIds.size} newIds(sample)=${newIds.take(12)} " +
-                                            "tempToNew(sample)=${tempToNewId.entries.take(12)}"
+                                    "APPLY_DIFF Applied insert: groups=${newIds.size} tempToNew(sample)=${tempToNewId.entries.take(12)}"
                                 )
                             } else {
                                 Log.d(tag, "APPLY_DIFF Applied insert: groups=0")
@@ -520,9 +554,16 @@ class ExplicationRepositoryImpl @Inject constructor(
                     }
                 }
             } catch (t: TimeoutCancellationException) {
+                Log.e(tag, "MANUAL_SAVE FAILED pid=$projectId", t)
                 val waitedMs = SystemClock.elapsedRealtime() - waitStart
                 Log.e(tag, "LOCK_TIMEOUT op=$opName pid=$projectId waitedMs=$waitedMs", t)
                 throw IllegalStateException("MANUAL_SAVE timeout: waitedMs=$waitedMs op=$opName pid=$projectId")
+            } catch (t: Throwable) {
+                // ✅ сюда попадёт SQLiteConstraintException и всё остальное
+                Log.e(tag, "MANUAL_SAVE FAILED pid=$projectId op=$opName", t)
+                throw t
+            } finally {
+                Log.w(tag, "LOCK_RELEASE op=$opName pid=$projectId totalMs=${SystemClock.elapsedRealtime() - waitStart}")
             }
         }
     }
@@ -627,6 +668,9 @@ class ExplicationRepositoryImpl @Inject constructor(
 
             // 5) Вставляем новые группы
             val groupEntities = groups.map { g -> g.toEntityGroup(projectId).copy(groupId = 0) }
+
+
+
             val newIds = groupDao.insertGroups(groupEntities)
             if (newIds.size != groups.size) {
                 sanityFail(tag, "insertGroups returned ${newIds.size} ids for ${groups.size} groups")
@@ -712,6 +756,17 @@ class ExplicationRepositoryImpl @Inject constructor(
             )
         }
     }
+
+    override suspend fun getAllDevicesByProject(projectId: String): List<Device> =
+        withContext(dispatchers) {
+            val pid = projectId.trim()
+            if (pid.isBlank()) return@withContext emptyList()
+
+            // ВАЖНО: должен быть project boundary + tombstones filtered на уровне DAO.
+            // Если метода в DeviceDao нет — его нужно добавить (но ты просил правки только 3 файлов).
+            deviceDao.getAllDevicesByProject(pid)
+                .map { it.toDomainDevice() }
+        }
 
     override suspend fun addGroup(circuitGroups: List<CircuitGroup>) {
         withContext(dispatchers) {
@@ -1003,3 +1058,10 @@ class ExplicationRepositoryImpl @Inject constructor(
     }
 }
 
+private fun stablePositiveLong(input: String): Long {
+    val md = java.security.MessageDigest.getInstance("SHA-256")
+    val hash = md.digest(input.toByteArray(Charsets.UTF_8))
+    val bb = java.nio.ByteBuffer.wrap(hash, 0, 8)
+    val v = bb.long and Long.MAX_VALUE
+    return if (v == 0L) 1L else v
+}

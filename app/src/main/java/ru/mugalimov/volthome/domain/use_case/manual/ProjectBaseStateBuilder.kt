@@ -17,7 +17,8 @@ import ru.mugalimov.volthome.domain.model.manual.ProjectEditState
  * - baseState строится НЕ из uiState конкретного экрана,
  * - источник истины: локальная БД (через репозитории),
  * - порядок должен быть детерминированным,
- * - nextGroupNumber должен быть вычислен стабильно.
+ * - nextGroupNumber должен быть вычислен стабильно,
+ * - ✅ после MANUAL_SAVE устройства без join обязаны появляться в "Нераспределённые".
  */
 class ProjectBaseStateBuilder @Inject constructor(
     private val explicationRepository: ExplicationRepository
@@ -29,8 +30,8 @@ class ProjectBaseStateBuilder @Inject constructor(
      */
     suspend fun build(projectId: String): ProjectEditState {
         Log.d(TAG, "build() projectId=$projectId")
-        // Важно: берём группы с устройствами по конкретному projectId,
-        // чтобы вход в manual был строго проектным, а не "что где сейчас отображается".
+
+        // 1) Группы + устройства по membership (join)
         val groupsWithDevices = explicationRepository.getGroupsWithDevicesByProject(projectId)
         Log.d(TAG, "db snapshot: groups=${groupsWithDevices.size}")
 
@@ -41,33 +42,53 @@ class ProjectBaseStateBuilder @Inject constructor(
             )
         }
 
-        // Детерминированный порядок групп:
-        // 1) groupNumber
-        // 2) groupId (на всякий случай для стабильности при одинаковых номерах)
+        // 2) ВСЕ устройства проекта (не через join!)
+        val allDevicesInProject = explicationRepository.getAllDevicesByProject(projectId)
+        Log.d(TAG, "db snapshot: allDevices=${allDevicesInProject.size}")
+
+        // 3) Детерминированный порядок групп:
         val sortedGroups = groupsWithDevices
             .sortedWith(compareBy({ it.group.groupNumber }, { it.group.groupId }))
 
-        // Собираем уникальные устройства из всех групп.
-        // В baseState это нужно для доменных операций (Move/AutoAssign и т.п.).
-        val allDevices = sortedGroups
-            .flatMap { it.devices }
+        // 4) assigned/unassigned
+        val assignedDeviceIds = sortedGroups
+            .asSequence()
+            .flatMap { it.devices.asSequence() }
+            .map { it.id }
+            .toSet()
+
+        val allDeviceIds = allDevicesInProject
+            .asSequence()
+            .map { it.id }
+            .toSet()
+
+        val unassignedDeviceIds = (allDeviceIds - assignedDeviceIds)
+
+        Log.d(
+            TAG,
+            "baseState devices: all=${allDeviceIds.size} assigned=${assignedDeviceIds.size} unassigned=${unassignedDeviceIds.size}"
+        )
+
+        // 5) devices в manual state — из ВСЕХ устройств проекта
+        // (иначе unassigned не сможет материализоваться в UI)
+        val manualDevices = allDevicesInProject
             .distinctBy { it.id }
             .sortedBy { it.id } // детерминированно
+            .map { d ->
+                ManualDeviceDraft(
+                    deviceId = d.id,
+                    roomId = d.roomId ?: 0L,
+                    deviceType = d.deviceType,
+                    powerW = d.power,
+                    voltageType = d.voltage.type,
+                    demandRatio = d.demandRatio,
+                    powerFactor = d.powerFactor,
+                    hasMotor = d.hasMotor,
+                    requiresDedicatedCircuit = d.requiresDedicatedCircuit
+                )
+            }
 
-        val manualDevices = allDevices.map { d ->
-            ManualDeviceDraft(
-                deviceId = d.id,
-                roomId = d.roomId ?: 0L,
-                deviceType = d.deviceType,
-                powerW = d.power,
-                voltageType = d.voltage.type,
-                demandRatio = d.demandRatio,
-                powerFactor = d.powerFactor,
-                hasMotor = d.hasMotor,
-                requiresDedicatedCircuit = d.requiresDedicatedCircuit
-            )
-        }
-
+        // 6) groups draft — как раньше (membership в deviceIds внутри групп)
         val manualGroups = sortedGroups.map { gw ->
             val g = gw.group
 
@@ -78,17 +99,12 @@ class ProjectBaseStateBuilder @Inject constructor(
                 roomName = g.roomName,
                 groupType = g.groupType,
 
-                // На входе в manual считаем состав "нормальным".
-                // Фактическая пометка MIXED_MANUAL выставляется доменными операциями.
                 composition = ManualGroupComposition.NORMAL,
 
-                // В доменной группе phase non-null, но если модель где-то допускает null —
-                // защищаемся, чтобы manual не падал при входе.
                 phase = g.phase ?: Phase.A,
 
                 deviceIds = gw.devices.map { it.id },
 
-                // Линия (может быть заполнена или нет — draft допускает nullable)
                 nominalCurrent = g.nominalCurrent,
                 circuitBreaker = g.circuitBreaker,
                 cableSection = g.cableSection,
@@ -104,14 +120,14 @@ class ProjectBaseStateBuilder @Inject constructor(
             projectId = projectId,
             groups = manualGroups,
             devices = manualDevices,
-            // На входе в manual — пусто. "Нераспределённые" формируются только ручными операциями.
-            unassignedDeviceIds = emptySet(),
+            // ✅ ключевой фикс: на входе в manual unassigned вычисляются из БД
+            unassignedDeviceIds = unassignedDeviceIds,
             nextGroupNumber = nextGroupNumber
         )
 
         Log.d(
             TAG,
-            "built: groups=${state.groups.size} devices=${state.devices.size} nextGroupNumber=${state.nextGroupNumber}"
+            "built: groups=${state.groups.size} devices=${state.devices.size} unassigned=${state.unassignedDeviceIds.size} nextGroupNumber=${state.nextGroupNumber}"
         )
 
         return state
