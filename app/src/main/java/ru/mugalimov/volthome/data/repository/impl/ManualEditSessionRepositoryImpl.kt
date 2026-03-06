@@ -13,6 +13,7 @@ import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.manual.ManualEditAction
 import ru.mugalimov.volthome.domain.model.manual.ManualEditSession
+import ru.mugalimov.volthome.domain.model.manual.ManualGroupComposition
 import ru.mugalimov.volthome.domain.model.manual.ManualGroupDraft
 import ru.mugalimov.volthome.domain.model.manual.ProjectEditState
 import ru.mugalimov.volthome.domain.use_case.StructuralWriteCoordinator
@@ -339,7 +340,7 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
             )
         }
 
-        // 2) Пересчитываем линию только затронутых групп
+        // 2) Пересчитываем линию + composition только затронутых групп
         if (touchedGroupIds.isEmpty()) return cur
 
         val devicesById = cur.devices.associateBy { it.deviceId }
@@ -348,12 +349,28 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
             if (!touchedGroupIds.contains(g.groupId)) return@map g
 
             val devsInGroup = g.deviceIds.mapNotNull { id -> devicesById[id] }
-            recalculateGroupLineUseCase.execute(
+
+            // ✅ composition: если в группе есть устройства другого типа — помечаем MIXED_MANUAL
+            val newComposition = run {
+                if (devsInGroup.isEmpty()) {
+                    // Пустые группы мы уже удалили, но на всякий случай — NORMAL.
+                    ManualGroupComposition.NORMAL
+                } else {
+                    val hasForeignType = devsInGroup.any { it.deviceType != g.groupType }
+                    if (hasForeignType) ManualGroupComposition.MIXED_MANUAL else ManualGroupComposition.NORMAL
+                }
+            }
+
+            // ✅ пересчёт линии (как у тебя было)
+            val recalculated = recalculateGroupLineUseCase.execute(
                 RecalculateGroupLineUseCase.Params(
                     group = g,
                     devicesInGroup = devsInGroup
                 )
             )
+
+            // ✅ возвращаем группу с обновлённой composition
+            recalculated.copy(composition = newComposition)
         }
 
         return cur.copy(groups = newGroups)
@@ -433,55 +450,47 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
         mode: PhaseMode,
         deviceId: Long
     ): ProjectEditState {
-
         val currentGroupId = ManualDraftSelectors.findGroupIdContainingDevice(draft, deviceId)
+
         val intermediate = if (currentGroupId != null) {
             moveToUnassigned(draft, deviceId, currentGroupId)
-        } else draft
+        } else {
+            draft
+        }
 
-        // ✅ Берём устройство из draft (это SoT для manual режима)
+        // ✅ Устройство обязано существовать в draft
         val device = intermediate.devices.firstOrNull { it.deviceId == deviceId }
-            ?: return intermediate // устройство пропало из draft -> ничего не делаем
+            ?: throw IllegalStateException("MANUAL_CREATE_GROUP: device not found for deviceId=$deviceId")
+
+        // ✅ Тип новой группы = тип переносимого устройства
+        val newGroupType: DeviceType = device.deviceType
+
+        // ✅ Комната новой группы = комната устройства / исходной группы
+        val (newRoomId, newRoomName) = resolveRoomForNewGroup(
+            draft = draft,
+            deviceId = deviceId,
+            currentGroupId = currentGroupId
+        )
 
         val phase = ManualDraftSelectors.choosePhaseForNewGroup(intermediate, mode)
         val newGroupId = ManualDraftSelectors.nextTempGroupId(intermediate)
         val newGroupNumber = intermediate.nextGroupNumber
 
-        // ✅ roomId обязателен, иначе FK на groups.room_id упадёт при сохранении
-        val roomId = device.roomId
-        if (roomId <= 0L) {
-            // Жёстко валим, чтобы не получить “тихий” крэш в транзакции
-            throw IllegalStateException("MANUAL: cannot create group for deviceId=$deviceId because roomId=$roomId (invalid)")
-        }
-
-        // ✅ roomName в draft-девайсе нет — вытаскиваем из любой существующей группы этой комнаты
-        // Если нет — оставляем пустым (это НЕ ломает FK, FK только по roomId)
-        val roomName = intermediate.groups.firstOrNull { it.roomId == roomId }?.roomName.orEmpty()
-
-        // ✅ groupType логичнее брать от устройства, а не от первой группы в проекте
-        val groupType = when (device.deviceType) {
-            DeviceType.LIGHTING -> DeviceType.LIGHTING
-            DeviceType.SOCKET -> DeviceType.SOCKET
-            DeviceType.HEAVY_DUTY -> DeviceType.HEAVY_DUTY
-            else -> intermediate.groups.firstOrNull()?.groupType ?: DeviceType.OTHER
-        }
-
-        val breakerTypeFallback = intermediate.groups.firstOrNull()?.breakerType ?: ""
-
+        // ✅ breakerType лучше брать не "из первой попавшейся группы",
+        // а ставить безопасный дефолт. Иначе можно притащить чужую кривую.
         val newGroup = ManualGroupDraft(
             groupId = newGroupId,
             groupNumber = newGroupNumber,
-            roomId = roomId,
-            roomName = roomName,
-            groupType = groupType,
+            roomId = newRoomId,
+            roomName = newRoomName,
+            groupType = newGroupType,
+            composition = ManualGroupComposition.NORMAL,
             phase = phase,
             deviceIds = listOf(deviceId),
-
-            // derived позже пересчитается usecase'ом
-            nominalCurrent = null,
+            nominalCurrent = 0.0,
             circuitBreaker = 16,
             cableSection = 2.5,
-            breakerType = breakerTypeFallback,
+            breakerType = "C",
             rcdRequired = false,
             rcdCurrent = null
         )
@@ -494,6 +503,49 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
             unassignedDeviceIds = newUnassigned,
             nextGroupNumber = newGroupNumber + 1
         )
+    }
+
+    /**
+     * Определяет валидные roomId / roomName для новой группы.
+     *
+     * Приоритет:
+     * 1. Если устройство уже было в существующей группе — берём комнату этой группы.
+     * 2. Иначе ищем комнату по самому устройству (device.roomId) среди групп draft/base.
+     * 3. Если не нашли — это уже инвариантная ошибка, такую группу создавать нельзя.
+     */
+    private fun resolveRoomForNewGroup(
+        draft: ProjectEditState,
+        deviceId: Long,
+        currentGroupId: Long?
+    ): Pair<Long, String> {
+        // 1) Самый надёжный путь: если устройство уже было в группе, берём комнату группы
+        val sourceGroup = currentGroupId?.let { gid ->
+            draft.groups.firstOrNull { it.groupId == gid }
+        }
+
+        if (sourceGroup != null && sourceGroup.roomId > 0L && sourceGroup.roomName.isNotBlank()) {
+            return sourceGroup.roomId to sourceGroup.roomName
+        }
+
+        // 2) Иначе пытаемся восстановить комнату по самому устройству
+        val device = draft.devices.firstOrNull { it.deviceId == deviceId }
+            ?: throw IllegalStateException("MANUAL_CREATE_GROUP: device not found for deviceId=$deviceId")
+
+        val deviceRoomId = device.roomId
+        require(deviceRoomId > 0L) {
+            "MANUAL_CREATE_GROUP: deviceId=$deviceId has invalid roomId=$deviceRoomId"
+        }
+
+        // Ищем любое известное имя комнаты среди уже существующих групп того же roomId
+        val roomNameFromDraft = draft.groups
+            .firstOrNull { it.roomId == deviceRoomId && it.roomName.isNotBlank() }
+            ?.roomName
+
+        require(!roomNameFromDraft.isNullOrBlank()) {
+            "MANUAL_CREATE_GROUP: cannot resolve roomName for deviceId=$deviceId roomId=$deviceRoomId"
+        }
+
+        return deviceRoomId to roomNameFromDraft
     }
 
     private fun autoAssignUnassigned(
