@@ -1,70 +1,68 @@
 package ru.mugalimov.volthome.data.repository.impl
 
+// outbox / tombstones
 import android.content.Context
 import android.util.Log
+import dagger.Lazy
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.emptyFlow
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import ru.mugalimov.volthome.core.error.RoomAlreadyExistsException
 import ru.mugalimov.volthome.core.error.RoomNotFoundException
 import ru.mugalimov.volthome.data.local.dao.DeviceDao
 import ru.mugalimov.volthome.data.local.dao.LoadDao
+import ru.mugalimov.volthome.data.local.dao.OutboxDao
 import ru.mugalimov.volthome.data.local.dao.RoomDao
 import ru.mugalimov.volthome.data.local.dao.RoomsTxDao
+import ru.mugalimov.volthome.data.local.dao.TombstoneDao
 import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.data.local.entity.LoadEntity
+import ru.mugalimov.volthome.data.local.entity.OutboxEntity
+import ru.mugalimov.volthome.data.local.entity.OutboxOpType
 import ru.mugalimov.volthome.data.local.entity.RoomEntity
+import ru.mugalimov.volthome.data.local.entity.TombstoneEntity
+import ru.mugalimov.volthome.data.local.entity.TombstoneEntityType
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
+import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
+import ru.mugalimov.volthome.data.repository.ProjectOwnershipRepository
 import ru.mugalimov.volthome.data.repository.ProjectsRepository
+import ru.mugalimov.volthome.data.repository.RoomRepository
+import ru.mugalimov.volthome.data.sync.outbox.DeviceCreatePayload
+import ru.mugalimov.volthome.data.sync.outbox.DeviceDeletePayload
+import ru.mugalimov.volthome.data.sync.outbox.OutboxPushWorker
+import ru.mugalimov.volthome.data.sync.outbox.RoomCreatePayload
+import ru.mugalimov.volthome.data.sync.outbox.RoomDeletePayload
+import ru.mugalimov.volthome.data.sync.outbox.RoomUpdatePayload
+import ru.mugalimov.volthome.data.sync.outbox.toJson
 import ru.mugalimov.volthome.di.database.AppDatabase
 import ru.mugalimov.volthome.di.database.IoDispatcher
-import ru.mugalimov.volthome.domain.mapper.mapToDomainDevices
 import ru.mugalimov.volthome.domain.mapper.mapToDomainRooms
 import ru.mugalimov.volthome.domain.mapper.toEntityRoom
 import ru.mugalimov.volthome.domain.model.DefaultRoom
+import ru.mugalimov.volthome.domain.model.DevicePreview
 import ru.mugalimov.volthome.domain.model.Room
 import ru.mugalimov.volthome.domain.model.RoomWithDevice
+import ru.mugalimov.volthome.domain.model.RoomWithDevicesPreview
 import ru.mugalimov.volthome.domain.model.RoomWithLoad
 import ru.mugalimov.volthome.domain.model.create.CreatedRoomResult
 import ru.mugalimov.volthome.domain.model.create.DeviceCreateRequest
 import ru.mugalimov.volthome.domain.model.create.RoomCreateRequest
 import ru.mugalimov.volthome.domain.model.provider.DeviceDefaultsProvider
-import ru.mugalimov.volthome.ui.components.JsonParser
-import java.util.Date
-import javax.inject.Inject
-
-// outbox / tombstones
-import ru.mugalimov.volthome.data.local.dao.OutboxDao
-import ru.mugalimov.volthome.data.local.dao.TombstoneDao
-import ru.mugalimov.volthome.data.local.entity.OutboxEntity
-import ru.mugalimov.volthome.data.local.entity.OutboxOpType
-import ru.mugalimov.volthome.data.local.entity.TombstoneEntity
-import ru.mugalimov.volthome.data.local.entity.TombstoneEntityType
-import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
-import ru.mugalimov.volthome.data.repository.RoomRepository
-import ru.mugalimov.volthome.data.sync.outbox.RoomCreatePayload
-import ru.mugalimov.volthome.data.sync.outbox.RoomUpdatePayload
-import ru.mugalimov.volthome.data.sync.outbox.RoomDeletePayload
-import ru.mugalimov.volthome.data.sync.outbox.DeviceCreatePayload
-import ru.mugalimov.volthome.data.sync.outbox.DeviceDeletePayload
-import ru.mugalimov.volthome.data.sync.outbox.OutboxPushWorker
-import ru.mugalimov.volthome.data.sync.outbox.toJson
-import ru.mugalimov.volthome.domain.model.DevicePreview
-import ru.mugalimov.volthome.domain.model.RoomWithDevicesPreview
 import ru.mugalimov.volthome.domain.telemetry.CreateDeviceOpBus
 import ru.mugalimov.volthome.domain.telemetry.CreateDeviceOpEvent
 import ru.mugalimov.volthome.domain.use_case.AutoRebuildGroupsAfterDeviceInsertUseCase
-import dagger.Lazy
+import ru.mugalimov.volthome.ui.components.JsonParser
+import java.util.Date
 import java.util.UUID
+import javax.inject.Inject
 
 class RoomRepositoryImpl @Inject constructor(
     private val roomDao: RoomDao,
@@ -83,8 +81,8 @@ class RoomRepositoryImpl @Inject constructor(
     // ✅ Commit 1: bus корреляции add-devices
     private val createDeviceOpBus: CreateDeviceOpBus,
     private val autoRebuildAfterInsertUseCase: Lazy<AutoRebuildGroupsAfterDeviceInsertUseCase>,
-    private val manualRepo:
-    ManualEditSessionRepository,
+    private val manualRepo: ManualEditSessionRepository,
+    private val ownershipRepo: ProjectOwnershipRepository,
 ) : RoomRepository {
 
     private val uuidDao get() = appDb.uuidMapDao()
@@ -378,38 +376,54 @@ class RoomRepositoryImpl @Inject constructor(
             )
         )
 
-        // post-insert policy для room-create должна быть такой же,
-        // как и в addDevicesToRoom():
-        // 1) если сейчас активен manual-режим — добавляем новые устройства в unassigned
-        //    и НЕ запускаем AUTO rebuild;
-        // 2) если manual не активен — запускаем ровно ОДИН AUTO rebuild.
+        // post-insert policy:
+        // 1) manualActive=true  -> это живая ручная сессия, докладываем новые устройства в unassigned
+        // 2) manualLock=true    -> ручная структура уже сохранена и принадлежит manual,
+        //                          AUTO трогать её не имеет права даже после рестарта
+        // 3) только если оба флага false -> разрешаем AUTO rebuild
         val manualActive = manualRepo.isManualActive(projectId)
-        if (manualActive) {
-            Log.i(
-                "MANUAL_POST_INSERT",
-                "pid=$projectId opId=$opId inserted=${deviceIds.size} roomId=$roomId"
-            )
+        val manualLock = ownershipRepo.isManualLock(projectId)
 
-            manualRepo.addInsertedDevicesToUnassigned(
-                projectId = projectId,
-                insertedDeviceIds = deviceIds,
-                opId = opId
-            )
+        when {
+            // Живая manual-сессия: сохраняем старое поведение.
+            manualActive -> {
+                Log.i(
+                    "MANUAL_POST_INSERT",
+                    "pid=$projectId opId=$opId inserted=${deviceIds.size} roomId=$roomId"
+                )
 
-            // В manual-режиме AUTO rebuild запрещён.
-            Log.w(
-                "AUTO_POST_INSERT",
-                "AUTO_POST_INSERT SUPPRESS reason=manualActive pid=$projectId opId=$opId inserted=${deviceIds.size} roomId=$roomId"
-            )
-        } else {
-            // В AUTO-режиме rebuild запускаем ровно один раз.
-            autoRebuildAfterInsertUseCase.get().execute(
-                AutoRebuildGroupsAfterDeviceInsertUseCase.Params(
-                    projectIdRecorded = projectId,
-                    insertedIds = deviceIds,
+                manualRepo.addInsertedDevicesToUnassigned(
+                    projectId = projectId,
+                    insertedDeviceIds = deviceIds,
                     opId = opId
                 )
-            )
+
+                // В active manual AUTO rebuild запрещён.
+                Log.w(
+                    "AUTO_POST_INSERT",
+                    "AUTO_POST_INSERT SUPPRESS reason=manualActive pid=$projectId opId=$opId inserted=${deviceIds.size} roomId=$roomId"
+                )
+            }
+
+            // Persisted ownership: после рестарта manualSession уже может отсутствовать,
+            // но AUTO всё равно не имеет права снести ручную структуру.
+            manualLock -> {
+                Log.w(
+                    "AUTO_POST_INSERT",
+                    "AUTO_POST_INSERT SUPPRESS reason=manualLock pid=$projectId opId=$opId inserted=${deviceIds.size} roomId=$roomId"
+                )
+            }
+
+            // Только в полностью AUTO-сценарии разрешаем rebuild.
+            else -> {
+                autoRebuildAfterInsertUseCase.get().execute(
+                    AutoRebuildGroupsAfterDeviceInsertUseCase.Params(
+                        projectIdRecorded = projectId,
+                        insertedIds = deviceIds,
+                        opId = opId
+                    )
+                )
+            }
         }
 
         loadDao.addLoad(
@@ -525,30 +539,47 @@ class RoomRepositoryImpl @Inject constructor(
             )
         )
 
+        // post-insert policy должна учитывать не только живую manual-сессию,
+        // но и persisted ownership после MANUAL_SAVE / рестарта.
         val manualActive = manualRepo.isManualActive(projectId)
+        val manualLock = ownershipRepo.isManualLock(projectId)
 
-        // ✅ MANUAL последствия (по ТЗ)
-        if (manualActive) {
-            manualRepo.addInsertedDevicesToUnassigned(
-                projectId = projectId,
-                insertedDeviceIds = ids,
-                opId = opId
-            )
-
-            // ✅ FIX по ТЗ v1.2: в MANUAL запрещён любой AUTO-rebuild
-            Log.w(
-                "AUTO_POST_INSERT",
-                "AUTO_POST_INSERT SUPPRESS reason=manualActive pid=$projectId opId=$opId inserted=${ids.size} roomId=$roomId"
-            )
-        } else {
-            // ✅ AUTO rebuild только если manualActive=false
-            autoRebuildAfterInsertUseCase.get().execute(
-                AutoRebuildGroupsAfterDeviceInsertUseCase.Params(
-                    projectIdRecorded = projectId,
-                    insertedIds = ids,
+        when {
+            // Живая ручная сессия: новые устройства уходим в unassigned.
+            manualActive -> {
+                manualRepo.addInsertedDevicesToUnassigned(
+                    projectId = projectId,
+                    insertedDeviceIds = ids,
                     opId = opId
                 )
-            )
+
+                Log.w(
+                    "AUTO_POST_INSERT",
+                    "AUTO_POST_INSERT SUPPRESS reason=manualActive pid=$projectId opId=$opId inserted=${ids.size} roomId=$roomId"
+                )
+            }
+
+            // Persisted manual ownership: после рестарта manualActive уже false,
+            // но AUTO rebuild всё равно запрещён.
+            // В этом коммите используем безопасный вариант A:
+            // просто suppress, без поднятия временной manual-сессии.
+            manualLock -> {
+                Log.w(
+                    "AUTO_POST_INSERT",
+                    "AUTO_POST_INSERT SUPPRESS reason=manualLock pid=$projectId opId=$opId inserted=${ids.size} roomId=$roomId"
+                )
+            }
+
+            // Полностью AUTO-сценарий.
+            else -> {
+                autoRebuildAfterInsertUseCase.get().execute(
+                    AutoRebuildGroupsAfterDeviceInsertUseCase.Params(
+                        projectIdRecorded = projectId,
+                        insertedIds = ids,
+                        opId = opId
+                    )
+                )
+            }
         }
 
         // outbox DEVICE_CREATE для каждого добавленного устройства
