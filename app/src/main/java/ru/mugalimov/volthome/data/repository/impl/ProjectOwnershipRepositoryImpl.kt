@@ -23,6 +23,9 @@ class ProjectOwnershipRepositoryImpl @Inject constructor(
 
     companion object {
         private const val TAG = "MANUAL_LOCK"
+
+        // Временный proof-тег для расследования старта/рестарта.
+        private const val TRACE_TAG = "OWNERSHIP_READ"
     }
 
     override suspend fun isManualLock(projectId: String): Boolean {
@@ -30,7 +33,17 @@ class ProjectOwnershipRepositoryImpl @Inject constructor(
         if (pid.isBlank()) return false
 
         projectLocalStateDao.ensureRow(pid)
-        return projectLocalStateDao.getManualOverridesPresent(pid) ?: false
+
+        val value = projectLocalStateDao.getManualOverridesPresent(pid) ?: false
+
+        // Временный startup-proof лог:
+        // видно, что реально прочитали из persisted state.
+        Log.i(
+            TRACE_TAG,
+            "isManualLock pid=$pid value=$value caller=${Throwable().stackTrace.firstOrNull()?.let { "${it.className}.${it.methodName}" } ?: "unknown"}"
+        )
+
+        return value
     }
 
     override suspend fun setManualLock(projectId: String, locked: Boolean) {
@@ -55,7 +68,14 @@ class ProjectOwnershipRepositoryImpl @Inject constructor(
 
         // observe* не вызывает ensureRow (suspend). Нормализуем null->false.
         return projectLocalStateDao.observeManualOverridesPresent(pid)
-            .map { it ?: false }
+            .map { raw ->
+                val value = raw ?: false
+
+                // Полезно для расследования стартового состояния и последующих изменений.
+                Log.i(TRACE_TAG, "observeManualLock pid=$pid value=$value")
+
+                value
+            }
     }
 
     override suspend fun getBootstrapVersion(projectId: String): Int {

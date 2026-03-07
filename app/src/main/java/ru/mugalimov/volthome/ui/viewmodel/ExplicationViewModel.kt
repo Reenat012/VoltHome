@@ -377,7 +377,26 @@ class ExplicationViewModel @Inject constructor(
                 .filter { it.isNotBlank() }
                 .distinctUntilChanged()
                 .collectLatest { pid ->
-                    Log.w("MANUAL_BOOTSTRAP", "VM trigger pid=$pid thread=${Thread.currentThread().name}")
+                    // Перед bootstrap явно читаем persisted ownership.
+                    // Это отдельный proof, чтобы было видно состояние lock ещё ДО bootstrap.
+                    val lockAtVmEntry = runCatching { projectOwnershipRepository.isManualLock(pid) }
+                        .getOrElse {
+                            Log.e("MANUAL_BOOTSTRAP", "VM pre-read lock FAILED pid=$pid", it)
+                            false
+                        }
+
+                    val versionAtVmEntry = runCatching { projectOwnershipRepository.getBootstrapVersion(pid) }
+                        .getOrElse {
+                            Log.e("MANUAL_BOOTSTRAP", "VM pre-read version FAILED pid=$pid", it)
+                            0
+                        }
+
+                    Log.w(
+                        "MANUAL_BOOTSTRAP",
+                        "VM trigger pid=$pid thread=${Thread.currentThread().name} " +
+                                "lockAtEntry=$lockAtVmEntry versionAtEntry=$versionAtVmEntry"
+                    )
+
                     try {
                         bootstrapManualLockUseCase.execute(pid)
                     } catch (t: Throwable) {
