@@ -378,12 +378,11 @@ class RoomRepositoryImpl @Inject constructor(
             )
         )
 
-        // ✅ Commit 4: MANUAL post-insert для room-create (unassigned)
-        // ВАЖНО:
-        // 1) строго по projectIdRecorded (projectId из ensureActiveDraft), без activeProjectId и без VM
-        // 2) это единственная точка, которая "автоматом" кладёт созданные устройства в draft.unassignedDeviceIds
-        // 3) лог-гейт: должен быть ровно один на операцию (как и CREATE_DEVICE_DB)
-        // ✅ Commit 4: MANUAL post-insert для room-create (unassigned)
+        // post-insert policy для room-create должна быть такой же,
+        // как и в addDevicesToRoom():
+        // 1) если сейчас активен manual-режим — добавляем новые устройства в unassigned
+        //    и НЕ запускаем AUTO rebuild;
+        // 2) если manual не активен — запускаем ровно ОДИН AUTO rebuild.
         val manualActive = manualRepo.isManualActive(projectId)
         if (manualActive) {
             Log.i(
@@ -397,13 +396,13 @@ class RoomRepositoryImpl @Inject constructor(
                 opId = opId
             )
 
-            // ✅ FIX по ТЗ v1.2: в MANUAL запрещён любой AUTO-rebuild
+            // В manual-режиме AUTO rebuild запрещён.
             Log.w(
                 "AUTO_POST_INSERT",
                 "AUTO_POST_INSERT SUPPRESS reason=manualActive pid=$projectId opId=$opId inserted=${deviceIds.size} roomId=$roomId"
             )
         } else {
-            // ✅ AUTO post-insert только если manualActive=false
+            // В AUTO-режиме rebuild запускаем ровно один раз.
             autoRebuildAfterInsertUseCase.get().execute(
                 AutoRebuildGroupsAfterDeviceInsertUseCase.Params(
                     projectIdRecorded = projectId,
@@ -412,20 +411,6 @@ class RoomRepositoryImpl @Inject constructor(
                 )
             )
         }
-
-        // ✅ Commit 5: AUTO post-insert для room-create (rebuild/suppress/busy/panic)
-        // Требование: это должно жить в repo, не в UI.
-        // Политика:
-        //  - manualActive=true  -> suppress (usecase сам залогирует SUPPRESS manualActive)
-        //  - manualActive=false -> rebuild (usecase залогирует DONE)
-        //  - Busy/Panic/Error   -> логируется внутри usecase (у тебя уже единый формат)
-        autoRebuildAfterInsertUseCase.get().execute(
-            AutoRebuildGroupsAfterDeviceInsertUseCase.Params(
-                projectIdRecorded = projectId,
-                insertedIds = deviceIds,
-                opId = opId
-            )
-        )
 
         loadDao.addLoad(
             LoadEntity(
