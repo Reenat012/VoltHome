@@ -273,14 +273,53 @@ class OutboxPusher @Inject constructor(
                     } else 0
                     Log.i("Outbox", "rebind done: rooms=$roomsRebound, devices=$devicesRebound, groups=$groupsRebound")
 
+                    // Считываем старое локальное состояние draft до удаления,
+// чтобы не потерять ownership-поля при переносе на remoteId
+                    val oldState = stateDao.get(rawProjectId)
+
+// Нормализуем marker:
+// если active_manual_project_id ссылался на draft-id,
+// после публикации он должен ссылаться уже на remoteId
+                    val migratedActiveManualProjectId =
+                        if (oldState?.active_manual_project_id == rawProjectId) {
+                            created.id
+                        } else {
+                            oldState?.active_manual_project_id
+                        }
+
+                    // Удаляем старую строку draft-state
                     stateDao.delete(rawProjectId)
-                    stateDao.upsert(
-                        ru.mugalimov.volthome.data.local.entity.ProjectLocalStateEntity(
+
+                    // Переносим state на новый remoteId,
+                    // сохраняя ownership-поля и marker
+                    val newState =
+                        (oldState ?: ru.mugalimov.volthome.data.local.entity.ProjectLocalStateEntity(
+                            project_id = created.id,
+                            remote_version = 0,
+                            last_sync_at = null,
+                            has_local_changes = false
+                        )).copy(
                             project_id = created.id,
                             remote_version = created.version,
                             last_sync_at = TimeUtils.formatIso(TimeUtils.now()),
-                            has_local_changes = true
+                            has_local_changes = true,
+                            active_manual_project_id = migratedActiveManualProjectId
+                            // manual_overrides_present и manual_lock_bootstrap_version
+                            // сохраняются автоматически через copy(...)
                         )
+
+                    stateDao.upsert(newState)
+
+                    Log.i(
+                        "PROJECT_STATE_WRITE",
+                        "source=OutboxPusher.publishDraft " +
+                                "pidOld=$rawProjectId pidNew=${created.id} " +
+                                "lockBefore=${oldState?.manual_overrides_present} " +
+                                "lockAfter=${newState.manual_overrides_present} " +
+                                "bootstrapBefore=${oldState?.manual_lock_bootstrap_version} " +
+                                "bootstrapAfter=${newState.manual_lock_bootstrap_version} " +
+                                "markerBefore=${oldState?.active_manual_project_id} " +
+                                "markerAfter=${newState.active_manual_project_id}"
                     )
 
                     projectDao.deleteById(rawProjectId)

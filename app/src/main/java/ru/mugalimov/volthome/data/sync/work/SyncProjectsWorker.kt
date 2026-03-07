@@ -96,15 +96,51 @@ class SyncProjectsWorker @AssistedInject constructor(
                 } else 0
                 Log.i(TAG, "rebind done: rooms=$roomsRebound, devices=$devicesRebound, groups=$groupsRebound")
 
-                // перенос локального состояния
+                // Считываем старое состояние draft до удаления,
+// чтобы не потерять manual lock / bootstrapVersion / marker
+                val oldState = stateDao.get(localProjectId)
+
+// Если marker ссылался на draft-id,
+// переводим его на новый remoteId
+                val migratedActiveManualProjectId =
+                    if (oldState?.active_manual_project_id == localProjectId) {
+                        created.id
+                    } else {
+                        oldState?.active_manual_project_id
+                    }
+
+                // Удаляем старую строку состояния draft
                 stateDao.delete(localProjectId)
-                stateDao.upsert(
-                    ru.mugalimov.volthome.data.local.entity.ProjectLocalStateEntity(
+
+                // Переносим состояние на новый remoteId с сохранением ownership-полей
+                val newState =
+                    (oldState ?: ru.mugalimov.volthome.data.local.entity.ProjectLocalStateEntity(
+                        project_id = created.id,
+                        remote_version = 0,
+                        last_sync_at = null,
+                        has_local_changes = false
+                    )).copy(
                         project_id = created.id,
                         remote_version = created.version,
                         last_sync_at = TimeUtils.formatIso(TimeUtils.now()),
-                        has_local_changes = true
+                        has_local_changes = true,
+                        active_manual_project_id = migratedActiveManualProjectId
+                        // manual_overrides_present и manual_lock_bootstrap_version
+                        // сохраняются автоматически через copy(...)
                     )
+
+                stateDao.upsert(newState)
+
+                Log.i(
+                    TAG,
+                    "PROJECT_STATE_WRITE source=SyncProjectsWorker.publishDraft " +
+                            "pidOld=$localProjectId pidNew=${created.id} " +
+                            "lockBefore=${oldState?.manual_overrides_present} " +
+                            "lockAfter=${newState.manual_overrides_present} " +
+                            "bootstrapBefore=${oldState?.manual_lock_bootstrap_version} " +
+                            "bootstrapAfter=${newState.manual_lock_bootstrap_version} " +
+                            "markerBefore=${oldState?.active_manual_project_id} " +
+                            "markerAfter=${newState.active_manual_project_id}"
                 )
 
                 // удаляем строку драфта

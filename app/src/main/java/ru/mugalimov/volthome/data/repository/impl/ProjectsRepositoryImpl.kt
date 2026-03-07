@@ -148,14 +148,33 @@ class ProjectsRepositoryImpl @Inject constructor(
                                 is_deleted = p.is_deleted
                             )
                         )
-                        stateDao.upsert(
-                            ru.mugalimov.volthome.data.local.entity.ProjectLocalStateEntity(
-                                project_id = p.id,
-                                remote_version = p.version,
-                                last_sync_at = null,
-                                has_local_changes = false
-                            )
+
+                        // Важно: не делаем full-upsert состояния проекта,
+                        // чтобы не затереть ownership-поля
+                        stateDao.ensureRow(p.id)
+
+                        // Читаем состояние до записи для доказательного лога
+                        val beforeState = stateDao.get(p.id)
+
+                        stateDao.updateRemoteVersion(p.id, p.version)
+                        stateDao.updateLastSyncAt(p.id, null)
+                        stateDao.setHasLocalChanges(p.id, false)
+
+                        // Читаем состояние после записи и доказываем, что ownership сохранился
+                        val afterState = stateDao.get(p.id)
+
+                        android.util.Log.i(
+                            "PROJECT_STATE_WRITE",
+                            "source=ProjectsRepositoryImpl.bootstrapFromRemote " +
+                                    "pid=${p.id} " +
+                                    "lockBefore=${beforeState?.manual_overrides_present} " +
+                                    "lockAfter=${afterState?.manual_overrides_present} " +
+                                    "bootstrapBefore=${beforeState?.manual_lock_bootstrap_version} " +
+                                    "bootstrapAfter=${afterState?.manual_lock_bootstrap_version} " +
+                                    "markerBefore=${beforeState?.active_manual_project_id} " +
+                                    "markerAfter=${afterState?.active_manual_project_id}"
                         )
+
                         imported++
                     }
                     cursor = page.next
@@ -250,14 +269,25 @@ class ProjectsRepositoryImpl @Inject constructor(
             )
 
             val stateDao = db.projectLocalStateDao()
-            val st = stateDao.get(id)
-            stateDao.upsert(
-                (st ?: ru.mugalimov.volthome.data.local.entity.ProjectLocalStateEntity(
-                    project_id = id,
-                    remote_version = 0,
-                    last_sync_at = null,
-                    has_local_changes = false
-                )).copy(has_local_changes = true)
+
+            // Важно: для existing row обновляем только sync-state поле,
+            // не пересобираем весь ProjectLocalStateEntity
+            stateDao.ensureRow(id)
+            val beforeState = stateDao.get(id)
+
+            stateDao.setHasLocalChanges(id, true)
+
+            val afterState = stateDao.get(id)
+            android.util.Log.i(
+                "PROJECT_STATE_WRITE",
+                "source=ProjectsRepositoryImpl.renameProject " +
+                        "pid=$id " +
+                        "lockBefore=${beforeState?.manual_overrides_present} " +
+                        "lockAfter=${afterState?.manual_overrides_present} " +
+                        "bootstrapBefore=${beforeState?.manual_lock_bootstrap_version} " +
+                        "bootstrapAfter=${afterState?.manual_lock_bootstrap_version} " +
+                        "markerBefore=${beforeState?.active_manual_project_id} " +
+                        "markerAfter=${afterState?.active_manual_project_id}"
             )
 
             // outbox PROJECT_UPDATE
@@ -289,11 +319,25 @@ class ProjectsRepositoryImpl @Inject constructor(
             dao.softDelete(id = id, updatedAt = nowIso, version = current.version)
 
             val stateDao = db.projectLocalStateDao()
-            val st = stateDao.get(id)
-            stateDao.upsert(
-                (st ?: ru.mugalimov.volthome.data.local.entity.ProjectLocalStateEntity(
-                    project_id = id, remote_version = 0, last_sync_at = null, has_local_changes = false
-                )).copy(has_local_changes = true)
+
+            // Важно: не делаем full-upsert состояния,
+            // чтобы не сбросить persisted ownership
+            stateDao.ensureRow(id)
+            val beforeState = stateDao.get(id)
+
+            stateDao.setHasLocalChanges(id, true)
+
+            val afterState = stateDao.get(id)
+            android.util.Log.i(
+                "PROJECT_STATE_WRITE",
+                "source=ProjectsRepositoryImpl.deleteProject " +
+                        "pid=$id " +
+                        "lockBefore=${beforeState?.manual_overrides_present} " +
+                        "lockAfter=${afterState?.manual_overrides_present} " +
+                        "bootstrapBefore=${beforeState?.manual_lock_bootstrap_version} " +
+                        "bootstrapAfter=${afterState?.manual_lock_bootstrap_version} " +
+                        "markerBefore=${beforeState?.active_manual_project_id} " +
+                        "markerAfter=${afterState?.active_manual_project_id}"
             )
 
             // tombstone — чтобы pull не вернул (если учитываешь при импорте)
