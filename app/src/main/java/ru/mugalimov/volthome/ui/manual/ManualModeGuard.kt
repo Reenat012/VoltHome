@@ -12,9 +12,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import ru.mugalimov.volthome.data.local.dao.GroupPhaseOverrideDao
+import ru.mugalimov.volthome.data.ownership.OwnershipOverridesCleaner
 import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
-import ru.mugalimov.volthome.domain.model.GroupingResult
 import ru.mugalimov.volthome.domain.use_case.manual.CommitManualDraftToLocalDbUseCase
 
 /**
@@ -26,17 +25,18 @@ import ru.mugalimov.volthome.domain.use_case.manual.CommitManualDraftToLocalDbUs
  *
  * Важно:
  * - request() НЕ должен блокировать UI: проверка manual-сессии делается в фоне.
- * - Добавлена защита от повторных нажатий (isProcessing) — иначе гонки и двойные execute().
+ * - Есть защита от повторных нажатий (isProcessing).
  *
- * Коммит 8:
- * - После Save/Cancel обязательно чистим group_phase_overrides,
- *   иначе AUTO перетрёт сохранённые фазы и пользователь увидит "откат".
+ * Commit 6:
+ * - Save больше НЕ чистит overrides напрямую через DAO.
+ *   Это делает CommitManualDraftToLocalDbUseCase через OwnershipOverridesCleaner.
+ * - Cancel чистит overrides только через OwnershipOverridesCleaner.
  */
 @Singleton
 class ManualModeGuard private constructor(
     private val manualRepo: ManualEditSessionRepository,
     private val commitManualDraftToLocalDb: CommitManualDraftToLocalDbUseCase,
-    private val groupPhaseOverrideDao: GroupPhaseOverrideDao,
+    private val ownershipOverridesCleaner: OwnershipOverridesCleaner,
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -105,7 +105,8 @@ class ManualModeGuard private constructor(
             val projectId = session.projectId
 
             val ok = runCatching {
-                // 1) commit draft -> локальная БД (diff-commit)
+                // 1) commit draft -> локальная БД
+                // 2) cleaner + manualLock=true уже внутри usecase
                 commitManualDraftToLocalDb.execute(
                     CommitManualDraftToLocalDbUseCase.Params(
                         projectId = projectId,
@@ -113,11 +114,7 @@ class ManualModeGuard private constructor(
                     )
                 )
 
-                // 2) КРИТИЧНО: чистим overrides, иначе AUTO "откатается" поверх сохранённых фаз
-                val deleted = groupPhaseOverrideDao.deleteByProject(projectId)
-                Log.w(TAG, "DELETE overrides pid=$projectId (guard SAVE) deletedRows=$deleted")
-
-                // 3) Выходим из manual
+                // 3) После успешного save просто выходим из manual
                 manualRepo.exitManualMode(projectId)
             }.onFailure {
                 Log.e(TAG, "onSaveClicked failed. projectId=$projectId", it)
@@ -128,7 +125,7 @@ class ManualModeGuard private constructor(
                     _dialogState.value = null
                     state.onProceed()
                 } else {
-                    // Ошибка — остаёмся в manual, возвращаем кнопки
+                    // Ошибка — остаёмся в manual
                     _dialogState.value = state.copy(isProcessing = false)
                 }
             }
@@ -155,11 +152,15 @@ class ManualModeGuard private constructor(
             val projectId = session.projectId
 
             val ok = runCatching {
-                // ✅ 1) чистим overrides (это не auto-recalc, не запись групп)
-                val deleted = groupPhaseOverrideDao.deleteByProject(projectId)
-                Log.w(TAG, "DELETE overrides pid=$projectId (guard CANCEL) deletedRows=$deleted")
+                // ✅ Cancel НЕ делает auto-recalc.
+                // ✅ Cancel чистит overrides только через единый cleaner.
+                val clearStats = ownershipOverridesCleaner.clearAll(projectId)
+                Log.w(
+                    TAG,
+                    "onCancelClicked cleaner done. projectId=$projectId totalDeleted=${clearStats.totalDeleted}"
+                )
 
-                // ✅ 2) выходим из manual (draft отбрасывается логикой repo)
+                // Выходим из manual, draft отбрасывается
                 manualRepo.exitManualMode(projectId)
             }.onFailure {
                 Log.e(TAG, "onCancelClicked failed. projectId=$projectId", it)
@@ -188,7 +189,7 @@ class ManualModeGuard private constructor(
             return ManualModeGuard(
                 manualRepo = ep.manualRepo(),
                 commitManualDraftToLocalDb = ep.commitManualDraftToLocalDb(),
-                groupPhaseOverrideDao = ep.groupPhaseOverrideDao()
+                ownershipOverridesCleaner = ep.ownershipOverridesCleaner()
             )
         }
     }

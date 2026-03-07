@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.local.dao.GroupPhaseOverrideDao
+import ru.mugalimov.volthome.data.ownership.OwnershipOverridesCleaner
 import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
 import ru.mugalimov.volthome.domain.model.PlanCapabilities
 import ru.mugalimov.volthome.domain.model.ProFeature
@@ -116,9 +117,8 @@ fun MainApp(
     // ❗️Cancel больше НЕ делает пересчёт (ТЗ): поэтому cancelUseCase не нужен
     // val cancelUseCase = remember { commitEp.cancelManualAndAutoRecalcUseCase() }
 
-    // ✅ КРИТИЧНО: overrides живут отдельно и в AUTO перетирают фазы поверх сохранённых групп.
-    // После manual-save их нужно чистить, иначе получаешь "откат" в AUTO.
-    val groupPhaseOverrideDao = remember { commitEp.groupPhaseOverrideDao() }
+    // ✅ Commit 6: все overrides чистим только через единый cleaner.
+    val ownershipOverridesCleaner = remember { commitEp.ownershipOverridesCleaner() }
 
     // ВАЖНО: manualRepo должен быть объявлен ДО первого использования
     val manualDraftResetNotifier = remember { resetEp.manualDraftResetNotifier() }
@@ -384,6 +384,10 @@ fun MainApp(
                         }
 
                         try {
+                            // ✅ Save usecase теперь сам:
+                            // 1) коммитит draft,
+                            // 2) чистит overrides через cleaner,
+                            // 3) фиксирует manualLock=true.
                             commitUseCase.execute(
                                 CommitManualDraftToLocalDbUseCase.Params(
                                     projectId = projectId,
@@ -391,15 +395,14 @@ fun MainApp(
                                 )
                             )
 
-                            val deleted = groupPhaseOverrideDao.deleteByProject(projectId)
-                            Log.w("OVERRIDES", "DELETE overrides pid=$projectId (manual SAVE) deletedRows=$deleted")
-
+                            // После успешного save просто выходим из manual
                             manualRepo.exitManualMode(projectId)
 
                             val proceed = pendingProceed
                             dismissManualExitDialog()
                             proceed?.invoke()
                         } catch (t: Throwable) {
+                            Log.e("MANUAL_SAVE", "MAINAPP Save failed pid=$projectId", t)
                             snackbarHostState.showSnackbar("Ошибка сохранения: ${t.message ?: "неизвестно"}")
                         }
                     }
@@ -422,16 +425,17 @@ fun MainApp(
                         }
 
                         try {
-                            // ✅ ТЗ: Cancel НЕ запускает calculateGroups() и НЕ пишет auto-группы в БД.
-                            // Cancel = просто выкинуть черновик и выйти из ручного режима.
+                            // ✅ Cancel НЕ делает auto-recalc и НЕ пишет auto-группы.
                             Log.w("MANUAL_CANCEL", "MAINAPP Cancel START (NO_RECALC) pid=$projectId")
 
-                            // ⚠️ ВАЖНО: overrides могли быть выставлены вручную и в AUTO перетирать фазы.
-                            // Поэтому чистим их при выходе из manual, даже если пересчёта нет.
-                            val deleted = groupPhaseOverrideDao.deleteByProject(projectId)
-                            Log.w("OVERRIDES", "DELETE overrides pid=$projectId (manual CANCEL NO_RECALC) deletedRows=$deleted")
+                            // ✅ Все overrides чистим только через единый cleaner.
+                            val clearStats = ownershipOverridesCleaner.clearAll(projectId)
+                            Log.w(
+                                "MANUAL_CANCEL",
+                                "MAINAPP Cancel cleaner done pid=$projectId totalDeleted=${clearStats.totalDeleted}"
+                            )
 
-                            // Выходим из manual: UI вернётся к данным из DB (последнее сохранённое состояние)
+                            // Выходим из manual: UI вернётся к последнему сохранённому состоянию БД
                             manualRepo.exitManualMode(projectId)
 
                             val proceed = pendingProceed
@@ -571,9 +575,6 @@ interface ManualDraftResetEntryPoint {
 interface ManualCommitEntryPoint {
     fun commitManualDraftToLocalDbUseCase(): CommitManualDraftToLocalDbUseCase
 
-    // Сейчас в MainApp не используется: Cancel по ТЗ без пересчёта.
-    // Оставляем, чтобы не трогать DI/EntryPoint шире, чем нужно.
-    // fun cancelManualAndAutoRecalcUseCase(): CancelManualAndAutoRecalcUseCase
-
-    fun groupPhaseOverrideDao(): GroupPhaseOverrideDao
+    // ✅ Commit 6: единая точка очистки всех overrides
+    fun ownershipOverridesCleaner(): OwnershipOverridesCleaner
 }
