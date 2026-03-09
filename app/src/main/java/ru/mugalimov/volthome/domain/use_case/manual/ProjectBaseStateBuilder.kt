@@ -69,15 +69,35 @@ class ProjectBaseStateBuilder @Inject constructor(
             "baseState devices: all=${allDeviceIds.size} assigned=${assignedDeviceIds.size} unassigned=${unassignedDeviceIds.size}"
         )
 
+        // ✅ НОВОЕ:
+        // Делаем карту roomId -> roomName из уже известных групп.
+        // Это основной способ нормализовать устройства в manual draft.
+        val roomNamesById: Map<Long, String> = sortedGroups
+            .map { it.group }
+            .filter { it.roomId > 0L && it.roomName.isNotBlank() }
+            .associate { it.roomId to it.roomName }
+
         // 5) devices в manual state — из ВСЕХ устройств проекта
         // (иначе unassigned не сможет материализоваться в UI)
         val manualDevices = allDevicesInProject
             .distinctBy { it.id }
-            .sortedBy { it.id } // детерминированно
+            .sortedBy { it.id }
             .map { d ->
+                val roomId = d.roomId ?: 0L
+
+                require(roomId > 0L) {
+                    "MANUAL_BASE_STATE: deviceId=${d.id} has invalid roomId=$roomId"
+                }
+
+                val roomName = roomNamesById[roomId]
+                    ?.trim()
+                    ?.takeIf { it.isNotBlank() }
+                    ?: "Помещение #$roomId"
+
                 ManualDeviceDraft(
                     deviceId = d.id,
-                    roomId = d.roomId ?: 0L,
+                    roomId = roomId,
+                    roomName = roomName,
                     deviceType = d.deviceType,
                     powerW = d.power,
                     voltageType = d.voltage.type,

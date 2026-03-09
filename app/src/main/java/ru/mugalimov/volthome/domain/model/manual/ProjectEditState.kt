@@ -64,6 +64,13 @@ data class ManualGroupDraft(
 data class ManualDeviceDraft(
     val deviceId: Long,
     val roomId: Long,
+
+    // ✅ НОВОЕ:
+    // Имя комнаты должно жить прямо в устройстве manual draft.
+    // Иначе устройство из unassigned не сможет создать новую группу,
+    // если в draft.groups сейчас нет ни одной группы этой комнаты.
+    val roomName: String,
+
     val deviceType: DeviceType,
 
     val powerW: Int?,

@@ -144,6 +144,7 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
         return ManualDeviceDraft(
             deviceId = id,
             roomId = nonNullRoomId,
+            roomName = fallbackRoomName(nonNullRoomId),
             deviceType = deviceType,
             powerW = power,
             voltageType = voltage.type,
@@ -153,6 +154,8 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
             requiresDedicatedCircuit = requiresDedicatedCircuit
         )
     }
+
+    private fun fallbackRoomName(roomId: Long): String = "Помещение #$roomId"
 
     /**
      * Merge новых устройств в draft.devices.
@@ -736,16 +739,27 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
         deviceId: Long,
         currentGroupId: Long?
     ): Pair<Long, String> {
-        // 1) Самый надёжный путь: если устройство уже было в группе, берём комнату группы
+        // 1) Если устройство уже было в существующей группе — это самый надёжный источник
         val sourceGroup = currentGroupId?.let { gid ->
             draft.groups.firstOrNull { it.groupId == gid }
         }
 
-        if (sourceGroup != null && sourceGroup.roomId > 0L && sourceGroup.roomName.isNotBlank()) {
-            return sourceGroup.roomId to sourceGroup.roomName
+        if (sourceGroup != null && sourceGroup.roomId > 0L) {
+            val sourceRoomName = sourceGroup.roomName.trim()
+            if (sourceRoomName.isNotBlank()) {
+                return sourceGroup.roomId to sourceRoomName
+            }
+
+            Log.w(
+                TAG,
+                "MANUAL_CREATE_GROUP blank source roomName, " +
+                        "deviceId=$deviceId currentGroupId=$currentGroupId roomId=${sourceGroup.roomId}"
+            )
+
+            return sourceGroup.roomId to fallbackRoomName(sourceGroup.roomId)
         }
 
-        // 2) Иначе пытаемся восстановить комнату по самому устройству
+        // 2) Берём устройство из draft
         val device = draft.devices.firstOrNull { it.deviceId == deviceId }
             ?: throw IllegalStateException("MANUAL_CREATE_GROUP: device not found for deviceId=$deviceId")
 
@@ -754,16 +768,36 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
             "MANUAL_CREATE_GROUP: deviceId=$deviceId has invalid roomId=$deviceRoomId"
         }
 
-        // Ищем любое известное имя комнаты среди уже существующих групп того же roomId
-        val roomNameFromDraft = draft.groups
-            .firstOrNull { it.roomId == deviceRoomId && it.roomName.isNotBlank() }
-            ?.roomName
-
-        require(!roomNameFromDraft.isNullOrBlank()) {
-            "MANUAL_CREATE_GROUP: cannot resolve roomName for deviceId=$deviceId roomId=$deviceRoomId"
+        // 3) Сначала пытаемся взять имя комнаты прямо из устройства
+        val deviceRoomName = device.roomName.trim()
+        if (deviceRoomName.isNotBlank()) {
+            return deviceRoomId to deviceRoomName
         }
 
-        return deviceRoomId to roomNameFromDraft
+        // 4) Потом пытаемся восстановить через существующие группы того же roomId
+        val roomNameFromDraft = draft.groups
+            .asSequence()
+            .mapNotNull { group ->
+                if (group.roomId != deviceRoomId) return@mapNotNull null
+                val normalized = group.roomName.trim()
+                if (normalized.isBlank()) null else normalized
+            }
+            .firstOrNull()
+
+        if (!roomNameFromDraft.isNullOrBlank()) {
+            return deviceRoomId to roomNameFromDraft
+        }
+
+        // 5) Аварийный fallback, чтобы manual не падал
+        val fallback = fallbackRoomName(deviceRoomId)
+
+        Log.w(
+            TAG,
+            "MANUAL_CREATE_GROUP fallback roomName used, " +
+                    "deviceId=$deviceId roomId=$deviceRoomId fallback='$fallback'"
+        )
+
+        return deviceRoomId to fallback
     }
 
     private fun autoAssignUnassigned(
