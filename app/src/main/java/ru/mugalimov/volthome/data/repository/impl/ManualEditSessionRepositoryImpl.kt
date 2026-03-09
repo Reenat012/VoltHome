@@ -195,7 +195,7 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
     override fun getSession(projectId: String): ManualEditSession? =
         sessionsFlow.value[projectId]
 
-    @Deprecated("Не использовать как SoT. Используйте getSession(projectId)/isManualActive(projectId).")
+    @Deprecated("Compat-only. UI/ViewModel обязаны использовать getSession(projectId)/isManualActive(projectId).")
     override fun getActiveSession(): ManualEditSession? {
         val active = sessionsFlow.value.values.filter { it.manualModeActive }
         if (active.size > 1) {
@@ -478,7 +478,7 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
         )
     }
 
-    @Deprecated("Используйте apply(projectId, action).")
+    @Deprecated("Compat-only. UI/ViewModel обязаны использовать apply(projectId, action).")
     override suspend fun apply(action: ManualEditAction) {
         val active = getActiveSession() ?: run {
             Log.w(TAG, "legacy apply ignored: activeSession=null action=$action")

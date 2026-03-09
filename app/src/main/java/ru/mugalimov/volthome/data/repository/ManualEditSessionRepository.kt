@@ -18,8 +18,11 @@ interface ManualEditSessionRepository {
     /**
      * ⚠️ Legacy/совместимость: НЕ использовать как SoT.
      * Вернёт активную сессию, если она ровно одна.
+     *
+     * UI/ViewModel не должны зависеть от этого метода.
+     * Допускается только как transitional compat для старых мест вызова.
      */
-    @Deprecated("Не использовать как SoT. Используйте getSession(projectId)/isManualActive(projectId).")
+    @Deprecated("Compat-only. UI/ViewModel обязаны использовать getSession(projectId)/isManualActive(projectId).")
     fun getActiveSession(): ManualEditSession?
 
     /** Вход в manual: создаём in-memory base/draft и включаем manualModeActive. */
@@ -49,9 +52,11 @@ interface ManualEditSessionRepository {
     )
 
     /**
-     * ⚠️ Legacy: оставляем, чтобы не ломать старые места вызова.
+     * ⚠️ Legacy: оставляем только для совместимости.
      * Делегирует в apply(projectIdOfActiveSession,...)
+     *
+     * UI/ViewModel не должны вызывать этот метод.
      */
-    @Deprecated("Используйте apply(projectId, action).")
+    @Deprecated("Compat-only. UI/ViewModel обязаны использовать apply(projectId, action).")
     suspend fun apply(action: ManualEditAction)
 }

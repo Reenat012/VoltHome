@@ -5,9 +5,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import java.text.SimpleDateFormat
-import java.util.Locale
-import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -51,7 +48,6 @@ import ru.mugalimov.volthome.domain.model.VoltageType
 import ru.mugalimov.volthome.domain.model.incomer.IncomerSpec
 import ru.mugalimov.volthome.domain.model.manual.ManualEditAction
 import ru.mugalimov.volthome.domain.model.manual.ManualEditSession
-import ru.mugalimov.volthome.domain.model.manual.ProjectEditState
 import ru.mugalimov.volthome.domain.model.report.DonutModel
 import ru.mugalimov.volthome.domain.model.report.ReportDevice
 import ru.mugalimov.volthome.domain.model.report.ReportGroup
@@ -67,10 +63,10 @@ import ru.mugalimov.volthome.domain.use_case.GroupCalculatorFactory
 import ru.mugalimov.volthome.domain.use_case.IncomerSelector
 import ru.mugalimov.volthome.domain.use_case.SaveAutoCalculatedGroupsToLocalDbUseCase
 import ru.mugalimov.volthome.domain.use_case.getOrZero
-import ru.mugalimov.volthome.domain.use_case.phaseCurrents
-import ru.mugalimov.volthome.domain.use_case.report.BuildProfessionalSectionsUseCase
 import ru.mugalimov.volthome.domain.use_case.manual.CommitManualDraftToLocalDbUseCase
 import ru.mugalimov.volthome.domain.use_case.manual.ResetManualOverridesAndAutoRecalcUseCase
+import ru.mugalimov.volthome.domain.use_case.phaseCurrents
+import ru.mugalimov.volthome.domain.use_case.report.BuildProfessionalSectionsUseCase
 import ru.mugalimov.volthome.domain.util.PowerCurrentNormalizer
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
 import ru.mugalimov.volthome.ui.screens.explication.sheets.CalcBlocksMapper
@@ -79,6 +75,9 @@ import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetPayload
 import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetType
 import ru.mugalimov.volthome.ui.utilities.ManualDraftResetNotifier
 import ru.mugalimov.volthome.ui.viewmodel.explication.InfoSheetPayloadFactory
+import java.text.SimpleDateFormat
+import java.util.Locale
+import javax.inject.Inject
 
 @HiltViewModel
 class ExplicationViewModel @Inject constructor(
@@ -229,13 +228,6 @@ class ExplicationViewModel @Inject constructor(
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
-    val showResetManualButton: StateFlow<Boolean> =
-        combine(manualSession, manualLockFlow) { session, locked ->
-            val isManual = session?.manualModeActive == true
-            // ТЗ: кнопка только в AUTO, если есть сохранённая ручная структура
-            (!isManual) && locked
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
-
 
 
     // =========================
@@ -333,6 +325,28 @@ class ExplicationViewModel @Inject constructor(
         _events.value = null
     }
 
+    /**
+     * Текущий activeProjectId в нормализованном виде.
+     */
+    private fun currentProjectIdOrNull(): String? =
+        activeProjectIdState.value
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+
+    /**
+     * Берём manual-сессию строго по projectId.
+     *
+     * Это и есть правильный SoT для VM:
+     * - никакого getActiveSession()
+     * - никакой зависимости от "какая-то одна активная сессия"
+     */
+    private fun getManualSessionForProject(projectId: String): ManualEditSession? =
+        manualRepo.getSession(projectId)
+
+    // =========================
+    // MIXED_MANUAL warning state (сессионно)
+    // =========================
+
     // =========================
     // MIXED_MANUAL warning state (сессионно)
     // =========================
@@ -412,8 +426,8 @@ class ExplicationViewModel @Inject constructor(
                 .filterNotNull()
                 .distinctUntilChanged()
                 .collect { projectId ->
-                    val s = manualRepo.getActiveSession()
-                    val hasSession = (s?.projectId == projectId) && (s.manualModeActive)
+                    val session = getManualSessionForProject(projectId)
+                    val hasSession = session?.manualModeActive == true
 
                     if (manualDraftResetNotifier.consumeResetIfNeeded(
                             projectId,
@@ -821,23 +835,18 @@ class ExplicationViewModel @Inject constructor(
     // Unassigned: refresh/clear
     // =========================
 
-    fun refreshUnassignedDevices(unassignedIds: Set<Long>) {
-        Log.d(
-            "MANUAL_DEVICES",
-            "refreshUnassignedDevices ignored (handled by manualDevicesById) ids=${unassignedIds.size}"
-        )
-    }
-
-    fun clearUnassignedDevices() {
-        Log.d("MANUAL_DEVICES", "clearUnassignedDevices ignored (handled by manualDevicesById)")
-    }
-
     fun onAutoAssignUnassignedClick() {
         viewModelScope.launch(ioDispatcher) {
-            val session = manualSession.value
+            val projectId = currentProjectIdOrNull() ?: return@launch
+            val session = getManualSessionForProject(projectId)
+
             if (session?.manualModeActive != true) return@launch
+
             try {
-                manualRepo.apply(ManualEditAction.AutoAssignUnassigned)
+                manualRepo.apply(
+                    projectId = projectId,
+                    action = ManualEditAction.AutoAssignUnassigned
+                )
                 _events.value = UiEvent.ShowSnackbar("Нераспределённые устройства распределены")
             } catch (_: Throwable) {
                 _events.value = UiEvent.ShowSnackbar("Не удалось распределить устройства")
@@ -983,58 +992,6 @@ class ExplicationViewModel @Inject constructor(
         )
     }
 
-    fun onCancelManualClicked() {
-        viewModelScope.launch(ioDispatcher) {
-
-            // ✅ Берём projectId без first(): это быстрее и без лишних suspend-ловушек
-            val projectId = activeProjectIdState.value.orEmpty().trim()
-
-            if (projectId.isBlank()) {
-                _events.value = UiEvent.ShowSnackbar("Не выбран проект")
-                return@launch
-            }
-
-            // Берём сессию: либо активная (глобальная), либо scoped-стейт
-            val session = manualRepo.getActiveSession() ?: manualSession.value
-            val isManual = session?.manualModeActive == true && session.projectId == projectId
-
-            if (!isManual) {
-                _events.value = UiEvent.ShowSnackbar("Ручной режим не активен")
-                return@launch
-            }
-
-            Log.w("MANUAL_CANCEL", "VM Cancel START (NO RECALC) pid=$projectId ver=${session?.version}")
-
-            /**
-             * ✅ ВАЖНО (ТЗ):
-             * "Отмена" в попапе выхода из ручного режима НЕ должна:
-             * - запускать calculateGroups()
-             * - писать авто-группы в БД
-             *
-             * Она должна просто:
-             * - выйти из manual (снять marker + удалить in-memory draft)
-             * - вернуть отображение к данным из БД (db pipeline сам подхватит)
-             */
-            try {
-                // 1) Выход из manual: чистит persisted marker + очищает сессию в памяти
-                manualRepo.exitManualMode(projectId)
-
-                // 2) Локальный UI-cleanup (чтобы не оставались панели/drag state)
-                _moveDeviceUi.value = null
-                _dragState.value = DragState()
-                _pendingMixedMove.value = null
-                _showMixedWarningDialog.value = false
-
-                // 3) Никакой Loading и никакой _isRecalculating — мы ничего не считаем
-                _events.value = UiEvent.ShowSnackbar("Ручные изменения отменены")
-                Log.w("MANUAL_CANCEL", "VM Cancel OK (NO RECALC) pid=$projectId")
-            } catch (t: Throwable) {
-                Log.e("MANUAL_CANCEL", "VM Cancel EXCEPTION pid=$projectId", t)
-                _events.value = UiEvent.ShowSnackbar("Ошибка отмены изменений")
-            }
-        }
-    }
-
     fun cancelDrag() {
         Log.d("DRAG_TRACE", "VM cancelDrag -> reset dragState only (panel stays)")
         _dragState.value = DragState()
@@ -1104,16 +1061,21 @@ class ExplicationViewModel @Inject constructor(
         _moveDeviceUi.value = null
 
         viewModelScope.launch(ioDispatcher) {
+            val projectId = currentProjectIdOrNull() ?: run {
+                Log.e("MOVE_DEBUG", "projectId=null")
+                _events.value = UiEvent.ShowSnackbar("Не выбран проект")
+                return@launch
+            }
 
-            val session = manualRepo.getActiveSession()
+            val session = getManualSessionForProject(projectId)
             if (session == null) {
-                Log.e("MOVE_DEBUG", "session=null")
+                Log.e("MOVE_DEBUG", "session=null pid=$projectId")
                 _events.value = UiEvent.ShowSnackbar("Manual session = null")
                 return@launch
             }
 
             if (!session.manualModeActive) {
-                Log.e("MOVE_DEBUG", "manualModeActive=false")
+                Log.e("MOVE_DEBUG", "manualModeActive=false pid=$projectId")
                 _events.value = UiEvent.ShowSnackbar("Manual mode inactive")
                 return@launch
             }
@@ -1125,7 +1087,7 @@ class ExplicationViewModel @Inject constructor(
 
             Log.d(
                 "DRAG_TRACE",
-                "VM APPLY MOVE device=$deviceId from=$fromGroupId to=$targetGroupId"
+                "VM APPLY MOVE pid=$projectId device=$deviceId from=$fromGroupId to=$targetGroupId"
             )
 
             val action = if (fromGroupId == FROM_UNASSIGNED) {
@@ -1141,58 +1103,26 @@ class ExplicationViewModel @Inject constructor(
                 )
             }
 
-            Log.d("DRAG_TRACE", "VM APPLY action=$action")
-            manualRepo.apply(action)
+            Log.d("DRAG_TRACE", "VM APPLY pid=$projectId action=$action")
+            manualRepo.apply(projectId = projectId, action = action)
         }
     }
 
-    fun onMixedWarningConfirm(dontShowAgainInSession: Boolean) {
-        _showMixedWarningDialog.value = false
-        _mixedWarningBlocked.value = true
-        if (dontShowAgainInSession) _mixedWarningDontShowAgain.value = true
-
-        val pending = _pendingMixedMove.value
-        _pendingMixedMove.value = null
-
-        if (pending == null) return
-
-        viewModelScope.launch(ioDispatcher) {
-            val session = manualRepo.getActiveSession() ?: manualSession.value ?: return@launch
-            if (!session.manualModeActive) return@launch
-
-            try {
-                if (pending.fromGroupId == FROM_UNASSIGNED) {
-                    manualRepo.apply(
-                        ManualEditAction.MoveFromUnassigned(
-                            deviceId = pending.deviceId,
-                            toGroupId = pending.targetGroupId
-                        )
-                    )
-                } else {
-                    manualRepo.apply(
-                        ManualEditAction.MoveDevice(
-                            deviceId = pending.deviceId,
-                            fromGroupId = pending.fromGroupId,
-                            toGroupId = pending.targetGroupId
-                        )
-                    )
-                }
-                _events.value = UiEvent.ShowSnackbar("Перенос выполнен (MIXED)")
-            } catch (_: Throwable) {
-                _events.value = UiEvent.ShowSnackbar("Не удалось перенести устройство")
-            }
-        }
-    }
 
     fun onMoveDeviceToNewGroupSelected(deviceId: Long) {
         _moveDeviceUi.value = null
 
         viewModelScope.launch(ioDispatcher) {
-            val session = manualRepo.getActiveSession() ?: manualSession.value
+            val projectId = currentProjectIdOrNull() ?: run {
+                _events.value = UiEvent.ShowSnackbar("Не выбран проект")
+                return@launch
+            }
+
+            val session = getManualSessionForProject(projectId)
             if (session == null) {
                 Log.d(
                     TAG_SESS,
-                    "onMoveDeviceToNewGroupSelected: session=null (ignored) deviceId=$deviceId"
+                    "onMoveDeviceToNewGroupSelected: session=null pid=$projectId deviceId=$deviceId"
                 )
                 _events.value = UiEvent.ShowSnackbar("Сессия ручного режима недоступна")
                 return@launch
@@ -1201,7 +1131,7 @@ class ExplicationViewModel @Inject constructor(
             if (!session.manualModeActive) {
                 Log.w(
                     TAG_SESS,
-                    "onMoveDeviceToNewGroupSelected: manualModeActive=false deviceId=$deviceId"
+                    "onMoveDeviceToNewGroupSelected: manualModeActive=false pid=$projectId deviceId=$deviceId"
                 )
                 _events.value = UiEvent.ShowSnackbar("Ручной режим выключен")
                 return@launch
@@ -1209,13 +1139,16 @@ class ExplicationViewModel @Inject constructor(
 
             Log.d(
                 TAG_MOVE,
-                "toNewGroup deviceId=$deviceId pid=${session.projectId} ver=${session.version}"
+                "toNewGroup deviceId=$deviceId pid=$projectId ver=${session.version}"
             )
 
             try {
-                manualRepo.apply(ManualEditAction.CreateNewGroupAndMove(deviceId = deviceId))
+                manualRepo.apply(
+                    projectId = projectId,
+                    action = ManualEditAction.CreateNewGroupAndMove(deviceId = deviceId)
+                )
             } catch (t: Throwable) {
-                Log.e(TAG_MOVE, "toNewGroup failed deviceId=$deviceId", t)
+                Log.e(TAG_MOVE, "toNewGroup failed deviceId=$deviceId pid=$projectId", t)
                 _events.value = UiEvent.ShowSnackbar("Не удалось создать новую группу")
             }
         }
@@ -1226,11 +1159,16 @@ class ExplicationViewModel @Inject constructor(
         _moveDeviceUi.value = null
 
         viewModelScope.launch(ioDispatcher) {
-            val session = manualRepo.getActiveSession() ?: manualSession.value
+            val projectId = currentProjectIdOrNull() ?: run {
+                _events.value = UiEvent.ShowSnackbar("Не выбран проект")
+                return@launch
+            }
+
+            val session = getManualSessionForProject(projectId)
             if (session == null) {
                 Log.w(
                     TAG_SESS,
-                    "onMoveDeviceToUnassignedSelected: session=null deviceId=$deviceId from=$fromGroupId"
+                    "onMoveDeviceToUnassignedSelected: session=null pid=$projectId deviceId=$deviceId from=$fromGroupId"
                 )
                 _events.value = UiEvent.ShowSnackbar("Сессия ручного режима недоступна")
                 return@launch
@@ -1239,7 +1177,7 @@ class ExplicationViewModel @Inject constructor(
             if (!session.manualModeActive) {
                 Log.w(
                     TAG_SESS,
-                    "onMoveDeviceToUnassignedSelected: manualModeActive=false deviceId=$deviceId"
+                    "onMoveDeviceToUnassignedSelected: manualModeActive=false pid=$projectId deviceId=$deviceId"
                 )
                 _events.value = UiEvent.ShowSnackbar("Ручной режим выключен")
                 return@launch
@@ -1253,18 +1191,19 @@ class ExplicationViewModel @Inject constructor(
 
             Log.d(
                 TAG_MOVE,
-                "toUnassigned deviceId=$deviceId from=$from pid=${session.projectId} ver=${session.version}"
+                "toUnassigned deviceId=$deviceId from=$from pid=$projectId ver=${session.version}"
             )
 
             try {
                 manualRepo.apply(
-                    ManualEditAction.MoveToUnassigned(
+                    projectId = projectId,
+                    action = ManualEditAction.MoveToUnassigned(
                         deviceId = deviceId,
                         fromGroupId = from
                     )
                 )
             } catch (t: Throwable) {
-                Log.e(TAG_MOVE, "toUnassigned failed deviceId=$deviceId from=$from", t)
+                Log.e(TAG_MOVE, "toUnassigned failed deviceId=$deviceId from=$from pid=$projectId", t)
                 _events.value = UiEvent.ShowSnackbar("Не удалось переместить в нераспределённые")
             }
         }
@@ -1351,11 +1290,6 @@ class ExplicationViewModel @Inject constructor(
         }
     }
 
-    fun clearSelected() {
-        _selectedDevice.value = null
-        _selectedDeviceBreakdown.value = null
-    }
-
     fun onInstalledPowerClick(calculated: CalculatedValue) {
         val plan = userPlanRepository.planFlow.value
         val hasAccess = plan.capabilities.professionalReportSections
@@ -1431,26 +1365,25 @@ class ExplicationViewModel @Inject constructor(
     fun recalcAndSaveGroups() {
         viewModelScope.launch(ioDispatcher) {
 
-            val activeSession = manualRepo.getActiveSession() ?: manualSession.value
-            val isManual = activeSession?.manualModeActive == true
-            val manualPid = activeSession?.projectId
-
-            if (isManual) {
-                Log.w(
-                    "AUTO_GATE",
-                    "AUTO_RECALC_BLOCKED reason=EXPLICIT_RECALC_REQUEST manual=true pid=$manualPid ver=${activeSession?.version}"
-                )
-                _events.value =
-                    UiEvent.ShowSnackbar("Сейчас включён ручной режим. Пересчёт недоступен.")
-                return@launch
-            }
-
-            val projectId = activeProjectIdState.value.orEmpty()
+            val projectId = activeProjectIdState.value.orEmpty().trim()
             if (projectId.isBlank()) {
                 Log.w(
                     "AUTO_GATE",
                     "AUTO_RECALC_ABORT reason=NO_ACTIVE_PROJECT (keep current uiState)"
                 )
+                return@launch
+            }
+
+            val activeSession = getManualSessionForProject(projectId)
+            val isManual = activeSession?.manualModeActive == true
+
+            if (isManual) {
+                Log.w(
+                    "AUTO_GATE",
+                    "AUTO_RECALC_BLOCKED reason=EXPLICIT_RECALC_REQUEST manual=true pid=$projectId ver=${activeSession.version}"
+                )
+                _events.value =
+                    UiEvent.ShowSnackbar("Сейчас включён ручной режим. Пересчёт недоступен.")
                 return@launch
             }
 
