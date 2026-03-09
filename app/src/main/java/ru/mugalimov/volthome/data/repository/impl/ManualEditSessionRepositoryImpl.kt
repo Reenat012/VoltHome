@@ -8,9 +8,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import ru.mugalimov.volthome.data.local.dao.ProjectLocalStateDao
+import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
+import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.PhaseMode
+import ru.mugalimov.volthome.domain.model.manual.ManualDeviceDraft
 import ru.mugalimov.volthome.domain.model.manual.ManualEditAction
 import ru.mugalimov.volthome.domain.model.manual.ManualEditSession
 import ru.mugalimov.volthome.domain.model.manual.ManualGroupComposition
@@ -29,6 +32,7 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
     private val manualDraftResetNotifier: ManualDraftResetNotifier, // ✅ kill-process UX маркер
     private val projectLocalStateDao: ProjectLocalStateDao,
     private val structuralWriteCoordinator: StructuralWriteCoordinator,
+    private val deviceRepository: DeviceRepository,
 ) : ManualEditSessionRepository {
 
     companion object {
@@ -125,12 +129,66 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
         )
     }
 
+    /**
+     * Преобразование обычной доменной модели устройства в manual draft-модель.
+     *
+     * Важно:
+     * - roomId в manual draft обязателен для дальнейших операций create group / resolve room
+     * - если roomId отсутствует, это уже битые входные данные, их нельзя молча проглатывать
+     */
+    private fun Device.toManualDeviceDraft(): ManualDeviceDraft {
+        val nonNullRoomId = requireNotNull(roomId) {
+            "MANUAL_POST_INSERT: deviceId=$id has null roomId"
+        }
+
+        return ManualDeviceDraft(
+            deviceId = id,
+            roomId = nonNullRoomId,
+            deviceType = deviceType,
+            powerW = power,
+            voltageType = voltage.type,
+            demandRatio = demandRatio,
+            powerFactor = powerFactor,
+            hasMotor = hasMotor,
+            requiresDedicatedCircuit = requiresDedicatedCircuit
+        )
+    }
+
+    /**
+     * Merge новых устройств в draft.devices.
+     *
+     * Политика:
+     * - если deviceId уже существует — обновляем запись
+     * - если deviceId новый — добавляем
+     * - итог всегда уникален по deviceId
+     * - порядок детерминированный: сохраняем старый порядок + добавляем новые в хвост
+     */
+    private fun mergeDevicesIntoDraft(
+        existing: List<ManualDeviceDraft>,
+        inserted: List<ManualDeviceDraft>
+    ): List<ManualDeviceDraft> {
+        if (inserted.isEmpty()) return existing
+
+        val merged = LinkedHashMap<Long, ManualDeviceDraft>()
+
+        // Сначала кладём текущее состояние draft
+        existing.forEach { draftDevice ->
+            merged[draftDevice.deviceId] = draftDevice
+        }
+
+        // Затем накатываем актуальные post-insert устройства
+        inserted.forEach { insertedDevice ->
+            merged[insertedDevice.deviceId] = insertedDevice
+        }
+
+        return merged.values.toList()
+    }
+
     override fun observeSession(projectId: String): Flow<ManualEditSession?> {
         return sessionsFlow
             .map { map -> map[projectId] }
             .distinctUntilChanged()
     }
-
     override fun isManualActive(projectId: String): Boolean =
         sessionsFlow.value[projectId]?.manualModeActive == true
 
@@ -351,16 +409,43 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
             .flatMap { it.deviceIds.asSequence() }
             .toSet()
 
-        // Присоединяем новые ids к unassigned (с защитой от дублей и от assigned)
-        val merged: Set<Long> = buildSet {
+        // Узкий path:
+        // читаем из БД только фактически вставленные устройства, а не пересобираем весь draft.
+        val insertedDevicesFromDb = deviceRepository
+            .getDevicesByIds(insertedDeviceIds)
+            .map { it.toManualDeviceDraft() }
+
+        // Для доказательности логируем, если БД вернула не все id.
+        val fetchedIds = insertedDevicesFromDb.map { it.deviceId }.toSet()
+        val missingFromDb = insertedDeviceIds.toSet() - fetchedIds
+        if (missingFromDb.isNotEmpty()) {
+            Log.w(
+                "MANUAL_POST_INSERT",
+                "pid=$projectId opId=$opId fetched=${fetchedIds.size} " +
+                        "missingFromDb=${missingFromDb.toList().sorted()}"
+            )
+        }
+
+        // Обновляем полный draft:
+        // 1) merge новых устройств в draft.devices
+        val mergedDevices = mergeDevicesIntoDraft(
+            existing = before.devices,
+            inserted = insertedDevicesFromDb
+        )
+
+        // 2) merge новых id в unassigned (с защитой от дублей и от assigned)
+        val mergedUnassigned: Set<Long> = buildSet {
             addAll(before.unassignedDeviceIds)
             insertedDeviceIds.forEach { add(it) }
         }
             .asSequence()
             .filterNot { it in assigned }
-            .toCollection(LinkedHashSet()) // детерминированно и это Set<Long>
+            .toCollection(LinkedHashSet())
 
-        val newDraft = before.copy(unassignedDeviceIds = merged)
+        val newDraft = before.copy(
+            devices = mergedDevices,
+            unassignedDeviceIds = mergedUnassigned
+        )
 
         val updated = current.copy(
             draftState = newDraft,
@@ -379,12 +464,13 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
             "MANUAL_POST_INSERT",
             "pid=$projectId opId=$opId inserted=${insertedDeviceIds.size} " +
                     "insertedIds=${insertedDeviceIds.sorted()} " +
-                    "unassigned(before=${before.unassignedDeviceIds.size} after=${merged.size}) " +
+                    "fetchedDevices=${insertedDevicesFromDb.map { it.deviceId }.sorted()} " +
+                    "devices(before=${before.devices.size} after=${mergedDevices.size}) " +
+                    "unassigned(before=${before.unassignedDeviceIds.size} after=${mergedUnassigned.size}) " +
                     "caller=$caller"
         )
 
-        // Ключевой proof-log этого коммита:
-        // после post-insert сразу видно, битый draft или нет
+        // После post-insert draft обязан оставаться консистентным.
         logDraftInvariant(
             projectId = projectId,
             source = "addInsertedDevicesToUnassigned",
