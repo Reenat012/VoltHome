@@ -31,6 +31,12 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
     private val structuralWriteCoordinator: StructuralWriteCoordinator,
 ) : ManualEditSessionRepository {
 
+    companion object {
+        private const val TAG = "MANUAL_REPO"
+        private const val INVARIANT_TAG = "MANUAL_DRAFT_INVARIANT"
+        private const val AUTO_ASSIGN_TAG = "MANUAL_AUTO_ASSIGN"
+    }
+
     /**
      * ✅ Commit 2: сессии по projectId (защита от “manual активен не того проекта”).
      *
@@ -43,6 +49,81 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
     // Глобальный key для сериализации операций с persisted marker.
     // enter/exit manual должны быть глобально последовательны, иначе возможны 2 marker одновременно.
     private val GLOBAL_MARKER_KEY = "__GLOBAL_MANUAL_MARKER__"
+
+    /**
+     * Снимок проверки целостности manual draft.
+     *
+     * Инвариант:
+     * - каждый deviceId, на который ссылаются groups.deviceIds
+     * - и каждый deviceId из unassignedDeviceIds
+     * обязан существовать в draft.devices
+     */
+    private data class ManualDraftInvariantSnapshot(
+        val assignedIds: Set<Long>,
+        val unassignedIds: Set<Long>,
+        val allReferencedIds: Set<Long>,
+        val knownIds: Set<Long>,
+        val missingInDevices: Set<Long>,
+        val danglingDevices: Set<Long>,
+    ) {
+        val ok: Boolean = missingInDevices.isEmpty()
+    }
+
+    /**
+     * Собираем полную диагностику целостности draft.
+     */
+    private fun buildDraftInvariantSnapshot(draft: ProjectEditState): ManualDraftInvariantSnapshot {
+        val assignedIds = draft.groups
+            .asSequence()
+            .flatMap { it.deviceIds.asSequence() }
+            .toSet()
+
+        val unassignedIds = draft.unassignedDeviceIds.toSet()
+        val allReferencedIds = assignedIds + unassignedIds
+        val knownIds = draft.devices
+            .asSequence()
+            .map { it.deviceId }
+            .toSet()
+
+        val missingInDevices = allReferencedIds - knownIds
+        val danglingDevices = knownIds - allReferencedIds
+
+        return ManualDraftInvariantSnapshot(
+            assignedIds = assignedIds,
+            unassignedIds = unassignedIds,
+            allReferencedIds = allReferencedIds,
+            knownIds = knownIds,
+            missingInDevices = missingInDevices,
+            danglingDevices = danglingDevices
+        )
+    }
+
+    /**
+     * Доказательный лог инварианта.
+     *
+     * Важно:
+     * - не падаем
+     * - только детерминированно логируем, чтобы поймать регрессию
+     */
+    private fun logDraftInvariant(
+        projectId: String,
+        source: String,
+        draft: ProjectEditState
+    ) {
+        val snapshot = buildDraftInvariantSnapshot(draft)
+
+        Log.i(
+            INVARIANT_TAG,
+            "pid=$projectId source=$source " +
+                    "groupsRefs=${snapshot.assignedIds.size} " +
+                    "unassignedRefs=${snapshot.unassignedIds.size} " +
+                    "allRefs=${snapshot.allReferencedIds.size} " +
+                    "devices=${snapshot.knownIds.size} " +
+                    "missingInDevices=${snapshot.missingInDevices.toList().sorted()} " +
+                    "danglingDevices=${snapshot.danglingDevices.toList().sorted()} " +
+                    "ok=${snapshot.ok}"
+        )
+    }
 
     override fun observeSession(projectId: String): Flow<ManualEditSession?> {
         return sessionsFlow
@@ -61,7 +142,7 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
         val active = sessionsFlow.value.values.filter { it.manualModeActive }
         if (active.size > 1) {
             // Это реально не должно случаться при глобальном marker.
-            Log.e("MANUAL_REPO", "INVARIANT: multiple active manual sessions! pids=${active.map { it.projectId }}")
+            Log.e(TAG, "INVARIANT: multiple active manual sessions! pids=${active.map { it.projectId }}")
         }
         return active.firstOrNull()
     }
@@ -112,6 +193,13 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
 
                 // UX маркер
                 manualDraftResetNotifier.markExpected(projectId)
+
+                // Доказательно фиксируем целостность draft на входе в manual
+                logDraftInvariant(
+                    projectId = projectId,
+                    source = "enterManualMode",
+                    draft = session.draftState
+                )
 
                 Log.d(TAG, "enterManualMode OK pid=$projectId markerSet=1 sessionsKept=1")
             }
@@ -183,23 +271,58 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
 
     override suspend fun apply(projectId: String, action: ManualEditAction) {
         val current = sessionsFlow.value[projectId] ?: run {
-            Log.w("MANUAL_REPO", "apply ignored: no session for pid=$projectId action=$action")
+            Log.w(TAG, "apply ignored: no session for pid=$projectId action=$action")
             return
         }
         if (!current.manualModeActive) {
-            Log.w("MANUAL_REPO", "apply ignored: manualModeActive=false pid=$projectId action=$action")
+            Log.w(TAG, "apply ignored: manualModeActive=false pid=$projectId action=$action")
             return
         }
 
-        Log.d("MANUAL_REPO", "apply pid=$projectId action=$action ver=${current.version} groups=${current.draftState.groups.size}")
-
         val before = current.draftState
+
+        Log.d(TAG, "apply pid=$projectId action=$action ver=${current.version} groups=${before.groups.size}")
+
+        // Логируем инвариант до применения действия
+        logDraftInvariant(
+            projectId = projectId,
+            source = "apply_before_${action::class.simpleName ?: "UnknownAction"}",
+            draft = before
+        )
+
+        // Отдельный proof-log именно для автоназначения
+        if (action == ManualEditAction.AutoAssignUnassigned) {
+            Log.i(
+                AUTO_ASSIGN_TAG,
+                "START pid=$projectId unassignedBefore=${before.unassignedDeviceIds.size} " +
+                        "ids=${before.unassignedDeviceIds.toList().sorted()}"
+            )
+        }
 
         // ⚠️ НЕ МЕНЯЕМ фазность в Commit 2: оставляем как было у тебя до этого.
         val newDraft = reduceDraft(before, action, mode = PhaseMode.THREE)
 
         val changed = before != newDraft
-        Log.d("MANUAL_REPO", "apply done pid=$projectId changed=$changed newGroups=${newDraft.groups.size} unassigned=${newDraft.unassignedDeviceIds.size}")
+        Log.d(
+            TAG,
+            "apply done pid=$projectId changed=$changed " +
+                    "newGroups=${newDraft.groups.size} unassigned=${newDraft.unassignedDeviceIds.size}"
+        )
+
+        // Логируем инвариант после применения действия
+        logDraftInvariant(
+            projectId = projectId,
+            source = "apply_after_${action::class.simpleName ?: "UnknownAction"}",
+            draft = newDraft
+        )
+
+        if (action == ManualEditAction.AutoAssignUnassigned) {
+            Log.i(
+                AUTO_ASSIGN_TAG,
+                "END pid=$projectId unassignedAfter=${newDraft.unassignedDeviceIds.size} " +
+                        "ids=${newDraft.unassignedDeviceIds.toList().sorted()}"
+            )
+        }
 
         val updated = current.copy(
             draftState = newDraft,
@@ -255,15 +378,24 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
         Log.i(
             "MANUAL_POST_INSERT",
             "pid=$projectId opId=$opId inserted=${insertedDeviceIds.size} " +
+                    "insertedIds=${insertedDeviceIds.sorted()} " +
                     "unassigned(before=${before.unassignedDeviceIds.size} after=${merged.size}) " +
                     "caller=$caller"
+        )
+
+        // Ключевой proof-log этого коммита:
+        // после post-insert сразу видно, битый draft или нет
+        logDraftInvariant(
+            projectId = projectId,
+            source = "addInsertedDevicesToUnassigned",
+            draft = newDraft
         )
     }
 
     @Deprecated("Используйте apply(projectId, action).")
     override suspend fun apply(action: ManualEditAction) {
         val active = getActiveSession() ?: run {
-            Log.w("MANUAL_REPO", "legacy apply ignored: activeSession=null action=$action")
+            Log.w(TAG, "legacy apply ignored: activeSession=null action=$action")
             return
         }
         apply(projectId = active.projectId, action = action)
