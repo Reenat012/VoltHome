@@ -837,18 +837,50 @@ class ExplicationViewModel @Inject constructor(
 
     fun onAutoAssignUnassignedClick() {
         viewModelScope.launch(ioDispatcher) {
-            val projectId = currentProjectIdOrNull() ?: return@launch
-            val session = getManualSessionForProject(projectId)
+            val projectId = currentProjectIdOrNull() ?: run {
+                Log.w("AUTO_ASSIGN_UI", "click ignored: projectId=null")
+                return@launch
+            }
 
-            if (session?.manualModeActive != true) return@launch
+            val beforeSession = getManualSessionForProject(projectId)
+            if (beforeSession?.manualModeActive != true) {
+                Log.w(
+                    "AUTO_ASSIGN_UI",
+                    "click ignored: manual inactive pid=$projectId hasSession=${beforeSession != null}"
+                )
+                return@launch
+            }
+
+            val beforeIds = beforeSession.draftState.unassignedDeviceIds.toList().sorted()
+
+            Log.i(
+                "AUTO_ASSIGN_UI",
+                "CLICK pid=$projectId ver=${beforeSession.version} " +
+                        "unassignedBefore=${beforeIds.size} idsBefore=$beforeIds"
+            )
 
             try {
                 manualRepo.apply(
                     projectId = projectId,
                     action = ManualEditAction.AutoAssignUnassigned
                 )
+
+                val afterSession = getManualSessionForProject(projectId)
+                val afterIds = afterSession?.draftState?.unassignedDeviceIds
+                    ?.toList()
+                    ?.sorted()
+                    .orEmpty()
+
+                Log.i(
+                    "AUTO_ASSIGN_UI",
+                    "DONE pid=$projectId verBefore=${beforeSession.version} " +
+                            "verAfter=${afterSession?.version} " +
+                            "unassignedAfter=${afterIds.size} idsAfter=$afterIds"
+                )
+
                 _events.value = UiEvent.ShowSnackbar("Нераспределённые устройства распределены")
-            } catch (_: Throwable) {
+            } catch (t: Throwable) {
+                Log.e("AUTO_ASSIGN_UI", "FAILED pid=$projectId", t)
                 _events.value = UiEvent.ShowSnackbar("Не удалось распределить устройства")
             }
         }

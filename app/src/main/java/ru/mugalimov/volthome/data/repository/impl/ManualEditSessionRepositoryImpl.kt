@@ -470,6 +470,8 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
                     "fetchedDevices=${insertedDevicesFromDb.map { it.deviceId }.sorted()} " +
                     "devices(before=${before.devices.size} after=${mergedDevices.size}) " +
                     "unassigned(before=${before.unassignedDeviceIds.size} after=${mergedUnassigned.size}) " +
+                    "unassignedIdsBefore=${before.unassignedDeviceIds.toList().sorted()} " +
+                    "unassignedIdsAfter=${mergedUnassigned.toList().sorted()} " +
                     "caller=$caller"
         )
 
