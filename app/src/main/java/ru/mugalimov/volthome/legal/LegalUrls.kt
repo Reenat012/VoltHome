@@ -3,16 +3,16 @@ package ru.mugalimov.volthome.legal
 object LegalUrls {
     // Пользовательское соглашение
     const val AGREEMENT =
-        "https://buildin.ai/mugalimov/share/852201bd-355d-4395-b2b3-352a5753e40e?code=NFQ3YR\n" +
-                "[BuildIn.AI]ПОЛЬЗОВАТЕЛЬСКОЕ СОГЛАШЕНИЕ (ОФЕРТА)"
+        "https://buildin.ai/mugalimov/share/1da14e83-cb94-4604-9827-900e10ff4de9?code=NFQ3YR\n" +
+                "[Buildin.AI]ПОЛЬЗОВАТЕЛЬСКОЕ СОГЛАШЕНИЕ (ОФЕРТА)"
 
     // Политика конфиденциальности
     const val PRIVACY =
-        "https://buildin.ai/mugalimov/share/f11f942d-dec2-4a92-9998-b8c5156de890?code=NFQ3YR\n" +
-                "[BuildIn.AI]Политика конфиденциальности приложения VoltHome"
+        "https://buildin.ai/mugalimov/share/52898b17-e097-42f2-badb-324f3e049614?code=NFQ3YR\n" +
+                "[Buildin.AI]Политика конфиденциальности приложения VoltHome"
 
     // Согласие на обработку ПДн (заглушка)
     const val PD_CONSENT =
-        "https://buildin.ai/mugalimov/share/55eec7cd-0aae-4f28-a9e1-8dfc2d510b31?code=NFQ3YR\n" +
+        "https://buildin.ai/mugalimov/share/3116ecbf-38bb-4b8f-95f2-1771632435ac?code=NFQ3YR\n" +
                 "[Buildin.AI]Согласие на обработку персональных данных"
 }

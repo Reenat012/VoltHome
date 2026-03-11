@@ -216,24 +216,24 @@ fun PhaseLoadContent(
             item { Spacer(Modifier.height(8.dp)) }
 
             // Режим работы экрана (коммит 1): Auto / Manual
-            item {
-                val modeLabel = when (phaseLoadMode) {
-                    PhaseLoadMode.AUTO -> "Авто"
-                    PhaseLoadMode.MANUAL -> "Ручной"
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "Режим: $modeLabel",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
+//            item {
+//                val modeLabel = when (phaseLoadMode) {
+//                    PhaseLoadMode.AUTO -> "Авто"
+//                    PhaseLoadMode.MANUAL -> "Ручной"
+//                }
+//
+//                Row(
+//                    modifier = Modifier.fillMaxWidth(),
+//                    verticalAlignment = Alignment.CenterVertically,
+//                    horizontalArrangement = Arrangement.SpaceBetween
+//                ) {
+//                    Text(
+//                        text = "Режим: $modeLabel",
+//                        style = MaterialTheme.typography.labelLarge,
+//                        color = MaterialTheme.colorScheme.onSurfaceVariant
+//                    )
+//                }
+//            }
 
             // Hint 1 — первый вход в ручной режим (MANUAL)
             item {
@@ -278,30 +278,30 @@ fun PhaseLoadContent(
             item {
                 val resetEnabled = (phaseLoadMode == PhaseLoadMode.MANUAL) && canDrag
 
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    Text(
-                        text = "Сбросить изменения и вернуться в режим Авто",
-                        modifier = Modifier
-                            .clickable(
-                                enabled = resetEnabled || !canDrag,
-                            ) {
-                                when {
-                                    !canDrag -> onPaywall()      // Free: объясняющая модалка (коммит 3)
-                                    resetEnabled -> onReset()     // PRO + MANUAL: сброс + AUTO (коммит 5)
-                                    else -> Unit                  // PRO + AUTO: ничего (уже baseline)
-                                }
-                            }
-                            .padding(vertical = 6.dp),
-                        color = when {
-                            !canDrag -> MaterialTheme.colorScheme.onSurfaceVariant
-                            resetEnabled -> MaterialTheme.colorScheme.primary
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                        }
-                    )
-                }
+//                Row(
+//                    Modifier.fillMaxWidth(),
+//                    horizontalArrangement = Arrangement.End
+//                ) {
+//                    Text(
+//                        text = "Сбросить изменения и вернуться в режим Авто",
+//                        modifier = Modifier
+//                            .clickable(
+//                                enabled = resetEnabled || !canDrag,
+//                            ) {
+//                                when {
+//                                    !canDrag -> onPaywall()      // Free: объясняющая модалка (коммит 3)
+//                                    resetEnabled -> onReset()     // PRO + MANUAL: сброс + AUTO (коммит 5)
+//                                    else -> Unit                  // PRO + AUTO: ничего (уже baseline)
+//                                }
+//                            }
+//                            .padding(vertical = 6.dp),
+//                        color = when {
+//                            !canDrag -> MaterialTheme.colorScheme.onSurfaceVariant
+//                            resetEnabled -> MaterialTheme.colorScheme.primary
+//                            else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+//                        }
+//                    )
+//                }
             }
 
             // Hint 2 — первый активный drag (пока dragging != null и флаг ещё не выставлен)

@@ -1,20 +1,20 @@
 package ru.mugalimov.volthome.ui.screens.loads
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -33,6 +33,7 @@ import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.local.datastore.AppPreferences
 import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseGroupItem
+import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadMode
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.paywall.PaywallEntryPoint
 import ru.mugalimov.volthome.ui.screens.loads.single.PhaseLoadSingleReportContent
@@ -44,7 +45,6 @@ interface AppPreferencesEntryPoint {
     fun appPreferences(): AppPreferences
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PhaseLoadScreen(
     viewModel: PhaseLoadViewModel = hiltViewModel(),
@@ -76,7 +76,15 @@ fun PhaseLoadScreen(
     val uiState = viewModel.uiState.collectAsStateWithLifecycle().value
     val groupsCount = viewModel.groupsCount.collectAsStateWithLifecycle().value
 
+    // Заголовок оставляем, но теперь рисуем его в контенте,
+    // а не через внутренний TopAppBar, чтобы не было двойного верхнего отступа.
+    val title = when (uiState.mode) {
+        PhaseMode.SINGLE -> "Состояние вводного аппарата"
+        PhaseMode.THREE -> "Распределение по фазам"
+    }
+
     val snackbarHostState = remember { SnackbarHostState() }
+
     LaunchedEffect(Unit) {
         viewModel.events.collect { msg ->
             snackbarHostState.showSnackbar(msg)
@@ -91,7 +99,10 @@ fun PhaseLoadScreen(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
                 Text("Группы пока не созданы")
                 Spacer(modifier = Modifier.height(12.dp))
                 Button(onClick = onRecalc) {
@@ -102,105 +113,127 @@ fun PhaseLoadScreen(
     }
 
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    val title = when (uiState.mode) {
-                        PhaseMode.SINGLE -> "Состояние вводного аппарата"
-                        PhaseMode.THREE -> "Распределение по фазам"
-                    }
-                    Text(title)
-                }
-            )
-        },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { padding ->
-        when {
-            uiState.isLoading -> {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator()
-                }
-            }
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            // Заголовок экрана как обычный блок контента.
+            // Так он занимает адекватное место и не конфликтует с внешним AppBar.
+            Text(
+                text = title,
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)
+            )
 
-            uiState.error != null -> {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = uiState.error.message ?: "Ошибка загрузки",
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-            }
-
-            else -> {
-                // ✅ visibility: пустоту определяем ТОЛЬКО по количеству групп,
-                // потому что uiState.data может быть "каркас фаз"
-                if (groupsCount == 0) {
-                    val isManual = uiState.phaseLoadMode == ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadMode.MANUAL
-
-                    LoadsEmptyState(
-                        onRecalc = {
-                            if (isManual) {
-                                // ❗ В MANUAL пересчёт не предлагаем/не делаем
-                                coroutineScope.launch {
-                                    snackbarHostState.showSnackbar("В ручном режиме пересчёт недоступен. Сначала сбросьте изменения.")
-                                }
-                            } else {
-                                // ✅ AUTO: вызови твоё действие "создать/пересчитать группы".
-                                // Сейчас в VM на этом экране явного recalc нет — поэтому оставляю самый близкий существующий экшен.
-                                viewModel.onResetOverrides()
-                            }
+            // Основную область даём через weight(1f),
+            // чтобы она занимала оставшуюся высоту под заголовком.
+            Box(
+                modifier = Modifier.weight(1f)
+            ) {
+                when {
+                    uiState.isLoading -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator()
                         }
-                    )
-                } else {
-                    when (uiState.mode) {
-                        PhaseMode.SINGLE -> {
-                            PhaseLoadSingleReportContent(
-                                uiState = uiState,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(padding)
+                    }
+
+                    uiState.error != null -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = uiState.error.message ?: "Ошибка загрузки",
+                                color = MaterialTheme.colorScheme.error
                             )
                         }
+                    }
 
-                        PhaseMode.THREE -> {
-                            PhaseLoadContent(
-                                phaseLoads = uiState.data,
-                                decisions = uiState.decisions,
-                                phaseLoadMode = uiState.phaseLoadMode,
-                                incomerRating = uiState.incomer?.mcbRating,
-                                thresholds = uiState.thresholds,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(padding),
-                                canDrag = canDrag,
-                                onPaywall = { viewModel.onDnDLockedTapped() },
-                                onGroupDropped = { groupId, phase -> viewModel.onGroupDragged(groupId, phase) },
-                                onReset = { viewModel.onResetOverrides() },
-                                onDecisionDetailsClick = { _ -> Unit },
+                    else -> {
+                        // Пустоту определяем только по количеству групп,
+                        // потому что uiState.data может содержать "каркас фаз".
+                        if (groupsCount == 0) {
+                            val isManual = uiState.phaseLoadMode == PhaseLoadMode.MANUAL
 
-                                manualModeHintShown = manualModeHintShown,
-                                firstDragHintShown = firstDragHintShown,
-                                markManualModeHintShown = { coroutineScope.launch { appPreferences.setManualModeHintShown() } },
-                                markFirstDragHintShown = { coroutineScope.launch { appPreferences.setFirstDragHintShown() } },
-                                onDropMissed = {
-                                    coroutineScope.launch {
-                                        snackbarHostState.showSnackbar(
-                                            "Не попали в фазу. Перетащите группу на карточку A/B/C сверху."
-                                        )
+                            LoadsEmptyState(
+                                onRecalc = {
+                                    if (isManual) {
+                                        // В MANUAL пересчёт не делаем.
+                                        coroutineScope.launch {
+                                            snackbarHostState.showSnackbar(
+                                                "В ручном режиме пересчёт недоступен. Сначала сбросьте изменения."
+                                            )
+                                        }
+                                    } else {
+                                        // В AUTO вызываем ближайшее доступное действие.
+                                        viewModel.onResetOverrides()
                                     }
                                 }
                             )
+                        } else {
+                            when (uiState.mode) {
+                                PhaseMode.SINGLE -> {
+                                    PhaseLoadSingleReportContent(
+                                        uiState = uiState,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+
+                                PhaseMode.THREE -> {
+                                    PhaseLoadContent(
+                                        phaseLoads = uiState.data,
+                                        decisions = uiState.decisions,
+                                        phaseLoadMode = uiState.phaseLoadMode,
+                                        incomerRating = uiState.incomer?.mcbRating,
+                                        thresholds = uiState.thresholds,
+                                        modifier = Modifier.fillMaxSize(),
+                                        canDrag = canDrag,
+                                        onPaywall = {
+                                            // Пока оставляю вызов как был,
+                                            // чтобы не менять существующее поведение.
+                                            paywallBus
+                                            viewModel.onDnDLockedTapped()
+                                        },
+                                        onGroupDropped = { groupId, phase ->
+                                            viewModel.onGroupDragged(groupId, phase)
+                                        },
+                                        onReset = { viewModel.onResetOverrides() },
+                                        onDecisionDetailsClick = { _ -> Unit },
+
+                                        manualModeHintShown = manualModeHintShown,
+                                        firstDragHintShown = firstDragHintShown,
+
+                                        markManualModeHintShown = {
+                                            coroutineScope.launch {
+                                                appPreferences.setManualModeHintShown()
+                                            }
+                                        },
+                                        markFirstDragHintShown = {
+                                            coroutineScope.launch {
+                                                appPreferences.setFirstDragHintShown()
+                                            }
+                                        },
+                                        onDropMissed = {
+                                            coroutineScope.launch {
+                                                snackbarHostState.showSnackbar(
+                                                    "Не попали в фазу. Перетащите группу на карточку A/B/C сверху."
+                                                )
+                                            }
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
         }
     }
-
 }
