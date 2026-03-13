@@ -4,19 +4,18 @@ import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -31,7 +30,6 @@ import ru.mugalimov.volthome.domain.model.UserPlan
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.viewmodel.SubscriptionViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VoltHomeProScreen(
     viewModel: SubscriptionViewModel = hiltViewModel(),
@@ -45,28 +43,34 @@ fun VoltHomeProScreen(
     }
 
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("VoltHome PRO") }
-            )
-        }
+        // Внешний контейнер уже обрабатывает системные insets,
+        // поэтому здесь их обнуляем, чтобы не получать повторный верхний отступ.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Column(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .padding(horizontal = 16.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // Заголовок экрана переносим в контент,
+            // чтобы он не создавал второй app bar и лишний отступ сверху.
             Text(
-                text = "Подписка VoltHome PRO",
+                text = "ВольтХом PRO",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold
             )
 
+            Text(
+                text = "Подписка ВольтХом PRO",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold
+            )
+
             val statusText = when {
-                userPlan.isPro -> "У вас активна подписка VoltHome PRO."
+                userPlan.isPro -> "У вас активна подписка ВольтХом PRO."
                 else -> "Сейчас вы пользуетесь бесплатным тарифом."
             }
 
@@ -78,7 +82,7 @@ fun VoltHomeProScreen(
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
             Text(
-                text = "Что даёт VoltHome PRO:",
+                text = "Что даёт ВольтХом PRO:",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold
             )
@@ -129,8 +133,11 @@ fun VoltHomeProScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = if (userPlan.isPro) "Подписка уже активна"
-                    else "Купить VoltHome PRO"
+                    text = if (userPlan.isPro) {
+                        "Подписка уже активна"
+                    } else {
+                        "Купить ВольтХом PRO"
+                    }
                 )
             }
 

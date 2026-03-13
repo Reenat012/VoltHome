@@ -301,7 +301,7 @@ fun MainApp(
                 AlertDialog(
                     onDismissRequest = { paywallFeature = null },
                     title = { Text("Купить PRO?") },
-                    text = { Text("Эта функция доступна только в VoltHome PRO.") },
+                    text = { Text("Эта функция доступна только в ВольтХом PRO.") },
                     confirmButton = {
                         TextButton(
                             onClick = {

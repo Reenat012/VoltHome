@@ -97,7 +97,7 @@ private fun FirstFramePlaceholder() {
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                text = "VoltHome",
+                text = "ВольтХом",
                 fontSize = 22.sp,
                 color = MaterialTheme.colorScheme.onBackground
             )

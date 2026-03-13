@@ -341,7 +341,7 @@ private fun FooterVersion() {
         }.getOrElse { "v—" }
     }
     Text(
-        text = "VoltHome © 2025 • $version",
+        text = "ВольтХом © 2026 • $version",
         style = MaterialTheme.typography.bodyMedium,
         color = t.textMuted,
         modifier = Modifier

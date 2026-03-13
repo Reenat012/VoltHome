@@ -9,7 +9,7 @@ import android.webkit.WebViewClient
 
 class PdfPrinter(private val context: Context) {
 
-    fun printHtml(html: String, jobName: String = "VoltHome — Экспликация") {
+    fun printHtml(html: String, jobName: String = "ВольтХом — Экспликация") {
         val wv = WebView(context)
         wv.settings.defaultTextEncodingName = "utf-8"
         wv.settings.javaScriptEnabled = false

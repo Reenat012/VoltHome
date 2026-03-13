@@ -156,7 +156,7 @@ class SubscriptionViewModel @Inject constructor(
                             )
                             UiState(
                                 isLoading = false,
-                                infoMessage = "Подписка VoltHome PRO активирована"
+                                infoMessage = "Подписка ВольтХом PRO активирована"
                             )
                         },
                         onFailure = { e ->

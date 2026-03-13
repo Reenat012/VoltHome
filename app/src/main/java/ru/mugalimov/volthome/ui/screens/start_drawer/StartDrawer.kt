@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -530,7 +531,7 @@ private fun DrawerHeader(
             if (profile?.avatarUrl.isNullOrBlank()) {
                 AsyncImage(
                     model = "file:///android_asset/report_pdf/img/logo.png",
-                    contentDescription = "VoltHome",
+                    contentDescription = "ВольтХом",
                     contentScale = ContentScale.Fit,
                     modifier = avatarModifier
                 )

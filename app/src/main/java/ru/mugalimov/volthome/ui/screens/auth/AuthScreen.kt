@@ -192,7 +192,7 @@ fun AuthScreen(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
-                                text = "VoltHome",
+                                text = "ВольтХом",
                                 style = MaterialTheme.typography.titleLarge.copy(
                                     letterSpacing = 0.sp,
                                     lineHeight = 22.sp

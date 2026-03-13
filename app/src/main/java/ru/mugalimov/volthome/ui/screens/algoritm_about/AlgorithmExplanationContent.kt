@@ -191,7 +191,7 @@ private fun HeaderCard() {
                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold)
             )
             Text(
-                "VoltHome группирует приборы, подбирает защиту и равномерно распределяет нагрузку по фазам A/B/C. Учёт «реальной» нагрузки и того, что не всё включено одновременно.",
+                "ВольтХом группирует приборы, подбирает защиту и равномерно распределяет нагрузку по фазам A/B/C. Учёт «реальной» нагрузки и того, что не всё включено одновременно.",
                 style = MaterialTheme.typography.bodyMedium
             )
 
