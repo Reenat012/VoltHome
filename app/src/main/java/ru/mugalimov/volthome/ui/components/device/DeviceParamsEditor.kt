@@ -2,6 +2,7 @@ package ru.mugalimov.volthome.ui.components.device
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -24,19 +25,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CoroutineScope
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.VoltageType
 import ru.mugalimov.volthome.ui.utilities.bringIntoViewOnFocus
-import androidx.compose.ui.platform.LocalContext
 import ru.mugalimov.volthome.ui.utilities.label
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DeviceParamsEditor(
-    // FREE
+    // FREE-поля
     name: String,
     onNameChange: (String) -> Unit,
     nameError: String? = null,
@@ -45,7 +46,7 @@ fun DeviceParamsEditor(
     onPowerTextChange: (String) -> Unit,
     powerError: String?,
 
-    // PRO
+    // PRO-поля
     deviceType: DeviceType,
     onDeviceTypeChange: (DeviceType) -> Unit,
 
@@ -67,17 +68,20 @@ fun DeviceParamsEditor(
     requiresSocketConnection: Boolean,
     onRequiresSocketConnectionChange: (Boolean) -> Unit,
 
-    // gating
+    // Ограничение PRO-функций
     locked: Boolean,
     onLockedClick: () -> Unit,
 
     bringIntoViewRequester: androidx.compose.foundation.relocation.BringIntoViewRequester? = null,
     scope: CoroutineScope? = null,
 ) {
+    val context = LocalContext.current
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        // FREE: название устройства
         OutlinedTextField(
             value = name,
             onValueChange = onNameChange,
@@ -96,6 +100,7 @@ fun DeviceParamsEditor(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            // FREE: мощность
             OutlinedTextField(
                 value = powerText,
                 onValueChange = onPowerTextChange,
@@ -112,8 +117,7 @@ fun DeviceParamsEditor(
                     .maybeBringIntoView(bringIntoViewRequester, scope)
             )
 
-            val context = LocalContext.current
-
+            // PRO: тип устройства
             EnumDropdownField(
                 label = "Тип устройства",
                 value = deviceType,
@@ -130,6 +134,7 @@ fun DeviceParamsEditor(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            // PRO: коэффициент мощности
             LockedDecimalField(
                 label = "Коэфф. мощности (PF)",
                 value = powerFactorText,
@@ -143,6 +148,7 @@ fun DeviceParamsEditor(
                 scope = scope
             )
 
+            // PRO: коэффициент спроса
             LockedDecimalField(
                 label = "Коэфф. спроса",
                 value = demandRatioText,
@@ -161,6 +167,7 @@ fun DeviceParamsEditor(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            // PRO: напряжение
             VoltageTypeDropdownField(
                 label = "Напряжение",
                 value = voltageType,
@@ -170,6 +177,7 @@ fun DeviceParamsEditor(
                 modifier = Modifier.weight(1f)
             )
 
+            // PRO: подключение розеткой
             YesNoDropdownField(
                 label = "Подключение розеткой",
                 value = requiresSocketConnection,
@@ -184,6 +192,7 @@ fun DeviceParamsEditor(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            // PRO: есть двигатель
             YesNoDropdownField(
                 label = "Есть двигатель",
                 value = hasMotor,
@@ -192,6 +201,8 @@ fun DeviceParamsEditor(
                 onValueChange = onHasMotorChange,
                 modifier = Modifier.weight(1f)
             )
+
+            // PRO: выделенная линия
             YesNoDropdownField(
                 label = "Выделенная линия",
                 value = requiresDedicatedCircuit,
@@ -204,7 +215,7 @@ fun DeviceParamsEditor(
     }
 }
 
-/* -------------------- building blocks -------------------- */
+/* -------------------- Вспомогательные блоки -------------------- */
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -220,7 +231,10 @@ private fun <T> EnumDropdownField(
 ) {
     var expanded by remember { mutableStateOf(false) }
 
-    val open = { if (locked) onLockedClick() else expanded = true }
+    // Если поле заблокировано, сразу открываем paywall.
+    val open = {
+        if (locked) onLockedClick() else expanded = true
+    }
 
     ExposedDropdownMenuBox(
         expanded = expanded,
@@ -237,14 +251,18 @@ private fun <T> EnumDropdownField(
             singleLine = true,
             label = { Text(label) },
             trailingIcon = {
-                if (locked) Icon(Icons.Rounded.Lock, contentDescription = null)
-                else ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+                if (locked) {
+                    Icon(Icons.Rounded.Lock, contentDescription = null)
+                } else {
+                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+                }
             },
             shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
             modifier = Modifier
                 .menuAnchor()
                 .fillMaxWidth()
-                // ✅ гарантируем отсутствие "тишины" на locked/readOnly anchor
+                // Гарантируем, что даже на readOnly/locked anchor
+                // пользователь не получит "тишину" при тапе.
                 .clickable { open() }
         )
 
@@ -277,7 +295,10 @@ private fun VoltageTypeDropdownField(
 ) {
     var expanded by remember { mutableStateOf(false) }
 
-    val open = { if (locked) onLockedClick() else expanded = true }
+    // Если поле заблокировано, сразу открываем paywall.
+    val open = {
+        if (locked) onLockedClick() else expanded = true
+    }
 
     ExposedDropdownMenuBox(
         expanded = expanded,
@@ -299,14 +320,18 @@ private fun VoltageTypeDropdownField(
             label = { Text(label) },
             supportingText = { Text("DC пока недоступен") },
             trailingIcon = {
-                if (locked) Icon(Icons.Rounded.Lock, contentDescription = null)
-                else ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+                if (locked) {
+                    Icon(Icons.Rounded.Lock, contentDescription = null)
+                } else {
+                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+                }
             },
             shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
             modifier = Modifier
                 .menuAnchor()
                 .fillMaxWidth()
-                // ✅ гарантируем отсутствие "тишины" на locked/readOnly anchor
+                // Гарантируем, что даже на readOnly/locked anchor
+                // пользователь не получит "тишину" при тапе.
                 .clickable { open() }
         )
 
@@ -316,12 +341,20 @@ private fun VoltageTypeDropdownField(
         ) {
             DropdownMenuItem(
                 text = { Text("AC 1ф") },
-                onClick = { expanded = false; onValueChange(VoltageType.AC_1PHASE) }
+                onClick = {
+                    expanded = false
+                    onValueChange(VoltageType.AC_1PHASE)
+                }
             )
+
             DropdownMenuItem(
                 text = { Text("AC 3ф") },
-                onClick = { expanded = false; onValueChange(VoltageType.AC_3PHASE) }
+                onClick = {
+                    expanded = false
+                    onValueChange(VoltageType.AC_3PHASE)
+                }
             )
+
             DropdownMenuItem(
                 enabled = false,
                 text = { Text("DC — скоро") },
@@ -365,31 +398,50 @@ private fun LockedDecimalField(
     bringIntoViewRequester: androidx.compose.foundation.relocation.BringIntoViewRequester?,
     scope: CoroutineScope?
 ) {
-    val m = modifier
-        .fillMaxWidth()
-        .heightIn(min = 56.dp)
-        .let { base -> if (locked) base.clickable { onLockedClick() } else base }
+    // Не вешаем clickable прямо на OutlinedTextField:
+    // такие клики иногда ведут себя нестабильно.
+    // Вместо этого кладём прозрачный overlay поверх поля.
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .maybeBringIntoView(bringIntoViewRequester, scope)
+    ) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = { if (!locked) onValueChange(it) },
+            label = { Text(label) },
+            enabled = true,
+            readOnly = locked,
+            singleLine = true,
+            isError = error != null && !locked,
+            supportingText = {
+                when {
+                    locked && hint != null -> Text(hint)
+                    !locked && error != null -> Text(error)
+                    hint != null -> Text(hint)
+                }
+            },
+            trailingIcon = {
+                if (locked) {
+                    Icon(Icons.Rounded.Lock, contentDescription = null)
+                }
+            },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth()
+        )
 
-    OutlinedTextField(
-        value = value,
-        onValueChange = { if (!locked) onValueChange(it) },
-        label = { Text(label) },
-        enabled = true,
-        readOnly = locked,
-        singleLine = true,
-        isError = (error != null && !locked),
-        supportingText = {
-            when {
-                locked && hint != null -> Text(hint)
-                !locked && error != null -> Text(error)
-                hint != null -> Text(hint)
-            }
-        },
-        trailingIcon = { if (locked) Icon(Icons.Rounded.Lock, contentDescription = null) },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-        modifier = m.maybeBringIntoView(bringIntoViewRequester, scope)
-    )
+        if (locked) {
+            // Прозрачный слой гарантирует,
+            // что tap по любой части заблокированного поля откроет paywall.
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clickable { onLockedClick() }
+            )
+        }
+    }
 }
 
 private fun Modifier.maybeBringIntoView(
@@ -397,6 +449,7 @@ private fun Modifier.maybeBringIntoView(
     scope: CoroutineScope?
 ): Modifier {
     if (bringIntoViewRequester == null || scope == null) return this
+
     return this.onFocusChanged {
         bringIntoViewOnFocus(
             scope = scope,

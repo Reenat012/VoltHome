@@ -19,4 +19,117 @@
     <string name="device_type_water_heater">Водонагреватель</string>
 
     <string name="device_type_other">Другое</string>
+
+    <!-- PRO screen -->
+    <string name="pro_title">ВольтХом PRO</string>
+    <string name="pro_subtitle">Профессиональные функции для расчёта и настройки щита</string>
+
+    <string name="pro_status_free">
+        Сейчас у вас бесплатный тариф. Перейдите на ВольтХом PRO, чтобы открыть профессиональные функции приложения.
+    </string>
+
+    <string name="pro_status_active">
+        У вас активен ВольтХом PRO. Доступны профессиональные функции приложения.
+    </string>
+
+    <string name="pro_features_title">Что даёт ВольтХом PRO</string>
+
+    <string name="pro_feature_projects">
+        Неограниченное количество проектов — удобно для работы с несколькими объектами, вариантами щита и расчётами для клиентов.
+    </string>
+
+    <string name="pro_feature_device_edit">
+        Редактирование параметров устройства перед добавлением — можно сразу скорректировать параметры под фактическое оборудование.
+    </string>
+
+    <string name="pro_feature_manual_mode">
+        Ручной режим настройки щита — переносите группы между фазами и устройства между группами.
+    </string>
+
+    <string name="pro_feature_pdf">
+        Расширенный PDF-отчёт — сохраняйте подробный расчёт, отправляйте его клиенту или используйте в работе.
+    </string>
+
+    <string name="pro_button_buy">Открыть ВольтХом PRO</string>
+    <string name="pro_button_active">Подписка уже активна</string>
+    <string name="pro_restore_purchases">Восстановить покупки</string>
+
+    <string name="pro_payment_info">
+        Оплата проходит через RuStore. После покупки подписка автоматически привязывается к вашему аккаунту Яндекс ID.
+    </string>
+
+    <!-- PRO screen: layout / sections -->
+    <string name="pro_hero_supporting">Для электриков, монтажников и работы с реальными объектами.</string>
+    <string name="pro_status_title">Текущий тариф</string>
+    <string name="pro_cta_title">Откройте профессиональные функции ВольтХом</string>
+
+    <!-- PRO screen: feature cards -->
+    <string name="pro_feature_projects_title">Неограниченное количество проектов</string>
+    <string name="pro_feature_projects_description">Удобно для работы с несколькими объектами, вариантами щита и расчётами для клиентов.</string>
+
+    <string name="pro_feature_device_edit_title">Редактирование параметров устройства</string>
+    <string name="pro_feature_device_edit_description">Сразу корректируйте параметры перед добавлением под фактическое оборудование.</string>
+
+    <string name="pro_feature_manual_mode_title">Ручной режим настройки щита</string>
+    <string name="pro_feature_manual_mode_description">Переносите группы между фазами и устройства между группами под реальную схему.</string>
+
+    <string name="pro_feature_pdf_title">Расширенный PDF-отчёт</string>
+    <string name="pro_feature_pdf_description">Сохраняйте подробный расчёт, отправляйте его клиенту или используйте в работе.</string>
+
+    <!-- PRO paywall dialogs -->
+    <string name="paywall_manual_mode_title">Ручной режим проекта</string>
+
+    <!-- Эту строку можно удалить позже, если она больше нигде не используется -->
+    <string name="paywall_manual_mode_text">В ручном режиме можно вручную изменять структуру щита во всём проекте:\n\n• переносить группы между фазами на экране «Нагрузки»;\n• переносить устройства между группами на экране «Экспликация».\n\nРежим действует на весь проект. Чтобы выйти из него, нужно сохранить изменения или отменить их.\n\nПока ручной режим активен, переключение проекта недоступно.\n\nФункция входит в ВольтХом PRO.</string>
+
+    <string name="paywall_open_pro">Открыть ВольтХом PRO</string>
+    <string name="paywall_not_now">Не сейчас</string>
+
+    <string name="paywall_manual_mode_intro">
+        В ручном режиме можно вручную изменять структуру щита во всём проекте:
+    </string>
+
+    <string name="paywall_manual_mode_item1">
+        переносить группы между фазами на экране «Нагрузки»
+    </string>
+
+    <string name="paywall_manual_mode_item2">
+        переносить устройства между группами на экране «Экспликация»
+    </string>
+
+    <string name="paywall_manual_mode_project_scope">
+        Режим действует на весь проект. Чтобы выйти из него, нужно сохранить изменения или отменить их. Пока ручной режим активен, переключение проекта недоступно.
+    </string>
+
+    <string name="paywall_manual_mode_pro_note">
+        Функция входит в ВольтХом PRO.
+    </string>
+
+    <string name="paywall_device_editor_title">Расширенное редактирование устройства</string>
+
+    <string name="paywall_device_editor_intro">
+        В ВольтХом PRO можно изменять параметры устройства перед добавлением в проект.
+    </string>
+
+    <string name="paywall_device_editor_item1">
+        редактировать тип устройства и точнее настраивать параметры нагрузки
+    </string>
+
+    <string name="paywall_device_editor_item2">
+        настраивать cos φ, коэффициент спроса и тип напряжения
+    </string>
+
+    <string name="paywall_device_editor_item3">
+        учитывать признаки оборудования для более точного расчёта
+    </string>
+
+    <string name="paywall_device_editor_pro_note">
+        Функция входит в ВольтХом PRO и подходит для настройки расчёта под фактическое оборудование.
+    </string>
+
+    <string name="pro_temporary_price_title">Текущая цена действует временно</string>
+
+    <string name="pro_temporary_price_description">
+    Текущая стоимость подписки действует на этапе стабилизации PRO-функций. По мере развития и расширения возможностей ВольтХом PRO условия подписки могут измениться.
+</string>
 </resources>

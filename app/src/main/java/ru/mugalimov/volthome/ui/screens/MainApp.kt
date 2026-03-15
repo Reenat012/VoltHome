@@ -2,11 +2,22 @@ package ru.mugalimov.volthome.ui.screens
 
 import android.util.Log
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.DragIndicator
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -24,6 +35,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -39,6 +52,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import ru.mugalimov.volthome.R
 import ru.mugalimov.volthome.data.local.dao.GroupPhaseOverrideDao
 import ru.mugalimov.volthome.data.ownership.OwnershipOverridesCleaner
 import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
@@ -246,16 +260,58 @@ fun MainApp(
             ProFeature.PHASE_DND_TEASER -> {
                 AlertDialog(
                     onDismissRequest = { paywallFeature = null },
-                    title = { Text("Ручное управление фазами") },
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+
+                            Icon(
+                                imageVector = Icons.Outlined.Tune,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            Text(
+                                text = stringResource(R.string.paywall_manual_mode_title),
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    },
                     text = {
-                        Text(
-                            "Как это работает:\n" +
-                                    "1) Включите «Ручной режим».\n" +
-                                    "2) Зажмите значок ⠿ у группы.\n" +
-                                    "3) Перетащите и отпустите на фазе A/B/C сверху.\n\n" +
-                                    "После каждого переноса сразу меняются токи по фазам и ΔI.\n\n" +
-                                    "Функция доступна в PRO."
-                        )
+
+                        Column {
+
+                            Text(
+                                text = stringResource(R.string.paywall_manual_mode_intro),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            PaywallBulletItem(
+                                text = stringResource(R.string.paywall_manual_mode_item1)
+                            )
+
+                            PaywallBulletItem(
+                                text = stringResource(R.string.paywall_manual_mode_item2)
+                            )
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Text(
+                                text = stringResource(R.string.paywall_manual_mode_project_scope),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Text(
+                                text = stringResource(R.string.paywall_manual_mode_pro_note),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     },
                     confirmButton = {
                         TextButton(
@@ -263,9 +319,85 @@ fun MainApp(
                                 paywallFeature = null
                                 appNavController.navigate(Screens.SubscriptionScreen.route) { launchSingleTop = true }
                             }
-                        ) { Text("Открыть PRO") }
+                        ) {
+                            Text(stringResource(R.string.paywall_open_pro))
+                        }
                     },
-                    dismissButton = { TextButton(onClick = { paywallFeature = null }) { Text("Понятно") } }
+                    dismissButton = {
+                        TextButton(onClick = { paywallFeature = null }) {
+                            Text(stringResource(R.string.paywall_not_now))
+                        }
+                    }
+                )
+            }
+
+            ProFeature.ADVANCED_DEVICE_EDITOR -> {
+                AlertDialog(
+                    onDismissRequest = { paywallFeature = null },
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Outlined.Tune,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            Text(
+                                text = stringResource(R.string.paywall_device_editor_title),
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    },
+                    text = {
+                        Column {
+                            Text(
+                                text = stringResource(R.string.paywall_device_editor_intro),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            PaywallBulletItem(
+                                text = stringResource(R.string.paywall_device_editor_item1)
+                            )
+
+                            PaywallBulletItem(
+                                text = stringResource(R.string.paywall_device_editor_item2)
+                            )
+
+                            PaywallBulletItem(
+                                text = stringResource(R.string.paywall_device_editor_item3)
+                            )
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Text(
+                                text = stringResource(R.string.paywall_device_editor_pro_note),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                paywallFeature = null
+                                appNavController.navigate(Screens.SubscriptionScreen.route) {
+                                    launchSingleTop = true
+                                }
+                            }
+                        ) {
+                            Text(stringResource(R.string.paywall_open_pro))
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { paywallFeature = null }) {
+                            Text(stringResource(R.string.paywall_not_now))
+                        }
+                    }
                 )
             }
 
@@ -301,7 +433,7 @@ fun MainApp(
                 AlertDialog(
                     onDismissRequest = { paywallFeature = null },
                     title = { Text("Купить PRO?") },
-                    text = { Text("Эта функция доступна только в ВольтХом PRO.") },
+                    text = { Text("Эта функция доступна в ВольтХом PRO.") },
                     confirmButton = {
                         TextButton(
                             onClick = {
@@ -577,4 +709,30 @@ interface ManualCommitEntryPoint {
 
     // ✅ Commit 6: единая точка очистки всех overrides
     fun ownershipOverridesCleaner(): OwnershipOverridesCleaner
+}
+
+@Composable
+private fun PaywallBulletItem(text: String) {
+
+    Row(
+        verticalAlignment = Alignment.Top,
+        modifier = Modifier.padding(vertical = 4.dp)
+    ) {
+
+        Icon(
+            imageVector = Icons.Outlined.DragIndicator,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .size(18.dp)
+                .padding(top = 2.dp)
+        )
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyMedium
+        )
+    }
 }
