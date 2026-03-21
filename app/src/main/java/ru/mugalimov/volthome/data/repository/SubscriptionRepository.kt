@@ -1,12 +1,15 @@
 package ru.mugalimov.volthome.data.repository
 
-import ru.mugalimov.volthome.domain.model.UserPlan
 import ru.mugalimov.volthome.domain.model.ProProduct
+import ru.mugalimov.volthome.domain.model.UserPlan
 
 /**
  * Репозиторий подписки RuStore.
  * Не хранит состояние сам — только ходит в BillingApi
  * и обновляет UserPlanRepository.
+ *
+ * Commit 1:
+ * flowId нужен только для client-side instrumentation.
  */
 interface SubscriptionRepository {
 
@@ -20,7 +23,9 @@ interface SubscriptionRepository {
      * Синхронизировать статус подписки с сервера.
      * GET /v1/billing/status
      */
-    suspend fun syncStatus(): Result<UserPlan>
+    suspend fun syncStatus(
+        flowId: String? = null
+    ): Result<UserPlan>
 
     /**
      * Подтвердить покупку RuStore:
@@ -29,6 +34,7 @@ interface SubscriptionRepository {
     suspend fun confirmRustorePurchase(
         productId: String,
         orderId: String,
-        purchaseToken: String
+        purchaseToken: String,
+        flowId: String? = null
     ): Result<UserPlan>
 }

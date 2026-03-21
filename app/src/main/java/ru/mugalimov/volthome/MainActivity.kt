@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
 import com.yandex.authsdk.YandexAuthSdk
 import dagger.hilt.android.AndroidEntryPoint
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.android.awaitFrame
 import kotlinx.coroutines.launch
@@ -46,7 +47,19 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var tokenRefreshScheduler: TokenRefreshScheduler
     @Inject lateinit var rustoreBillingManager: RustoreBillingManager
 
+    companion object {
+        private const val TAG = "MainActivity"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        val flowId = newFlowId(prefix = "activity")
+
+        logBegin(
+            operation = "onCreate",
+            flowId = flowId,
+            extra = "hasSavedState=${savedInstanceState != null}"
+        )
+
         super.onCreate(savedInstanceState)
 
         val cid = BuildConfig.YANDEX_CLIENT_ID
@@ -55,8 +68,36 @@ class MainActivity : ComponentActivity() {
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
 
         lifecycleScope.launch(Dispatchers.Default) {
-            sessionManager.load()?.let { s ->
-                tokenRefreshScheduler.schedule(s.expiresAtMillis)
+            val sessionFlowId = newFlowId(prefix = "session")
+
+            logBegin(
+                operation = "sessionRefreshSchedule",
+                flowId = sessionFlowId
+            )
+
+            try {
+                sessionManager.load()?.let { s ->
+                    tokenRefreshScheduler.schedule(s.expiresAtMillis)
+
+                    logEnd(
+                        operation = "sessionRefreshSchedule",
+                        flowId = sessionFlowId,
+                        outcome = "SCHEDULED"
+                    )
+                } ?: run {
+                    logEnd(
+                        operation = "sessionRefreshSchedule",
+                        flowId = sessionFlowId,
+                        outcome = "NO_SESSION"
+                    )
+                }
+            } catch (t: Throwable) {
+                logError(
+                    operation = "sessionRefreshSchedule",
+                    flowId = sessionFlowId,
+                    outcome = "FAILED",
+                    throwable = t
+                )
             }
         }
 
@@ -65,8 +106,30 @@ class MainActivity : ComponentActivity() {
                 var showApp by remember { mutableStateOf(false) }
 
                 LaunchedEffect(Unit) {
-                    awaitFrame()
-                    showApp = true
+                    val firstFrameFlowId = newFlowId(prefix = "frame")
+
+                    logBegin(
+                        operation = "firstFrame",
+                        flowId = firstFrameFlowId
+                    )
+
+                    try {
+                        awaitFrame()
+                        showApp = true
+
+                        logEnd(
+                            operation = "firstFrame",
+                            flowId = firstFrameFlowId,
+                            outcome = "FRAME_RENDER_READY"
+                        )
+                    } catch (t: Throwable) {
+                        logError(
+                            operation = "firstFrame",
+                            flowId = firstFrameFlowId,
+                            outcome = "FAILED",
+                            throwable = t
+                        )
+                    }
                 }
 
                 if (!showApp) {
@@ -76,14 +139,106 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
+        logEnd(
+            operation = "onCreate",
+            flowId = flowId,
+            outcome = "CONTENT_SET"
+        )
     }
 
     override fun onNewIntent(intent: Intent) {
+        val flowId = newFlowId(prefix = "deeplink")
+
+        logBegin(
+            operation = "onNewIntent",
+            flowId = flowId,
+            extra = "intentData=${intent.data}"
+        )
+
         super.onNewIntent(intent)
         Log.d("YA_AUTH", "onNewIntent data=${intent.data}")
 
-        // Пробрасываем интент в RuStore Pay SDK через менеджер
-        rustoreBillingManager.handleDeeplinkIntent(intent)
+        try {
+            // Это не purchaseFlowId покупки, а отдельная системная трассировка deeplink-обработки.
+            rustoreBillingManager.handleDeeplinkIntent(intent = intent, flowId = flowId)
+
+            logEnd(
+                operation = "onNewIntent",
+                flowId = flowId,
+                outcome = "DEEPLINK_DISPATCHED"
+            )
+        } catch (t: Throwable) {
+            logError(
+                operation = "onNewIntent",
+                flowId = flowId,
+                outcome = "FAILED",
+                throwable = t
+            )
+            throw t
+        }
+    }
+
+    /**
+     * Генерация короткого flow id для системных шагов Activity.
+     */
+    private fun newFlowId(prefix: String): String {
+        val tail = UUID.randomUUID().toString().replace("-", "").take(12)
+        return "$prefix-$tail"
+    }
+
+    /**
+     * Лог начала шага.
+     */
+    private fun logBegin(
+        operation: String,
+        flowId: String,
+        extra: String? = null
+    ) {
+        val message = buildString {
+            append("BEGIN")
+            append(" op=").append(operation)
+            append(" flowId=").append(flowId)
+            if (!extra.isNullOrBlank()) append(" ").append(extra)
+        }
+        Log.d(TAG, message)
+    }
+
+    /**
+     * Лог завершения шага.
+     */
+    private fun logEnd(
+        operation: String,
+        flowId: String,
+        outcome: String
+    ) {
+        val message = buildString {
+            append("END")
+            append(" op=").append(operation)
+            append(" flowId=").append(flowId)
+            append(" outcome=").append(outcome)
+        }
+        Log.d(TAG, message)
+    }
+
+    /**
+     * Error-лог.
+     */
+    private fun logError(
+        operation: String,
+        flowId: String,
+        outcome: String,
+        throwable: Throwable
+    ) {
+        val message = buildString {
+            append("END")
+            append(" op=").append(operation)
+            append(" flowId=").append(flowId)
+            append(" outcome=").append(outcome)
+            append(" errorClass=").append(throwable.javaClass.simpleName)
+            append(" errorMessage=").append(throwable.message)
+        }
+        Log.e(TAG, message, throwable)
     }
 }
 

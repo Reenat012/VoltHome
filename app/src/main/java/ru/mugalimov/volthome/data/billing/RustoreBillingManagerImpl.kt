@@ -33,14 +33,10 @@ import kotlin.coroutines.resumeWithException
 /**
  * Реализация поверх RuStorePayClient.
  *
- * Требования со стороны окружения:
- *  - в AndroidManifest прописан:
- *      <meta-data
- *          android:name="console_app_id_value"
- *          android:value="@string/rustore_console_app_id" />
- *  - указан sdk_pay_scheme_value и настроены deeplink-и;
- *  - Activity, куда возвращаемся из банковских приложений, вызывает
- *    IntentInteractor.proceedIntent() в onCreate/onNewIntent.
+ * Commit 1:
+ * - никаких локальных flow id внутри менеджера не генерируем
+ * - используем только flowId, который пришёл сверху
+ * - логируем только реальные critical boundaries, без мусора
  */
 class RustoreBillingManagerImpl @Inject constructor() : RustoreBillingManager {
 
@@ -48,152 +44,177 @@ class RustoreBillingManagerImpl @Inject constructor() : RustoreBillingManager {
         private const val TAG = "RustoreBillingManager"
     }
 
-    // берём IO-диспетчер без DI, чтобы не плодить лишние биндинги
+    // Берём IO-диспетчер без DI, чтобы не плодить лишние биндинги.
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 
     private val payClient: RuStorePayClient
-        get() {
-            Log.d(TAG, "payClient.get() → RuStorePayClient.instance")
-            return RuStorePayClient.instance
-        }
+        get() = RuStorePayClient.instance
 
     private val productInteractor: ProductInteractor
-        get() {
-            Log.d(TAG, "productInteractor.get()")
-            return payClient.getProductInteractor()
-        }
+        get() = payClient.getProductInteractor()
 
     private val purchaseInteractor: PurchaseInteractor
-        get() {
-            Log.d(TAG, "purchaseInteractor.get()")
-            return payClient.getPurchaseInteractor()
-        }
+        get() = payClient.getPurchaseInteractor()
 
     private val userInteractor: UserInteractor
-        get() {
-            Log.d(TAG, "userInteractor.get()")
-            return payClient.getUserInteractor()
-        }
+        get() = payClient.getUserInteractor()
 
     private val intentInteractor: IntentInteractor
-        get() {
-            Log.d(TAG, "intentInteractor.get()")
-            return payClient.getIntentInteractor()
-        }
+        get() = payClient.getIntentInteractor()
 
-    override suspend fun checkAvailability(): BillingAvailability = withContext(ioDispatcher) {
-        Log.d(TAG, "checkAvailability() → start")
+    override suspend fun checkAvailability(
+        flowId: String?
+    ): BillingAvailability = withContext(ioDispatcher) {
+        logBegin(
+            operation = "billing.checkAvailability",
+            flowId = flowId
+        )
+
         try {
-            val result = purchaseInteractor.getPurchaseAvailability().await()
-            Log.d(TAG, "checkAvailability() → raw result=$result")
+            val result = purchaseInteractor.getPurchaseAvailability().await(
+                operation = "billing.checkAvailability.await",
+                flowId = flowId
+            )
 
             when (result) {
                 is PurchaseAvailabilityResult.Available -> {
-                    Log.d(TAG, "checkAvailability() → Available")
+                    logEnd(
+                        operation = "billing.checkAvailability",
+                        flowId = flowId,
+                        outcome = "AVAILABLE"
+                    )
                     BillingAvailability.Available
                 }
 
                 is PurchaseAvailabilityResult.Unavailable -> {
-                    Log.w(
-                        TAG,
-                        "checkAvailability() → Unavailable, cause=${result.cause?.javaClass?.simpleName}, " +
-                                "message=${result.cause?.message}"
-                    )
                     val ex = mapToBillingException(
                         throwable = result.cause,
                         defaultCode = BillingErrorCode.BILLING_NOT_AVAILABLE,
-                        customMessage = "Платежи недоступны: ${result.cause.message}"
+                        customMessage = "Платежи недоступны: ${result.cause?.message}"
                     )
-                    Log.w(TAG, "checkAvailability() → mapped to BillingAvailability.Unavailable(code=${ex.code}, message=${ex.message})")
+
+                    logWarn(
+                        operation = "billing.checkAvailability",
+                        flowId = flowId,
+                        outcome = "UNAVAILABLE",
+                        extra = buildString {
+                            append("causeClass=").append(result.cause?.javaClass?.simpleName)
+                            append(", code=").append(ex.code)
+                            append(", message=").append(ex.message)
+                        }
+                    )
+
                     BillingAvailability.Unavailable(
                         code = ex.code,
                         message = ex.message,
-                        cause = ex.cause,
+                        cause = ex.cause
                     )
                 }
             }
         } catch (t: Throwable) {
-            Log.e(TAG, "checkAvailability() → exception: ${t.javaClass.simpleName}: ${t.message}", t)
             val ex = mapToBillingException(
                 throwable = t,
                 defaultCode = BillingErrorCode.BILLING_NOT_AVAILABLE,
                 customMessage = "Не удалось проверить доступность платежей: ${t.message}"
             )
-            Log.w(TAG, "checkAvailability() → mapped error to BillingAvailability.Unavailable(code=${ex.code}, message=${ex.message})")
+
+            logError(
+                operation = "billing.checkAvailability",
+                flowId = flowId,
+                outcome = "EXCEPTION",
+                throwable = t,
+                extra = "mappedCode=${ex.code}, mappedMessage=${ex.message}"
+            )
+
             BillingAvailability.Unavailable(
                 code = ex.code,
                 message = ex.message,
-                cause = ex.cause,
+                cause = ex.cause
             )
         }
     }
 
-    override suspend fun loadProducts(productIds: List<String>): Result<List<BillingProduct>> =
-        withContext(ioDispatcher) {
-            Log.d(TAG, "loadProducts() → start, productIds=$productIds")
+    override suspend fun loadProducts(
+        productIds: List<String>,
+        flowId: String?
+    ): Result<List<BillingProduct>> = withContext(ioDispatcher) {
+        logBegin(
+            operation = "billing.loadProducts",
+            flowId = flowId,
+            extra = "productIds=${productIds.map(::maskValue)}"
+        )
 
-            if (productIds.isEmpty()) {
-                Log.d(TAG, "loadProducts() → productIds empty, returning success(emptyList())")
-                return@withContext Result.success(emptyList())
-            }
+        if (productIds.isEmpty()) {
+            logEnd(
+                operation = "billing.loadProducts",
+                flowId = flowId,
+                outcome = "EMPTY_INPUT"
+            )
+            return@withContext Result.success(emptyList())
+        }
 
-            runCatching {
-                val products: List<Product> = productInteractor
-                    .getProducts(
-                        productsId = productIds.map { ProductId(it) }
-                    )
-                    .await()
-
-                Log.d(
-                    TAG,
-                    "loadProducts() → getProducts() success, count=${products.size}, ids=${products.map { it.productId.value }}"
+        runCatching {
+            val products: List<Product> = productInteractor
+                .getProducts(
+                    productsId = productIds.map { ProductId(it) }
+                )
+                .await(
+                    operation = "billing.loadProducts.await",
+                    flowId = flowId
                 )
 
-                products.map { it.toBillingProduct() }
-            }.mapError { throwable ->
-                Log.e(TAG, "loadProducts() → error from SDK: ${throwable.javaClass.simpleName}: ${throwable.message}", throwable)
-                null
-            }.also { result ->
-                result.onSuccess {
-                    Log.d(TAG, "loadProducts() → mapped success, count=${it.size}")
-                }.onFailure {
-                    Log.e(
-                        TAG,
-                        "loadProducts() → final failure: ${it.javaClass.simpleName}: ${it.message}",
-                        it
-                    )
-                }
+            products.map { it.toBillingProduct() }
+        }.mapError(
+            operation = "billing.loadProducts.mapError",
+            flowId = flowId
+        ).also { result ->
+            result.onSuccess {
+                logEnd(
+                    operation = "billing.loadProducts",
+                    flowId = flowId,
+                    outcome = "OK",
+                    extra = "count=${it.size}"
+                )
+            }.onFailure {
+                logError(
+                    operation = "billing.loadProducts",
+                    flowId = flowId,
+                    outcome = "FAILED",
+                    throwable = it
+                )
             }
         }
+    }
 
     override suspend fun purchaseSubscription(
         productId: String,
         appUserId: String?,
         appUserEmail: String?,
+        flowId: String?
     ): Result<PurchaseCompleted> = withContext(ioDispatcher) {
-        Log.d(
-            TAG,
-            "purchaseSubscription() → start, productId=$productId, appUserId=$appUserId, appUserEmail=$appUserEmail"
+        logBegin(
+            operation = "billing.purchaseSubscription",
+            flowId = flowId,
+            extra = buildString {
+                append("productId=").append(maskValue(productId))
+                append(", appUserId=").append(maskValue(appUserId))
+                append(", appUserEmail=").append(maskEmail(appUserEmail))
+            }
         )
 
         runCatching {
-            // Быстрая проверка доступности перед покупкой
-            Log.d(TAG, "purchaseSubscription() → checkAvailability() before purchase")
-            when (val availability = checkAvailability()) {
+            // Внутри purchase делаем ту же pre-check, но не создаём новый flow id.
+            when (val availability = checkAvailability(flowId = flowId)) {
                 is BillingAvailability.Unavailable -> {
-                    Log.w(
-                        TAG,
-                        "purchaseSubscription() → Billing unavailable before purchase: code=${availability.code}, message=${availability.message}"
-                    )
                     throw BillingException(
                         code = availability.code,
                         message = availability.message ?: "Платежи недоступны",
-                        cause = availability.cause,
+                        cause = availability.cause
                     )
                 }
 
                 BillingAvailability.Available -> {
-                    Log.d(TAG, "purchaseSubscription() → BillingAvailable, continue")
+                    // Ничего не делаем, продолжаем.
                 }
             }
 
@@ -203,156 +224,182 @@ class RustoreBillingManagerImpl @Inject constructor() : RustoreBillingManager {
                 quantity = null,
                 orderId = null,
                 developerPayload = null,
-                // Эти параметры опциональны, null OK — дока это подтверждает
+                // Эти параметры опциональны, null OK — дока это подтверждает.
                 appUserId = appUserId?.let { ru.rustore.sdk.pay.model.AppUserId(it) },
                 appUserEmail = appUserEmail?.let { ru.rustore.sdk.pay.model.AppUserEmail(it) },
             )
-
-            Log.d(TAG, "purchaseSubscription() → calling purchase() with params=$params")
 
             val result: ProductPurchaseResult = purchaseInteractor
                 .purchase(
                     params = params,
                     preferredPurchaseType = PreferredPurchaseType.ONE_STEP
                 )
-                .await()
-
-            Log.d(
-                TAG,
-                "purchaseSubscription() → purchase() success: " +
-                        "productId=${result.productId.value}, " +
-                        "purchaseId=${result.purchaseId.value}, " +
-                        "invoiceId=${result.invoiceId.value}, " +
-                        "purchaseType=${result.purchaseType}, " +
-                        "productType=${result.productType}, " +
-                        "sandbox=${result.sandbox}"
-            )
+                .await(
+                    operation = "billing.purchaseSubscription.await",
+                    flowId = flowId
+                )
 
             PurchaseCompleted(
                 productId = result.productId.value,
                 purchaseId = result.purchaseId.value,
                 invoiceId = result.invoiceId.value,
-                purchaseType = result.purchaseType,
+                // Приводим тип покупки из SDK к строке,
+                // потому что в нашей модели PurchaseCompleted поле purchaseType имеет тип String.
+                purchaseType = result.purchaseType.toString(),
                 productType = result.productType,
-                sandbox = result.sandbox,
-            )
-        }.mapError { throwable ->
-            Log.e(
-                TAG,
-                "purchaseSubscription() → error from SDK: ${throwable.javaClass.simpleName}: ${throwable.message}",
-                throwable
+                sandbox = result.sandbox
             )
 
-            // Отдельно подсвечиваем отмену пользователем
-            if (throwable is RuStorePaymentException &&
+        }.mapError(
+            operation = "billing.purchaseSubscription.mapError",
+            flowId = flowId
+        ) { throwable ->
+            // Отдельно подсвечиваем отмену пользователем.
+            if (
+                throwable is RuStorePaymentException &&
                 throwable.message?.contains("cancel", ignoreCase = true) == true
             ) {
-                Log.w(TAG, "purchaseSubscription() → detected user cancel")
                 BillingException(
                     code = BillingErrorCode.USER_CANCELLED,
                     message = "Покупка отменена пользователем",
-                    cause = throwable,
+                    cause = throwable
                 )
             } else {
                 null
             }
         }.also { result ->
             result.onSuccess {
-                Log.d(TAG, "purchaseSubscription() → final success: $it")
+                logEnd(
+                    operation = "billing.purchaseSubscription",
+                    flowId = flowId,
+                    outcome = "OK",
+                    extra = buildString {
+                        append("productId=").append(maskValue(it.productId))
+                        append(", orderId=").append(maskValue(it.invoiceId))
+                        append(", purchaseToken=").append(maskValue(it.purchaseId))
+                    }
+                )
             }.onFailure {
-                Log.e(
-                    TAG,
-                    "purchaseSubscription() → final failure: ${it.javaClass.simpleName}: ${it.message}",
-                    it
+                val outcome = when ((it as? BillingException)?.code) {
+                    BillingErrorCode.USER_CANCELLED -> "CANCELLED"
+                    else -> "FAILED"
+                }
+
+                logError(
+                    operation = "billing.purchaseSubscription",
+                    flowId = flowId,
+                    outcome = outcome,
+                    throwable = it
                 )
             }
         }
     }
 
-    override suspend fun restorePurchases(): Result<List<Purchase>> =
-        withContext(ioDispatcher) {
-            Log.d(TAG, "restorePurchases() → start")
-
-            runCatching {
-                val purchases = purchaseInteractor
-                    .getPurchases()
-                    .await()
-
-                Log.d(
-                    TAG,
-                    "restorePurchases() → getPurchases() success, count=${purchases.size}"
-                )
-
-                purchases
-            }.mapError { throwable ->
-                Log.e(
-                    TAG,
-                    "restorePurchases() → error from SDK: ${throwable.javaClass.simpleName}: ${throwable.message}",
-                    throwable
-                )
-                null
-            }.also { result ->
-                result.onSuccess {
-                    Log.d(TAG, "restorePurchases() → final success, count=${it.size}")
-                }.onFailure {
-                    Log.e(
-                        TAG,
-                        "restorePurchases() → final failure: ${it.javaClass.simpleName}: ${it.message}",
-                        it
-                    )
-                }
-            }
-        }
-
-    override suspend fun getActiveSubscriptions(): Result<List<SubscriptionPurchase>> =
-        withContext(ioDispatcher) {
-            Log.d(TAG, "getActiveSubscriptions() → start")
-
-            runCatching {
-                val purchases: List<Purchase> = purchaseInteractor
-                    .getPurchases(
-                        productType = ProductType.SUBSCRIPTION,
-                        // purchaseStatus не задаём — тогда придут ACTIVE и PAUSED
-                    )
-                    .await()
-
-                Log.d(
-                    TAG,
-                    "getActiveSubscriptions() → getPurchases(SUBSCRIPTION) success, count=${purchases.size}"
-                )
-
-                val subs = purchases.filterIsInstance<SubscriptionPurchase>()
-                Log.d(
-                    TAG,
-                    "getActiveSubscriptions() → filtered SubscriptionPurchase, count=${subs.size}"
-                )
-                subs
-            }.mapError { throwable ->
-                Log.e(
-                    TAG,
-                    "getActiveSubscriptions() → error from SDK: ${throwable.javaClass.simpleName}: ${throwable.message}",
-                    throwable
-                )
-                null
-            }.also { result ->
-                result.onSuccess {
-                    Log.d(TAG, "getActiveSubscriptions() → final success, count=${it.size}")
-                }.onFailure {
-                    Log.e(
-                        TAG,
-                        "getActiveSubscriptions() → final failure: ${it.javaClass.simpleName}: ${it.message}",
-                        it
-                    )
-                }
-            }
-        }
-
-    override fun handleDeeplinkIntent(intent: Intent?) {
-        Log.d(TAG, "handleDeeplinkIntent() → start, intent=$intent, data=${intent?.data}")
-        intentInteractor.proceedIntent(
-            intent = intent
+    override suspend fun restorePurchases(
+        flowId: String?
+    ): Result<List<Purchase>> = withContext(ioDispatcher) {
+        logBegin(
+            operation = "billing.restorePurchases",
+            flowId = flowId
         )
-        Log.d(TAG, "handleDeeplinkIntent() → proceedIntent() called")
+
+        runCatching {
+            purchaseInteractor
+                .getPurchases()
+                .await(
+                    operation = "billing.restorePurchases.await",
+                    flowId = flowId
+                )
+        }.mapError(
+            operation = "billing.restorePurchases.mapError",
+            flowId = flowId
+        ).also { result ->
+            result.onSuccess {
+                logEnd(
+                    operation = "billing.restorePurchases",
+                    flowId = flowId,
+                    outcome = "OK",
+                    extra = "count=${it.size}"
+                )
+            }.onFailure {
+                logError(
+                    operation = "billing.restorePurchases",
+                    flowId = flowId,
+                    outcome = "FAILED",
+                    throwable = it
+                )
+            }
+        }
+    }
+
+    override suspend fun getActiveSubscriptions(
+        flowId: String?
+    ): Result<List<SubscriptionPurchase>> = withContext(ioDispatcher) {
+        logBegin(
+            operation = "billing.getActiveSubscriptions",
+            flowId = flowId
+        )
+
+        runCatching {
+            val purchases: List<Purchase> = purchaseInteractor
+                .getPurchases(
+                    productType = ProductType.SUBSCRIPTION,
+                    // purchaseStatus не задаём — тогда придут ACTIVE и PAUSED.
+                )
+                .await(
+                    operation = "billing.getActiveSubscriptions.await",
+                    flowId = flowId
+                )
+
+            purchases.filterIsInstance<SubscriptionPurchase>()
+        }.mapError(
+            operation = "billing.getActiveSubscriptions.mapError",
+            flowId = flowId
+        ).also { result ->
+            result.onSuccess {
+                logEnd(
+                    operation = "billing.getActiveSubscriptions",
+                    flowId = flowId,
+                    outcome = "OK",
+                    extra = "count=${it.size}"
+                )
+            }.onFailure {
+                logError(
+                    operation = "billing.getActiveSubscriptions",
+                    flowId = flowId,
+                    outcome = "FAILED",
+                    throwable = it
+                )
+            }
+        }
+    }
+
+    override fun handleDeeplinkIntent(
+        intent: Intent?,
+        flowId: String?
+    ) {
+        logBegin(
+            operation = "billing.handleDeeplinkIntent",
+            flowId = flowId,
+            extra = "intentData=${intent?.data}"
+        )
+
+        try {
+            intentInteractor.proceedIntent(intent)
+            logEnd(
+                operation = "billing.handleDeeplinkIntent",
+                flowId = flowId,
+                outcome = "OK"
+            )
+        } catch (t: Throwable) {
+            logError(
+                operation = "billing.handleDeeplinkIntent",
+                flowId = flowId,
+                outcome = "FAILED",
+                throwable = t
+            )
+            throw t
+        }
     }
 
     // -------------------------------------------------------------
@@ -361,54 +408,61 @@ class RustoreBillingManagerImpl @Inject constructor() : RustoreBillingManager {
 
     /**
      * Обёртка Task<T> → suspend.
-     * Task — это Task API RuStore (аналог Google Tasks).
+     * Task — это Task API RuStore.
+     *
+     * Логируем только boundary ожидания результата, без лишнего мусора.
      */
-    private suspend fun <T> Task<T>.await(): T = suspendCancellableCoroutine { cont ->
-        Log.d(TAG, "Task.await() → subscribe")
+    private suspend fun <T> Task<T>.await(
+        operation: String,
+        flowId: String?
+    ): T = suspendCancellableCoroutine { cont ->
+        logBegin(operation = operation, flowId = flowId)
+
         addOnSuccessListener { result ->
-            Log.d(TAG, "Task.await() → onSuccess: $result")
+            logEnd(
+                operation = operation,
+                flowId = flowId,
+                outcome = "SUCCESS",
+                extra = "resultClass=${result?.javaClass?.simpleName}"
+            )
             if (cont.isActive) {
                 cont.resume(result)
             }
         }
+
         addOnFailureListener { throwable ->
-            Log.e(
-                TAG,
-                "Task.await() → onFailure: ${throwable.javaClass.simpleName}: ${throwable.message}",
-                throwable
+            logError(
+                operation = operation,
+                flowId = flowId,
+                outcome = "FAILURE",
+                throwable = throwable
             )
             if (cont.isActive) {
                 cont.resumeWithException(throwable)
             }
         }
+
         cont.invokeOnCancellation {
-            Log.d(TAG, "Task.await() → continuation cancelled")
+            logWarn(
+                operation = operation,
+                flowId = flowId,
+                outcome = "CANCELLED"
+            )
             // У Task API нет нормального cancel, просто игнорируем результат.
         }
     }
 
     /**
-     * Маппинг Throwable → BillingException по максимально полезным кейсам
-     * из документации (RuStoreNotInstalledException, RuStoreOutdatedException и т.п.).
+     * Маппинг Throwable → BillingException.
      */
     private fun mapToBillingException(
         throwable: Throwable,
         defaultCode: BillingErrorCode = BillingErrorCode.UNKNOWN,
         customMessage: String? = null,
     ): BillingException {
-        // Если это уже наш BillingException — просто пробрасываем.
         if (throwable is BillingException) {
-            Log.d(
-                TAG,
-                "mapToBillingException() → throwable already BillingException(code=${throwable.code}, message=${throwable.message})"
-            )
             return throwable
         }
-
-        Log.d(
-            TAG,
-            "mapToBillingException() → start, throwable=${throwable.javaClass.simpleName}, message=${throwable.message}, defaultCode=$defaultCode, customMessage=$customMessage"
-        )
 
         val (code, message) = when (throwable) {
             is RuStoreNotInstalledException -> BillingErrorCode.RUSTORE_NOT_INSTALLED to
@@ -435,50 +489,164 @@ class RustoreBillingManagerImpl @Inject constructor() : RustoreBillingManager {
             else -> defaultCode to (customMessage ?: throwable.message ?: "Неизвестная ошибка биллинга")
         }
 
-        Log.d(TAG, "mapToBillingException() → mapped to code=$code, message=$message")
-
         return BillingException(
             code = code,
             message = message,
-            cause = throwable,
+            cause = throwable
         )
     }
 
     /**
-     * Удобное расширение для Result<T>: мапим любые Throwable в BillingException.
+     * Унифицированное расширение для Result<T>:
+     * мапим Throwable в BillingException и сохраняем контекст логирования.
      */
     private fun <T> Result<T>.mapError(
+        operation: String,
+        flowId: String?,
         extraMapper: ((Throwable) -> BillingException?)? = null
     ): Result<T> {
-        return this
-            .mapCatching { it }
-            .onFailure {
-                // просто чтобы Result не "забывал" исключение
-                Log.d(
-                    TAG,
-                    "mapError() → onFailure raw throwable: ${it.javaClass.simpleName}: ${it.message}",
-                    it
+        return fold(
+            onSuccess = { Result.success(it) },
+            onFailure = { throwable ->
+                val custom = extraMapper?.invoke(throwable)
+                val ex = custom ?: mapToBillingException(throwable)
+
+                logDebug(
+                    operation = operation,
+                    flowId = flowId,
+                    extra = "mappedCode=${ex.code}, mappedMessage=${ex.message}"
                 )
+
+                Result.failure(ex)
             }
-            .fold(
-                onSuccess = { value ->
-                    Log.d(TAG, "mapError() → onSuccess, value=$value")
-                    Result.success(value)
-                },
-                onFailure = { throwable ->
-                    Log.d(
-                        TAG,
-                        "mapError() → fold.onFailure, throwable=${throwable.javaClass.simpleName}: ${throwable.message}"
-                    )
-                    val custom = extraMapper?.invoke(throwable)
-                    val ex = custom ?: mapToBillingException(throwable)
-                    Log.d(
-                        TAG,
-                        "mapError() → mapped to BillingException(code=${ex.code}, message=${ex.message})"
-                    )
-                    Result.failure<T>(ex)
-                }
-            )
+        )
+    }
+
+    /**
+     * Маскирование чувствительных значений для логов.
+     */
+    private fun maskValue(value: String?): String {
+        if (value.isNullOrBlank()) return "null"
+        return when {
+            value.length <= 4 -> "***$value"
+            value.length <= 8 -> "${value.take(1)}***${value.takeLast(2)}"
+            else -> "${value.take(3)}***${value.takeLast(4)}"
+        }
+    }
+
+    /**
+     * Маскирование email для логов.
+     */
+    private fun maskEmail(value: String?): String {
+        if (value.isNullOrBlank()) return "null"
+
+        val parts = value.split("@")
+        if (parts.size != 2) return "***"
+
+        val local = parts[0]
+        val domain = parts[1]
+
+        val localMasked = when {
+            local.isEmpty() -> "***"
+            local.length == 1 -> "${local.first()}***"
+            else -> "${local.first()}***${local.last()}"
+        }
+
+        return "$localMasked@$domain"
+    }
+
+    /**
+     * Унифицированный debug-лог.
+     */
+    private fun logDebug(
+        operation: String,
+        flowId: String?,
+        extra: String? = null
+    ) {
+        val message = buildString {
+            append("MID")
+            append(" op=").append(operation)
+            append(" flowId=").append(flowId ?: "null")
+            if (!extra.isNullOrBlank()) append(" ").append(extra)
+        }
+        Log.d(TAG, message)
+    }
+
+    /**
+     * Унифицированный лог начала шага.
+     */
+    private fun logBegin(
+        operation: String,
+        flowId: String?,
+        extra: String? = null
+    ) {
+        val message = buildString {
+            append("BEGIN")
+            append(" op=").append(operation)
+            append(" flowId=").append(flowId ?: "null")
+            if (!extra.isNullOrBlank()) append(" ").append(extra)
+        }
+        Log.d(TAG, message)
+    }
+
+    /**
+     * Унифицированный лог завершения шага.
+     */
+    private fun logEnd(
+        operation: String,
+        flowId: String?,
+        outcome: String,
+        extra: String? = null
+    ) {
+        val message = buildString {
+            append("END")
+            append(" op=").append(operation)
+            append(" flowId=").append(flowId ?: "null")
+            append(" outcome=").append(outcome)
+            if (!extra.isNullOrBlank()) append(" ").append(extra)
+        }
+        Log.d(TAG, message)
+    }
+
+    /**
+     * Warning-лог.
+     */
+    private fun logWarn(
+        operation: String,
+        flowId: String?,
+        outcome: String,
+        extra: String? = null
+    ) {
+        val message = buildString {
+            append("END")
+            append(" op=").append(operation)
+            append(" flowId=").append(flowId ?: "null")
+            append(" outcome=").append(outcome)
+            if (!extra.isNullOrBlank()) append(" ").append(extra)
+        }
+        Log.w(TAG, message)
+    }
+
+    /**
+     * Error-лог.
+     */
+    private fun logError(
+        operation: String,
+        flowId: String?,
+        outcome: String,
+        throwable: Throwable,
+        extra: String? = null
+    ) {
+        val message = buildString {
+            append("END")
+            append(" op=").append(operation)
+            append(" flowId=").append(flowId ?: "null")
+            append(" outcome=").append(outcome)
+            if (!extra.isNullOrBlank()) append(" ").append(extra)
+            append(" errorClass=").append(throwable.javaClass.simpleName)
+            append(" errorMessage=").append(throwable.message)
+        }
+        Log.e(TAG, message, throwable)
     }
 }
 
