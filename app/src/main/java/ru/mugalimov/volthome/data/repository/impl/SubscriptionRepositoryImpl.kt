@@ -9,6 +9,8 @@ import ru.mugalimov.volthome.data.repository.SubscriptionRepository
 import ru.mugalimov.volthome.data.repository.UserPlanRepository
 import ru.mugalimov.volthome.domain.model.ProProduct
 import ru.mugalimov.volthome.domain.model.UserPlan
+import ru.mugalimov.volthome.domain.model.PurchaseKind
+import ru.mugalimov.volthome.domain.model.VOLTHOME_PRO_MONTHLY_PRODUCT_ID
 
 @Singleton
 class SubscriptionRepositoryImpl @Inject constructor(
@@ -21,7 +23,12 @@ class SubscriptionRepositoryImpl @Inject constructor(
     }
 
     override fun getProProducts(): List<ProProduct> {
-        TODO("Not yet implemented")
+        return listOf(
+            ProProduct(
+                productId = VOLTHOME_PRO_MONTHLY_PRODUCT_ID,
+                kind = PurchaseKind.SUBSCRIPTION
+            )
+        )
     }
 
     override suspend fun syncStatus(

@@ -53,9 +53,13 @@ fun VoltHomeProScreen(
     val uiState by viewModel.state.collectAsStateWithLifecycle()
     val userPlan: UserPlan = LocalUserPlan.current
 
+    // При первом открытии экрана:
+    // 1) обновляем текущий тариф с сервера,
+    // 2) пробуем загрузить реальный продукт из RuStore SDK.
     LaunchedEffect(Unit) {
-        Log.d("VoltHomeProScreen", "LaunchedEffect → refreshStatus()")
+        Log.d("VoltHomeProScreen", "LaunchedEffect → init")
         viewModel.refreshStatus()
+        viewModel.loadProProductIfNeeded()
     }
 
     Scaffold(
@@ -92,7 +96,14 @@ fun VoltHomeProScreen(
             stringResource(R.string.pro_status_free)
         }
 
-        val buttonEnabled = !userPlan.isPro && !uiState.isLoading
+        // Кнопка покупки живёт не по старому isLoading,
+        // а по продуктовой готовности и purchase-related stage.
+        val buttonEnabled =
+            !userPlan.isPro &&
+                uiState.isProductLoaded &&
+                !uiState.isProductLoading &&
+                uiState.stage != SubscriptionViewModel.BillingStage.PURCHASING &&
+                uiState.stage != SubscriptionViewModel.BillingStage.CONFIRMING
 
         Column(
             modifier = Modifier
@@ -214,7 +225,7 @@ fun VoltHomeProScreen(
             }
 
             // Отдельный CTA-блок:
-            // здесь собраны покупка, восстановление и служебная информация.
+            // здесь собраны покупка, обновление статуса и служебная информация.
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp),
@@ -233,20 +244,66 @@ fun VoltHomeProScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    uiState.errorMessage?.let { msg ->
+                    // Состояние загрузки продукта из RuStore SDK.
+                    if (uiState.isProductLoading) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.secondaryContainer
+                        ) {
+                            Text(
+                                text = stringResource(R.string.billing_product_loading),
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                style = MaterialTheme.typography.bodyMedium,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp)
+                            )
+                        }
+                    }
+
+                    // SDK ответил корректно, но нужного продукта нет.
+                    if (uiState.isProductUnavailable) {
                         Surface(
                             shape = RoundedCornerShape(12.dp),
                             color = MaterialTheme.colorScheme.errorContainer
                         ) {
                             Text(
-                                text = msg,
+                                text = stringResource(R.string.billing_product_unavailable),
                                 color = MaterialTheme.colorScheme.onErrorContainer,
                                 style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.padding(12.dp)
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp)
                             )
                         }
                     }
 
+                    // Ошибка загрузки продукта.
+                    // Показываем её только если это не unavailable-case.
+                    if (!uiState.isProductLoading &&
+                        !uiState.isProductLoaded &&
+                        !uiState.isProductUnavailable &&
+                        uiState.errorMessage != null
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.errorContainer
+                        ) {
+                            Text(
+                                text = stringResource(R.string.billing_product_load_failed),
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodyMedium,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp)
+                            )
+                        }
+                    }
+
+                    // Общее информационное сообщение из ViewModel.
                     uiState.infoMessage?.let { msg ->
                         Surface(
                             shape = RoundedCornerShape(12.dp),
@@ -261,11 +318,23 @@ fun VoltHomeProScreen(
                         }
                     }
 
+                    TextButton(
+                        onClick = {
+                            Log.d("VoltHomeProScreen", "Check availability clicked")
+                            viewModel.debugCheckAvailability()
+                        },
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    ) {
+                        Text("DEBUG: Check availability")
+                    }
+
+                    // Если есть продуктовая готовность, пользователь может покупать.
+                    // Если нет — кнопка disabled, это и есть purchase gating.
                     Button(
                         onClick = {
                             Log.d(
                                 "VoltHomeProScreen",
-                                "Buy button clicked, userPlan.isPro=${userPlan.isPro}, isLoading=${uiState.isLoading}"
+                                "Buy click → isPro=${userPlan.isPro}, loaded=${uiState.isProductLoaded}, loading=${uiState.isProductLoading}, unavailable=${uiState.isProductUnavailable}, stage=${uiState.stage}"
                             )
 
                             if (!userPlan.isPro) {
@@ -284,12 +353,25 @@ fun VoltHomeProScreen(
                         )
                     }
 
+                    // Если покупка недоступна, явно показываем это под кнопкой,
+                    // чтобы disabled-состояние не выглядело как баг.
+                    if (!userPlan.isPro && !buttonEnabled) {
+                        Text(
+                            text = stringResource(R.string.billing_purchase_not_available),
+                            style = MaterialTheme.typography.bodySmall,
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
                     TextButton(
                         onClick = {
                             Log.d("VoltHomeProScreen", "Refresh status clicked")
                             viewModel.refreshStatus()
+                            viewModel.loadProProductIfNeeded()
                         },
-                        enabled = !uiState.isLoading,
+                        enabled = !uiState.isLoading && !uiState.isProductLoading,
                         modifier = Modifier.align(Alignment.CenterHorizontally)
                     ) {
                         Text(stringResource(R.string.pro_restore_purchases))

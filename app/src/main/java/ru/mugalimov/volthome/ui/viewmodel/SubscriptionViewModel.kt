@@ -44,8 +44,15 @@ class SubscriptionViewModel @Inject constructor(
 
     data class UiState(
         val isLoading: Boolean = false,
+
+        // 🔥 NEW
+        val isProductLoading: Boolean = false,
+        val isProductLoaded: Boolean = false,
+        val isProductUnavailable: Boolean = false,
+
         val errorMessage: String? = null,
         val infoMessage: String? = null,
+
         val stage: BillingStage = BillingStage.IDLE,
         val purchaseFlowId: String? = null
     )
@@ -53,10 +60,96 @@ class SubscriptionViewModel @Inject constructor(
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
 
-    /**
-     * ID продукта в RuStore Console.
-     */
-    private val productId: String = "volthome_pro_monthly"
+    private val proProduct by lazy {
+        subscriptionRepository.getProProducts().first()
+    }
+
+    fun loadProProductIfNeeded() {
+        viewModelScope.launch {
+            // 🔒 idempotent guard
+            val current = _state.value
+
+            // 🔒 idempotent guard + защита от бесполезных повторов
+            if (current.isProductLoaded || current.isProductLoading) {
+                return@launch
+            }
+
+            // ❗ НОВОЕ: если уже знаем, что продукта нет — не долбим SDK повторно
+            if (current.isProductUnavailable) {
+                Log.d(TAG, "LOAD_PRODUCTS_SKIPPED_ALREADY_UNAVAILABLE")
+                return@launch
+            }
+
+            val flowId = newFlowId("product")
+
+            logBegin(
+                operation = "loadProducts",
+                flowId = flowId,
+                stage = BillingStage.LOADING_PRODUCT
+            )
+
+            _state.value = current.copy(
+                isProductLoading = true,
+                errorMessage = null,
+                stage = BillingStage.LOADING_PRODUCT
+            )
+
+            val result = billingManager.loadProducts(
+                productIds = listOf(proProduct.productId),
+                flowId = flowId
+            )
+
+            result.fold(
+                onSuccess = { products ->
+                    if (products.isEmpty()) {
+                        logEnd(
+                            operation = "loadProducts",
+                            flowId = flowId,
+                            stage = BillingStage.FAILED,
+                            outcome = "PRODUCT_UNAVAILABLE"
+                        )
+
+                        _state.value = _state.value.copy(
+                            isProductLoading = false,
+                            isProductUnavailable = true,
+                            isProductLoaded = false,
+                            stage = BillingStage.FAILED
+                        )
+                    } else {
+                        logEnd(
+                            operation = "loadProducts",
+                            flowId = flowId,
+                            stage = BillingStage.READY_TO_PURCHASE,
+                            outcome = "PRODUCT_LOADED"
+                        )
+
+                        _state.value = _state.value.copy(
+                            isProductLoading = false,
+                            isProductLoaded = true,
+                            isProductUnavailable = false,
+                            stage = BillingStage.READY_TO_PURCHASE
+                        )
+                    }
+                },
+                onFailure = { e ->
+                    logEnd(
+                        operation = "loadProducts",
+                        flowId = flowId,
+                        stage = BillingStage.FAILED,
+                        outcome = "PRODUCT_LOAD_FAILED",
+                        extra = e.message
+                    )
+
+                    _state.value = _state.value.copy(
+                        isProductLoading = false,
+                        isProductLoaded = false,
+                        errorMessage = e.message ?: "Ошибка загрузки продукта",
+                        stage = BillingStage.FAILED
+                    )
+                }
+            )
+        }
+    }
 
     fun refreshStatus() {
         viewModelScope.launch {
@@ -130,6 +223,15 @@ class SubscriptionViewModel @Inject constructor(
         }
     }
 
+    private fun isPurchaseAllowed(): Boolean {
+        val s = _state.value
+
+        return s.isProductLoaded &&
+                !s.isProductLoading &&
+                s.stage != BillingStage.PURCHASING &&
+                s.stage != BillingStage.CONFIRMING
+    }
+
     /**
      * Покупка VoltHome PRO через RuStore Pay.
      *
@@ -140,13 +242,18 @@ class SubscriptionViewModel @Inject constructor(
      */
     fun buyPro() {
         viewModelScope.launch {
+            if (!isPurchaseAllowed()) {
+                Log.w(TAG, "BUY_PRO_REJECTED_NOT_ALLOWED")
+                return@launch
+            }
+
             val purchaseFlowId = newFlowId(prefix = "purchase")
 
             logBegin(
                 operation = "buyPro",
                 flowId = purchaseFlowId,
                 stage = BillingStage.PURCHASING,
-                extra = "productId=${maskValue(productId)}"
+                extra = "productId=${maskValue(proProduct.productId)}"
             )
 
             _state.value = _state.value.copy(
@@ -236,12 +343,12 @@ class SubscriptionViewModel @Inject constructor(
                 operation = "purchaseSubscription",
                 flowId = purchaseFlowId,
                 stage = BillingStage.PURCHASING,
-                extra = "productId=${maskValue(productId)}"
+                extra = "productId=${maskValue(proProduct.productId)}"
             )
 
             val payResult = try {
                 billingManager.purchaseSubscription(
-                    productId = productId,
+                    productId = proProduct.productId,
                     flowId = purchaseFlowId
                 )
             } catch (t: Throwable) {
@@ -493,5 +600,51 @@ class SubscriptionViewModel @Inject constructor(
             }
         }
         Log.d(TAG, message)
+    }
+
+    fun debugCheckAvailability() {
+        viewModelScope.launch {
+            val flowId = newFlowId("availability")
+
+            logBegin(
+                operation = "debugCheckAvailability",
+                flowId = flowId,
+                stage = BillingStage.IDLE
+            )
+
+            val result = try {
+                billingManager.checkAvailability(flowId = flowId)
+            } catch (t: Throwable) {
+                logEnd(
+                    operation = "debugCheckAvailability",
+                    flowId = flowId,
+                    stage = BillingStage.FAILED,
+                    outcome = "EXCEPTION",
+                    extra = "errorClass=${t.javaClass.simpleName}, message=${t.message}"
+                )
+                return@launch
+            }
+
+            when (result) {
+                is BillingAvailability.Available -> {
+                    logEnd(
+                        operation = "debugCheckAvailability",
+                        flowId = flowId,
+                        stage = BillingStage.IDLE,
+                        outcome = "AVAILABLE"
+                    )
+                }
+
+                is BillingAvailability.Unavailable -> {
+                    logEnd(
+                        operation = "debugCheckAvailability",
+                        flowId = flowId,
+                        stage = BillingStage.FAILED,
+                        outcome = "UNAVAILABLE",
+                        extra = "code=${result.code}, message=${result.message}"
+                    )
+                }
+            }
+        }
     }
 }

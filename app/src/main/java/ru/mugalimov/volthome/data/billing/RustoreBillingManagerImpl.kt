@@ -2,6 +2,7 @@ package ru.mugalimov.volthome.data.billing
 
 import android.content.Intent
 import android.util.Log
+import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -26,17 +27,18 @@ import ru.rustore.sdk.pay.model.Purchase
 import ru.rustore.sdk.pay.model.PurchaseAvailabilityResult
 import ru.rustore.sdk.pay.model.RuStorePaymentException
 import ru.rustore.sdk.pay.model.SubscriptionPurchase
-import javax.inject.Inject
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /**
  * Реализация поверх RuStorePayClient.
  *
- * Commit 1:
- * - никаких локальных flow id внутри менеджера не генерируем
- * - используем только flowId, который пришёл сверху
- * - логируем только реальные critical boundaries, без мусора
+ * Commit 2:
+ * - не генерируем локальные flow id внутри менеджера;
+ * - используем только flowId, который пришёл сверху;
+ * - для loadProducts явно различаем empty input / empty result / failure;
+ * - пустой список продуктов не считаем ошибкой SDK: это normal success-case,
+ *   а решение «product unavailable» принимает уже ViewModel.
  */
 class RustoreBillingManagerImpl @Inject constructor() : RustoreBillingManager {
 
@@ -56,6 +58,7 @@ class RustoreBillingManagerImpl @Inject constructor() : RustoreBillingManager {
     private val purchaseInteractor: PurchaseInteractor
         get() = payClient.getPurchaseInteractor()
 
+    // Пока не используем явно, но оставляем доступ к interactor на будущее.
     private val userInteractor: UserInteractor
         get() = payClient.getUserInteractor()
 
@@ -144,6 +147,7 @@ class RustoreBillingManagerImpl @Inject constructor() : RustoreBillingManager {
             extra = "productIds=${productIds.map(::maskValue)}"
         )
 
+        // Пустой вход — не ошибка SDK и не crash-case.
         if (productIds.isEmpty()) {
             logEnd(
                 operation = "billing.loadProducts",
@@ -163,18 +167,34 @@ class RustoreBillingManagerImpl @Inject constructor() : RustoreBillingManager {
                     flowId = flowId
                 )
 
+            // Явно мапим SDK-модели в наши UI/домен модели.
             products.map { it.toBillingProduct() }
         }.mapError(
             operation = "billing.loadProducts.mapError",
             flowId = flowId
         ).also { result ->
-            result.onSuccess {
-                logEnd(
-                    operation = "billing.loadProducts",
-                    flowId = flowId,
-                    outcome = "OK",
-                    extra = "count=${it.size}"
-                )
+            result.onSuccess { products ->
+                // Пустой результат — это не failure, а корректный сигнал
+                // для дальнейнего состояния Product unavailable.
+                if (products.isEmpty()) {
+                    logWarn(
+                        operation = "billing.loadProducts",
+                        flowId = flowId,
+                        outcome = "EMPTY_RESULT",
+                        extra = "requestedCount=${productIds.size}"
+                    )
+                } else {
+                    logEnd(
+                        operation = "billing.loadProducts",
+                        flowId = flowId,
+                        outcome = "OK",
+                        extra = buildString {
+                            append("requestedCount=").append(productIds.size)
+                            append(", loadedCount=").append(products.size)
+                            append(", loadedIds=").append(products.map { maskValue(it.id) })
+                        }
+                    )
+                }
             }.onFailure {
                 logError(
                     operation = "billing.loadProducts",
@@ -249,7 +269,6 @@ class RustoreBillingManagerImpl @Inject constructor() : RustoreBillingManager {
                 productType = result.productType,
                 sandbox = result.sandbox
             )
-
         }.mapError(
             operation = "billing.purchaseSubscription.mapError",
             flowId = flowId
@@ -466,25 +485,25 @@ class RustoreBillingManagerImpl @Inject constructor() : RustoreBillingManager {
 
         val (code, message) = when (throwable) {
             is RuStoreNotInstalledException -> BillingErrorCode.RUSTORE_NOT_INSTALLED to
-                    "На устройстве не установлен RuStore"
+                "На устройстве не установлен RuStore"
 
             is RuStoreOutdatedException -> BillingErrorCode.RUSTORE_OUTDATED to
-                    "RuStore устарел, требуется обновление"
+                "RuStore устарел, требуется обновление"
 
             is RuStoreApplicationBannedException -> BillingErrorCode.APPLICATION_BANNED to
-                    "Приложение заблокировано в RuStore"
+                "Приложение заблокировано в RuStore"
 
             is RuStoreUserBannedException -> BillingErrorCode.USER_BANNED to
-                    "Пользователь заблокирован в RuStore"
+                "Пользователь заблокирован в RuStore"
 
             is RuStorePaymentException.RuStorePaymentNetworkException -> BillingErrorCode.NETWORK_ERROR to
-                    "Ошибка сети при обращении к RuStore: ${throwable.message}"
+                "Ошибка сети при обращении к RuStore: ${throwable.message}"
 
             is RuStorePaymentException.RuStorePaymentCommonException -> defaultCode to
-                    (customMessage ?: throwable.message ?: "Ошибка RuStore SDK")
+                (customMessage ?: throwable.message ?: "Ошибка RuStore SDK")
 
             is RuStorePaymentException -> defaultCode to
-                    (customMessage ?: throwable.message ?: "Ошибка платежа RuStore")
+                (customMessage ?: throwable.message ?: "Ошибка платежа RuStore")
 
             else -> defaultCode to (customMessage ?: throwable.message ?: "Неизвестная ошибка биллинга")
         }
