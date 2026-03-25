@@ -1,10 +1,13 @@
 package ru.mugalimov.volthome.data.repository.impl
 
+import android.util.Log
 import com.yandex.authsdk.YandexAuthException
 import com.yandex.authsdk.YandexAuthLoginOptions
 import com.yandex.authsdk.YandexAuthResult
 import com.yandex.authsdk.YandexAuthSdk
 import com.yandex.authsdk.YandexAuthToken
+import javax.inject.Inject
+import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import ru.mugalimov.volthome.data.remote.api.AuthApi
@@ -16,8 +19,6 @@ import ru.mugalimov.volthome.data.remote.auth.SessionManager
 import ru.mugalimov.volthome.data.remote.auth.toAuthSession
 import ru.mugalimov.volthome.data.repository.AuthRepository
 import ru.mugalimov.volthome.data.sync.work.TokenRefreshScheduler
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Реализация репозитория авторизации на основе рекомендаций Яндекс ID SDK 3.1.x.
@@ -29,6 +30,10 @@ class AuthRepositoryImpl @Inject constructor(
     private val session: SessionManager,
     private val tokenRefreshScheduler: TokenRefreshScheduler
 ) : AuthRepository {
+
+    companion object {
+        private const val TAG = "AuthRepositoryImpl"
+    }
 
     override fun loginOptions(): YandexAuthLoginOptions {
         // Централизованное создание options.
@@ -42,22 +47,42 @@ class AuthRepositoryImpl @Inject constructor(
             when (result) {
                 is YandexAuthResult.Success -> {
                     val ya: YandexAuthToken = result.token
-                    return@withContext try {
-                        val resp = authApi.exchange(ExchangeRequest(code = ya.value))
 
+                    return@withContext try {
+                        // Важно:
+                        // 1) code оставляем для совместимости со старой серверной логикой;
+                        // 2) yaAccessToken передаём отдельно, чтобы новый сервер мог
+                        //    сходить в Яндекс /info и получить стабильный id пользователя.
+                        val resp = authApi.exchange(
+                            ExchangeRequest(
+                                code = ya.value,
+                                yaAccessToken = ya.value
+                            )
+                        )
+
+                        // Временный диагностический лог:
+                        // подтверждаем, что uid реально пришёл с сервера.
+                        Log.d(
+                            TAG,
+                            "AUTH_EXCHANGE_OK uid=${resp.uid} refreshIdPresent=${!resp.refreshId.isNullOrBlank()}"
+                        )
+
+                        // Сохраняем uid в локальную сессию.
                         session.save(
                             sessionJwt = resp.sessionJwt,
                             expiresAtEpochSeconds = resp.expiresAtEpochSeconds,
-                            refreshId = resp.refreshId
+                            refreshId = resp.refreshId,
+                            uid = resp.uid
                         )
 
-                        // Единое планирование без expedited
+                        // Единое планирование без expedited.
                         tokenRefreshScheduler.schedule(resp.expiresAtEpochSeconds * 1000L)
 
                         Result.success(
                             AuthSession(
                                 accessToken = resp.sessionJwt,
                                 expiresAtMillis = resp.expiresAtEpochSeconds * 1000L,
+                                uid = resp.uid,
                                 tokenType = "Bearer",
                                 refreshId = resp.refreshId
                             )
@@ -67,8 +92,13 @@ class AuthRepositoryImpl @Inject constructor(
                     }
                 }
 
-                is YandexAuthResult.Failure   -> Result.failure(RuntimeException("oauth_invalid"))
-                is YandexAuthResult.Cancelled -> Result.failure(RuntimeException("cancelled"))
+                is YandexAuthResult.Failure -> {
+                    Result.failure(RuntimeException("oauth_invalid"))
+                }
+
+                is YandexAuthResult.Cancelled -> {
+                    Result.failure(RuntimeException("cancelled"))
+                }
             }
         }
 
@@ -79,10 +109,10 @@ class AuthRepositoryImpl @Inject constructor(
         try {
             authApi.logout(LogoutRequest(refreshId = s?.refreshId))
         } catch (_: Throwable) {
-            // server logout best-effort
+            // Server logout best-effort.
         } finally {
             session.clear()
-            // Ничего отдельно отменять не требуется: при новом логине будет REPLACE
+            // Ничего отдельно отменять не требуется: при новом логине будет REPLACE.
         }
     }
 

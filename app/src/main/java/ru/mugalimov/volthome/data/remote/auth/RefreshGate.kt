@@ -1,5 +1,10 @@
 package ru.mugalimov.volthome.data.remote.auth
 
+import android.util.Log
+import java.security.MessageDigest
+import javax.inject.Inject
+import javax.inject.Named
+import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -8,10 +13,6 @@ import kotlinx.coroutines.withContext
 import ru.mugalimov.volthome.data.remote.api.AuthApi
 import ru.mugalimov.volthome.data.remote.api.RefreshRequest
 import ru.mugalimov.volthome.data.sync.work.TokenRefreshScheduler
-import java.security.MessageDigest
-import javax.inject.Inject
-import javax.inject.Named
-import javax.inject.Singleton
 
 /**
  * Единая точка refresh (single-flight) с защитой от гонок rotation.
@@ -19,7 +20,8 @@ import javax.inject.Singleton
  *
  * ВАЖНО:
  * - после любого успешного /auth/refresh мы не только сохраняем сессию в SessionManager,
- *   но и перепланируем TokenRefreshWorker через TokenRefreshScheduler.
+ *   но и перепланируем TokenRefreshWorker через TokenRefreshScheduler;
+ * - uid тоже обязан сохраняться здесь, иначе после refresh stable identity потеряется.
  */
 @Singleton
 class RefreshGate @Inject constructor(
@@ -41,7 +43,9 @@ class RefreshGate @Inject constructor(
     }
 
     enum class FailureKind {
-        NETWORK, UNAUTHORIZED, UNKNOWN
+        NETWORK,
+        UNAUTHORIZED,
+        UNKNOWN
     }
 
     /**
@@ -54,8 +58,10 @@ class RefreshGate @Inject constructor(
     }
 
     /**
-     * Инициировать refresh, если он нужен. Если уже запущен — дождаться результата.
-     * @param minTtlSec если до истечения меньше, чем столькo секунд — пробуем обновить.
+     * Инициировать refresh, если он нужен.
+     * Если уже запущен — дождаться результата.
+     *
+     * @param minTtlSec если до истечения меньше, чем столько секунд — пробуем обновить.
      */
     suspend fun refreshIfNeeded(minTtlSec: Int): Result = withContext(io) {
         val needs = sessionManager.needsRefresh(leewaySeconds = minTtlSec.toLong())
@@ -79,6 +85,7 @@ class RefreshGate @Inject constructor(
                     lastResult = Result.Failed(FailureKind.UNAUTHORIZED)
                     return@withLock lastResult
                 }
+
                 val usedSha = sha256(refreshToken)
                 lastTokenUsedSha = usedSha
 
@@ -93,19 +100,25 @@ class RefreshGate @Inject constructor(
                     return@withLock lastResult
                 }
 
-                // Успех — сохраняем новую сессию (access + новый refresh),
+                Log.d(
+                    "RefreshGate",
+                    "REFRESH_IF_NEEDED_OK uid=${response.uid} refreshIdPresent=${!response.refreshId.isNullOrBlank()}"
+                )
+
+                // Успех — сохраняем новую сессию (access + новый refresh + uid),
                 // и сразу же планируем следующий refresh.
                 sessionManager.save(
                     sessionJwt = response.sessionJwt,
                     expiresAtEpochSeconds = response.expiresAtEpochSeconds,
-                    refreshId = response.refreshId
+                    refreshId = response.refreshId,
+                    uid = response.uid
                 )
 
                 tokenRefreshScheduler.schedule(response.expiresAtEpochSeconds * 1000L)
 
                 lastResult = Result.Succeeded(response.expiresAtEpochSeconds)
                 return@withLock lastResult
-            } catch (t: Throwable) {
+            } catch (_: Throwable) {
                 lastResult = Result.Failed(FailureKind.UNKNOWN)
                 return@withLock lastResult
             } finally {
@@ -115,7 +128,7 @@ class RefreshGate @Inject constructor(
     }
 
     /**
-     * Жестко выполнить refresh «прямо сейчас», без проверки TTL.
+     * Жестко выполнить refresh прямо сейчас, без проверки TTL.
      * Нужен для Authenticator после 401.
      */
     suspend fun forceRefresh(): Result = withContext(io) {
@@ -123,12 +136,14 @@ class RefreshGate @Inject constructor(
             if (running) {
                 return@withLock lastResult
             }
+
             running = true
             try {
                 val refreshToken = sessionManager.refreshTokenOrNull() ?: run {
                     lastResult = Result.Failed(FailureKind.UNAUTHORIZED)
                     return@withLock lastResult
                 }
+
                 val usedSha = sha256(refreshToken)
                 lastTokenUsedSha = usedSha
 
@@ -136,9 +151,12 @@ class RefreshGate @Inject constructor(
                     authApi.refresh(RefreshRequest(refreshId = refreshToken))
                 } catch (e: Throwable) {
                     // Проверяем гонку rotation:
-                    // если в сторе уже лежит другой refresh-токен — значит, где-то параллельно всё уже обновилось.
+                    // если в сторе уже лежит другой refresh-токен — значит,
+                    // где-то параллельно всё уже обновилось.
                     val currentRefreshNow = sessionManager.refreshTokenOrNull()
-                    return@withLock if (currentRefreshNow != null && sha256(currentRefreshNow) != usedSha) {
+                    return@withLock if (
+                        currentRefreshNow != null && sha256(currentRefreshNow) != usedSha
+                    ) {
                         lastResult = Result.Failed(FailureKind.UNKNOWN)
                         lastResult
                     } else {
@@ -148,10 +166,17 @@ class RefreshGate @Inject constructor(
                     }
                 }
 
+                Log.d(
+                    "RefreshGate",
+                    "FORCE_REFRESH_OK uid=${response.uid} refreshIdPresent=${!response.refreshId.isNullOrBlank()}"
+                )
+
+                // При forceRefresh тоже обязаны сохранять uid.
                 sessionManager.save(
                     sessionJwt = response.sessionJwt,
                     expiresAtEpochSeconds = response.expiresAtEpochSeconds,
-                    refreshId = response.refreshId
+                    refreshId = response.refreshId,
+                    uid = response.uid
                 )
 
                 // Планируем следующий refresh по новому exp.

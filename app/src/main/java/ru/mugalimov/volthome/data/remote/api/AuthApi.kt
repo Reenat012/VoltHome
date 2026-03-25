@@ -4,15 +4,42 @@ import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.POST
 
-data class ExchangeRequest(val code: String? = null, val uid: String? = null)
-data class RefreshRequest(val refreshId: String? = null)
-data class LogoutRequest(val refreshId: String? = null)
+/**
+ * Запрос обмена результата Яндекс ID на серверную сессию.
+ *
+ * Важно:
+ * - code оставляем для обратной совместимости;
+ * - yaAccessToken добавляем как явное поле, чтобы сервер мог сходить в /info
+ *   и получить стабильный Yandex user id;
+ * - uid оставляем как совместимое поле на будущее/для fallback-сценариев.
+ */
+data class ExchangeRequest(
+    val code: String? = null,
+    val uid: String? = null,
+    val yaAccessToken: String? = null
+)
 
+data class RefreshRequest(
+    val refreshId: String? = null
+)
+
+data class LogoutRequest(
+    val refreshId: String? = null
+)
+
+/**
+ * Ответ сервера с серверной сессией.
+ *
+ * Важно:
+ * - uid теперь приходит с сервера как owner identity;
+ * - старый сервер может uid не прислать, поэтому поле nullable.
+ */
 data class SessionResponse(
     val sessionJwt: String,
     val expiresAtEpochSeconds: Long,
     val expiresAt: Long? = null,
-    val refreshId: String? = null
+    val refreshId: String? = null,
+    val uid: String? = null
 )
 
 interface AuthApi {

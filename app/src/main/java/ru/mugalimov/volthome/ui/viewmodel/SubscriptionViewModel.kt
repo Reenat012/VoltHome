@@ -14,12 +14,14 @@ import ru.mugalimov.volthome.data.billing.BillingAvailability
 import ru.mugalimov.volthome.data.billing.BillingErrorCode
 import ru.mugalimov.volthome.data.billing.BillingException
 import ru.mugalimov.volthome.data.billing.RustoreBillingManager
+import ru.mugalimov.volthome.data.remote.auth.RefreshGate
 import ru.mugalimov.volthome.data.repository.SubscriptionRepository
 
 @HiltViewModel
 class SubscriptionViewModel @Inject constructor(
     private val subscriptionRepository: SubscriptionRepository,
-    private val billingManager: RustoreBillingManager
+    private val billingManager: RustoreBillingManager,
+    private val refreshGate: RefreshGate
 ) : ViewModel() {
 
     companion object {
@@ -644,6 +646,63 @@ class SubscriptionViewModel @Inject constructor(
                         extra = "code=${result.code}, message=${result.message}"
                     )
                 }
+            }
+        }
+    }
+
+    fun debugForceRefreshSession() {
+        viewModelScope.launch {
+            val flowId = newFlowId("force-refresh")
+
+            logBegin(
+                operation = "debugForceRefreshSession",
+                flowId = flowId,
+                stage = BillingStage.IDLE
+            )
+
+            try {
+                // Если RefreshGate у тебя ещё не внедрён в этот VM,
+                // его надо добавить в конструктор.
+                val result = refreshGate.forceRefresh()
+
+                when (result) {
+                    is RefreshGate.Result.Succeeded -> {
+                        logEnd(
+                            operation = "debugForceRefreshSession",
+                            flowId = flowId,
+                            stage = BillingStage.IDLE,
+                            outcome = "REFRESH_OK",
+                            extra = "newExpSeconds=${result.newExpSeconds}"
+                        )
+                    }
+
+                    is RefreshGate.Result.Idle -> {
+                        logEnd(
+                            operation = "debugForceRefreshSession",
+                            flowId = flowId,
+                            stage = BillingStage.IDLE,
+                            outcome = "REFRESH_IDLE"
+                        )
+                    }
+
+                    is RefreshGate.Result.Failed -> {
+                        logEnd(
+                            operation = "debugForceRefreshSession",
+                            flowId = flowId,
+                            stage = BillingStage.FAILED,
+                            outcome = "REFRESH_FAILED",
+                            extra = "kind=${result.kind}"
+                        )
+                    }
+                }
+            } catch (t: Throwable) {
+                logEnd(
+                    operation = "debugForceRefreshSession",
+                    flowId = flowId,
+                    stage = BillingStage.FAILED,
+                    outcome = "EXCEPTION",
+                    extra = "errorClass=${t.javaClass.simpleName}, message=${t.message}"
+                )
             }
         }
     }

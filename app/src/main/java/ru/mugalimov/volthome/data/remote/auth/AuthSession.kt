@@ -1,5 +1,11 @@
 package ru.mugalimov.volthome.data.remote.auth
 
+/**
+ * Домашняя модель авторизационной сессии.
+ *
+ * uid нужен как стабильный идентификатор пользователя,
+ * который приходит с сервера и затем используется в recovery-сценариях.
+ */
 data class AuthSession(
     val accessToken: String,
     val expiresAtMillis: Long,
@@ -17,6 +23,7 @@ fun SessionManager.AuthSession.toAuthSession(): AuthSession =
     AuthSession(
         accessToken = accessToken,
         expiresAtMillis = expiresAtMillis,
+        uid = uid,
         tokenType = tokenType,
         refreshId = refreshId
     )
@@ -27,5 +34,6 @@ fun AuthSession.toSessionAuth(): SessionManager.AuthSession =
         accessToken = accessToken,
         tokenType = tokenType,
         expiresAtMillis = expiresAtMillis,
-        refreshId = refreshId
+        refreshId = refreshId,
+        uid = uid
     )

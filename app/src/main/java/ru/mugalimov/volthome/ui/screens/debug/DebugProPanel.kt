@@ -2,8 +2,10 @@ package ru.mugalimov.volthome.ui.screens.debug
 
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
@@ -34,15 +36,31 @@ fun DebugProPanel(
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
     ) {
-        Row(
+        Column(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(
-                text = if (enabled) "DEBUG: PRO ON" else "DEBUG: PRO OFF",
-                style = MaterialTheme.typography.labelLarge
-            )
-            Switch(checked = enabled, onCheckedChange = { vm.setEnabled(it) })
+
+            // 🔹 Существующий переключатель
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = if (enabled) "DEBUG: PRO ON" else "DEBUG: PRO OFF",
+                    style = MaterialTheme.typography.labelLarge
+                )
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = { vm.setEnabled(it) }
+                )
+            }
+
+            // 🔥 ВОТ СЮДА ДОБАВЛЯЕМ КНОПКУ
+            Button(
+                onClick = { vm.forceRefreshSession() }
+            ) {
+                Text("Force refresh session")
+            }
         }
     }
 }

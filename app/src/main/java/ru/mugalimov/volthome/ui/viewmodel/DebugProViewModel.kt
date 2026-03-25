@@ -1,17 +1,22 @@
 package ru.mugalimov.volthome.ui.viewmodel
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import ru.mugalimov.volthome.data.remote.auth.RefreshGate
 import ru.mugalimov.volthome.data.repository.UserPlanRepository
 
 @HiltViewModel
 class DebugProViewModel @Inject constructor(
     app: Application,
-    private val userPlanRepository: UserPlanRepository
+    private val userPlanRepository: UserPlanRepository,
+    private val refreshGate: RefreshGate
 ) : AndroidViewModel(app) {
 
     private val prefs =
@@ -34,5 +39,12 @@ class DebugProViewModel @Inject constructor(
 
     private fun apply(v: Boolean) {
         userPlanRepository.setDebugForcePro(v)
+    }
+
+    fun forceRefreshSession() {
+        viewModelScope.launch {
+            val result = refreshGate.forceRefresh()
+            Log.d("DEBUG_REFRESH", "result=$result")
+        }
     }
 }
