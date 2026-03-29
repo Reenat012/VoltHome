@@ -53,6 +53,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.R
+import ru.mugalimov.volthome.data.billing.pending.PendingConfirmCoordinator
 import ru.mugalimov.volthome.data.local.dao.GroupPhaseOverrideDao
 import ru.mugalimov.volthome.data.ownership.OwnershipOverridesCleaner
 import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
@@ -82,7 +83,7 @@ import ru.mugalimov.volthome.ui.viewmodel.UserPlanViewModel
 @Composable
 fun MainApp(
     rootNavController: NavHostController,
-    authVm: AuthViewModel
+    authVm: AuthViewModel,
 ) {
     val appNavController = rememberNavController()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -93,9 +94,21 @@ fun MainApp(
     val context = LocalContext.current
     val appContext = context.applicationContext
 
+    val pendingCoordinator = remember {
+        EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            BillingPendingEntryPoint::class.java
+        ).pendingConfirmCoordinator()
+    }
+
     // ✅ Guard: единая точка запрета действий в manual
     val manualGuard = remember {
         ManualModeGuard.fromApp(appContext)
+    }
+
+    LaunchedEffect(Unit) {
+        // 🔥 cold start replay
+        pendingCoordinator.tryReplay("cold_start")
     }
 
     // ✅ Paywall bus (глобально)
@@ -451,7 +464,12 @@ fun MainApp(
     // Подтягиваем профиль, когда авторизация успешна
     LaunchedEffect(authVm.state.collectAsState().value) {
         val s = authVm.state.value
-        if (s is AuthViewModel.State.Success) profileVm.refresh()
+        if (s is AuthViewModel.State.Success) {
+            profileVm.refresh()
+
+            // 🔥 Commit 3 — replay pending после логина
+            pendingCoordinator.tryReplay("login")
+        }
     }
 
     val profileFlow: Flow<UserProfileUi?> =
@@ -735,4 +753,10 @@ private fun PaywallBulletItem(text: String) {
             style = MaterialTheme.typography.bodyMedium
         )
     }
+}
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface BillingPendingEntryPoint {
+    fun pendingConfirmCoordinator(): PendingConfirmCoordinator
 }

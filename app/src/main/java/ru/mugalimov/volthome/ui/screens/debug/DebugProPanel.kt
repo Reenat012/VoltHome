@@ -61,6 +61,12 @@ fun DebugProPanel(
             ) {
                 Text("Force refresh session")
             }
+
+            Button(
+                onClick = { vm.debugCallConfirmDirectly() }
+            ) {
+                Text("Debug confirm direct")
+            }
         }
     }
 }

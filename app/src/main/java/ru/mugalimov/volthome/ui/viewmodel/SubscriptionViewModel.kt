@@ -4,24 +4,28 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
 import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import ru.mugalimov.volthome.BuildConfig
 import ru.mugalimov.volthome.data.billing.BillingAvailability
 import ru.mugalimov.volthome.data.billing.BillingErrorCode
 import ru.mugalimov.volthome.data.billing.BillingException
 import ru.mugalimov.volthome.data.billing.RustoreBillingManager
 import ru.mugalimov.volthome.data.remote.auth.RefreshGate
 import ru.mugalimov.volthome.data.repository.SubscriptionRepository
+import ru.mugalimov.volthome.data.billing.pending.PendingConfirmCoordinator
 
 @HiltViewModel
 class SubscriptionViewModel @Inject constructor(
     private val subscriptionRepository: SubscriptionRepository,
     private val billingManager: RustoreBillingManager,
-    private val refreshGate: RefreshGate
+    private val refreshGate: RefreshGate,
+    private val pendingCoordinator: PendingConfirmCoordinator
 ) : ViewModel() {
 
     companion object {
@@ -76,10 +80,15 @@ class SubscriptionViewModel @Inject constructor(
                 return@launch
             }
 
-            // ❗ НОВОЕ: если уже знаем, что продукта нет — не долбим SDK повторно
-            if (current.isProductUnavailable) {
+            // В release не долбим SDK повторно, если уже знаем, что продукта нет.
+            // В debug разрешаем повторную попытку, чтобы можно было тестировать сценарии.
+            if (current.isProductUnavailable && !BuildConfig.DEBUG) {
                 Log.d(TAG, "LOAD_PRODUCTS_SKIPPED_ALREADY_UNAVAILABLE")
                 return@launch
+            }
+
+            if (current.isProductUnavailable && BuildConfig.DEBUG) {
+                Log.d(TAG, "LOAD_PRODUCTS_RETRY_DEBUG")
             }
 
             val flowId = newFlowId("product")
@@ -92,6 +101,7 @@ class SubscriptionViewModel @Inject constructor(
 
             _state.value = current.copy(
                 isProductLoading = true,
+                isProductUnavailable = false,
                 errorMessage = null,
                 stage = BillingStage.LOADING_PRODUCT
             )
@@ -393,12 +403,29 @@ class SubscriptionViewModel @Inject constructor(
                         }
                     )
 
+                    // 🔥 СНАЧАЛА сохраняем pending (КРИТИЧНО)
+                    pendingCoordinator.onSdkSuccess(
+                        flowId = purchaseFlowId,
+                        productId = purchase.productId,
+                        orderId = purchase.invoiceId,
+                        purchaseToken = purchase.purchaseId
+                    )
+
                     // SDK success — это только переход в ожидание server confirm.
                     _state.value = _state.value.copy(
                         isLoading = true,
                         stage = BillingStage.PENDING_CONFIRM,
                         purchaseFlowId = purchaseFlowId
                     )
+
+                    // ✅ ТЕСТ Commit 3:
+// даём окно, чтобы успеть убить приложение после SDK success,
+// но до backend confirm.
+                    Log.d(
+                        TAG,
+                        "TEST_PENDING_WINDOW flowId=$purchaseFlowId delayBeforeConfirmMs=10000"
+                    )
+                    delay(10_000)
 
                     // Шаг 3. Backend confirm.
                     logBegin(
@@ -443,6 +470,9 @@ class SubscriptionViewModel @Inject constructor(
                                 extra = "finalPlan=${plan.plan}"
                             )
 
+                            // 🔥 очистка pending после server-consistent результата
+                            pendingCoordinator.onConfirmSuccess(purchaseFlowId)
+
                             UiState(
                                 isLoading = false,
                                 infoMessage = "Подписка ВольтХом PRO активирована",
@@ -465,6 +495,12 @@ class SubscriptionViewModel @Inject constructor(
                                 stage = BillingStage.FAILED,
                                 outcome = "PURCHASE_FLOW_FAILED_AFTER_SDK_SUCCESS",
                                 extra = "errorClass=${e.javaClass.simpleName}, errorMessage=${e.message}"
+                            )
+
+                            // 🔥 фиксируем неудачную попытку (retry потом)
+                            pendingCoordinator.onConfirmFailed(
+                                flowId = purchaseFlowId,
+                                error = e
                             )
 
                             UiState(

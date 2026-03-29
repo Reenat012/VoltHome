@@ -48,6 +48,12 @@ android {
             "true"
         )
 
+        buildConfigField(
+            "boolean",
+            "BILLING_PENDING_CONFIRM_ENABLED",
+            "true"
+        )
+
 //        addManifestPlaceholders(
 //            mapOf(
 //                "VKIDClientID" to providers.gradleProperty("VKIDClientID").get(),

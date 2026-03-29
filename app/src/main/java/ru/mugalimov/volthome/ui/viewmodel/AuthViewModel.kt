@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.BuildConfig
+import ru.mugalimov.volthome.data.billing.pending.PendingConfirmCoordinator
 import ru.mugalimov.volthome.data.remote.auth.AuthSession
 import ru.mugalimov.volthome.data.remote.yandex.YandexTokenStore
 import ru.mugalimov.volthome.data.repository.AuthRepository
@@ -23,7 +24,8 @@ import javax.inject.Inject
 class AuthViewModel @Inject constructor(
     private val authRepo: AuthRepository,
     private val projectsRepo: ProjectsRepository,
-    private val yaTokenStore: YandexTokenStore
+    private val yaTokenStore: YandexTokenStore,
+    private val pendingCoordinator: PendingConfirmCoordinator
 ) : ViewModel() {
 
     // === СЕТЕВОЕ / СЕРВЕРНОЕ СОСТОЯНИЕ АВТОРИЗАЦИИ ===
@@ -104,6 +106,9 @@ class AuthViewModel @Inject constructor(
             _state.value = res.fold(
                 onSuccess = { session ->
                     launch { runCatching { projectsRepo.bootstrapFromRemote() } }
+                    // 🔥 после успешного логина
+                    pendingCoordinator.tryReplay("auth_success")
+
                     State.Success(session)
                 },
                 onFailure = { State.Error(mapThrowableToUi(it)) }
