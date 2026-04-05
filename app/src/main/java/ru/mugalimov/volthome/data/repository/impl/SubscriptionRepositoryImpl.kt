@@ -1,6 +1,7 @@
 package ru.mugalimov.volthome.data.repository.impl
 
 import android.util.Log
+import ru.mugalimov.volthome.data.billing.BillingRecoveryCoordinator
 import javax.inject.Inject
 import javax.inject.Singleton
 import ru.mugalimov.volthome.data.remote.api.BillingApi
@@ -32,56 +33,65 @@ class SubscriptionRepositoryImpl @Inject constructor(
     }
 
     override suspend fun syncStatus(
-        flowId: String?
-    ): Result<UserPlan> = runCatching {
-        logBegin(
-            operation = "repo.syncStatus",
-            flowId = flowId,
-            extra = "route=GET /v1/billing/status"
-        )
+        flowId: String?,
+        source: String
+    ): Result<UserPlan> {
+        val safeFlowId = flowId ?: "status-no-flow"
 
-        val dto = billingApi.getStatus()
+        return runCatching {
+            logBegin(
+                operation = "repo.syncStatus",
+                flowId = safeFlowId,
+                extra = "route=GET /v1/billing/status, source=$source"
+            )
 
-        val plan = UserPlan(
-            plan = dto.plan.ifBlank { "free" },
-            planUntilEpochSeconds = dto.periodEndEpochSeconds
-        )
+            val dto = billingApi.getStatus()
 
-        userPlanRepository.setPlan(plan)
+            val plan = UserPlan(
+                plan = dto.plan.ifBlank { "free" },
+                planUntilEpochSeconds = dto.periodEndEpochSeconds
+            )
 
-        logEnd(
-            operation = "repo.syncStatus",
-            flowId = flowId,
-            outcome = "SYNC_STATUS_OK",
-            extra = buildString {
-                append("plan=").append(plan.plan)
-                append(", status=").append(dto.status)
-                append(", productId=").append(maskValue(dto.productId))
-                append(", planUntil=").append(plan.planUntilEpochSeconds)
-            }
-        )
+            userPlanRepository.setPlan(plan)
 
-        plan
-    }.onFailure {
-        logError(
-            operation = "repo.syncStatus",
-            flowId = flowId,
-            outcome = "SYNC_STATUS_FAILED",
-            throwable = it
-        )
+            logEnd(
+                operation = "repo.syncStatus",
+                flowId = safeFlowId,
+                outcome = "SYNC_STATUS_OK",
+                extra = buildString {
+                    append("source=").append(source)
+                    append(", plan=").append(plan.plan)
+                    append(", status=").append(dto.status)
+                    append(", productId=").append(maskValue(dto.productId))
+                    append(", planUntil=").append(plan.planUntilEpochSeconds)
+                }
+            )
+
+            plan
+        }.onFailure {
+            logError(
+                operation = "repo.syncStatus",
+                flowId = safeFlowId,
+                outcome = "SYNC_STATUS_FAILED",
+                throwable = it,
+                extra = "source=$source"
+            )
+        }
     }
 
     override suspend fun confirmRustorePurchase(
         productId: String,
         orderId: String,
         purchaseToken: String,
-        flowId: String?
+        flowId: String?,
+        source: String
     ): Result<UserPlan> = runCatching {
         logBegin(
             operation = "repo.confirmRustorePurchase",
             flowId = flowId,
             extra = buildString {
                 append("route=POST /v1/billing/rustore/confirm")
+                append(", source=").append(source)
                 append(", productId=").append(maskValue(productId))
                 append(", orderId=").append(maskValue(orderId))
                 append(", purchaseToken=").append(maskValue(purchaseToken))
@@ -108,7 +118,8 @@ class SubscriptionRepositoryImpl @Inject constructor(
             flowId = flowId,
             outcome = "CONFIRM_OK",
             extra = buildString {
-                append("ok=").append(resp.ok)
+                append("source=").append(source)
+                append(", ok=").append(resp.ok)
                 append(", plan=").append(plan.plan)
                 append(", status=").append(resp.status)
                 append(", planUntil=").append(plan.planUntilEpochSeconds)
@@ -123,7 +134,8 @@ class SubscriptionRepositoryImpl @Inject constructor(
             outcome = "CONFIRM_FAILED",
             throwable = it,
             extra = buildString {
-                append("productId=").append(maskValue(productId))
+                append("source=").append(source)
+                append(", productId=").append(maskValue(productId))
                 append(", orderId=").append(maskValue(orderId))
                 append(", purchaseToken=").append(maskValue(purchaseToken))
             }

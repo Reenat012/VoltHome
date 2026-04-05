@@ -11,13 +11,13 @@ import ru.mugalimov.volthome.domain.model.UserPlan
 @Singleton
 class UserPlanRepositoryImpl @Inject constructor() : UserPlanRepository {
 
-    // план, пришедший с сервера (истина в проде)
+    // План, пришедший с сервера. Это единственный источник entitlement в проде.
     private val _serverPlan = MutableStateFlow(UserPlan.FREE)
 
-    // debug-only форс
+    // Debug-only runtime override.
     private val _debugForcePro = MutableStateFlow(false)
 
-    // итоговый план, который видит UI
+    // Итоговый план, который читает UI.
     private val _planFlow = MutableStateFlow(UserPlan.FREE)
     override val planFlow: StateFlow<UserPlan> = _planFlow
 
@@ -36,6 +36,19 @@ class UserPlanRepositoryImpl @Inject constructor() : UserPlanRepository {
     }
 
     override fun isDebugForceProEnabled(): Boolean = _debugForcePro.value
+
+    override suspend fun resetToFree(clearDebugOverride: Boolean) {
+        // Сбрасываем серверный план в free, чтобы следующий пользователь
+        // не увидел entitlement прошлого пользователя.
+        _serverPlan.value = UserPlan.FREE
+
+        // Сбрасываем runtime debug override.
+        if (clearDebugOverride) {
+            _debugForcePro.value = false
+        }
+
+        recompute()
+    }
 
     private fun recompute() {
         _planFlow.value =

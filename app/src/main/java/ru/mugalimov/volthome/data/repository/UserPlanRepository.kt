@@ -28,4 +28,17 @@ interface UserPlanRepository {
      * В release может всегда возвращать false.
      */
     fun isDebugForceProEnabled(): Boolean
+
+    /**
+     * Полный сброс клиентского entitlement-состояния.
+     *
+     * Нужен на logout, чтобы новый пользователь не унаследовал:
+     * - серверный plan прошлого пользователя;
+     * - runtime debug-force состояние.
+     *
+     * Важно:
+     * persisted debug override в SharedPreferences этим методом НЕ чистится,
+     * если она хранится вне репозитория.
+     */
+    suspend fun resetToFree(clearDebugOverride: Boolean = true)
 }

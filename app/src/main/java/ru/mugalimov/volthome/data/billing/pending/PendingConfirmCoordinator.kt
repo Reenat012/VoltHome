@@ -1,12 +1,14 @@
 package ru.mugalimov.volthome.data.billing.pending
 
 import android.util.Log
+import kotlinx.coroutines.delay
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import retrofit2.HttpException
 import ru.mugalimov.volthome.BuildConfig
+import ru.mugalimov.volthome.data.billing.BillingRecoveryCoordinator
 import ru.mugalimov.volthome.data.billing.pending.model.PendingConfirmRecord
 import ru.mugalimov.volthome.data.billing.pending.model.PendingConfirmState
 import ru.mugalimov.volthome.data.billing.pending.storage.PendingConfirmStorage
@@ -17,7 +19,8 @@ import ru.mugalimov.volthome.data.repository.SubscriptionRepository
 class PendingConfirmCoordinator @Inject constructor(
     private val storage: PendingConfirmStorage,
     private val sessionManager: SessionManager,
-    private val subscriptionRepository: SubscriptionRepository
+    private val subscriptionRepository: SubscriptionRepository,
+    private val billingRecoveryCoordinator: BillingRecoveryCoordinator
 ) {
 
     companion object {
@@ -29,6 +32,11 @@ class PendingConfirmCoordinator @Inject constructor(
          */
         private const val UNKNOWN_USER_ID = "__missing_uid__"
     }
+
+    /**
+     * Владелец identity для replay-контура.
+     */
+    private fun replayOwner(flowId: String): String = "pending_replay:$flowId"
 
     private val replayMutex = Mutex()
 
@@ -129,6 +137,38 @@ class PendingConfirmCoordinator @Inject constructor(
     }
 
     /**
+     * Очистка pending-хвоста при logout.
+     *
+     * Важно:
+     * - чистим только user scope текущего пользователя;
+     * - при необходимости заодно убираем fallback unknown-user записи,
+     *   чтобы новый логин не унаследовал старый pending хвост.
+     */
+    suspend fun clearForLogout(userId: String?) {
+        if (!BuildConfig.BILLING_PENDING_CONFIRM_ENABLED) {
+            Log.w(TAG, "LOGOUT_CLEAR_SKIPPED featureFlag=false")
+            return
+        }
+
+        if (userId.isNullOrBlank()) {
+            // Если uid уже потерян, делаем best-effort очистку только unknown bucket.
+            Log.w(TAG, "LOGOUT_CLEAR_NO_UID")
+            storage.removeByUserId(
+                userId = UNKNOWN_USER_ID,
+                includeUnknownUser = true
+            )
+            return
+        }
+
+        storage.removeByUserId(
+            userId = userId,
+            includeUnknownUser = true
+        )
+
+        Log.w(TAG, "LOGOUT_CLEAR_DONE userId=$userId")
+    }
+
+    /**
      * Replay при старте / логине / cold start.
      *
      * Важно:
@@ -144,86 +184,133 @@ class PendingConfirmCoordinator @Inject constructor(
         }
 
         replayMutex.withLock {
-            val now = System.currentTimeMillis()
-            val currentUid = sessionManager.currentUidOrNull()
-            val records = storage.getAll().sortedBy { it.createdAt }
-
-            Log.d(
-                TAG,
-                "REPLAY_BEGIN reason=$reason currentUid=$currentUid records=${records.size}"
-            )
-
-            records.forEach { record ->
-                // Терминальные записи не переигрываем.
-                if (record.isTerminal) {
-                    return@forEach
-                }
-
-                // Просроченные записи переводим в terminal-failed.
-                if (now - record.createdAt > PendingConfirmRecord.MAX_RECORD_AGE_MS) {
-                    storage.upsert(
-                        record.asTerminalFailed(errorCode = "STALE_PENDING")
-                    )
-                    Log.w(TAG, "REPLAY_STALE_TO_TERMINAL flowId=${record.purchaseFlowId}")
-                    return@forEach
-                }
-
-                // Если запись привязана к другому пользователю — не трогаем.
-                if (
-                    currentUid != null &&
-                    record.userId != UNKNOWN_USER_ID &&
-                    record.userId != currentUid
-                ) {
-                    Log.w(
-                        TAG,
-                        "REPLAY_SKIPPED_USER_MISMATCH flowId=${record.purchaseFlowId} recordUser=${record.userId} currentUser=$currentUid"
-                    )
-                    return@forEach
-                }
-
-                // Если ещё не пришло время retry — пропускаем.
-                if (!record.canRetry(now)) {
-                    Log.d(
-                        TAG,
-                        "REPLAY_SKIPPED_BACKOFF flowId=${record.purchaseFlowId} nextRetryAt=${record.nextRetryAtMillis()}"
-                    )
-                    return@forEach
-                }
-
-                // Перед вызовом confirm фиксируем состояние CONFIRMING.
-                storage.upsert(
-                    record.copy(
-                        state = PendingConfirmState.CONFIRMING,
-                        lastAttemptAt = now
-                    )
-                )
-
-                val result = subscriptionRepository.confirmRustorePurchase(
-                    productId = record.productId,
-                    orderId = record.orderId,
-                    purchaseToken = record.purchaseToken,
-                    flowId = record.purchaseFlowId
-                )
-
-                result.fold(
-                    onSuccess = {
-                        onConfirmSuccess(record.purchaseFlowId)
-                        Log.d(
-                            TAG,
-                            "REPLAY_CONFIRM_OK flowId=${record.purchaseFlowId} reason=$reason"
-                        )
-                    },
-                    onFailure = { error ->
-                        onConfirmFailed(record.purchaseFlowId, error)
-                        Log.w(
-                            TAG,
-                            "REPLAY_CONFIRM_FAILED flowId=${record.purchaseFlowId} reason=$reason errorClass=${error.javaClass.simpleName}"
-                        )
-                    }
-                )
+            // 🔥 replay имеет приоритет над restore/status refresh.
+            if (!billingRecoveryCoordinator.beginPendingReplay(reason)) {
+                Log.w(TAG, "REPLAY_SKIPPED_COORDINATOR_REJECT reason=$reason")
+                return@withLock
             }
 
-            Log.d(TAG, "REPLAY_END reason=$reason")
+            try {
+                val now = System.currentTimeMillis()
+                val currentUid = sessionManager.currentUidOrNull()
+                val records = storage.getAll().sortedBy { it.createdAt }
+
+                Log.d(
+                    TAG,
+                    "REPLAY_BEGIN reason=$reason currentUid=$currentUid records=${records.size}"
+                )
+
+                records.forEach { record ->
+                    // Терминальные записи не переигрываем.
+                    if (record.isTerminal) {
+                        return@forEach
+                    }
+
+                    // Просроченные записи переводим в terminal-failed.
+                    if (now - record.createdAt > PendingConfirmRecord.MAX_RECORD_AGE_MS) {
+                        storage.upsert(
+                            record.asTerminalFailed(errorCode = "STALE_PENDING")
+                        )
+                        Log.w(TAG, "REPLAY_STALE_TO_TERMINAL flowId=${record.purchaseFlowId}")
+                        return@forEach
+                    }
+
+                    // Если запись привязана к другому пользователю — не трогаем.
+                    if (
+                        currentUid != null &&
+                        record.userId != UNKNOWN_USER_ID &&
+                        record.userId != currentUid
+                    ) {
+                        Log.w(
+                            TAG,
+                            "REPLAY_SKIPPED_USER_MISMATCH flowId=${record.purchaseFlowId} recordUser=${record.userId} currentUser=$currentUid"
+                        )
+                        return@forEach
+                    }
+
+                    // Если ещё не пришло время retry — пропускаем.
+                    if (!record.canRetry(now)) {
+                        Log.d(
+                            TAG,
+                            "REPLAY_SKIPPED_BACKOFF flowId=${record.purchaseFlowId} nextRetryAt=${record.nextRetryAtMillis()}"
+                        )
+                        return@forEach
+                    }
+
+                    // 🔥 Нельзя, чтобы одна identity одновременно пошла
+                    // и через pending replay, и через другой recovery-контур.
+                    val owner = replayOwner(record.purchaseFlowId)
+                    val identityAcquired = billingRecoveryCoordinator.tryAcquireIdentity(
+                        productId = record.productId,
+                        orderId = record.orderId,
+                        purchaseToken = record.purchaseToken,
+                        owner = owner
+                    )
+
+                    if (!identityAcquired) {
+                        Log.w(
+                            TAG,
+                            "REPLAY_SKIPPED_IDENTITY_BUSY flowId=${record.purchaseFlowId} reason=$reason"
+                        )
+                        return@forEach
+                    }
+
+                    try {
+                        // Перед вызовом confirm фиксируем состояние CONFIRMING.
+                        storage.upsert(
+                            record.copy(
+                                state = PendingConfirmState.CONFIRMING,
+                                lastAttemptAt = now
+                            )
+                        )
+
+
+                        // 🔥 ТЕСТОВОЕ ОКНО:
+                        // даём время руками нажать manual restore, пока pending replay ещё активен.
+                        Log.d(
+                            TAG,
+                            "REPLAY_TEST_WINDOW_OPEN flowId=${record.purchaseFlowId} reason=$reason"
+                        )
+                        delay(10_000)
+
+                        val result = subscriptionRepository.confirmRustorePurchase(
+                            productId = record.productId,
+                            orderId = record.orderId,
+                            purchaseToken = record.purchaseToken,
+                            flowId = record.purchaseFlowId,
+                            source = "pending_replay"
+                        )
+
+                        result.fold(
+                            onSuccess = {
+                                onConfirmSuccess(record.purchaseFlowId)
+                                Log.d(
+                                    TAG,
+                                    "REPLAY_CONFIRM_OK flowId=${record.purchaseFlowId} reason=$reason"
+                                )
+                            },
+                            onFailure = { error ->
+                                onConfirmFailed(record.purchaseFlowId, error)
+                                Log.w(
+                                    TAG,
+                                    "REPLAY_CONFIRM_FAILED flowId=${record.purchaseFlowId} reason=$reason errorClass=${error.javaClass.simpleName}"
+                                )
+                            }
+                        )
+                    } finally {
+                        billingRecoveryCoordinator.releaseIdentity(
+                            productId = record.productId,
+                            orderId = record.orderId,
+                            purchaseToken = record.purchaseToken,
+                            owner = owner
+                        )
+                    }
+                }
+
+                Log.d(TAG, "REPLAY_END reason=$reason")
+            } finally {
+                billingRecoveryCoordinator.endPendingReplay(reason)
+            }
         }
     }
 

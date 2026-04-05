@@ -67,6 +67,24 @@ fun DebugProPanel(
             ) {
                 Text("Debug confirm direct")
             }
+
+            Button(
+                onClick = { vm.debugInjectPendingPurchase() }
+            ) {
+                Text("Inject pending purchase")
+            }
+
+            Button(
+                onClick = { vm.debugRestoreSamePurchaseAsPending() }
+            ) {
+                Text("Debug restore same purchase")
+            }
+
+            Button(
+                onClick = { vm.debugTryAcquireSameIdentityWhileReplay() }
+            ) {
+                Text("Try acquire same identity")
+            }
         }
     }
 }

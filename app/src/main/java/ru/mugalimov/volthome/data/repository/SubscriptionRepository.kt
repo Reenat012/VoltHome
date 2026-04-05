@@ -24,7 +24,8 @@ interface SubscriptionRepository {
      * GET /v1/billing/status
      */
     suspend fun syncStatus(
-        flowId: String? = null
+        flowId: String? = null,
+        source: String = "manual"
     ): Result<UserPlan>
 
     /**
@@ -35,6 +36,7 @@ interface SubscriptionRepository {
         productId: String,
         orderId: String,
         purchaseToken: String,
-        flowId: String? = null
+        flowId: String? = null,
+        source: String = "direct_confirm"
     ): Result<UserPlan>
 }

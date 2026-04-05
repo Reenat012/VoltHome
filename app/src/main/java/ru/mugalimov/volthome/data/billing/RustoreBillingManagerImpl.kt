@@ -333,12 +333,36 @@ class RustoreBillingManagerImpl @Inject constructor() : RustoreBillingManager {
             operation = "billing.restorePurchases.mapError",
             flowId = flowId
         ).also { result ->
-            result.onSuccess {
+            result.onSuccess { purchases ->
+                // Отдельно считаем подписки, потому что именно они важны для restore PRO.
+                val subscriptions = purchases.filterIsInstance<SubscriptionPurchase>()
+
+                // Для логов даём короткий preview по первым найденным подпискам.
+                val preview = subscriptions.take(3).joinToString(separator = "; ") { purchase ->
+                    buildString {
+                        append("productId=").append(maskValue(purchase.productId.value))
+                        append(", orderId=").append(maskValue(purchase.invoiceId.value))
+                        append(", purchaseToken=").append(maskValue(purchase.purchaseId.value))
+                    }
+                }
+
+                val outcome = when {
+                    purchases.isEmpty() -> "EMPTY"
+                    subscriptions.isEmpty() -> "NO_SUBSCRIPTIONS"
+                    else -> "OK"
+                }
+
                 logEnd(
                     operation = "billing.restorePurchases",
                     flowId = flowId,
-                    outcome = "OK",
-                    extra = "count=${it.size}"
+                    outcome = outcome,
+                    extra = buildString {
+                        append("purchaseCount=").append(purchases.size)
+                        append(", subscriptionCount=").append(subscriptions.size)
+                        if (preview.isNotBlank()) {
+                            append(", preview=[").append(preview).append("]")
+                        }
+                    }
                 )
             }.onFailure {
                 logError(
@@ -375,12 +399,27 @@ class RustoreBillingManagerImpl @Inject constructor() : RustoreBillingManager {
             operation = "billing.getActiveSubscriptions.mapError",
             flowId = flowId
         ).also { result ->
-            result.onSuccess {
+            result.onSuccess { subscriptions ->
+                val preview = subscriptions.take(3).joinToString(separator = "; ") { purchase ->
+                    buildString {
+                        append("productId=").append(maskValue(purchase.productId.value))
+                        append(", orderId=").append(maskValue(purchase.invoiceId.value))
+                        append(", purchaseToken=").append(maskValue(purchase.purchaseId.value))
+                    }
+                }
+
+                val outcome = if (subscriptions.isEmpty()) "EMPTY" else "OK"
+
                 logEnd(
                     operation = "billing.getActiveSubscriptions",
                     flowId = flowId,
-                    outcome = "OK",
-                    extra = "count=${it.size}"
+                    outcome = outcome,
+                    extra = buildString {
+                        append("count=").append(subscriptions.size)
+                        if (preview.isNotBlank()) {
+                            append(", preview=[").append(preview).append("]")
+                        }
+                    }
                 )
             }.onFailure {
                 logError(

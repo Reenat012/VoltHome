@@ -89,6 +89,32 @@ class PendingConfirmStorageImpl @Inject constructor(
         Log.d(TAG, "REMOVE flowId=$flowId")
     }
 
+    override suspend fun removeByUserId(
+        userId: String,
+        includeUnknownUser: Boolean
+    ): Unit = withContext(io) {
+        val prefs = prefs()
+        val payload = readPayloadSafely(prefs)
+
+        val updated = payload.records.filterNot { record ->
+            record.userId == userId ||
+                    (includeUnknownUser && record.userId == FALLBACK_UNKNOWN_USER)
+        }
+
+        writePayload(
+            prefs = prefs,
+            payload = StoragePayload(
+                version = PendingConfirmRecord.CURRENT_STORAGE_VERSION,
+                records = updated
+            )
+        )
+
+        Log.w(
+            TAG,
+            "REMOVE_BY_USER userId=$userId includeUnknownUser=$includeUnknownUser removed=${payload.records.size - updated.size}"
+        )
+    }
+
     override suspend fun clear(): Unit = withContext(io) {
         val prefs = prefs()
         prefs.edit().remove(KEY_PENDING_CONFIRM_PAYLOAD).commit()

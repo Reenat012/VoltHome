@@ -17,7 +17,7 @@ android {
         minSdk = 24
         //noinspection EditedTargetSdkVersion
         targetSdk = 35
-        versionCode = 21
+        versionCode = 24
         versionName = "2.2.7"
 
 
@@ -52,6 +52,26 @@ android {
             "boolean",
             "BILLING_PENDING_CONFIRM_ENABLED",
             "true"
+        )
+
+        // ---------------------------------------------------------
+        // 🔥 COMMIT 5 — FEATURE FLAGS ДЛЯ RESTORE / RECOVERY
+        // ---------------------------------------------------------
+        // true = ручное восстановление покупок через SDK разрешено
+        // false = кнопка restore и recovery path должны быть отключены
+        buildConfigField(
+            "boolean",
+            "BILLING_RESTORE_ENABLED",
+            "true"
+        )
+
+        // true = разрешаем контролируемый auto-restore на старте / после логина
+        // false = auto-restore выключен, доступен только manual restore
+        // На rollout держим false, чтобы не словить лишние recovery-гонки.
+        buildConfigField(
+            "boolean",
+            "BILLING_AUTO_RESTORE_ON_START_ENABLED",
+            "false"
         )
 
 //        addManifestPlaceholders(

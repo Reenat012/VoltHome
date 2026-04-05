@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.ui.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.yandex.authsdk.YandexAuthLoginOptions
@@ -10,11 +11,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.BuildConfig
+import ru.mugalimov.volthome.data.billing.BillingRecoveryCoordinator
 import ru.mugalimov.volthome.data.billing.pending.PendingConfirmCoordinator
 import ru.mugalimov.volthome.data.remote.auth.AuthSession
 import ru.mugalimov.volthome.data.remote.yandex.YandexTokenStore
 import ru.mugalimov.volthome.data.repository.AuthRepository
 import ru.mugalimov.volthome.data.repository.ProjectsRepository
+import ru.mugalimov.volthome.data.repository.UserPlanRepository
 import ru.mugalimov.volthome.ui.screens.auth.contract.AuthConfigCheckResult
 import ru.mugalimov.volthome.ui.screens.auth.contract.AuthState
 import ru.mugalimov.volthome.ui.screens.auth.contract.checkAuthConfig
@@ -25,8 +28,14 @@ class AuthViewModel @Inject constructor(
     private val authRepo: AuthRepository,
     private val projectsRepo: ProjectsRepository,
     private val yaTokenStore: YandexTokenStore,
-    private val pendingCoordinator: PendingConfirmCoordinator
+    private val pendingCoordinator: PendingConfirmCoordinator,
+    private val billingRecoveryCoordinator: BillingRecoveryCoordinator,
+    private val userPlanRepository: UserPlanRepository
 ) : ViewModel() {
+
+    companion object {
+        private const val TAG = "AuthViewModel"
+    }
 
     // === СЕТЕВОЕ / СЕРВЕРНОЕ СОСТОЯНИЕ АВТОРИЗАЦИИ ===
 
@@ -62,6 +71,9 @@ class AuthViewModel @Inject constructor(
             if (session != null) {
                 _state.value = State.Success(session)
                 launch { runCatching { projectsRepo.bootstrapFromRemote() } }
+
+                // После восстановления локальной серверной сессии пробуем login recovery.
+                tryLoginRecovery(reason = "bootstrap_session_restored")
             } else {
                 _state.value = State.Idle
             }
@@ -106,8 +118,12 @@ class AuthViewModel @Inject constructor(
             _state.value = res.fold(
                 onSuccess = { session ->
                     launch { runCatching { projectsRepo.bootstrapFromRemote() } }
-                    // 🔥 после успешного логина
+
+                    // Сначала replay pending confirm: он выше restore по приоритету.
                     pendingCoordinator.tryReplay("auth_success")
+
+                    // Потом controlled login recovery, если ничего не занято.
+                    tryLoginRecovery(reason = "auth_success")
 
                     State.Success(session)
                 },
@@ -120,8 +136,34 @@ class AuthViewModel @Inject constructor(
 
     fun signOut() {
         viewModelScope.launch {
+            // Считываем uid ДО очистки серверной сессии.
+            val currentUid = authRepo.currentSession()?.uid
+
+            // 1. Сначала чистим клиентский billing/runtime хвост.
+            runCatching {
+                pendingCoordinator.clearForLogout(currentUid)
+            }.onFailure {
+                Log.e(TAG, "LOGOUT_CLEAR_PENDING_FAILED uid=$currentUid", it)
+            }
+
+            runCatching {
+                billingRecoveryCoordinator.resetRuntimeState(reason = "logout")
+            }.onFailure {
+                Log.e(TAG, "LOGOUT_RESET_RECOVERY_FAILED uid=$currentUid", it)
+            }
+
+            runCatching {
+                // Сбрасываем entitlement прошлого пользователя.
+                userPlanRepository.resetToFree(clearDebugOverride = true)
+            }.onFailure {
+                Log.e(TAG, "LOGOUT_RESET_PLAN_FAILED uid=$currentUid", it)
+            }
+
+            // 2. Потом чистим серверную/локальную auth-сессию.
             authRepo.signOut()
             yaTokenStore.clear()
+
+            // 3. И только после этого переводим UI в idle.
             _state.value = State.Idle
             _consentState.value = AuthState()
         }
@@ -136,6 +178,44 @@ class AuthViewModel @Inject constructor(
             "oauth_invalid" -> "Неверный/просроченный токен Яндекса. Попробуй снова."
             "jwt_auth"      -> "Не удалось получить серверную сессию. Повтори вход."
             else            -> "Ошибка входа. ${t.message ?: ""}".trim()
+        }
+    }
+
+    /**
+     * Controlled login recovery.
+     *
+     * Правила:
+     * - auto restore управляется флагом;
+     * - не стартуем recovery, если уже активен другой recovery-контур;
+     * - login recovery идёт только после pending replay.
+     */
+    private suspend fun tryLoginRecovery(reason: String) {
+        if (!BuildConfig.BILLING_AUTO_RESTORE_ON_START_ENABLED) {
+            Log.d(TAG, "LOGIN_RECOVERY_SKIPPED featureFlag=false reason=$reason")
+            return
+        }
+
+        if (billingRecoveryCoordinator.hasActiveRecovery()) {
+            Log.w(TAG, "LOGIN_RECOVERY_SKIPPED activeRecovery=true reason=$reason")
+            return
+        }
+
+        val started = billingRecoveryCoordinator.beginLoginRecovery(reason = reason)
+        if (!started) {
+            Log.w(TAG, "LOGIN_RECOVERY_REJECTED reason=$reason")
+            return
+        }
+
+        try {
+            Log.d(TAG, "LOGIN_RECOVERY_BEGIN reason=$reason")
+
+            // Здесь пока только включаем recovery-контур после логина.
+            // Сам restore-path уже будет вызван из подписочного слоя/экрана.
+            // Этот шаг фиксирует корректный ordering и не даёт второму recovery
+            // стартовать параллельно.
+        } finally {
+            billingRecoveryCoordinator.endLoginRecovery(reason = reason)
+            Log.d(TAG, "LOGIN_RECOVERY_END reason=$reason")
         }
     }
 }

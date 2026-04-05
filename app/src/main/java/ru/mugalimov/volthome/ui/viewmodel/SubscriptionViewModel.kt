@@ -15,6 +15,7 @@ import ru.mugalimov.volthome.BuildConfig
 import ru.mugalimov.volthome.data.billing.BillingAvailability
 import ru.mugalimov.volthome.data.billing.BillingErrorCode
 import ru.mugalimov.volthome.data.billing.BillingException
+import ru.mugalimov.volthome.data.billing.BillingRecoveryCoordinator
 import ru.mugalimov.volthome.data.billing.RustoreBillingManager
 import ru.mugalimov.volthome.data.remote.auth.RefreshGate
 import ru.mugalimov.volthome.data.repository.SubscriptionRepository
@@ -25,7 +26,8 @@ class SubscriptionViewModel @Inject constructor(
     private val subscriptionRepository: SubscriptionRepository,
     private val billingManager: RustoreBillingManager,
     private val refreshGate: RefreshGate,
-    private val pendingCoordinator: PendingConfirmCoordinator
+    private val pendingCoordinator: PendingConfirmCoordinator,
+    private val billingRecoveryCoordinator: BillingRecoveryCoordinator
 ) : ViewModel() {
 
     companion object {
@@ -51,10 +53,14 @@ class SubscriptionViewModel @Inject constructor(
     data class UiState(
         val isLoading: Boolean = false,
 
-        // 🔥 NEW
+        // Состояние загрузки продукта из SDK.
         val isProductLoading: Boolean = false,
         val isProductLoaded: Boolean = false,
         val isProductUnavailable: Boolean = false,
+
+        // Состояние manual restore.
+        val isRestoreAvailable: Boolean = BuildConfig.BILLING_RESTORE_ENABLED,
+        val isRestoring: Boolean = false,
 
         val errorMessage: String? = null,
         val infoMessage: String? = null,
@@ -168,6 +174,38 @@ class SubscriptionViewModel @Inject constructor(
             // Это не purchaseFlowId покупки, а отдельный id для refresh-операции.
             val flowId = newFlowId(prefix = "status")
 
+            // Грубая отсечка: если уже идёт recovery, даже не пытаемся входить в refresh-контур.
+            if (billingRecoveryCoordinator.hasActiveRecovery()) {
+                Log.w(TAG, "REFRESH_STATUS_SKIPPED_ACTIVE_RECOVERY flowId=$flowId")
+
+                logEnd(
+                    operation = "refreshStatus",
+                    flowId = flowId,
+                    stage = BillingStage.IDLE,
+                    outcome = "SYNC_STATUS_SKIPPED_ACTIVE_RECOVERY"
+                )
+                return@launch
+            }
+
+            // Захватываем refresh-контур через coordinator.
+            // Это защищает от гонок с restore / replay / login recovery.
+            val refreshStarted = billingRecoveryCoordinator.beginStatusRefresh(
+                flowId = flowId,
+                reason = "manual_status_refresh"
+            )
+
+            if (!refreshStarted) {
+                Log.w(TAG, "REFRESH_STATUS_BLOCKED_BY_COORDINATOR flowId=$flowId")
+
+                logEnd(
+                    operation = "refreshStatus",
+                    flowId = flowId,
+                    stage = BillingStage.IDLE,
+                    outcome = "SYNC_STATUS_BLOCKED_BY_COORDINATOR"
+                )
+                return@launch
+            }
+
             logBegin(
                 operation = "refreshStatus",
                 flowId = flowId,
@@ -182,7 +220,10 @@ class SubscriptionViewModel @Inject constructor(
             )
 
             try {
-                val result = subscriptionRepository.syncStatus(flowId = flowId)
+                val result = subscriptionRepository.syncStatus(
+                    flowId = flowId,
+                    source = "manual_status_refresh"
+                )
 
                 _state.value = result.fold(
                     onSuccess = { plan ->
@@ -230,6 +271,244 @@ class SubscriptionViewModel @Inject constructor(
                     isLoading = false,
                     errorMessage = t.message ?: "Не удалось обновить статус подписки",
                     stage = BillingStage.FAILED
+                )
+            } finally {
+                // Критично: всегда освобождаем refresh-контур.
+                billingRecoveryCoordinator.endStatusRefresh(
+                    flowId = flowId,
+                    reason = "manual_status_refresh"
+                )
+            }
+        }
+    }
+
+    /**
+     * Ручное восстановление покупок через RuStore SDK.
+     *
+     * Правила:
+     * - restore доступен только если включён флаг;
+     * - restore не стартует, если активен pending replay;
+     * - status refresh не должен пересекаться с restore;
+     * - найденные покупки подтверждаем через backend confirm path.
+     */
+    fun restorePurchases() {
+        viewModelScope.launch {
+            if (!BuildConfig.BILLING_RESTORE_ENABLED) {
+                Log.w(TAG, "RESTORE_SKIPPED_FEATURE_FLAG_DISABLED")
+                return@launch
+            }
+
+            val current = _state.value
+            if (current.isRestoring || current.stage == BillingStage.RESTORING) {
+                Log.w(TAG, "RESTORE_SKIPPED_ALREADY_RUNNING")
+                return@launch
+            }
+
+            if (billingRecoveryCoordinator.hasActiveRecovery()) {
+                Log.w(TAG, "RESTORE_SKIPPED_ACTIVE_RECOVERY")
+                _state.value = current.copy(
+                    errorMessage = "Сейчас выполняется другая операция восстановления. Повторите чуть позже."
+                )
+                return@launch
+            }
+
+            val flowId = newFlowId("restore")
+
+            logBegin(
+                operation = "restorePurchases",
+                flowId = flowId,
+                stage = BillingStage.RESTORING,
+                extra = "manual=true"
+            )
+
+            _state.value = current.copy(
+                isLoading = true,
+                isRestoring = true,
+                errorMessage = null,
+                infoMessage = null,
+                stage = BillingStage.RESTORING,
+                purchaseFlowId = flowId
+            )
+
+            // Старт restore через coordinator.
+            val restoreStarted = billingRecoveryCoordinator.beginRestore(
+                flowId = flowId,
+                reason = "manual_restore"
+            )
+
+            if (!restoreStarted) {
+                logEnd(
+                    operation = "restorePurchases",
+                    flowId = flowId,
+                    stage = BillingStage.FAILED,
+                    outcome = "RESTORE_BLOCKED_BY_COORDINATOR"
+                )
+
+                _state.value = _state.value.copy(
+                    isLoading = false,
+                    isRestoring = false,
+                    errorMessage = "Восстановление сейчас недоступно. Повторите позже.",
+                    stage = BillingStage.FAILED
+                )
+                return@launch
+            }
+
+            try {
+                // 1. Просим SDK вернуть покупки.
+                val restoreResult = billingManager.restorePurchases(flowId = flowId)
+
+                restoreResult.fold(
+                    onSuccess = { purchases ->
+                        if (purchases.isEmpty()) {
+                            logEnd(
+                                operation = "restorePurchases",
+                                flowId = flowId,
+                                stage = BillingStage.IDLE,
+                                outcome = "RESTORE_EMPTY"
+                            )
+
+                            _state.value = _state.value.copy(
+                                isLoading = false,
+                                isRestoring = false,
+                                infoMessage = "Покупки для восстановления не найдены.",
+                                errorMessage = null,
+                                stage = BillingStage.IDLE
+                            )
+                            return@fold
+                        }
+
+                        // 2. Берём только подписки.
+                        val subscriptions = purchases
+                            .filterIsInstance<ru.rustore.sdk.pay.model.SubscriptionPurchase>()
+
+                        if (subscriptions.isEmpty()) {
+                            logEnd(
+                                operation = "restorePurchases",
+                                flowId = flowId,
+                                stage = BillingStage.IDLE,
+                                outcome = "RESTORE_NO_SUBSCRIPTIONS"
+                            )
+
+                            _state.value = _state.value.copy(
+                                isLoading = false,
+                                isRestoring = false,
+                                infoMessage = "Подписок для восстановления не найдено.",
+                                errorMessage = null,
+                                stage = BillingStage.IDLE
+                            )
+                            return@fold
+                        }
+
+                        // 3. Подтверждаем найденные покупки через backend confirm path.
+                        var restoredCount = 0
+                        var lastError: Throwable? = null
+
+                        subscriptions.forEach { purchase ->
+                            val productId = purchase.productId.value
+                            val orderId = purchase.invoiceId.value
+                            val purchaseToken = purchase.purchaseId.value
+                            val owner = "restore:$flowId"
+
+                            val identityAcquired = billingRecoveryCoordinator.tryAcquireIdentity(
+                                productId = productId,
+                                orderId = orderId,
+                                purchaseToken = purchaseToken,
+                                owner = owner
+                            )
+
+                            if (!identityAcquired) {
+                                Log.w(
+                                    TAG,
+                                    "RESTORE_IDENTITY_SKIPPED flowId=$flowId productId=${maskValue(productId)} orderId=${maskValue(orderId)}"
+                                )
+                                return@forEach
+                            }
+
+                            try {
+                                val confirmResult = subscriptionRepository.confirmRustorePurchase(
+                                    productId = productId,
+                                    orderId = orderId,
+                                    purchaseToken = purchaseToken,
+                                    flowId = flowId,
+                                    source = "manual_restore"
+                                )
+
+                                confirmResult.fold(
+                                    onSuccess = {
+                                        restoredCount += 1
+                                    },
+                                    onFailure = { error ->
+                                        lastError = error
+                                        Log.w(
+                                            TAG,
+                                            "RESTORE_CONFIRM_FAILED flowId=$flowId productId=${maskValue(productId)} orderId=${maskValue(orderId)} errorClass=${error.javaClass.simpleName}"
+                                        )
+                                    }
+                                )
+                            } finally {
+                                billingRecoveryCoordinator.releaseIdentity(
+                                    productId = productId,
+                                    orderId = orderId,
+                                    purchaseToken = purchaseToken,
+                                    owner = owner
+                                )
+                            }
+                        }
+
+                        if (restoredCount > 0) {
+                            logEnd(
+                                operation = "restorePurchases",
+                                flowId = flowId,
+                                stage = BillingStage.ENTITLED,
+                                outcome = "RESTORE_OK",
+                                extra = "restoredCount=$restoredCount"
+                            )
+
+                            _state.value = _state.value.copy(
+                                isLoading = false,
+                                isRestoring = false,
+                                infoMessage = "Покупки восстановлены: $restoredCount",
+                                errorMessage = null,
+                                stage = BillingStage.ENTITLED
+                            )
+                        } else {
+                            logEnd(
+                                operation = "restorePurchases",
+                                flowId = flowId,
+                                stage = BillingStage.FAILED,
+                                outcome = "RESTORE_CONFIRM_FAILED",
+                                extra = "errorClass=${lastError?.javaClass?.simpleName}, errorMessage=${lastError?.message}"
+                            )
+
+                            _state.value = _state.value.copy(
+                                isLoading = false,
+                                isRestoring = false,
+                                errorMessage = lastError?.message ?: "Не удалось восстановить покупки",
+                                stage = BillingStage.FAILED
+                            )
+                        }
+                    },
+                    onFailure = { error ->
+                        logEnd(
+                            operation = "restorePurchases",
+                            flowId = flowId,
+                            stage = BillingStage.FAILED,
+                            outcome = "RESTORE_SDK_FAILED",
+                            extra = "errorClass=${error.javaClass.simpleName}, errorMessage=${error.message}"
+                        )
+
+                        _state.value = _state.value.copy(
+                            isLoading = false,
+                            isRestoring = false,
+                            errorMessage = error.message ?: "Не удалось восстановить покупки",
+                            stage = BillingStage.FAILED
+                        )
+                    }
+                )
+            } finally {
+                billingRecoveryCoordinator.endRestore(
+                    flowId = flowId,
+                    reason = "manual_restore"
                 )
             }
         }

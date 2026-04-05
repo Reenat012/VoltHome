@@ -161,4 +161,16 @@
     <string name="billing_purchase_not_available">
     Покупка временно недоступна
 </string>
+
+    <!-- ========================================================= -->
+    <!-- 🔥 COMMIT 5 — MANUAL RESTORE -->
+    <!-- ========================================================= -->
+
+    <string name="billing_restore_loading">
+        Восстанавливаем покупки через RuStore…
+    </string>
+
+    <string name="pro_refresh_status">
+        Обновить статус
+    </string>
 </resources>

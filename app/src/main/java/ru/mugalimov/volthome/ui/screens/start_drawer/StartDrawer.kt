@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Payment
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.AlertDialog
@@ -291,6 +292,24 @@ fun StartDrawer(
                                 selected = false,
                                 onClick = { scope.launch { drawerState.close(); onOpenProfile() } },
                                 icon = { Icon(Icons.Default.Person, contentDescription = null) },
+                                colors = NavigationDrawerItemDefaults.colors(
+                                    selectedContainerColor = t.surfaceAlt,
+                                    unselectedContainerColor = t.bg,
+                                    selectedTextColor = t.textPrimary,
+                                    unselectedTextColor = t.textPrimary,
+                                    selectedIconColor = t.textSecondary,
+                                    unselectedIconColor = t.textSecondary
+                                ),
+                                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                            )
+                        }
+
+                        item {
+                            NavigationDrawerItem(
+                                label = { Text("ВольтХом PRO") },
+                                selected = false,
+                                onClick = { scope.launch { drawerState.close(); onOpenSubscription() } },
+                                icon = { Icon(Icons.Default.Payment, contentDescription = null) },
                                 colors = NavigationDrawerItemDefaults.colors(
                                     selectedContainerColor = t.surfaceAlt,
                                     unselectedContainerColor = t.bg,

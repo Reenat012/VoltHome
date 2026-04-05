@@ -32,6 +32,17 @@ interface PendingConfirmStorage {
     suspend fun removeByFlowId(flowId: String)
 
     /**
+     * Удалить все записи user scope.
+     *
+     * Нужен для logout, чтобы pending хвост одного пользователя
+     * не утёк в следующую сессию.
+     */
+    suspend fun removeByUserId(
+        userId: String,
+        includeUnknownUser: Boolean = false
+    )
+
+    /**
      * Полная очистка storage.
      * Нужно редко: только для recovery/debug/rollback сценариев.
      */

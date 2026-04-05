@@ -100,10 +100,12 @@ fun VoltHomeProScreen(
         // а по продуктовой готовности и purchase-related stage.
         val buttonEnabled =
             !userPlan.isPro &&
-                uiState.isProductLoaded &&
-                !uiState.isProductLoading &&
-                uiState.stage != SubscriptionViewModel.BillingStage.PURCHASING &&
-                uiState.stage != SubscriptionViewModel.BillingStage.CONFIRMING
+                    uiState.isProductLoaded &&
+                    !uiState.isProductLoading &&
+                    !uiState.isRestoring &&
+                    uiState.stage != SubscriptionViewModel.BillingStage.PURCHASING &&
+                    uiState.stage != SubscriptionViewModel.BillingStage.CONFIRMING &&
+                    uiState.stage != SubscriptionViewModel.BillingStage.RESTORING
 
         Column(
             modifier = Modifier
@@ -280,6 +282,24 @@ fun VoltHomeProScreen(
                         }
                     }
 
+                    // Состояние ручного восстановления покупок.
+                    if (uiState.isRestoring) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.secondaryContainer
+                        ) {
+                            Text(
+                                text = stringResource(R.string.billing_restore_loading),
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                style = MaterialTheme.typography.bodyMedium,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp)
+                            )
+                        }
+                    }
+
                     // Ошибка загрузки продукта.
                     // Показываем её только если это не unavailable-case.
                     if (!uiState.isProductLoading &&
@@ -318,15 +338,15 @@ fun VoltHomeProScreen(
                         }
                     }
 
-                    TextButton(
-                        onClick = {
-                            Log.d("VoltHomeProScreen", "Check availability clicked")
-                            viewModel.debugCheckAvailability()
-                        },
-                        modifier = Modifier.align(Alignment.CenterHorizontally)
-                    ) {
-                        Text("DEBUG: Check availability")
-                    }
+//                    TextButton(
+//                        onClick = {
+//                            Log.d("VoltHomeProScreen", "Check availability clicked")
+//                            viewModel.debugCheckAvailability()
+//                        },
+//                        modifier = Modifier.align(Alignment.CenterHorizontally)
+//                    ) {
+//                        Text("DEBUG: Check availability")
+//                    }
 
                     // Если есть продуктовая готовность, пользователь может покупать.
                     // Если нет — кнопка disabled, это и есть purchase gating.
@@ -367,14 +387,30 @@ fun VoltHomeProScreen(
 
                     TextButton(
                         onClick = {
+                            Log.d("VoltHomeProScreen", "Restore purchases clicked")
+                            viewModel.restorePurchases()
+                        },
+                        enabled = uiState.isRestoreAvailable &&
+                                !uiState.isLoading &&
+                                !uiState.isProductLoading &&
+                                !uiState.isRestoring,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    ) {
+                        Text(stringResource(R.string.pro_restore_purchases))
+                    }
+
+                    TextButton(
+                        onClick = {
                             Log.d("VoltHomeProScreen", "Refresh status clicked")
                             viewModel.refreshStatus()
                             viewModel.loadProProductIfNeeded()
                         },
-                        enabled = !uiState.isLoading && !uiState.isProductLoading,
+                        enabled = !uiState.isLoading &&
+                                !uiState.isProductLoading &&
+                                !uiState.isRestoring,
                         modifier = Modifier.align(Alignment.CenterHorizontally)
                     ) {
-                        Text(stringResource(R.string.pro_restore_purchases))
+                        Text(stringResource(R.string.pro_refresh_status))
                     }
 
                     Text(
