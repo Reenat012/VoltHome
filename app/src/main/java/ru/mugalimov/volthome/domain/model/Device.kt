@@ -1,14 +1,13 @@
 package ru.mugalimov.volthome.domain.model
 
-import androidx.room.ColumnInfo
 import java.util.Date
 
 data class Device(
     val id: Long = 0,
     val name: String,
-    val power: Int, //мощность
+    val power: Int, // мощность
     val voltage: Voltage,
-    val demandRatio: Double, //к-т спроса
+    val demandRatio: Double, // к-т спроса
     val roomId: Long?,
     val createdAt: Date = Date(),
     val deviceType: DeviceType,
@@ -20,6 +19,21 @@ data class Device(
     val current: Double
         get() = calculateCurrent()
 
+    /**
+     * LEGACY / PARALLEL DEVICE CURRENT PATH (Коммит 1).
+     *
+     * ВАЖНО:
+     * - этот метод считает "сырой" ток устройства;
+     * - здесь НЕ учитывается demandRatio;
+     * - именно поэтому в текущем аудите он не считается главным кандидатом
+     *   на canonical current path для группового расчёта.
+     *
+     * Сейчас этот путь всё ещё используется в:
+     * - breakdown,
+     * - части UI device rows.
+     *
+     * В этом коммите формулу НЕ меняем.
+     */
     fun calculateCurrent(): Double {
         return when (voltage.type) {
             VoltageType.AC_1PHASE ->

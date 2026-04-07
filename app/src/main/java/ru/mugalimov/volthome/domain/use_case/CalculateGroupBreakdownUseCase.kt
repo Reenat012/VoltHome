@@ -9,6 +9,15 @@ import ru.mugalimov.volthome.domain.model.CalculatedValue
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.CoefficientSource
 
+/**
+ * Breakdown use-case для уже собранной группы.
+ *
+ * ВАЖНО (Коммит 1):
+ * - этот use-case сейчас НЕ является canonical SoT для group current;
+ * - он строит объяснение поверх уже существующей группы;
+ * - при этом current здесь считается через Device.calculateCurrent() * demandRatio,
+ *   то есть это отдельный parallel path, который мы пока только фиксируем.
+ */
 class CalculateGroupBreakdownUseCase @Inject constructor() {
 
     data class Result(
@@ -18,6 +27,14 @@ class CalculateGroupBreakdownUseCase @Inject constructor() {
     )
 
     fun execute(group: CircuitGroup): Result {
+        CalculationTrace.log(
+            stage = "GROUP_BREAKDOWN_START",
+            message =
+                "groupNumber=${group.groupNumber} groupId=${group.groupId} " +
+                        "devices=${group.devices.size} groupNominalCurrentField=${CalculationTrace.f(group.nominalCurrent)} " +
+                        "path=CalculateGroupBreakdownUseCase.execute()"
+        )
+
         // 1) Installed power (ΣPуст) — паспортная
         val installedPW = group.installedPowerW.toDouble()
 
@@ -79,6 +96,10 @@ class CalculateGroupBreakdownUseCase @Inject constructor() {
         )
 
         // 3) Calculated current (Σ(Iном × kспроса)) — прозрачный шаг по устройствам
+        // ВАЖНО:
+        // - текущая реализация использует Device.calculateCurrent() как базовый ток,
+        //   а потом умножает на demandRatio.
+        // - это intentional characterization trace для Коммита 1.
         val calculatedCurrentInputs = buildList {
             group.devices.forEach { d ->
                 val baseIA = d.calculateCurrent()
@@ -121,6 +142,15 @@ class CalculateGroupBreakdownUseCase @Inject constructor() {
             unit = "А",
             label = "Расчётный ток группы",
             steps = currentSteps
+        )
+
+        CalculationTrace.log(
+            stage = "GROUP_BREAKDOWN_FINISH",
+            message =
+                "groupNumber=${group.groupNumber} installedPowerW=${CalculationTrace.f(installedPW)} " +
+                        "calculatedPowerW=${CalculationTrace.f(calculatedPW)} " +
+                        "breakdownCurrentA=${CalculationTrace.f(calculatedIA)} " +
+                        "groupNominalCurrentField=${CalculationTrace.f(group.nominalCurrent)}"
         )
 
         return Result(

@@ -2,6 +2,22 @@ package ru.mugalimov.volthome.domain.use_case
 
 import ru.mugalimov.volthome.domain.model.VoltageType
 
+/**
+ * CANONICAL FORMULA ENTRY POINT (Коммит 1).
+ *
+ * На текущем этапе проекта именно этот объект считается
+ * главным кандидатом на canonical path для расчёта nominal/calculated current,
+ * потому что здесь одновременно учитываются:
+ * - power
+ * - demandRatio
+ * - powerFactor
+ * - voltage / voltageType
+ *
+ * ВАЖНО:
+ * - мы НЕ меняем формулу в этом коммите;
+ * - мы только фиксируем, что дальнейшая унификация должна идти относительно
+ *   этого пути, а не относительно Device.calculateCurrent() или UI-агрегатов.
+ */
 object CurrentCalculator {
 
     fun calculateNominalCurrent(

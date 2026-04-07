@@ -17,6 +17,14 @@ import kotlin.math.min
  * - phase переприсваиваем только в результате.
  * - 3φ группы (Phase.THREE_PHASE или группы с устройствами AC_3PHASE) НЕ балансируем.
  * - Возвращаем decision log (пока без UI) — доказательная база “почему так”.
+ *
+ * ВАЖНО (Коммит 1):
+ * - canonical weight for phase balancing = group.nominalCurrent
+ * - этот модуль НЕ должен сам пересчитывать физику группы;
+ * - он обязан использовать уже рассчитанный ток группы, пришедший из GroupCalculator.
+ *
+ * Сейчас tie-break всё ещё использует epsilon-логику.
+ * Мы её НЕ меняем в этом коммите — только явно фиксируем текущую семантику.
  */
 object PhaseDistributor {
 
@@ -28,6 +36,10 @@ object PhaseDistributor {
     /**
      * Крошечный детерминированный «шум» для устойчивых тай-брейков при равных нагрузках.
      * Не влияет на итоговые суммы заметно (±0.005 A), но убирает прилипание к фазе A.
+     *
+     * ВАЖНО:
+     * - это ТЕКУЩЕЕ поведение, которое мы только трассируем;
+     * - в Коммите 1 мы его не правим.
      */
     private fun weightWithEpsilon(value: Double, seed: Int): Double {
         // Линейный конгруэнтный генератор от seed (берём groupNumber как seed)
@@ -51,6 +63,15 @@ object PhaseDistributor {
     ): Pair<List<CircuitGroup>, List<DistributionDecision>> {
         if (input.isEmpty()) return emptyList<CircuitGroup>() to emptyList()
 
+        CalculationTrace.log(
+            stage = "PHASE_BALANCER_START",
+            message =
+                "groups=${input.size} canonicalWeightField=group.nominalCurrent " +
+                        "weights=" + input.joinToString { g ->
+                    "g#${g.groupNumber}:${CalculationTrace.f(g.nominalCurrent)}A"
+                }
+        )
+
         // ✅ 3φ группы: либо уже помечены THREE_PHASE,
         // ✅ либо содержат хотя бы одно 3φ устройство (VoltageType.AC_3PHASE)
         val threePhaseLike = input
@@ -66,18 +87,36 @@ object PhaseDistributor {
                     g.devices.any { it.voltage.type == VoltageType.AC_3PHASE }
         }
 
+        CalculationTrace.log(
+            stage = "PHASE_BALANCER_POOL",
+            message =
+                "onePhaseOnly=${onePhaseOnly.size} threePhaseLike=${threePhaseLike.size}"
+        )
+
         // Если остались только 3φ — балансировка не нужна
         if (onePhaseOnly.isEmpty()) {
+            CalculationTrace.log(
+                stage = "PHASE_BALANCER_FINISH",
+                message = "result=ONLY_THREE_PHASE groups=${threePhaseLike.size}"
+            )
             return threePhaseLike.sortedBy { it.groupNumber } to emptyList()
         }
 
         val phases = arrayOf(Phase.A, Phase.B, Phase.C)
         val decisions = mutableListOf<DistributionDecision>()
 
-        // 1) Отсортируем по току (тяжёлые раньше), тай-брейк через микрошум
+        // 1) Отсортируем по canonical group current (тяжёлые раньше), тай-брейк через микрошум
         val sorted = onePhaseOnly.sortedWith(
             compareByDescending<CircuitGroup> { weightWithEpsilon(it.nominalCurrent, it.groupNumber) }
                 .thenBy { it.groupNumber }
+        )
+
+        CalculationTrace.log(
+            stage = "PHASE_BALANCER_SORTED",
+            message =
+                "order=" + sorted.joinToString { g ->
+                    "g#${g.groupNumber}:${CalculationTrace.f(g.nominalCurrent)}A"
+                }
         )
 
         // Текущие нагрузки по фазам (A/B/C)
@@ -102,8 +141,6 @@ object PhaseDistributor {
             assigned[idx] += updated
 
             val after = loads.toPhaseMap()
-            val deltaBefore = currentDelta(loads.copyOf().also { /* до добавления */ })
-            /* проще: считаем по before/after, см. ниже в коммите — важно лишь чтобы метрика была именно max-min */
 
             val beforeDelta = currentDelta(doubleArrayOf(
                 before[Phase.A] ?: 0.0,
@@ -115,6 +152,15 @@ object PhaseDistributor {
                 after[Phase.B] ?: 0.0,
                 after[Phase.C] ?: 0.0
             ))
+
+            CalculationTrace.log(
+                stage = "PHASE_BALANCER_GREEDY_ASSIGN",
+                message =
+                    "groupNumber=${g.groupNumber} canonicalWeightA=${CalculationTrace.f(g.nominalCurrent)} " +
+                            "chosenPhase=${phases[idx]} loadsBefore=$before loadsAfter=$after " +
+                            "imbalanceBefore=${CalculationTrace.f(beforeDelta)} " +
+                            "imbalanceAfter=${CalculationTrace.f(afterDelta)}"
+            )
 
             decisions += DistributionDecision(
                 groupNumber = g.groupNumber,
@@ -130,7 +176,7 @@ object PhaseDistributor {
                 imbalanceAfterA = afterDelta,
 
                 algorithm = "balanced_greedy+local_opt",
-                note = "Greedy: picked phase with minimal load (tie-break via epsilon)" // остаётся, но UI не трогает
+                note = "Greedy: picked phase with minimal load (tie-break via epsilon)"
             )
         }
 
@@ -206,6 +252,15 @@ object PhaseDistributor {
                         after[Phase.C] ?: 0.0
                     ))
 
+                    CalculationTrace.log(
+                        stage = "PHASE_BALANCER_LOCAL_OPT_MOVE",
+                        message =
+                            "pass=${pass + 1} groupNumber=${g.groupNumber} " +
+                                    "canonicalWeightA=${CalculationTrace.f(g.nominalCurrent)} " +
+                                    "from=$from to=$to imbalanceBefore=${CalculationTrace.f(beforeDelta)} " +
+                                    "imbalanceAfter=${CalculationTrace.f(afterDelta)}"
+                    )
+
                     decisions += DistributionDecision(
                         groupNumber = g.groupNumber,
                         groupCurrentA = g.nominalCurrent,
@@ -221,7 +276,7 @@ object PhaseDistributor {
 
                         algorithm = "balanced_greedy+local_opt",
                         note = "LocalOpt(pass=${pass + 1}): moved $from -> $to to reduce delta %.3f -> %.3f"
-                            .format(currentDelta, bestDelta) // остаётся как debug, UI не трогает
+                            .format(currentDelta, bestDelta)
                     )
 
                     improved = true
@@ -238,6 +293,13 @@ object PhaseDistributor {
         // ✅ 5) Добавляем 3φ обратно (они не участвовали в балансировке)
         val finalGroups = (onePhaseResult + threePhaseLike)
             .sortedBy { it.groupNumber }
+
+        CalculationTrace.log(
+            stage = "PHASE_BALANCER_FINISH",
+            message =
+                "finalGroups=${finalGroups.size} decisions=${decisions.size} " +
+                        "phases=" + finalGroups.joinToString { g -> "g#${g.groupNumber}:${g.phase}" }
+        )
 
         return finalGroups to decisions
     }

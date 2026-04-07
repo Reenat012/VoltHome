@@ -36,6 +36,11 @@ class GroupCalculator(
             // ✅ ВАЖНО: больше не “в воздухе”. Всегда считаем по конкретному projectId.
             val rooms = roomRepository.getRoomsWithDevicesByProject(projectId)
 
+            CalculationTrace.log(
+                stage = "GROUP_CALC_START",
+                message = "projectId=$projectId mode=$mode rooms=${rooms.size}"
+            )
+
             var totalGroupNumber = 1
             val allGroups = mutableListOf<CircuitGroup>()
 
@@ -47,7 +52,19 @@ class GroupCalculator(
                 roomWithDevices.devices
                     .filter(::isHeavy)
                     .forEach { d ->
-                        val profile = selectBreaker(d.nominalCurrent(), d.deviceType, d.hasMotor)
+                        val canonicalDeviceCurrent = d.nominalCurrent()
+
+                        CalculationTrace.log(
+                            stage = "GROUP_CALC_DEVICE_CONTRIBUTION",
+                            message =
+                                "projectId=$projectId roomId=${room.id} room='${room.name}' " +
+                                        "deviceId=${d.deviceId} device='${d.name}' type=${d.deviceType} " +
+                                        "dedicated=true currentA=${CalculationTrace.f(canonicalDeviceCurrent)} " +
+                                        "path=DeviceEntity.nominalCurrent()->CurrentCalculator.calculateNominalCurrent()"
+                        )
+
+                        val profile = selectBreaker(canonicalDeviceCurrent, d.deviceType, d.hasMotor)
+
                         allGroups += createDedicatedGroup(
                             device = d,
                             profile = profile,
@@ -68,6 +85,15 @@ class GroupCalculator(
                 byType.forEach { (deviceType, devicesOfType) ->
                     val maxI = devicesOfType.maxOfOrNull { it.nominalCurrent() } ?: 0.0
                     val hasMotor = devicesOfType.any { it.hasMotor }
+
+                    CalculationTrace.log(
+                        stage = "GROUP_CALC_COMMON_BUCKET",
+                        message =
+                            "projectId=$projectId roomId=${room.id} room='${room.name}' " +
+                                    "deviceType=$deviceType devices=${devicesOfType.size} " +
+                                    "maxCanonicalCurrentA=${CalculationTrace.f(maxI)} hasMotor=$hasMotor"
+                    )
+
                     val profile = selectBreaker(maxI, deviceType, hasMotor)
 
                     val groups = createCircuitGroups(
@@ -87,22 +113,56 @@ class GroupCalculator(
                 .sortedWith(compareBy<CircuitGroup> { it.roomId }.thenBy { it.groupNumber })
                 .mapIndexed { idx, g -> g.copy(groupNumber = idx + 1) }
 
+            CalculationTrace.log(
+                stage = "GROUP_CALC_NORMALIZED",
+                message =
+                    "projectId=$projectId groupsBeforeIds=${allGroups.size} groupsAfterNormalize=${normalized.size}"
+            )
+
             // 3.1) ✅ Генерируем стабильные groupId (валидные, уникальные, детерминированные)
             // ВАЖНО:
             // - НЕ используем groupNumber как ключ (он плавает)
             // - НЕ меняем порядок списка (иначе downstream распределение фаз будет “плясать”)
             val withStableIds = assignStableGroupIds(normalized)
 
+            CalculationTrace.log(
+                stage = "GROUP_CALC_STABLE_IDS",
+                message =
+                    "projectId=$projectId groups=${withStableIds.size} sample=" +
+                            withStableIds.take(10).joinToString { "g#${it.groupNumber}->${it.groupId}" }
+            )
+
             // 4) Балансировка фаз / режим 1 фаза
             val (distributed, decisionLog) =
                 if (mode == PhaseMode.THREE) {
+                    CalculationTrace.log(
+                        stage = "GROUP_CALC_PHASE_BALANCING_INPUT",
+                        message =
+                            "projectId=$projectId mode=$mode canonicalWeightField=group.nominalCurrent " +
+                                    "weights=" + withStableIds.joinToString { g ->
+                                "g#${g.groupNumber}:${CalculationTrace.f(g.nominalCurrent)}A"
+                            }
+                    )
                     distributeGroupsBalancedWithLog(withStableIds)
                 } else {
                     withStableIds.map { it.copy(phase = Phase.A) } to emptyList()
                 }
 
+            CalculationTrace.log(
+                stage = "GROUP_CALC_PHASE_BALANCING_RESULT",
+                message =
+                    "projectId=$projectId distributed=${distributed.size} decisions=${decisionLog.size} " +
+                            "phases=" + distributed.joinToString { g -> "g#${g.groupNumber}:${g.phase}" }
+            )
+
             // 5) Валидация до сохранения
             validateBeforeSave(distributed)
+
+            CalculationTrace.log(
+                stage = "GROUP_CALC_FINISH",
+                message =
+                    "projectId=$projectId groups=${distributed.size} result=SUCCESS"
+            )
 
             // 6) НИКАКОГО сохранения здесь
             GroupingResult.Success(
@@ -110,6 +170,10 @@ class GroupCalculator(
                 distributionDecisions = decisionLog
             )
         } catch (e: Exception) {
+            CalculationTrace.log(
+                stage = "GROUP_CALC_FINISH",
+                message = "projectId=$projectId result=ERROR error='${e.message}'"
+            )
             GroupingResult.Error("Ошибка расчёта: ${e.message}")
         }
     }
@@ -125,7 +189,16 @@ class GroupCalculator(
             else -> false
         }
 
-    /** Подбор автомата/кабеля/кривой по подгруппе. */
+    /**
+     * Подбор автомата/кабеля/кривой по подгруппе.
+     *
+     * ВАЖНО (Коммит 1):
+     * - это текущий AUTO path line selection;
+     * - здесь пока живёт текущая product-эвристика;
+     * - формулу и policy НЕ меняем;
+     * - только помечаем, что именно этот путь сейчас участвует в canonical AUTO pipeline:
+     *   device contribution -> group.nominalCurrent -> selectBreaker(...) -> line profile.
+     */
     private fun selectBreaker(
         nominalCurrent: Double,
         deviceType: DeviceType,
@@ -167,6 +240,15 @@ class GroupCalculator(
             else -> baseCurve
         }
 
+        CalculationTrace.log(
+            stage = "GROUP_CALC_LINE_SELECTION",
+            message =
+                "projectId=$projectId nominalCurrentA=${CalculationTrace.f(nominalCurrent)} " +
+                        "deviceType=$deviceType hasMotor=$hasMotor requiredMin=$requiredMin " +
+                        "selectedBreaker=$rating selectedCable=${CalculationTrace.f(cable)} " +
+                        "selectedCurve=$finalCurve path=GroupCalculator.selectBreaker()"
+        )
+
         return GroupProfile(
             maxCurrent = rating.toDouble(),
             breakerRating = rating,
@@ -186,6 +268,15 @@ class GroupCalculator(
         val sorted = devices.sortedByDescending { it.nominalCurrent() }
         val limit = profile.maxCurrent
         val eps = 1e-6
+
+        CalculationTrace.log(
+            stage = "GROUP_CALC_FFD_START",
+            message =
+                "projectId=$projectId roomId=${room.id} room='${room.name}' " +
+                        "devices=${devices.size} limitA=${CalculationTrace.f(limit)} " +
+                        "breaker=${profile.breakerRating} cable=${CalculationTrace.f(profile.cableSection)} " +
+                        "curve=${profile.breakerType}"
+        )
 
         // Одиночное устройство не должно превышать лимит группы
         val tooBig = sorted.firstOrNull { it.nominalCurrent() - limit > eps }
@@ -209,6 +300,13 @@ class GroupCalculator(
             }
         }
 
+        CalculationTrace.log(
+            stage = "GROUP_CALC_FFD_RESULT",
+            message =
+                "projectId=$projectId roomId=${room.id} room='${room.name}' bins=${bins.size} " +
+                        "binCurrents=" + sums.joinToString { CalculationTrace.f(it) }
+        )
+
         var number = startGroupNumber
         return bins.map { bin ->
             createGroup(
@@ -221,6 +319,18 @@ class GroupCalculator(
         }
     }
 
+    /**
+     * Текущая canonical AUTO point сборки группы.
+     *
+     * ВАЖНО (Коммит 1):
+     * - group.nominalCurrent сейчас формируется ЗДЕСЬ как сумма DeviceEntity.nominalCurrent();
+     * - именно это значение дальше используется:
+     *   1) как сохранённый расчётный ток группы в AUTO pipeline
+     *   2) как weight for phase balancing
+     *   3) как база для line selection, уже выбранного выше для bucket/dedicated line.
+     *
+     * Никаких формул в этом коммите не меняем — только фиксируем путь.
+     */
     private fun createGroup(
         devices: List<DeviceEntity>,
         profile: GroupProfile,
@@ -230,6 +340,17 @@ class GroupCalculator(
     ): CircuitGroup {
         val nominalCurrent = devices.sumOf { it.nominalCurrent() }
         val installedPowerW = devices.sumOf { it.power }
+
+        CalculationTrace.log(
+            stage = "GROUP_CALC_GROUP_BUILT",
+            message =
+                "projectId=$projectId roomId=${room.id} room='${room.name}' groupNumber=$groupNumber " +
+                        "kind=COMMON devices=${devices.size} deviceIds=${devices.joinToString { it.deviceId.toString() }} " +
+                        "installedPowerW=$installedPowerW canonicalGroupCurrentA=${CalculationTrace.f(nominalCurrent)} " +
+                        "lineBreaker=${profile.breakerRating} lineCable=${CalculationTrace.f(profile.cableSection)} " +
+                        "lineCurve=${profile.breakerType}"
+        )
+
         return CircuitGroup(
             roomName = room.name,
             groupType = devices.first().deviceType,
@@ -246,6 +367,13 @@ class GroupCalculator(
         )
     }
 
+    /**
+     * Текущая canonical AUTO point сборки выделенной линии.
+     *
+     * ВАЖНО:
+     * - current идёт через DeviceEntity.nominalCurrent();
+     * - это часть того же canonical AUTO pipeline, что и createGroup(...).
+     */
     private fun createDedicatedGroup(
         device: DeviceEntity,
         profile: GroupProfile,
@@ -255,6 +383,17 @@ class GroupCalculator(
     ): CircuitGroup {
         val nominalCurrent = device.nominalCurrent()
         val installedPowerW = device.power
+
+        CalculationTrace.log(
+            stage = "GROUP_CALC_GROUP_BUILT",
+            message =
+                "projectId=$projectId roomId=${room.id} room='${room.name}' groupNumber=$groupNumber " +
+                        "kind=DEDICATED deviceId=${device.deviceId} device='${device.name}' type=${device.deviceType} " +
+                        "installedPowerW=$installedPowerW canonicalGroupCurrentA=${CalculationTrace.f(nominalCurrent)} " +
+                        "lineBreaker=${profile.breakerRating} lineCable=${CalculationTrace.f(profile.cableSection)} " +
+                        "lineCurve=${profile.breakerType}"
+        )
+
         return CircuitGroup(
             roomName = room.name,
             groupType = device.deviceType,
@@ -375,6 +514,16 @@ class GroupCalculator(
 
 // --- Extensions / мапперы ---
 
+/**
+ * Текущий canonical AUTO path для вклада устройства в ток группы.
+ *
+ * ВАЖНО (Коммит 1):
+ * - это НЕ raw Device.calculateCurrent();
+ * - это путь через CurrentCalculator с учётом:
+ *   power + demandRatio + powerFactor + voltageType.
+ *
+ * Именно этот path сейчас используется в GroupCalculator для AUTO-расчёта групп.
+ */
 fun DeviceEntity.nominalCurrent(): Double =
     CurrentCalculator.calculateNominalCurrent(
         power = power.toDouble(),
