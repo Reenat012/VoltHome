@@ -67,9 +67,19 @@ class RecalculateGroupLineUseCase @Inject constructor() {
         }
 
         // Единый canonical path расчёта нагрузки группы.
+        CalculationTrace.log(
+            stage = "MANUAL_LINE_RECALC_INPUT",
+            message =
+                "groupId=${p.group.groupId} groupNumber=${p.group.groupNumber} " +
+                        "devices=" + p.devicesInGroup.joinToString { d ->
+                    "id=${d.deviceId},type=${d.deviceType},power=${d.powerW},U=${d.voltageValue},pf=${d.powerFactor},dr=${d.demandRatio}"
+                }
+        )
+
         val groupLoad = CurrentCalculator.calculateGroupLoad(
             p.devicesInGroup.map { it.toLoadInput() }
         )
+
         val nominalI = groupLoad.calculatedCurrentA
 
         // В manual path тип группы берём из самой группы,

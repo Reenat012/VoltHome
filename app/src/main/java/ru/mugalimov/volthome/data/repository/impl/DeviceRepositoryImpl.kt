@@ -34,6 +34,7 @@ import ru.mugalimov.volthome.data.local.entity.OutboxEntity
 import ru.mugalimov.volthome.data.local.entity.OutboxOpType
 import ru.mugalimov.volthome.data.local.entity.TombstoneEntity
 import ru.mugalimov.volthome.data.local.entity.TombstoneEntityType
+import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
 import ru.mugalimov.volthome.data.sync.outbox.DeviceCreatePayload
 import ru.mugalimov.volthome.data.sync.outbox.DeviceUpdatePayload
 import ru.mugalimov.volthome.data.sync.outbox.DeviceDeletePayload
@@ -44,10 +45,10 @@ class DeviceRepositoryImpl @Inject constructor(
     private val deviceDao: DeviceDao,
     private val roomDao: RoomDao,
     private val explicationRepository: ExplicationRepository,
+    private val manualEditSessionRepository: ManualEditSessionRepository,
     @IoDispatcher private val dispatchers: CoroutineDispatcher,
     @ApplicationContext private val context: Context,
     private val appDb: AppDatabase,
-    // 🔹 новое
     private val outboxDao: OutboxDao,
     private val tombstoneDao: TombstoneDao
 ) : DeviceRepository {
@@ -132,36 +133,52 @@ class DeviceRepositoryImpl @Inject constructor(
             val current = deviceDao.getDeviceById(device.id.toInt())
                 ?: throw DeviceNotFoundException("Устройство ${device.id} не найдено")
 
-            // 1) локально
-            // КРИТИЧНО: projectId обязателен. Берём его из текущей записи (источник истины).
             val pid = current.projectId
                 ?: throw IllegalStateException("DEVICE_UPDATE: у устройства ${device.id} нет projectId в БД")
 
-            deviceDao.update(
-                device.toEntityDevice(pid)
+            val updatedDevice = device.copy(
+                roomId = device.roomId ?: current.roomId
             )
 
-            // 2) outbox
-            if (!pid.isBlank()) {
+            // 1) локально
+            deviceDao.update(
+                updatedDevice.toEntityDevice(pid)
+            )
+
+            // 2) синхронизация active manual draft
+            manualEditSessionRepository.syncEditedDeviceInManualSession(
+                projectId = pid,
+                device = updatedDevice
+            )
+
+            Log.i(
+                "DEVICE_UPDATE_SYNC",
+                "pid=$pid deviceId=${updatedDevice.id} power=${updatedDevice.power} " +
+                        "pf=${updatedDevice.powerFactor} dr=${updatedDevice.demandRatio} " +
+                        "voltage=${updatedDevice.voltage.value}/${updatedDevice.voltage.type}"
+            )
+
+            // 3) outbox
+            if (pid.isNotBlank()) {
                 outboxDao.insert(
                     OutboxEntity(
                         project_id = pid,
                         op_type = OutboxOpType.DEVICE_UPDATE,
                         payload_json = DeviceUpdatePayload(
                             projectId = pid,
-                            localId = device.id,
-                            roomLocalId = device.roomId,   // может быть null — значит не меняли
-                            name = device.name,
-                            power = device.power,
-                            voltage = device.voltage,
-                            demandRatio = device.demandRatio,
-                            deviceType = device.deviceType,
-                            powerFactor = device.powerFactor,
-                            hasMotor = device.hasMotor,
-                            requiresDedicatedCircuit = device.requiresDedicatedCircuit,
-                            requiresSocketConnection = device.requiresSocketConnection
+                            localId = updatedDevice.id,
+                            roomLocalId = updatedDevice.roomId,
+                            name = updatedDevice.name,
+                            power = updatedDevice.power,
+                            voltage = updatedDevice.voltage,
+                            demandRatio = updatedDevice.demandRatio,
+                            deviceType = updatedDevice.deviceType,
+                            powerFactor = updatedDevice.powerFactor,
+                            hasMotor = updatedDevice.hasMotor,
+                            requiresDedicatedCircuit = updatedDevice.requiresDedicatedCircuit,
+                            requiresSocketConnection = updatedDevice.requiresSocketConnection
                         ).toJson(),
-                        group_key = "device:update:$pid:${device.id}"
+                        group_key = "device:update:$pid:${updatedDevice.id}"
                     )
                 )
                 OutboxPushWorker.enqueueProject(context, pid)

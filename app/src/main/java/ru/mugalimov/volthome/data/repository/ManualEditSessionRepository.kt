@@ -1,11 +1,17 @@
 package ru.mugalimov.volthome.data.repository
 
 import kotlinx.coroutines.flow.Flow
+import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.manual.ManualEditAction
 import ru.mugalimov.volthome.domain.model.manual.ManualEditSession
 import ru.mugalimov.volthome.domain.model.manual.ProjectEditState
 
 interface ManualEditSessionRepository {
+
+    suspend fun syncEditedDeviceInManualSession(
+        projectId: String,
+        device: Device
+    )
 
     fun observeSession(projectId: String): Flow<ManualEditSession?>
 

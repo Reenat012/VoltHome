@@ -23,6 +23,7 @@ class CommitManualDraftToLocalDbUseCase @Inject constructor(
     private val explicationRepository: ExplicationRepository,
     private val projectOwnershipRepository: ProjectOwnershipRepository,
     private val ownershipOverridesCleaner: OwnershipOverridesCleaner,
+    private val recalculateGroupLineUseCase: RecalculateGroupLineUseCase,
 ) {
 
     data class Params(
@@ -42,12 +43,35 @@ class CommitManualDraftToLocalDbUseCase @Inject constructor(
         val draft = params.draft
 
         // =========================
+        // 0) FINAL RECOMPUTE BARRIER
+        // =========================
+        // Перед save обязаны пересчитать line params всех групп
+        // по актуальному составу draft.devices, иначе можно закоммитить
+        // устаревший nominalCurrent / breaker / cable.
+        val devicesById = draft.devices.associateBy { it.deviceId }
+
+        val recomputedGroups = draft.groups.map { group ->
+            val devicesInGroup = group.deviceIds.mapNotNull { deviceId ->
+                devicesById[deviceId]
+            }
+
+            recalculateGroupLineUseCase.execute(
+                RecalculateGroupLineUseCase.Params(
+                    group = group,
+                    devicesInGroup = devicesInGroup
+                )
+            )
+        }
+
+        val recomputedDraft = draft.copy(groups = recomputedGroups)
+
+        // =========================
         // MANUAL_SAVE: входные данные
         // =========================
-        val desiredGroups = draft.groups
+        val desiredGroups = recomputedDraft.groups
         val desiredGroupCount = desiredGroups.size
 
-        val desiredUnassigned = draft.unassignedDeviceIds.toSet()
+        val desiredUnassigned = recomputedDraft.unassignedDeviceIds.toSet()
         val desiredAllDeviceIds = desiredGroups.flatMap { it.deviceIds }.toSet()
 
         // assigned = в группах, но не в unassigned
@@ -56,7 +80,7 @@ class CommitManualDraftToLocalDbUseCase @Inject constructor(
         val desiredSummary = desiredGroups
             .sortedBy { it.groupNumber }
             .joinToString { g ->
-                "${g.groupId}#${g.groupNumber}#${g.phase.name}(devs=${g.deviceIds.size})"
+                "${g.groupId}#${g.groupNumber}#${g.phase.name}(devs=${g.deviceIds.size},I=${g.nominalCurrent})"
             }
 
         Log.d(
@@ -71,7 +95,7 @@ class CommitManualDraftToLocalDbUseCase @Inject constructor(
         // =========================
         explicationRepository.commitManualDraftTransactional(
             projectId = projectId,
-            draftState = draft
+            draftState = recomputedDraft
         )
 
         // =========================

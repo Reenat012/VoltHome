@@ -41,6 +41,7 @@ import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.DistributionDecision
+import ru.mugalimov.volthome.domain.model.Voltage
 import ru.mugalimov.volthome.domain.model.manual.ManualGroupDraft
 import ru.mugalimov.volthome.domain.model.manual.ProjectEditState
 import ru.mugalimov.volthome.domain.model.phase_load.GroupWithDevices
@@ -190,8 +191,20 @@ class ExplicationRepositoryImpl @Inject constructor(
                             )
 
                             // =========================
-                            // 0) MANUAL_SAVE: входные данные (draft)
-                            // =========================
+// 0) PERSIST MANUAL DEVICE DRAFTS
+// =========================
+// ВАЖНО:
+// manual save обязан сначала записать актуальные device params в local DB,
+// иначе groups будут сохранены по новым расчётам,
+// а breakdown/read path после выхода из manual продолжит читать старые device fields.
+                            persistManualDraftDevicesInTx(
+                                projectId = projectId,
+                                draftState = draftState
+                            )
+
+// =========================
+// 1) MANUAL_SAVE: входные данные (draft)
+// =========================
                             val desiredDraftGroups = draftState.groups
 
                             // ✅ Жёсткий инвариант: каждая группа должна ссылаться на существующую комнату
@@ -566,7 +579,70 @@ class ExplicationRepositoryImpl @Inject constructor(
                 Log.w(tag, "LOCK_RELEASE op=$opName pid=$projectId totalMs=${SystemClock.elapsedRealtime() - waitStart}")
             }
         }
+
+
     }
+
+    private suspend fun persistManualDraftDevicesInTx(
+        projectId: String,
+        draftState: ProjectEditState
+    ) {
+        val tag = "APPLY_DIFF"
+
+        val draftDevices = draftState.devices
+        if (draftDevices.isEmpty()) {
+            Log.d(tag, "MANUAL_DEVICE_PERSIST SKIP pid=$projectId reason=no_draft_devices")
+            return
+        }
+
+        val dbDevices = deviceDao.getAllDevicesByProject(projectId)
+        val dbDevicesById = dbDevices.associateBy { it.deviceId }
+
+        val missingInDb = draftDevices
+            .map { it.deviceId }
+            .filter { it !in dbDevicesById.keys }
+
+        if (missingInDb.isNotEmpty()) {
+            Log.w(
+                tag,
+                "MANUAL_DEVICE_PERSIST missingInDb pid=$projectId count=${missingInDb.size} sample=${missingInDb.take(20)}"
+            )
+        }
+
+        var updatedCount = 0
+
+        draftDevices.forEach { draftDevice ->
+            val dbEntity = dbDevicesById[draftDevice.deviceId] ?: return@forEach
+
+            val resolvedVoltageValue = (draftDevice.voltageValue ?: 0)
+                .takeIf { it > 0 }
+                ?: CurrentCalculator.defaultVoltageFor(draftDevice.voltageType).toInt()
+
+            val updatedEntity = dbEntity.copy(
+                roomId = draftDevice.roomId,
+                name = dbEntity.name,
+                deviceType = draftDevice.deviceType,
+                power = draftDevice.powerW ?: 0,
+                voltage = Voltage(
+                    value = resolvedVoltageValue,
+                    type = draftDevice.voltageType
+                ),
+                demandRatio = draftDevice.demandRatio ?: 1.0,
+                powerFactor = draftDevice.powerFactor ?: 1.0,
+                hasMotor = draftDevice.hasMotor,
+                requiresDedicatedCircuit = draftDevice.requiresDedicatedCircuit
+            )
+
+            deviceDao.update(updatedEntity)
+            updatedCount++
+        }
+
+        Log.d(
+            tag,
+            "MANUAL_DEVICE_PERSIST DONE pid=$projectId updated=$updatedCount"
+        )
+    }
+
     override suspend fun replaceAllGroupsTransactional(
         projectId: String,
         groups: List<CircuitGroup>

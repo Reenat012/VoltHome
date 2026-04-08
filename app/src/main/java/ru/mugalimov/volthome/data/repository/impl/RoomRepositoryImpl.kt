@@ -83,8 +83,7 @@ class RoomRepositoryImpl @Inject constructor(
     private val createDeviceOpBus: CreateDeviceOpBus,
     private val autoRebuildAfterInsertUseCase: Lazy<AutoRebuildGroupsAfterDeviceInsertUseCase>,
     private val manualRepo: ManualEditSessionRepository,
-    private val ownershipRepo: ProjectOwnershipRepository,
-    private val bootstrapManualLockUseCase: BootstrapManualLockUseCase,
+    private val ownershipRepo: ProjectOwnershipRepository
 ) : RoomRepository {
 
     private val uuidDao get() = appDb.uuidMapDao()
@@ -384,10 +383,10 @@ class RoomRepositoryImpl @Inject constructor(
         //                          AUTO трогать её не имеет права даже после рестарта
         // 3) только если оба флага false -> разрешаем AUTO rebuild
         val manualActive = manualRepo.isManualActive(projectId)
-        var manualLock = ownershipRepo.isManualLock(projectId)
+        val manualLock = ownershipRepo.isManualLock(projectId)
 
         when {
-            // Живая manual-сессия: сохраняем старое поведение.
+            // Живая manual-сессия: новые устройства идут в unassigned.
             manualActive -> {
                 Log.i(
                     "MANUAL_POST_INSERT",
@@ -406,35 +405,13 @@ class RoomRepositoryImpl @Inject constructor(
                 )
             }
 
+            // Persisted manual ownership: после рестарта AUTO не имеет права
+            // пересобирать структуру. Никакого bootstrap/clear здесь больше нет.
             manualLock -> {
                 Log.w(
                     "AUTO_POST_INSERT",
-                    "AUTO_POST_INSERT STALE_LOCK_CHECK pid=$projectId opId=$opId inserted=${deviceIds.size} roomId=$roomId manualActive=$manualActive manualLock=$manualLock"
+                    "AUTO_POST_INSERT SUPPRESS reason=manualLock pid=$projectId opId=$opId inserted=${deviceIds.size} roomId=$roomId"
                 )
-
-                bootstrapManualLockUseCase.execute(projectId)
-
-                manualLock = ownershipRepo.isManualLock(projectId)
-
-                Log.w(
-                    "AUTO_POST_INSERT",
-                    "AUTO_POST_INSERT STALE_LOCK_RESULT pid=$projectId opId=$opId manualLockAfterBootstrap=$manualLock"
-                )
-
-                if (manualLock) {
-                    Log.w(
-                        "AUTO_POST_INSERT",
-                        "AUTO_POST_INSERT SUPPRESS reason=manualLock pid=$projectId opId=$opId inserted=${deviceIds.size} roomId=$roomId"
-                    )
-                } else {
-                    autoRebuildAfterInsertUseCase.get().execute(
-                        AutoRebuildGroupsAfterDeviceInsertUseCase.Params(
-                            projectIdRecorded = projectId,
-                            insertedIds = deviceIds,
-                            opId = opId
-                        )
-                    )
-                }
             }
 
             else -> {
@@ -564,7 +541,7 @@ class RoomRepositoryImpl @Inject constructor(
         // post-insert policy должна учитывать не только живую manual-сессию,
         // но и persisted ownership после MANUAL_SAVE / рестарта.
         val manualActive = manualRepo.isManualActive(projectId)
-        var manualLock = ownershipRepo.isManualLock(projectId)
+        val manualLock = ownershipRepo.isManualLock(projectId)
 
         when {
             // Живая ручная сессия: новые устройства уходим в unassigned.
@@ -581,35 +558,13 @@ class RoomRepositoryImpl @Inject constructor(
                 )
             }
 
+            // Persisted manual ownership после MANUAL_SAVE / рестарта:
+            // AUTO rebuild запрещён. Никакой попытки auto-clear здесь быть не должно.
             manualLock -> {
                 Log.w(
                     "AUTO_POST_INSERT",
-                    "AUTO_POST_INSERT STALE_LOCK_CHECK pid=$projectId opId=$opId inserted=${ids.size} roomId=$roomId manualActive=$manualActive manualLock=$manualLock"
+                    "AUTO_POST_INSERT SUPPRESS reason=manualLock pid=$projectId opId=$opId inserted=${ids.size} roomId=$roomId"
                 )
-
-                bootstrapManualLockUseCase.execute(projectId)
-
-                manualLock = ownershipRepo.isManualLock(projectId)
-
-                Log.w(
-                    "AUTO_POST_INSERT",
-                    "AUTO_POST_INSERT STALE_LOCK_RESULT pid=$projectId opId=$opId manualLockAfterBootstrap=$manualLock"
-                )
-
-                if (manualLock) {
-                    Log.w(
-                        "AUTO_POST_INSERT",
-                        "AUTO_POST_INSERT SUPPRESS reason=manualLock pid=$projectId opId=$opId inserted=${ids.size} roomId=$roomId"
-                    )
-                } else {
-                    autoRebuildAfterInsertUseCase.get().execute(
-                        AutoRebuildGroupsAfterDeviceInsertUseCase.Params(
-                            projectIdRecorded = projectId,
-                            insertedIds = ids,
-                            opId = opId
-                        )
-                    )
-                }
             }
 
             else -> {

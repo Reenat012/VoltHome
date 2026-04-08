@@ -78,6 +78,7 @@ import ru.mugalimov.volthome.ui.viewmodel.explication.InfoSheetPayloadFactory
 import java.text.SimpleDateFormat
 import java.util.Locale
 import javax.inject.Inject
+import kotlin.collections.emptyList
 
 @HiltViewModel
 class ExplicationViewModel @Inject constructor(
@@ -124,7 +125,8 @@ class ExplicationViewModel @Inject constructor(
     val phaseMode: StateFlow<PhaseMode> = _phaseMode.asStateFlow()
 
     private val _showResetManualConfirmDialog = MutableStateFlow(false)
-    val showResetManualConfirmDialog: StateFlow<Boolean> = _showResetManualConfirmDialog.asStateFlow()
+    val showResetManualConfirmDialog: StateFlow<Boolean> =
+        _showResetManualConfirmDialog.asStateFlow()
 
 
     // выбранный инстанс устройства для шита
@@ -170,7 +172,10 @@ class ExplicationViewModel @Inject constructor(
     // =========================
 
     val unassignedDevices: StateFlow<List<Device>> =
-        combine(manualSession, manualDevicesById) { s: ManualEditSession?, devicesById: Map<Long, Device> ->
+        combine(
+            manualSession,
+            manualDevicesById
+        ) { s: ManualEditSession?, devicesById: Map<Long, Device> ->
             val draft = s?.draftState ?: return@combine emptyList()
             if (s.manualModeActive != true) return@combine emptyList()
 
@@ -186,7 +191,10 @@ class ExplicationViewModel @Inject constructor(
      * который обновляется единым batch-load по draft (groups + unassigned).
      */
     val manualDisplayGroups: StateFlow<List<CircuitGroup>> =
-        combine(manualSession, manualDevicesById) { s: ManualEditSession?, devicesById: Map<Long, Device> ->
+        combine(
+            manualSession,
+            manualDevicesById
+        ) { s: ManualEditSession?, devicesById: Map<Long, Device> ->
             val draft = s?.draftState ?: return@combine emptyList()
             if (s.manualModeActive != true) return@combine emptyList()
 
@@ -227,7 +235,6 @@ class ExplicationViewModel @Inject constructor(
                 else projectOwnershipRepository.observeManualLock(pid)
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
-
 
 
     // =========================
@@ -343,6 +350,74 @@ class ExplicationViewModel @Inject constructor(
     private fun getManualSessionForProject(projectId: String): ManualEditSession? =
         manualRepo.getSession(projectId)
 
+    /**
+     * Safety-net для случая:
+     * - manualActive=false
+     * - manualLock=true
+     * - в проекте уже нет групп в БД
+     *
+     * Тогда считаем lock залипшим и снимаем его, чтобы explicit auto recalc мог оживить проект.
+     *
+     * ВАЖНО:
+     * - если manual session жива -> lock не трогаем
+     * - если в БД есть группы -> lock не трогаем
+     * - снимаем lock только в реально пустом проекте
+     */
+    private suspend fun recoverStaleManualLockIfProjectEmpty(projectId: String): Boolean {
+        val pid = projectId.trim()
+        if (pid.isBlank()) return false
+
+        val session = getManualSessionForProject(pid)
+        val manualActive = session?.manualModeActive == true
+        if (manualActive) {
+            Log.w(
+                "AUTO_GATE",
+                "STALE_LOCK_RECOVERY_SKIP pid=$pid reason=manualActive ver=${session?.version}"
+            )
+            return false
+        }
+
+        // Берём уже наблюдаемые группы текущего проекта из VM-state.
+        // Для этого safety-net нам достаточно факта: пусто / не пусто.
+        val groupsInDb: List<CircuitGroup> = dbGroupsFlow.value
+
+        if (groupsInDb.isNotEmpty()) {
+            Log.w(
+                "AUTO_GATE",
+                "STALE_LOCK_RECOVERY_SKIP pid=$pid reason=groups_exist groups=${groupsInDb.size}"
+            )
+            return false
+        }
+
+        val lockBefore: Boolean = runCatching { projectOwnershipRepository.isManualLock(pid) }
+            .onFailure {
+                Log.e("AUTO_GATE", "STALE_LOCK_RECOVERY_LOCK_READ_FAILED pid=$pid", it)
+            }
+            .getOrElse { false }
+
+        if (!lockBefore) {
+            Log.w(
+                "AUTO_GATE",
+                "STALE_LOCK_RECOVERY_SKIP pid=$pid reason=lock_already_false"
+            )
+            return false
+        }
+
+        return runCatching {
+            projectOwnershipRepository.setManualLock(pid, false)
+            val lockAfter = projectOwnershipRepository.isManualLock(pid)
+
+            Log.w(
+                "AUTO_GATE",
+                "STALE_LOCK_RECOVERY_RESULT pid=$pid lockBefore=$lockBefore lockAfter=$lockAfter groups=0"
+            )
+
+            !lockAfter
+        }.onFailure {
+            Log.e("AUTO_GATE", "STALE_LOCK_RECOVERY_FAILED pid=$pid", it)
+        }.getOrElse { false }
+    }
+
     // =========================
     // MIXED_MANUAL warning state (сессионно)
     // =========================
@@ -381,43 +456,9 @@ class ExplicationViewModel @Inject constructor(
             }
         }
 
-        // ✅ Commit 2: BOOTSTRAP — строго единственный entry-point
-        // Запускаем на смене activeProjectId.
-        // Дедуп обеспечивается persisted bootstrapVersion внутри usecase.
-        viewModelScope.launch(ioDispatcher) {
-            activeProjectIdState
-                .filterNotNull()
-                .map { it.trim() }
-                .filter { it.isNotBlank() }
-                .distinctUntilChanged()
-                .collectLatest { pid ->
-                    // Перед bootstrap явно читаем persisted ownership.
-                    // Это отдельный proof, чтобы было видно состояние lock ещё ДО bootstrap.
-                    val lockAtVmEntry = runCatching { projectOwnershipRepository.isManualLock(pid) }
-                        .getOrElse {
-                            Log.e("MANUAL_BOOTSTRAP", "VM pre-read lock FAILED pid=$pid", it)
-                            false
-                        }
-
-                    val versionAtVmEntry = runCatching { projectOwnershipRepository.getBootstrapVersion(pid) }
-                        .getOrElse {
-                            Log.e("MANUAL_BOOTSTRAP", "VM pre-read version FAILED pid=$pid", it)
-                            0
-                        }
-
-                    Log.w(
-                        "MANUAL_BOOTSTRAP",
-                        "VM trigger pid=$pid thread=${Thread.currentThread().name} " +
-                                "lockAtEntry=$lockAtVmEntry versionAtEntry=$versionAtVmEntry"
-                    )
-
-                    try {
-                        bootstrapManualLockUseCase.execute(pid)
-                    } catch (t: Throwable) {
-                        Log.e("MANUAL_BOOTSTRAP", "VM bootstrap FAILED pid=$pid", t)
-                    }
-                }
-        }
+        // Временное безопасное правило:
+        // automatic bootstrap manual-lock на старте отключён.
+        // Пока нет железного stale-detector, persisted manualLock сохраняем как есть.
 
         // 2) Kill-process UX:
         // Если manual ожидался (маркер стоит), но сессии нет => процесс был убит => показываем уведомление.
@@ -461,29 +502,36 @@ class ExplicationViewModel @Inject constructor(
         viewModelScope.launch(ioDispatcher) {
             manualSession
                 .map { s ->
-                    if (s?.manualModeActive != true) return@map emptySet<Long>()
+                    if (s?.manualModeActive != true) {
+                        return@map 0L to emptySet<Long>()
+                    }
 
                     val draft = s.draftState
                     val assigned = draft.groups.asSequence().flatMap { it.deviceIds.asSequence() }
                     val unassigned = draft.unassignedDeviceIds.asSequence()
 
-                    (assigned + unassigned).toSet()
+                    s.version to (assigned + unassigned).toSet()
                 }
-                .distinctUntilChanged() // если набор id не изменился — не дёргаем БД повторно
-                .collectLatest { neededIds ->
-                    // если manual выключен или id пустые — чистим кэш
+                .distinctUntilChanged()
+                .collectLatest { (sessionVersion, neededIds) ->
                     if (neededIds.isEmpty()) {
                         val version = _manualDevicesRequestVersion.value + 1
                         _manualDevicesRequestVersion.value = version
                         _manualDevicesById.value = emptyMap()
-                        Log.d("MANUAL_DEVICES", "CLEAR neededIds=0 ver=$version")
+                        Log.d(
+                            "MANUAL_DEVICES",
+                            "CLEAR neededIds=0 ver=$version sessionVer=$sessionVersion"
+                        )
                         return@collectLatest
                     }
 
                     val version = _manualDevicesRequestVersion.value + 1
                     _manualDevicesRequestVersion.value = version
 
-                    Log.d("MANUAL_DEVICES", "LOAD start ids=${neededIds.size} ver=$version")
+                    Log.d(
+                        "MANUAL_DEVICES",
+                        "LOAD start ids=${neededIds.size} ver=$version sessionVer=$sessionVersion"
+                    )
 
                     val devices = deviceRepository.getDevicesByIds(neededIds.toList())
                     val returnedIds = devices.map { it.id }.toSet()
@@ -491,19 +539,23 @@ class ExplicationViewModel @Inject constructor(
 
                     Log.d(
                         "MANUAL_DEVICES",
-                        "LOAD result returned=${returnedIds.size} missing=${missing.size} missingIds=${missing.take(20)}"
+                        "LOAD result returned=${returnedIds.size} missing=${missing.size} " +
+                                "missingIds=${missing.take(20)} sessionVer=$sessionVersion"
                     )
 
                     val map = devices.associateBy { it.id }
 
-                    // ✅ защита от гонок: старый запрос не имеет права перезатереть новый
                     if (_manualDevicesRequestVersion.value == version) {
                         _manualDevicesById.value = map
-                        Log.d("MANUAL_DEVICES", "LOAD apply ids=${map.size} ver=$version")
+                        Log.d(
+                            "MANUAL_DEVICES",
+                            "LOAD apply ids=${map.size} ver=$version sessionVer=$sessionVersion"
+                        )
                     } else {
                         Log.w(
                             "MANUAL_DEVICES",
-                            "LOAD drop stale ids=${map.size} ver=$version current=${_manualDevicesRequestVersion.value}"
+                            "LOAD drop stale ids=${map.size} ver=$version " +
+                                    "current=${_manualDevicesRequestVersion.value} sessionVer=$sessionVersion"
                         )
                     }
                 }
@@ -974,7 +1026,10 @@ class ExplicationViewModel @Inject constructor(
                     }
 
                     is GroupingResult.Success -> {
-                        Log.w("MANUAL_RESET", "RESET OK pid=$projectId groups=${res.system.groups.size}")
+                        Log.w(
+                            "MANUAL_RESET",
+                            "RESET OK pid=$projectId groups=${res.system.groups.size}"
+                        )
                         repo.setLastDistributionDecisions(res.distributionDecisions)
                         _events.value = UiEvent.ShowSnackbar("Ручные изменения сброшены")
                         // uiState сам восстановится из DB pipeline
@@ -1235,7 +1290,11 @@ class ExplicationViewModel @Inject constructor(
                     )
                 )
             } catch (t: Throwable) {
-                Log.e(TAG_MOVE, "toUnassigned failed deviceId=$deviceId from=$from pid=$projectId", t)
+                Log.e(
+                    TAG_MOVE,
+                    "toUnassigned failed deviceId=$deviceId from=$from pid=$projectId",
+                    t
+                )
                 _events.value = UiEvent.ShowSnackbar("Не удалось переместить в нераспределённые")
             }
         }
@@ -1415,8 +1474,9 @@ class ExplicationViewModel @Inject constructor(
                     false
                 }
 
-            // ✅ Safety-net:
-            // если живой manual session нет, но lock=true — пытаемся восстановить stale lock через bootstrap.
+            // ✅ Новый safety-net:
+            // если manual сессии нет, но lock=true, пробуем снять залипший lock
+            // ТОЛЬКО когда проект реально пустой по группам.
             if (!isManual && manualLock) {
                 Log.w(
                     "AUTO_GATE",
@@ -1424,11 +1484,7 @@ class ExplicationViewModel @Inject constructor(
                             "manualActive=false manualLock=true"
                 )
 
-                runCatching {
-                    bootstrapManualLockUseCase.execute(projectId)
-                }.onFailure {
-                    Log.e("AUTO_GATE", "AUTO_RECALC_STALE_LOCK_BOOTSTRAP_FAILED pid=$projectId", it)
-                }
+                val recovered = recoverStaleManualLockIfProjectEmpty(projectId)
 
                 manualLock = runCatching { projectOwnershipRepository.isManualLock(projectId) }
                     .getOrElse {
@@ -1438,7 +1494,8 @@ class ExplicationViewModel @Inject constructor(
 
                 Log.w(
                     "AUTO_GATE",
-                    "AUTO_RECALC_STALE_LOCK_RESULT pid=$projectId manualLockAfterBootstrap=$manualLock"
+                    "AUTO_RECALC_STALE_LOCK_RESULT pid=$projectId " +
+                            "recovered=$recovered manualLockAfterRecovery=$manualLock"
                 )
             }
 
@@ -1451,7 +1508,7 @@ class ExplicationViewModel @Inject constructor(
 
                 restoreUiFromCurrentLocalState()
                 _events.value = UiEvent.ShowSnackbar(
-                    "Проект заблокирован ручными изменениями. Сначала сбросьте или сохраните ручной режим."
+                    "Проект заблокирован ручными изменениями. Сначала сбросьте ручной режим."
                 )
                 return@launch
             }
@@ -1479,31 +1536,34 @@ class ExplicationViewModel @Inject constructor(
         reason: String,
         updateUiSuccess: Boolean
     ) {
-        var manualLockBeforeStart = runCatching { projectOwnershipRepository.isManualLock(projectId) }
-            .getOrElse {
-                Log.e("AUTO_GATE", "AUTO_RECALC_LOCK_READ_FAILED pid=$projectId", it)
-                false
-            }
+        var manualLockBeforeStart =
+            runCatching { projectOwnershipRepository.isManualLock(projectId) }
+                .getOrElse {
+                    Log.e("AUTO_GATE", "AUTO_RECALC_LOCK_READ_FAILED pid=$projectId", it)
+                    false
+                }
 
-        // ✅ Ещё один safety-net на случай гонки:
-        // explicit recalc уже дошёл сюда, но lock внезапно true при отсутствии manual session.
-        if (manualLockBeforeStart && manualSession.value?.manualModeActive != true) {
+        // ✅ Повторный safety-net на внутреннем контуре,
+        // если lock успел долететь сюда до старта пересчёта.
+        if (manualLockBeforeStart) {
+            val recovered = recoverStaleManualLockIfProjectEmpty(projectId)
+
+            manualLockBeforeStart =
+                runCatching { projectOwnershipRepository.isManualLock(projectId) }
+                    .getOrElse {
+                        Log.e(
+                            "AUTO_GATE",
+                            "AUTO_RECALC_PRESTART_LOCK_REREAD_FAILED pid=$projectId",
+                            it
+                        )
+                        true
+                    }
+
             Log.w(
                 "AUTO_GATE",
-                "AUTO_RECALC_PRESTART_RECOVERY pid=$projectId reason=$reason manualLock=true"
+                "AUTO_RECALC_PRESTART_STALE_LOCK_RESULT pid=$projectId " +
+                        "recovered=$recovered manualLockAfterRecovery=$manualLockBeforeStart"
             )
-
-            runCatching {
-                bootstrapManualLockUseCase.execute(projectId)
-            }.onFailure {
-                Log.e("AUTO_GATE", "AUTO_RECALC_PRESTART_RECOVERY_FAILED pid=$projectId", it)
-            }
-
-            manualLockBeforeStart = runCatching { projectOwnershipRepository.isManualLock(projectId) }
-                .getOrElse {
-                    Log.e("AUTO_GATE", "AUTO_RECALC_PRESTART_REREAD_FAILED pid=$projectId", it)
-                    true
-                }
         }
 
         if (manualLockBeforeStart) {
@@ -1555,11 +1615,40 @@ class ExplicationViewModel @Inject constructor(
                                 "idsSample=${ids.take(20)} dup=$dup"
                     )
 
-                    val manualLockBeforeSave = runCatching { projectOwnershipRepository.isManualLock(projectId) }
-                        .getOrElse {
-                            Log.e("AUTO_SAVE_TRACE", "manualLock read failed pid=$projectId", it)
-                            false
-                        }
+                    var manualLockBeforeSave =
+                        runCatching { projectOwnershipRepository.isManualLock(projectId) }
+                            .getOrElse {
+                                Log.e(
+                                    "AUTO_SAVE_TRACE",
+                                    "manualLock read failed pid=$projectId",
+                                    it
+                                )
+                                false
+                            }
+
+                    // ✅ Финальный safety-net:
+                    // если lock внезапно true, но проект пустой был и recovery возможен —
+                    // пробуем снять перед save.
+                    if (manualLockBeforeSave) {
+                        val recovered = recoverStaleManualLockIfProjectEmpty(projectId)
+
+                        manualLockBeforeSave =
+                            runCatching { projectOwnershipRepository.isManualLock(projectId) }
+                                .getOrElse {
+                                    Log.e(
+                                        "AUTO_SAVE_TRACE",
+                                        "manualLock re-read failed pid=$projectId",
+                                        it
+                                    )
+                                    true
+                                }
+
+                        Log.w(
+                            "AUTO_TRIGGER",
+                            "AUTO_RECALC_BEFORE_SAVE_STALE_LOCK_RESULT pid=$projectId " +
+                                    "recovered=$recovered manualLockAfterRecovery=$manualLockBeforeSave"
+                        )
+                    }
 
                     if (manualLockBeforeSave) {
                         Log.w(

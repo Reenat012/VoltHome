@@ -92,20 +92,22 @@ class BootstrapManualLockUseCase @Inject constructor(
                 )
             } else {
                 /**
-                 * 2) Если duplicate нет, manual session в памяти тоже нет,
-                 *    а persisted lock=true — это stale lock.
+                 * ВРЕМЕННОЕ БЕЗОПАСНОЕ ПРАВИЛО:
+                 * если persisted manualLock=true, но bootstrap не смог ДОКАЗАТЬ,
+                 * что структура битая, lock НЕ снимаем.
                  *
-                 *    Его надо снять, иначе проект навсегда застрянет:
-                 *    manualLock=true + manualSession=null.
+                 * Иначе мы ошибаемся в сторону разрушения ручной структуры.
                  */
-                if (lockBefore) {
-                    ownershipRepo.setManualLock(pid, false)
-                    lockChanged = true
-                    recoveryAction = "CLEAR_STALE_LOCK"
+                recoveryAction = if (lockBefore) {
+                    "PRESERVE_EXISTING_LOCK"
+                } else {
+                    "NOOP"
+                }
 
+                if (lockBefore) {
                     Log.w(
                         TAG,
-                        "BACKFILL CLEAR pid=$pid reason=stale_manual_lock_no_membership"
+                        "BACKFILL KEEP pid=$pid reason=manual_lock_preserved_no_strong_stale_proof"
                     )
                 }
             }

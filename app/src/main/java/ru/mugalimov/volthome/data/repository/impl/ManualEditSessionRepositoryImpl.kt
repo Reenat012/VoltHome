@@ -7,9 +7,11 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import ru.mugalimov.volthome.data.local.dao.DeviceDao
 import ru.mugalimov.volthome.data.local.dao.ProjectLocalStateDao
 import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
+import ru.mugalimov.volthome.domain.mapper.toDomainDevice
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.PhaseMode
@@ -32,7 +34,7 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
     private val manualDraftResetNotifier: ManualDraftResetNotifier, // ✅ kill-process UX маркер
     private val projectLocalStateDao: ProjectLocalStateDao,
     private val structuralWriteCoordinator: StructuralWriteCoordinator,
-    private val deviceRepository: DeviceRepository,
+    private val deviceDao: DeviceDao,
 ) : ManualEditSessionRepository {
 
     companion object {
@@ -395,6 +397,92 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
         sessionsFlow.value = sessionsFlow.value + (projectId to updated)
     }
 
+    /**
+     * Синхронизирует уже отредактированное устройство из БД в active manual draft.
+     *
+     * ВАЖНО:
+     * - если manual session для проекта не активна — ничего не делаем
+     * - обновляем draft.devices
+     * - если устройство находится в группе, пересчитываем line params этой группы
+     * - если устройство в unassigned, пересчёт групп не нужен
+     */
+    override suspend fun syncEditedDeviceInManualSession(
+        projectId: String,
+        device: Device
+    ) {
+        val current = sessionsFlow.value[projectId] ?: return
+        if (!current.manualModeActive) return
+
+        val before = current.draftState
+
+        val updatedManualDevice = device.toManualDeviceDraft()
+
+        val updatedDevices = before.devices.map { draftDevice ->
+            if (draftDevice.deviceId == updatedManualDevice.deviceId) {
+                updatedManualDevice
+            } else {
+                draftDevice
+            }
+        }
+
+        val targetGroup = before.groups.firstOrNull { group ->
+            updatedManualDevice.deviceId in group.deviceIds
+        }
+
+        val updatedGroups = if (targetGroup != null) {
+            val devicesById = updatedDevices.associateBy { it.deviceId }
+
+            before.groups.map { group ->
+                if (group.groupId != targetGroup.groupId) {
+                    group
+                } else {
+                    val devicesInGroup = group.deviceIds.mapNotNull { id -> devicesById[id] }
+
+                    val hasForeignType = devicesInGroup.any { it.deviceType != group.groupType }
+                    val newComposition = if (hasForeignType) {
+                        ManualGroupComposition.MIXED_MANUAL
+                    } else {
+                        ManualGroupComposition.NORMAL
+                    }
+
+                    recalculateGroupLineUseCase.execute(
+                        RecalculateGroupLineUseCase.Params(
+                            group = group,
+                            devicesInGroup = devicesInGroup
+                        )
+                    ).copy(composition = newComposition)
+                }
+            }
+        } else {
+            before.groups
+        }
+
+        val newDraft = before.copy(
+            groups = updatedGroups,
+            devices = updatedDevices
+        )
+
+        val updatedSession = current.copy(
+            draftState = newDraft,
+            version = current.version + 1L,
+            updatedAtEpochMs = System.currentTimeMillis()
+        )
+
+        sessionsFlow.value = sessionsFlow.value + (projectId to updatedSession)
+
+        logDraftInvariant(
+            projectId = projectId,
+            source = "syncEditedDeviceInManualSession",
+            draft = newDraft
+        )
+
+        Log.i(
+            TAG,
+            "syncEditedDeviceInManualSession pid=$projectId deviceId=${device.id} " +
+                    "groupId=${targetGroup?.groupId} sessionVer=${updatedSession.version}"
+        )
+    }
+
     override suspend fun addInsertedDevicesToUnassigned(
         projectId: String,
         insertedDeviceIds: List<Long>,
@@ -415,8 +503,9 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
 
         // Узкий path:
         // читаем из БД только фактически вставленные устройства, а не пересобираем весь draft.
-        val insertedDevicesFromDb = deviceRepository
+        val insertedDevicesFromDb = deviceDao
             .getDevicesByIds(insertedDeviceIds)
+            .map { it.toDomainDevice() }
             .map { it.toManualDeviceDraft() }
 
         // Для доказательности логируем, если БД вернула не все id.
