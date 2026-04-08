@@ -12,10 +12,9 @@ import ru.mugalimov.volthome.domain.model.DeviceCalcBreakdown
 /**
  * Device breakdown use-case.
  *
- * ВАЖНО (Коммит 1):
- * - этот use-case сейчас НЕ является canonical source of truth для device current;
- * - здесь формируется breakdown/объяснение по мощности;
- * - формулы не меняем, только явно помечаем место в системе.
+ * Коммит 2:
+ * - breakdown мощности устройства теперь идёт через canonical calculation core,
+ *   а не через локальную формулу use-case.
  */
 class CalculateDeviceBreakdownUseCase @Inject constructor() {
 
@@ -24,22 +23,26 @@ class CalculateDeviceBreakdownUseCase @Inject constructor() {
             stage = "DEVICE_BREAKDOWN_START",
             message =
                 "deviceId=${device.id} name='${device.name}' powerW=${device.power} " +
+                        "voltage=${device.voltage.value} voltageType=${device.voltage.type} " +
                         "demandRatio=${device.demandRatio} powerFactor=${device.powerFactor} " +
                         "path=CalculateDeviceBreakdownUseCase.execute()"
         )
 
-        // Важно: в домене power/demandRatio/powerFactor — non-null
-        val powerW = device.power
-        val appliedDemand = device.demandRatio
+        val input = LoadInput(
+            powerW = device.power.toDouble(),
+            voltage = device.voltage.value.toDouble(),
+            powerFactor = device.powerFactor,
+            demandRatio = device.demandRatio,
+            voltageType = device.voltage.type,
+            label = device.name
+        )
 
-        // В этом проекте demandRatio в доменной модели non-null,
-        // значит допущение "не задан" тут больше не актуально.
+        val deviceLoad = CurrentCalculator.calculateDeviceLoad(input)
+
         val assumptions = emptyList<CalcAssumption>()
 
-        val calcPowerW: Double = powerW.toDouble() * appliedDemand
-
         val calculatedPower = CalculatedValue(
-            value = calcPowerW,
+            value = deviceLoad.calculatedPowerW,
             unit = "Вт",
             label = "Расчётная мощность устройства",
             steps = listOf(
@@ -47,10 +50,10 @@ class CalculateDeviceBreakdownUseCase @Inject constructor() {
                     name = "Учет коэффициента спроса",
                     formula = "Pрасч = Pуст × kспроса",
                     inputs = listOf(
-                        CalcInput("Pуст", powerW.toDouble(), "Вт"),
-                        CalcInput("kспроса", appliedDemand)
+                        CalcInput("Pуст", device.power.toDouble(), "Вт"),
+                        CalcInput("kспроса", device.demandRatio)
                     ),
-                    output = CalcOutput(calcPowerW, "Вт"),
+                    output = CalcOutput(deviceLoad.calculatedPowerW, "Вт"),
                     assumptions = assumptions
                 )
             ),
@@ -60,7 +63,8 @@ class CalculateDeviceBreakdownUseCase @Inject constructor() {
         CalculationTrace.log(
             stage = "DEVICE_BREAKDOWN_FINISH",
             message =
-                "deviceId=${device.id} calculatedPowerW=${CalculationTrace.f(calcPowerW)}"
+                "deviceId=${device.id} calculatedPowerW=${CalculationTrace.f(deviceLoad.calculatedPowerW)} " +
+                        "calculatedCurrentA=${CalculationTrace.f(deviceLoad.calculatedCurrentA)}"
         )
 
         return DeviceCalcBreakdown(

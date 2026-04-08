@@ -8,15 +8,14 @@ import ru.mugalimov.volthome.domain.model.CalcStep
 import ru.mugalimov.volthome.domain.model.CalculatedValue
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.CoefficientSource
+import ru.mugalimov.volthome.domain.model.Device
 
 /**
  * Breakdown use-case для уже собранной группы.
  *
- * ВАЖНО (Коммит 1):
- * - этот use-case сейчас НЕ является canonical SoT для group current;
- * - он строит объяснение поверх уже существующей группы;
- * - при этом current здесь считается через Device.calculateCurrent() * demandRatio,
- *   то есть это отдельный parallel path, который мы пока только фиксируем.
+ * Коммит 2:
+ * - installed/calculated power и calculated current теперь идут
+ *   через единый canonical calculation core.
  */
 class CalculateGroupBreakdownUseCase @Inject constructor() {
 
@@ -35,8 +34,11 @@ class CalculateGroupBreakdownUseCase @Inject constructor() {
                         "path=CalculateGroupBreakdownUseCase.execute()"
         )
 
-        // 1) Installed power (ΣPуст) — паспортная
-        val installedPW = group.installedPowerW.toDouble()
+        val inputs = group.devices.map { it.toLoadInput() }
+        val groupLoad = CurrentCalculator.calculateGroupLoad(inputs)
+
+        // 1) Installed power
+        val installedPW = groupLoad.installedPowerW
 
         val installedPowerSteps = listOf(
             CalcStep(
@@ -45,7 +47,7 @@ class CalculateGroupBreakdownUseCase @Inject constructor() {
                 inputs = group.devices.map { d ->
                     CalcInput(
                         name = d.name,
-                        value = d.power.toDouble(), // power в домене non-null
+                        value = d.power.toDouble(),
                         unit = "Вт"
                     )
                 },
@@ -60,23 +62,15 @@ class CalculateGroupBreakdownUseCase @Inject constructor() {
             steps = installedPowerSteps
         )
 
-        // 2) Calculated power (Σ(Pуст × kспроса)) — прозрачный шаг по устройствам
+        // 2) Calculated power
         val calculatedPowerInputs = buildList {
             group.devices.forEach { d ->
-                val basePW = d.power.toDouble()
-                val k = d.demandRatio
-                val resultPW = basePW * k
+                val deviceLoad = CurrentCalculator.calculateDeviceLoad(d.toLoadInput())
 
-                add(CalcInput(name = "${d.name} / base", value = basePW, unit = "Вт"))
-                add(CalcInput(name = "${d.name} / k", value = k, unit = ""))
-                add(CalcInput(name = "${d.name} / result", value = resultPW, unit = "Вт"))
+                add(CalcInput(name = "${d.name} / base", value = d.power.toDouble(), unit = "Вт"))
+                add(CalcInput(name = "${d.name} / k", value = d.demandRatio, unit = ""))
+                add(CalcInput(name = "${d.name} / result", value = deviceLoad.calculatedPowerW, unit = "Вт"))
             }
-        }
-
-        val calculatedPW = group.devices.sumOf { d ->
-            val basePW = d.power.toDouble()
-            val k = d.demandRatio
-            basePW * k
         }
 
         val calculatedPowerSteps = listOf(
@@ -84,52 +78,46 @@ class CalculateGroupBreakdownUseCase @Inject constructor() {
                 name = "Расчётная мощность группы по спросу",
                 formula = "Pгр(расч) = Σ (Pуст,i × kспроса,i)",
                 inputs = calculatedPowerInputs,
-                output = CalcOutput(calculatedPW, "Вт")
+                output = CalcOutput(groupLoad.calculatedPowerW, "Вт")
             )
         )
 
         val calculatedPower = CalculatedValue(
-            value = calculatedPW,
+            value = groupLoad.calculatedPowerW,
             unit = "Вт",
             label = "Расчётная мощность группы",
             steps = calculatedPowerSteps
         )
 
-        // 3) Calculated current (Σ(Iном × kспроса)) — прозрачный шаг по устройствам
-        // ВАЖНО:
-        // - текущая реализация использует Device.calculateCurrent() как базовый ток,
-        //   а потом умножает на demandRatio.
-        // - это intentional characterization trace для Коммита 1.
+        // 3) Calculated current
         val calculatedCurrentInputs = buildList {
             group.devices.forEach { d ->
-                val baseIA = d.calculateCurrent()
-                val k = d.demandRatio
-                val resultIA = baseIA * k
+                val baseInstalledCurrent = CurrentCalculator.calculateInstalledCurrent(
+                    power = d.power.toDouble(),
+                    voltage = d.voltage.value.toDouble(),
+                    powerFactor = d.powerFactor,
+                    voltageType = d.voltage.type
+                )
+                val deviceLoad = CurrentCalculator.calculateDeviceLoad(d.toLoadInput())
 
-                add(CalcInput(name = "${d.name} / base", value = baseIA, unit = "А"))
-                add(CalcInput(name = "${d.name} / k", value = k, unit = ""))
-                add(CalcInput(name = "${d.name} / result", value = resultIA, unit = "А"))
+                add(CalcInput(name = "${d.name} / base", value = baseInstalledCurrent, unit = "А"))
+                add(CalcInput(name = "${d.name} / k", value = d.demandRatio, unit = ""))
+                add(CalcInput(name = "${d.name} / result", value = deviceLoad.calculatedCurrentA, unit = "А"))
             }
-        }
-
-        val calculatedIA = group.devices.sumOf { d ->
-            val baseIA = d.calculateCurrent()
-            val k = d.demandRatio
-            baseIA * k
         }
 
         val currentSteps = listOf(
             CalcStep(
                 name = "Сумма расчётных токов устройств с учётом спроса",
-                formula = "Iгр(расч) = Σ (Iном,i × kспроса,i)",
+                formula = "Iгр(расч) = Σ Iрасч,i",
                 inputs = calculatedCurrentInputs,
-                output = CalcOutput(calculatedIA, "А"),
+                output = CalcOutput(groupLoad.calculatedCurrentA, "А"),
                 assumptions = listOf(
                     CalcAssumption(
                         kind = CalcAssumption.Kind.OTHER,
                         source = CoefficientSource.DEFAULT,
                         subject = "domainCalc.current",
-                        message = "Токи устройств рассчитаны с учётом коэффициента спроса и коэффициента мощности.",
+                        message = "Расчётные токи устройств получены из canonical calculation core.",
                         original = null,
                         applied = null
                     )
@@ -138,7 +126,7 @@ class CalculateGroupBreakdownUseCase @Inject constructor() {
         )
 
         val calculatedCurrent = CalculatedValue(
-            value = calculatedIA,
+            value = groupLoad.calculatedCurrentA,
             unit = "А",
             label = "Расчётный ток группы",
             steps = currentSteps
@@ -147,9 +135,9 @@ class CalculateGroupBreakdownUseCase @Inject constructor() {
         CalculationTrace.log(
             stage = "GROUP_BREAKDOWN_FINISH",
             message =
-                "groupNumber=${group.groupNumber} installedPowerW=${CalculationTrace.f(installedPW)} " +
-                        "calculatedPowerW=${CalculationTrace.f(calculatedPW)} " +
-                        "breakdownCurrentA=${CalculationTrace.f(calculatedIA)} " +
+                "groupNumber=${group.groupNumber} installedPowerW=${CalculationTrace.f(groupLoad.installedPowerW)} " +
+                        "calculatedPowerW=${CalculationTrace.f(groupLoad.calculatedPowerW)} " +
+                        "breakdownCurrentA=${CalculationTrace.f(groupLoad.calculatedCurrentA)} " +
                         "groupNominalCurrentField=${CalculationTrace.f(group.nominalCurrent)}"
         )
 
@@ -159,4 +147,14 @@ class CalculateGroupBreakdownUseCase @Inject constructor() {
             calculatedCurrent = calculatedCurrent
         )
     }
+
+    private fun Device.toLoadInput(): LoadInput =
+        LoadInput(
+            powerW = power.toDouble(),
+            voltage = voltage.value.toDouble(),
+            powerFactor = powerFactor,
+            demandRatio = demandRatio,
+            voltageType = voltage.type,
+            label = name
+        )
 }

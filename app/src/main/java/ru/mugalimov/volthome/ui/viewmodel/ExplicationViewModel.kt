@@ -1409,13 +1409,50 @@ class ExplicationViewModel @Inject constructor(
             val activeSession = getManualSessionForProject(projectId)
             val isManual = activeSession?.manualModeActive == true
 
-            if (isManual) {
+            var manualLock = runCatching { projectOwnershipRepository.isManualLock(projectId) }
+                .getOrElse {
+                    Log.e("AUTO_GATE", "AUTO_RECALC_LOCK_READ_FAILED pid=$projectId", it)
+                    false
+                }
+
+            // ✅ Safety-net:
+            // если живой manual session нет, но lock=true — пытаемся восстановить stale lock через bootstrap.
+            if (!isManual && manualLock) {
                 Log.w(
                     "AUTO_GATE",
-                    "AUTO_RECALC_BLOCKED reason=EXPLICIT_RECALC_REQUEST manual=true pid=$projectId ver=${activeSession.version}"
+                    "AUTO_RECALC_STALE_LOCK_CHECK pid=$projectId " +
+                            "manualActive=false manualLock=true"
                 )
-                _events.value =
-                    UiEvent.ShowSnackbar("Сейчас включён ручной режим. Пересчёт недоступен.")
+
+                runCatching {
+                    bootstrapManualLockUseCase.execute(projectId)
+                }.onFailure {
+                    Log.e("AUTO_GATE", "AUTO_RECALC_STALE_LOCK_BOOTSTRAP_FAILED pid=$projectId", it)
+                }
+
+                manualLock = runCatching { projectOwnershipRepository.isManualLock(projectId) }
+                    .getOrElse {
+                        Log.e("AUTO_GATE", "AUTO_RECALC_LOCK_REREAD_FAILED pid=$projectId", it)
+                        true
+                    }
+
+                Log.w(
+                    "AUTO_GATE",
+                    "AUTO_RECALC_STALE_LOCK_RESULT pid=$projectId manualLockAfterBootstrap=$manualLock"
+                )
+            }
+
+            if (isManual || manualLock) {
+                Log.w(
+                    "AUTO_GATE",
+                    "AUTO_RECALC_BLOCKED reason=EXPLICIT_RECALC_REQUEST " +
+                            "manualActive=$isManual manualLock=$manualLock pid=$projectId ver=${activeSession?.version}"
+                )
+
+                restoreUiFromCurrentLocalState()
+                _events.value = UiEvent.ShowSnackbar(
+                    "Проект заблокирован ручными изменениями. Сначала сбросьте или сохраните ручной режим."
+                )
                 return@launch
             }
 
@@ -1442,6 +1479,45 @@ class ExplicationViewModel @Inject constructor(
         reason: String,
         updateUiSuccess: Boolean
     ) {
+        var manualLockBeforeStart = runCatching { projectOwnershipRepository.isManualLock(projectId) }
+            .getOrElse {
+                Log.e("AUTO_GATE", "AUTO_RECALC_LOCK_READ_FAILED pid=$projectId", it)
+                false
+            }
+
+        // ✅ Ещё один safety-net на случай гонки:
+        // explicit recalc уже дошёл сюда, но lock внезапно true при отсутствии manual session.
+        if (manualLockBeforeStart && manualSession.value?.manualModeActive != true) {
+            Log.w(
+                "AUTO_GATE",
+                "AUTO_RECALC_PRESTART_RECOVERY pid=$projectId reason=$reason manualLock=true"
+            )
+
+            runCatching {
+                bootstrapManualLockUseCase.execute(projectId)
+            }.onFailure {
+                Log.e("AUTO_GATE", "AUTO_RECALC_PRESTART_RECOVERY_FAILED pid=$projectId", it)
+            }
+
+            manualLockBeforeStart = runCatching { projectOwnershipRepository.isManualLock(projectId) }
+                .getOrElse {
+                    Log.e("AUTO_GATE", "AUTO_RECALC_PRESTART_REREAD_FAILED pid=$projectId", it)
+                    true
+                }
+        }
+
+        if (manualLockBeforeStart) {
+            Log.w(
+                "AUTO_GATE",
+                "AUTO_RECALC_ABORT reason=$reason manualLock=true pid=$projectId stage=BEFORE_LOADING"
+            )
+            restoreUiFromCurrentLocalState()
+            _events.value = UiEvent.ShowSnackbar(
+                "Проект заблокирован ручными изменениями. Автопересчёт отменён."
+            )
+            return
+        }
+
         Log.w("AUTO_GATE", "AUTO_RECALC_ALLOWED reason=$reason pid=$projectId")
 
         _isRecalculating.value = true
@@ -1478,6 +1554,26 @@ class ExplicationViewModel @Inject constructor(
                         "about to save pid=$projectId mode=$mode groups=${groups.size} " +
                                 "idsSample=${ids.take(20)} dup=$dup"
                     )
+
+                    val manualLockBeforeSave = runCatching { projectOwnershipRepository.isManualLock(projectId) }
+                        .getOrElse {
+                            Log.e("AUTO_SAVE_TRACE", "manualLock read failed pid=$projectId", it)
+                            false
+                        }
+
+                    if (manualLockBeforeSave) {
+                        Log.w(
+                            "AUTO_TRIGGER",
+                            "AUTO_RECALC_SUPPRESSED pid=$projectId groups=${groups.size} " +
+                                    "manualLock=true stage=BEFORE_SAVE"
+                        )
+                        restoreUiFromCurrentLocalState()
+                        _events.value = UiEvent.ShowSnackbar(
+                            "Проект заблокирован ручными изменениями. Результат автопересчёта не сохранён."
+                        )
+                        return
+                    }
+
                     saveAutoCalculatedGroupsToLocalDbUseCase.execute(
                         SaveAutoCalculatedGroupsToLocalDbUseCase.Params(
                             projectId = projectId,
@@ -1494,6 +1590,13 @@ class ExplicationViewModel @Inject constructor(
                         "AUTO_TRIGGER",
                         "AUTO_RECALC_OK pid=$projectId groups=${groups.size} (uiSuccess=$updateUiSuccess)"
                     )
+
+                    // Даже если updateUiSuccess=false, экран нельзя оставлять в Loading.
+                    // При успешном save DB pipeline сам поднимет Success/Empty.
+                    // Но если эмит не пришёл мгновенно, делаем fail-safe restore.
+                    if (_uiState.value is GroupScreenState.Loading) {
+                        restoreUiFromCurrentLocalState()
+                    }
 
                     if (updateUiSuccess) {
                         Log.w("AUTO_TRIGGER", "updateUiSuccess=true is not used сейчас")
@@ -1557,6 +1660,61 @@ class ExplicationViewModel @Inject constructor(
                 )
             } finally {
                 autoRecalcInFlight.value = false
+            }
+        }
+    }
+
+    /**
+     * Восстанавливает terminal UI state из текущего локального состояния,
+     * не инициируя новых write-операций.
+     *
+     * Нужен как fail-safe, когда explicit auto recalc был запущен,
+     * но сохранить результат нельзя (например, из-за manualLock=true).
+     */
+    private fun restoreUiFromCurrentLocalState() {
+        val session = manualSession.value
+        val manualActive = session?.manualModeActive == true
+        val manualGroups = manualDisplayGroups.value
+        val dbGroups = dbGroupsFlow.value
+        val mode = phaseMode.value
+        val decisions = decisionsFlow.value
+
+        val plan = userPlanRepository.planFlow.value
+        val isProReport = plan.capabilities.professionalReportSections
+
+        when {
+            manualActive && manualGroups.isNotEmpty() -> {
+                setSuccessFromGroups(
+                    groups = manualGroups,
+                    mode = mode,
+                    isProReport = isProReport,
+                    decisions = decisions
+                )
+            }
+
+            manualActive && manualGroups.isEmpty() -> {
+                _uiState.value = GroupScreenState.Empty(
+                    mode = GroupScreenState.Empty.EmptyMode.MANUAL,
+                    title = "Ручной режим",
+                    message = "Группы пока не созданы"
+                )
+            }
+
+            dbGroups.isNotEmpty() -> {
+                setSuccessFromGroups(
+                    groups = dbGroups,
+                    mode = mode,
+                    isProReport = isProReport,
+                    decisions = decisions
+                )
+            }
+
+            else -> {
+                _uiState.value = GroupScreenState.Empty(
+                    mode = GroupScreenState.Empty.EmptyMode.AUTO,
+                    title = "Распределение по фазам",
+                    message = "Группы пока не созданы"
+                )
             }
         }
     }
@@ -1724,3 +1882,4 @@ data class PdfReportSnapshot(
     val installedPowerW: Double,
     val calculatedPowerW: Double
 )
+

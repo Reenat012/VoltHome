@@ -101,6 +101,7 @@ class ProjectBaseStateBuilder @Inject constructor(
                     deviceType = d.deviceType,
                     powerW = d.power,
                     voltageType = d.voltage.type,
+                    voltageValue = d.voltage.value,
                     demandRatio = d.demandRatio,
                     powerFactor = d.powerFactor,
                     hasMotor = d.hasMotor,

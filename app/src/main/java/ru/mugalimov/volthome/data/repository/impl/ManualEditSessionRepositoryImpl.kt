@@ -148,6 +148,7 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
             deviceType = deviceType,
             powerW = power,
             voltageType = voltage.type,
+            voltageValue = voltage.value,
             demandRatio = demandRatio,
             powerFactor = powerFactor,
             hasMotor = hasMotor,

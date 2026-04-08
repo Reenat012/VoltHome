@@ -59,6 +59,7 @@ import ru.mugalimov.volthome.domain.model.provider.DeviceDefaultsProvider
 import ru.mugalimov.volthome.domain.telemetry.CreateDeviceOpBus
 import ru.mugalimov.volthome.domain.telemetry.CreateDeviceOpEvent
 import ru.mugalimov.volthome.domain.use_case.AutoRebuildGroupsAfterDeviceInsertUseCase
+import ru.mugalimov.volthome.domain.use_case.BootstrapManualLockUseCase
 import ru.mugalimov.volthome.ui.components.JsonParser
 import java.util.Date
 import java.util.UUID
@@ -83,6 +84,7 @@ class RoomRepositoryImpl @Inject constructor(
     private val autoRebuildAfterInsertUseCase: Lazy<AutoRebuildGroupsAfterDeviceInsertUseCase>,
     private val manualRepo: ManualEditSessionRepository,
     private val ownershipRepo: ProjectOwnershipRepository,
+    private val bootstrapManualLockUseCase: BootstrapManualLockUseCase,
 ) : RoomRepository {
 
     private val uuidDao get() = appDb.uuidMapDao()
@@ -382,7 +384,7 @@ class RoomRepositoryImpl @Inject constructor(
         //                          AUTO трогать её не имеет права даже после рестарта
         // 3) только если оба флага false -> разрешаем AUTO rebuild
         val manualActive = manualRepo.isManualActive(projectId)
-        val manualLock = ownershipRepo.isManualLock(projectId)
+        var manualLock = ownershipRepo.isManualLock(projectId)
 
         when {
             // Живая manual-сессия: сохраняем старое поведение.
@@ -398,23 +400,43 @@ class RoomRepositoryImpl @Inject constructor(
                     opId = opId
                 )
 
-                // В active manual AUTO rebuild запрещён.
                 Log.w(
                     "AUTO_POST_INSERT",
                     "AUTO_POST_INSERT SUPPRESS reason=manualActive pid=$projectId opId=$opId inserted=${deviceIds.size} roomId=$roomId"
                 )
             }
 
-            // Persisted ownership: после рестарта manualSession уже может отсутствовать,
-            // но AUTO всё равно не имеет права снести ручную структуру.
             manualLock -> {
                 Log.w(
                     "AUTO_POST_INSERT",
-                    "AUTO_POST_INSERT SUPPRESS reason=manualLock pid=$projectId opId=$opId inserted=${deviceIds.size} roomId=$roomId"
+                    "AUTO_POST_INSERT STALE_LOCK_CHECK pid=$projectId opId=$opId inserted=${deviceIds.size} roomId=$roomId manualActive=$manualActive manualLock=$manualLock"
                 )
+
+                bootstrapManualLockUseCase.execute(projectId)
+
+                manualLock = ownershipRepo.isManualLock(projectId)
+
+                Log.w(
+                    "AUTO_POST_INSERT",
+                    "AUTO_POST_INSERT STALE_LOCK_RESULT pid=$projectId opId=$opId manualLockAfterBootstrap=$manualLock"
+                )
+
+                if (manualLock) {
+                    Log.w(
+                        "AUTO_POST_INSERT",
+                        "AUTO_POST_INSERT SUPPRESS reason=manualLock pid=$projectId opId=$opId inserted=${deviceIds.size} roomId=$roomId"
+                    )
+                } else {
+                    autoRebuildAfterInsertUseCase.get().execute(
+                        AutoRebuildGroupsAfterDeviceInsertUseCase.Params(
+                            projectIdRecorded = projectId,
+                            insertedIds = deviceIds,
+                            opId = opId
+                        )
+                    )
+                }
             }
 
-            // Только в полностью AUTO-сценарии разрешаем rebuild.
             else -> {
                 autoRebuildAfterInsertUseCase.get().execute(
                     AutoRebuildGroupsAfterDeviceInsertUseCase.Params(
@@ -542,7 +564,7 @@ class RoomRepositoryImpl @Inject constructor(
         // post-insert policy должна учитывать не только живую manual-сессию,
         // но и persisted ownership после MANUAL_SAVE / рестарта.
         val manualActive = manualRepo.isManualActive(projectId)
-        val manualLock = ownershipRepo.isManualLock(projectId)
+        var manualLock = ownershipRepo.isManualLock(projectId)
 
         when {
             // Живая ручная сессия: новые устройства уходим в unassigned.
@@ -559,18 +581,37 @@ class RoomRepositoryImpl @Inject constructor(
                 )
             }
 
-            // Persisted manual ownership: после рестарта manualActive уже false,
-            // но AUTO rebuild всё равно запрещён.
-            // В этом коммите используем безопасный вариант A:
-            // просто suppress, без поднятия временной manual-сессии.
             manualLock -> {
                 Log.w(
                     "AUTO_POST_INSERT",
-                    "AUTO_POST_INSERT SUPPRESS reason=manualLock pid=$projectId opId=$opId inserted=${ids.size} roomId=$roomId"
+                    "AUTO_POST_INSERT STALE_LOCK_CHECK pid=$projectId opId=$opId inserted=${ids.size} roomId=$roomId manualActive=$manualActive manualLock=$manualLock"
                 )
+
+                bootstrapManualLockUseCase.execute(projectId)
+
+                manualLock = ownershipRepo.isManualLock(projectId)
+
+                Log.w(
+                    "AUTO_POST_INSERT",
+                    "AUTO_POST_INSERT STALE_LOCK_RESULT pid=$projectId opId=$opId manualLockAfterBootstrap=$manualLock"
+                )
+
+                if (manualLock) {
+                    Log.w(
+                        "AUTO_POST_INSERT",
+                        "AUTO_POST_INSERT SUPPRESS reason=manualLock pid=$projectId opId=$opId inserted=${ids.size} roomId=$roomId"
+                    )
+                } else {
+                    autoRebuildAfterInsertUseCase.get().execute(
+                        AutoRebuildGroupsAfterDeviceInsertUseCase.Params(
+                            projectIdRecorded = projectId,
+                            insertedIds = ids,
+                            opId = opId
+                        )
+                    )
+                }
             }
 
-            // Полностью AUTO-сценарий.
             else -> {
                 autoRebuildAfterInsertUseCase.get().execute(
                     AutoRebuildGroupsAfterDeviceInsertUseCase.Params(

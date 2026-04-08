@@ -17,11 +17,9 @@ import ru.mugalimov.volthome.domain.use_case.IncomerSelector
 object UseCaseModule {
     @Provides
     fun provideCalculateLoadUseCase(
-        deviceRepository: DeviceRepository,
-        roomRepository: RoomRepository
-
+        deviceRepository: DeviceRepository
     ): CalcLoads {
-        return CalcLoads(deviceRepository, roomRepository)
+        return CalcLoads(deviceRepository)
     }
 
     @Provides

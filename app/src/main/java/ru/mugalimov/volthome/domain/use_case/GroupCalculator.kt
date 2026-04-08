@@ -83,7 +83,9 @@ class GroupCalculator(
                 val byType = commonDevices.groupBy { it.deviceType }
 
                 byType.forEach { (deviceType, devicesOfType) ->
-                    val maxI = devicesOfType.maxOfOrNull { it.nominalCurrent() } ?: 0.0
+                    val maxI: Double = devicesOfType.maxOfOrNull { device: DeviceEntity ->
+                        device.nominalCurrent()
+                    } ?: 0.0
                     val hasMotor = devicesOfType.any { it.hasMotor }
 
                     CalculationTrace.log(
@@ -338,15 +340,21 @@ class GroupCalculator(
         groupNumber: Int,
         room: RoomEntity
     ): CircuitGroup {
-        val nominalCurrent = devices.sumOf { it.nominalCurrent() }
-        val installedPowerW = devices.sumOf { it.power }
+        // Единый canonical group load для AUTO-режима.
+        val groupLoad = CurrentCalculator.calculateGroupLoad(
+            devices.map { it.toLoadInput() }
+        )
+
+        val nominalCurrent = groupLoad.calculatedCurrentA
+        val installedPowerW = groupLoad.installedPowerW.toInt()
 
         CalculationTrace.log(
             stage = "GROUP_CALC_GROUP_BUILT",
             message =
                 "projectId=$projectId roomId=${room.id} room='${room.name}' groupNumber=$groupNumber " +
                         "kind=COMMON devices=${devices.size} deviceIds=${devices.joinToString { it.deviceId.toString() }} " +
-                        "installedPowerW=$installedPowerW canonicalGroupCurrentA=${CalculationTrace.f(nominalCurrent)} " +
+                        "installedPowerW=$installedPowerW calculatedPowerW=${CalculationTrace.f(groupLoad.calculatedPowerW)} " +
+                        "canonicalGroupCurrentA=${CalculationTrace.f(nominalCurrent)} " +
                         "lineBreaker=${profile.breakerRating} lineCable=${CalculationTrace.f(profile.cableSection)} " +
                         "lineCurve=${profile.breakerType}"
         )
@@ -381,15 +389,19 @@ class GroupCalculator(
         groupNumber: Int,
         room: RoomEntity
     ): CircuitGroup {
-        val nominalCurrent = device.nominalCurrent()
-        val installedPowerW = device.power
+        // Единый canonical device load для AUTO-режима.
+        val deviceLoad = CurrentCalculator.calculateDeviceLoad(device.toLoadInput())
+
+        val nominalCurrent = deviceLoad.calculatedCurrentA
+        val installedPowerW = deviceLoad.installedPowerW.toInt()
 
         CalculationTrace.log(
             stage = "GROUP_CALC_GROUP_BUILT",
             message =
                 "projectId=$projectId roomId=${room.id} room='${room.name}' groupNumber=$groupNumber " +
                         "kind=DEDICATED deviceId=${device.deviceId} device='${device.name}' type=${device.deviceType} " +
-                        "installedPowerW=$installedPowerW canonicalGroupCurrentA=${CalculationTrace.f(nominalCurrent)} " +
+                        "installedPowerW=$installedPowerW calculatedPowerW=${CalculationTrace.f(deviceLoad.calculatedPowerW)} " +
+                        "canonicalGroupCurrentA=${CalculationTrace.f(nominalCurrent)} " +
                         "lineBreaker=${profile.breakerRating} lineCable=${CalculationTrace.f(profile.cableSection)} " +
                         "lineCurve=${profile.breakerType}"
         )
@@ -515,20 +527,24 @@ class GroupCalculator(
 // --- Extensions / мапперы ---
 
 /**
- * Текущий canonical AUTO path для вклада устройства в ток группы.
- *
- * ВАЖНО (Коммит 1):
- * - это НЕ raw Device.calculateCurrent();
- * - это путь через CurrentCalculator с учётом:
- *   power + demandRatio + powerFactor + voltageType.
- *
- * Именно этот path сейчас используется в GroupCalculator для AUTO-расчёта групп.
+ * Маппинг DeviceEntity -> canonical LoadInput.
  */
-fun DeviceEntity.nominalCurrent(): Double =
-    CurrentCalculator.calculateNominalCurrent(
-        power = power.toDouble(),
-        voltage = (voltage.value.takeIf { it > 0 } ?: 230).toDouble(),
+private fun DeviceEntity.toLoadInput(): LoadInput =
+    LoadInput(
+        powerW = power.toDouble(),
+        voltage = voltage.value.toDouble(),
         powerFactor = powerFactor,
         demandRatio = demandRatio,
-        voltageType = voltage.type
+        voltageType = voltage.type,
+        label = name
     )
+
+/**
+ * Текущий canonical AUTO path для вклада устройства в ток группы.
+ *
+ * Коммит 2:
+ * - это единый путь через canonical calculation core;
+ * - именно это значение используется в GroupCalculator для AUTO-расчёта групп.
+ */
+fun DeviceEntity.nominalCurrent(): Double =
+    CurrentCalculator.calculateDeviceLoad(toLoadInput()).calculatedCurrentA

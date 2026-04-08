@@ -29,10 +29,9 @@ import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
  * - MANUAL больше НЕ строится здесь (он строится во ViewModel из draft).
  * - Здесь оставляем только AUTO-пайплайн: БД + overrides.
  *
- * ВАЖНО (Коммит 1):
- * - этот use-case НЕ является canonical source of truth для group current;
- * - здесь есть параллельный UI path, который заново суммирует токи устройств;
- * - мы НЕ меняем это поведение сейчас, только трассируем его как characterization path.
+ * Коммит 2:
+ * - UI path больше не держит собственную формулу;
+ * - он использует тот же canonical calculation core, что и остальные пути.
  */
 class GetPhaseLoadUiUseCase @Inject constructor(
     private val groupDao: GroupDao,
@@ -64,10 +63,8 @@ class GetPhaseLoadUiUseCase @Inject constructor(
                             "projectId=$projectId groupsFromDb=${groupsFromDb.size} overrides=${overrides.size}"
                     )
 
-                    // groupId -> Phase (override)
                     val overrideMap = overrides.associate { it.groupId to it.phase }
 
-                    // применяем override ДО сборки PhaseLoadItem
                     groupsFromDb.map { g ->
                         val forced = overrideMap[g.groupId]
                         if (forced != null && forced != g.phase) g.copy(phase = forced) else g
@@ -83,11 +80,10 @@ class GetPhaseLoadUiUseCase @Inject constructor(
         CalculationTrace.log(
             stage = "PHASE_LOAD_AUTO_BUILD_START",
             message =
-                "groups=${groups.size} mode=AUTO path=GetPhaseLoadUiUseCase.buildPhaseItems() " +
-                        "note=UI path recalculates totals from devices for characterization"
+                "groups=${groups.size} mode=AUTO path=GetPhaseLoadUiUseCase.buildPhaseItems() note=UI path recalculates totals from devices for characterization"
         )
 
-        // 1) Сбор 3φ пула: устройства с AC_3PHASE (вне зависимости от фазы группы)
+        // 1) Сбор 3φ пула: устройства с AC_3PHASE
         val threePhaseDevices = groups
             .flatMap { g -> g.devices.map { d -> g to d } }
             .filter { (_, d) -> d.voltage.type == VoltageType.AC_3PHASE }
@@ -101,7 +97,9 @@ class GetPhaseLoadUiUseCase @Inject constructor(
                 .values
                 .map { items ->
                     val g = items.first().first
-                    val deviceRows = items.map { (_, d) ->
+                    val devices = items.map { it.second }
+
+                    val deviceRows = devices.map { d ->
                         PhaseDeviceItem(
                             deviceId = d.id,
                             name = d.name,
@@ -110,21 +108,24 @@ class GetPhaseLoadUiUseCase @Inject constructor(
                         )
                     }
 
-                    val uiCurrent = items.sumOf { (_, d) ->
-                        CurrentCalculator.calculateNominalCurrent(
-                            power = d.power.toDouble(),
-                            voltage = (d.voltage.value.takeIf { it > 0 } ?: 230).toDouble(),
-                            powerFactor = d.powerFactor,
-                            demandRatio = d.demandRatio,
-                            voltageType = d.voltage.type
-                        )
-                    }
+                    val groupLoad = CurrentCalculator.calculateGroupLoad(
+                        devices.map { d ->
+                            LoadInput(
+                                powerW = d.power.toDouble(),
+                                voltage = d.voltage.value.toDouble(),
+                                powerFactor = d.powerFactor,
+                                demandRatio = d.demandRatio,
+                                voltageType = d.voltage.type,
+                                label = d.name
+                            )
+                        }
+                    )
 
                     CalculationTrace.log(
                         stage = "PHASE_LOAD_AUTO_GROUP_UI_TOTAL",
                         message =
                             "groupNumber=${g.groupNumber} groupId=${g.groupId} phase=${g.phase} " +
-                                    "uiTotalCurrentA=${CalculationTrace.f(uiCurrent)} " +
+                                    "uiTotalCurrentA=${CalculationTrace.f(groupLoad.calculatedCurrentA)} " +
                                     "groupNominalCurrentField=${CalculationTrace.f(g.nominalCurrent)} " +
                                     "segment=THREE_PHASE"
                     )
@@ -136,7 +137,7 @@ class GetPhaseLoadUiUseCase @Inject constructor(
                         devices = deviceRows,
                         roomId = g.roomId,
                         totalPower = deviceRows.sumOf { it.power },
-                        totalCurrent = uiCurrent
+                        totalCurrent = groupLoad.calculatedCurrentA
                     )
                 }
 
@@ -146,13 +147,12 @@ class GetPhaseLoadUiUseCase @Inject constructor(
         val p3PerPhase = p3Total / 3.0
         val i3PerPhase = i3Total / 3.0
 
-        // 2) Секции A/B/C: берём только группы A/B/C и внутри них — только НЕ 3φ устройства
+        // 2) Секции A/B/C
         val phaseItems = listOf(Phase.A, Phase.B, Phase.C).map { phase ->
             val groupsOfPhase = groups.filter { it.phase == phase }
 
             val groupRows: List<PhaseGroupItem> = groupsOfPhase.map { g ->
-                val onePhaseDevices = g.devices
-                    .filter { it.voltage.type != VoltageType.AC_3PHASE }
+                val onePhaseDevices = g.devices.filter { it.voltage.type != VoltageType.AC_3PHASE }
 
                 val deviceRows = onePhaseDevices.map { d ->
                     PhaseDeviceItem(
@@ -163,21 +163,24 @@ class GetPhaseLoadUiUseCase @Inject constructor(
                     )
                 }
 
-                val uiCurrent = onePhaseDevices.sumOf { d ->
-                    CurrentCalculator.calculateNominalCurrent(
-                        power = d.power.toDouble(),
-                        voltage = (d.voltage.value.takeIf { it > 0 } ?: 230).toDouble(),
-                        powerFactor = d.powerFactor,
-                        demandRatio = d.demandRatio,
-                        voltageType = d.voltage.type
-                    )
-                }
+                val groupLoad = CurrentCalculator.calculateGroupLoad(
+                    onePhaseDevices.map { d ->
+                        LoadInput(
+                            powerW = d.power.toDouble(),
+                            voltage = d.voltage.value.toDouble(),
+                            powerFactor = d.powerFactor,
+                            demandRatio = d.demandRatio,
+                            voltageType = d.voltage.type,
+                            label = d.name
+                        )
+                    }
+                )
 
                 CalculationTrace.log(
                     stage = "PHASE_LOAD_AUTO_GROUP_UI_TOTAL",
                     message =
                         "groupNumber=${g.groupNumber} groupId=${g.groupId} phase=${g.phase} " +
-                                "uiTotalCurrentA=${CalculationTrace.f(uiCurrent)} " +
+                                "uiTotalCurrentA=${CalculationTrace.f(groupLoad.calculatedCurrentA)} " +
                                 "groupNominalCurrentField=${CalculationTrace.f(g.nominalCurrent)} " +
                                 "segment=ONE_PHASE"
                 )
@@ -189,7 +192,7 @@ class GetPhaseLoadUiUseCase @Inject constructor(
                     devices = deviceRows,
                     roomId = g.roomId,
                     totalPower = deviceRows.sumOf { it.power },
-                    totalCurrent = uiCurrent
+                    totalCurrent = groupLoad.calculatedCurrentA
                 )
             }
 
@@ -204,7 +207,6 @@ class GetPhaseLoadUiUseCase @Inject constructor(
             )
         }
 
-        // 3) Отдельный блок 3φ как отдельный PhaseLoadItem, чтобы не ломать контракт List<PhaseLoadItem>
         val threePhaseItem = PhaseLoadItem(
             phase = Phase.THREE_PHASE,
             groups = threePhaseGroups,
