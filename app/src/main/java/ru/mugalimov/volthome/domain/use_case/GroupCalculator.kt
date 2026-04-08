@@ -324,14 +324,14 @@ class GroupCalculator(
     /**
      * Текущая canonical AUTO point сборки группы.
      *
-     * ВАЖНО (Коммит 1):
-     * - group.nominalCurrent сейчас формируется ЗДЕСЬ как сумма DeviceEntity.nominalCurrent();
+     * ВАЖНО:
+     * - group.nominalCurrent формируется ЗДЕСЬ как canonical current группы;
      * - именно это значение дальше используется:
      *   1) как сохранённый расчётный ток группы в AUTO pipeline
-     *   2) как weight for phase balancing
-     *   3) как база для line selection, уже выбранного выше для bucket/dedicated line.
+     *   2) как единственный weight for phase balancing
+     *   3) как вход для decision log распределения фаз
      *
-     * Никаких формул в этом коммите не меняем — только фиксируем путь.
+     * Никаких отдельных "весов для балансировки" здесь быть не должно.
      */
     private fun createGroup(
         devices: List<DeviceEntity>,
@@ -379,8 +379,8 @@ class GroupCalculator(
      * Текущая canonical AUTO point сборки выделенной линии.
      *
      * ВАЖНО:
-     * - current идёт через DeviceEntity.nominalCurrent();
-     * - это часть того же canonical AUTO pipeline, что и createGroup(...).
+     * - nominalCurrent здесь тоже является canonical current группы;
+     * - дальше он используется и как persisted current, и как balancing weight.
      */
     private fun createDedicatedGroup(
         device: DeviceEntity,
@@ -542,9 +542,10 @@ private fun DeviceEntity.toLoadInput(): LoadInput =
 /**
  * Текущий canonical AUTO path для вклада устройства в ток группы.
  *
- * Коммит 2:
+ * ВАЖНО:
  * - это единый путь через canonical calculation core;
- * - именно это значение используется в GroupCalculator для AUTO-расчёта групп.
+ * - именно это значение используется в GroupCalculator для AUTO-расчёта групп;
+ * - phase balancer не имеет права использовать иной "вес".
  */
 fun DeviceEntity.nominalCurrent(): Double =
     CurrentCalculator.calculateDeviceLoad(toLoadInput()).calculatedCurrentA

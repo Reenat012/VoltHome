@@ -2,7 +2,11 @@ package ru.mugalimov.volthome.domain.model
 
 /**
  * Лог решений алгоритма распределения групп по фазам.
- * Никакого UI пока — только доказательная база “почему так”.
+ *
+ * Важно:
+ * - это не UI-модель, а доказательная модель алгоритма;
+ * - должна объяснять, почему группа попала именно в эту фазу;
+ * - должна быть стабильной при одинаковом input.
  */
 enum class DecisionEventType {
     GREEDY_ASSIGN,
@@ -16,16 +20,23 @@ data class DistributionDecision(
     val phaseCurrentsBefore: Map<Phase, Double>,
     val phaseCurrentsAfter: Map<Phase, Double>,
 
-    // ✅ Коммит 2: структурированная часть события (для уровня C)
+    // Тип события алгоритма.
     val eventType: DecisionEventType = DecisionEventType.GREEDY_ASSIGN,
+
+    // Для greedy fromPhase = null, для move — заполнено.
     val fromPhase: Phase? = null,
     val toPhase: Phase? = null,
 
-    // ✅ метрики (без парсинга note)
-    val imbalanceBeforeA: Double = 0.0,   // перекос ДО (max-min)
-    val imbalanceAfterA: Double = 0.0,    // перекос ПОСЛЕ (max-min)
+    // Метрики перекоса.
+    val imbalanceBeforeA: Double = 0.0,
+    val imbalanceAfterA: Double = 0.0,
 
-    // оставляем как "техническая подпись", но UI не использует
-    val algorithm: String = "balanced_greedy_min_current",
+    // Техническая подпись алгоритма.
+    val algorithm: String = "balanced_greedy_deterministic+local_opt_deterministic",
+
+    // Формализованное правило tie-break.
+    val tieBreakRule: String = "MIN_IMBALANCE_THEN_PHASE_ORDER_A_B_C",
+
+    // Человекочитаемое объяснение решения.
     val note: String? = null
 )

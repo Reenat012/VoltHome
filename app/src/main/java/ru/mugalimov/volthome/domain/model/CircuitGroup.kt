@@ -3,13 +3,14 @@ package ru.mugalimov.volthome.domain.model
 /**
  * Доменная группа расчётной системы.
  *
- * ВАЖНО (Коммит 1):
- * - поле nominalCurrent сейчас участвует как:
- *   1) итоговый AUTO group current, собранный в GroupCalculator,
- *   2) weight for phase balancing,
- *   3) одно из ключевых derived fields, сохраняемых и восстанавливаемых через persistence.
+ * Важно:
+ * - nominalCurrent = canonical current группы;
+ * - это же значение используется:
+ *   1) как persisted расчётный ток группы,
+ *   2) как weight for phase balancing,
+ *   3) как источник для decision log распределения фаз.
  *
- * В этом коммите семантику не меняем — только явно фиксируем её.
+ * Отдельного "скрытого веса" для балансировки у группы быть не должно.
  */
 // Каждая подгруппа содержит полную информацию для карточки
 data class CircuitGroup(
@@ -33,4 +34,11 @@ data class CircuitGroup(
 
     // Фазы
     val phase: Phase = Phase.A
-)
+) {
+    /**
+     * Явный алиас для мест, где группе нужен "вес" в балансировке.
+     * Это не отдельное поле, а просто читаемое имя того же canonical current.
+     */
+    val balancingWeightA: Double
+        get() = nominalCurrent
+}
