@@ -789,8 +789,14 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
         val newGroupId = ManualDraftSelectors.nextTempGroupId(intermediate)
         val newGroupNumber = intermediate.nextGroupNumber
 
-        // ✅ breakerType лучше брать не "из первой попавшейся группы",
-        // а ставить безопасный дефолт. Иначе можно притащить чужую кривую.
+        // ВАЖНО:
+        // При создании новой manual-группы не подсовываем фейковые line params.
+        // Иначе до первого policy-recalc в draft живут "нарисованные" значения,
+        // которые не выбраны единым breaker policy.
+        //
+        // Реальные nominalCurrent / breaker / cable / curve
+        // будут выставлены в finalizeAfterBulkCompositionChange(...)
+        // через RecalculateGroupLineUseCase -> единый breaker policy.
         val newGroup = ManualGroupDraft(
             groupId = newGroupId,
             groupNumber = newGroupNumber,
@@ -800,10 +806,12 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
             composition = ManualGroupComposition.NORMAL,
             phase = phase,
             deviceIds = listOf(deviceId),
-            nominalCurrent = 0.0,
-            circuitBreaker = 16,
-            cableSection = 2.5,
-            breakerType = "C",
+
+            // До policy-recalc значения отсутствуют намеренно.
+            nominalCurrent = null,
+            circuitBreaker = null,
+            cableSection = null,
+            breakerType = null,
             rcdRequired = false,
             rcdCurrent = null
         )

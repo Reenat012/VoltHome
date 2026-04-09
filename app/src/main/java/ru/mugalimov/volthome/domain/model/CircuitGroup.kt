@@ -28,6 +28,9 @@ data class CircuitGroup(
     val cableSection: Double,    // Сечение кабеля (мм²)
     val breakerType: String,     // Тип автомата ("B", "C", "D")
 
+    // Объяснение выбора автомата единым policy-слоем
+    val whyBreakerSelected: LineSelectionReason? = null,
+
     // Параметры безопасности
     val rcdRequired: Boolean,    // Требуется ли УЗО
     val rcdCurrent: Int = 30,     // Ток утечки для УЗО (мА)

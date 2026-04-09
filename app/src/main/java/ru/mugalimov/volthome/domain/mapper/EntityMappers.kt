@@ -27,14 +27,21 @@ fun RoomDto.toEntity(): RoomEntity =
 fun GroupDto.toEntity(roomId: Long = 0L, roomNameFallback: String = ""): CircuitGroupEntity =
     CircuitGroupEntity(
         groupId = 0L,                     // автоинкремент
-        groupNumber = 0,                  // нет в DTO — безопасный дефолт
+        groupNumber = 0,                  // сервер не присылает локальный номер группы
         roomId = roomId,                  // если знаешь привязку — передай фактический roomId
         roomName = if (roomNameFallback.isNotBlank()) roomNameFallback else name,
+
+        // ВАЖНО:
+        // transport DTO группы не является источником line policy.
+        // Поэтому здесь не подставляем фейковую кривую "C" и не симулируем
+        // будто автомат уже был выбран policy-слоем.
+        //
+        // Эти поля здесь только как технический placeholder до локального пересчёта/нормализации.
         groupType = "GENERIC",
         nominalCurrent = 0.0,
         circuitBreaker = 0,
         cableSection = 0.0,
-        breakerType = "C",
+        breakerType = "",
         rcdRequired = false,
         rcdCurrent = 30,
         createdAt = Date(),

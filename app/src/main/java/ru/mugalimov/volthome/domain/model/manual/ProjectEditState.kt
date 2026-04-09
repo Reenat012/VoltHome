@@ -1,6 +1,7 @@
 package ru.mugalimov.volthome.domain.model.manual
 
 import ru.mugalimov.volthome.domain.model.DeviceType
+import ru.mugalimov.volthome.domain.model.LineSelectionReason
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.VoltageType
 
@@ -48,11 +49,15 @@ data class ManualGroupDraft(
     val phase: Phase,
     val deviceIds: List<Long>,
 
-    // Линия/защита (как часть группового состояния в draft; фактическая пересборка будет в следующих коммитах)
+    // Линия/защита
     val nominalCurrent: Double? = null,
     val circuitBreaker: Int? = null,
     val cableSection: Double? = null,
     val breakerType: String? = null,
+
+    // Объяснение выбора автомата единым policy-слоем
+    val whyBreakerSelected: LineSelectionReason? = null,
+
     val rcdRequired: Boolean? = null,
     val rcdCurrent: Int? = null,
 ) {
@@ -64,22 +69,18 @@ data class ManualGroupDraft(
 data class ManualDeviceDraft(
     val deviceId: Long,
     val roomId: Long,
-
     val roomName: String,
-
     val deviceType: DeviceType,
-
     val powerW: Int?,
     val voltageType: VoltageType,
 
-    // ✅ Коммит 2: manual path обязан хранить реальное напряжение устройства,
+    // ✅ manual path обязан хранить реальное напряжение устройства,
     // иначе пересчёт линии уйдёт на дефолт 230/400 и начнёт расходиться с AUTO/breakdown.
     val voltageValue: Int?,
 
     val demandRatio: Double?,
     val powerFactor: Double?,
     val hasMotor: Boolean,
-
     val requiresDedicatedCircuit: Boolean,
 ) {
     fun deepCopy(): ManualDeviceDraft = copy()

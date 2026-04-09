@@ -47,7 +47,6 @@
     "requiresDedicatedCircuit": false,
     "requiresSocketConnection": false
   },
-
   {
     "id": 22,
     "name": "Розетка бытовая",
@@ -103,10 +102,10 @@
     "voltage": 220,
     "demandRatio": 0.6,
     "powerFactor": 0.75,
-    "deviceType": "SOCKET",
+    "deviceType": "WASHING_MACHINE",
     "hasMotor": true,
-    "requiresDedicatedCircuit": false,
-    "requiresSocketConnection": true
+    "requiresDedicatedCircuit": true,
+    "requiresSocketConnection": false
   },
   {
     "id": 5,
@@ -307,7 +306,7 @@
     "voltage": 220,
     "demandRatio": 0.75,
     "powerFactor": 0.8,
-    "deviceType": "HEAVY_DUTY",
+    "deviceType": "AIR_CONDITIONER",
     "hasMotor": true,
     "requiresDedicatedCircuit": true,
     "requiresSocketConnection": false
@@ -319,7 +318,7 @@
     "voltage": 220,
     "demandRatio": 0.7,
     "powerFactor": 1.0,
-    "deviceType": "HEAVY_DUTY",
+    "deviceType": "ELECTRIC_STOVE",
     "hasMotor": false,
     "requiresDedicatedCircuit": true,
     "requiresSocketConnection": false
@@ -331,7 +330,7 @@
     "voltage": 220,
     "demandRatio": 0.7,
     "powerFactor": 1.0,
-    "deviceType": "HEAVY_DUTY",
+    "deviceType": "OVEN",
     "hasMotor": false,
     "requiresDedicatedCircuit": true,
     "requiresSocketConnection": false
@@ -343,7 +342,7 @@
     "voltage": 220,
     "demandRatio": 0.7,
     "powerFactor": 0.85,
-    "deviceType": "HEAVY_DUTY",
+    "deviceType": "DISHWASHER",
     "hasMotor": true,
     "requiresDedicatedCircuit": true,
     "requiresSocketConnection": false
@@ -355,7 +354,7 @@
     "voltage": 220,
     "demandRatio": 0.8,
     "powerFactor": 1.0,
-    "deviceType": "HEAVY_DUTY",
+    "deviceType": "WATER_HEATER",
     "hasMotor": false,
     "requiresDedicatedCircuit": true,
     "requiresSocketConnection": false

@@ -13,16 +13,20 @@ import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.domain.model.SafetyProfile
+import ru.mugalimov.volthome.domain.policy.breaker.BreakerPolicyInput
+import ru.mugalimov.volthome.domain.policy.breaker.BreakerPolicySelector
 import ru.mugalimov.volthome.domain.use_case.PhaseDistributor.distributeGroupsBalancedWithLog
 import java.nio.ByteBuffer
 import java.security.MessageDigest
-import kotlin.math.ceil
 
 class GroupCalculator(
     private val projectId: String,
     private val roomRepository: RoomRepository,
     private val groupRepository: ExplicationRepository
 ) {
+
+    // ✅ Единый selector policy
+    private val breakerPolicySelector = BreakerPolicySelector()
 
     private val roomSafetyProfiles = mapOf(
         RoomType.BATHROOM to SafetyProfile(rcdRequired = true),
@@ -33,7 +37,6 @@ class GroupCalculator(
 
     suspend fun calculateGroups(mode: PhaseMode): GroupingResult {
         return try {
-            // ✅ ВАЖНО: больше не “в воздухе”. Всегда считаем по конкретному projectId.
             val rooms = roomRepository.getRoomsWithDevicesByProject(projectId)
 
             CalculationTrace.log(
@@ -63,7 +66,11 @@ class GroupCalculator(
                                         "path=DeviceEntity.nominalCurrent()->CurrentCalculator.calculateNominalCurrent()"
                         )
 
-                        val profile = selectBreaker(canonicalDeviceCurrent, d.deviceType, d.hasMotor)
+                        val profile = selectBreaker(
+                            nominalCurrent = canonicalDeviceCurrent,
+                            deviceType = d.deviceType,
+                            hasMotor = d.hasMotor
+                        )
 
                         allGroups += createDedicatedGroup(
                             device = d,
@@ -96,7 +103,11 @@ class GroupCalculator(
                                     "maxCanonicalCurrentA=${CalculationTrace.f(maxI)} hasMotor=$hasMotor"
                     )
 
-                    val profile = selectBreaker(maxI, deviceType, hasMotor)
+                    val profile = selectBreaker(
+                        nominalCurrent = maxI,
+                        deviceType = deviceType,
+                        hasMotor = hasMotor
+                    )
 
                     val groups = createCircuitGroups(
                         devices = devicesOfType,
@@ -110,7 +121,6 @@ class GroupCalculator(
                 }
             }
 
-            // 3) Нормализуем номера один раз (детерминированно)
             val normalized = allGroups
                 .sortedWith(compareBy<CircuitGroup> { it.roomId }.thenBy { it.groupNumber })
                 .mapIndexed { idx, g -> g.copy(groupNumber = idx + 1) }
@@ -121,10 +131,6 @@ class GroupCalculator(
                     "projectId=$projectId groupsBeforeIds=${allGroups.size} groupsAfterNormalize=${normalized.size}"
             )
 
-            // 3.1) ✅ Генерируем стабильные groupId (валидные, уникальные, детерминированные)
-            // ВАЖНО:
-            // - НЕ используем groupNumber как ключ (он плавает)
-            // - НЕ меняем порядок списка (иначе downstream распределение фаз будет “плясать”)
             val withStableIds = assignStableGroupIds(normalized)
 
             CalculationTrace.log(
@@ -134,7 +140,6 @@ class GroupCalculator(
                             withStableIds.take(10).joinToString { "g#${it.groupNumber}->${it.groupId}" }
             )
 
-            // 4) Балансировка фаз / режим 1 фаза
             val (distributed, decisionLog) =
                 if (mode == PhaseMode.THREE) {
                     CalculationTrace.log(
@@ -157,7 +162,6 @@ class GroupCalculator(
                             "phases=" + distributed.joinToString { g -> "g#${g.groupNumber}:${g.phase}" }
             )
 
-            // 5) Валидация до сохранения
             validateBeforeSave(distributed)
 
             CalculationTrace.log(
@@ -166,7 +170,6 @@ class GroupCalculator(
                     "projectId=$projectId groups=${distributed.size} result=SUCCESS"
             )
 
-            // 6) НИКАКОГО сохранения здесь
             GroupingResult.Success(
                 system = ru.mugalimov.volthome.domain.model.ElectricalSystem(distributed),
                 distributionDecisions = decisionLog
@@ -187,76 +190,42 @@ class GroupCalculator(
             DeviceType.AIR_CONDITIONER,
             DeviceType.ELECTRIC_STOVE,
             DeviceType.HEAVY_DUTY -> true
-
             else -> false
         }
 
     /**
-     * Подбор автомата/кабеля/кривой по подгруппе.
+     * ✅ Единый policy-вход для выбора автомата.
      *
-     * ВАЖНО (Коммит 1):
-     * - это текущий AUTO path line selection;
-     * - здесь пока живёт текущая product-эвристика;
-     * - формулу и policy НЕ меняем;
-     * - только помечаем, что именно этот путь сейчас участвует в canonical AUTO pipeline:
-     *   device contribution -> group.nominalCurrent -> selectBreaker(...) -> line profile.
+     * Здесь больше нет локальной эвристики.
+     * AUTO path теперь пользуется тем же selector-ом, что и MANUAL.
      */
     private fun selectBreaker(
         nominalCurrent: Double,
         deviceType: DeviceType,
         hasMotor: Boolean
     ): GroupProfile {
-        val current = ceil(nominalCurrent).toInt()
-
-        val minRatingByType = mapOf(
-            DeviceType.LIGHTING to 10,
-            DeviceType.SOCKET to 16,
-            DeviceType.HEAVY_DUTY to 16,
-            DeviceType.OVEN to 20,
-            DeviceType.AIR_CONDITIONER to 20,
-            DeviceType.ELECTRIC_STOVE to 25
+        val result = breakerPolicySelector.select(
+            BreakerPolicyInput(
+                nominalCurrentA = nominalCurrent,
+                deviceType = deviceType,
+                hasMotor = hasMotor
+            )
         )
-
-        val requiredMin = minRatingByType[deviceType] ?: 10
-        val finalRequired = maxOf(current, requiredMin)
-
-        // (rating A, cable mm^2, curve)
-        val breakerOptions = listOf(
-            Triple(10, 1.5, "B"),
-            Triple(16, 2.5, "C"),
-            Triple(20, 2.5, "C"),
-            Triple(25, 4.0, "C"),
-            Triple(32, 6.0, "C"),
-            Triple(40, 10.0, "C"),
-            Triple(50, 10.0, "D"),
-            Triple(63, 16.0, "D")
-        )
-
-        val (rating, cable, baseCurve) = breakerOptions.firstOrNull { it.first >= finalRequired }
-            ?: throw IllegalArgumentException("Нет подходящего автомата для ${finalRequired}А")
-
-        // D — только для реально больших пусков; малые моторы оставляем на C
-        val finalCurve = when {
-            hasMotor && rating >= 25 -> "D"
-            hasMotor -> "C"
-            else -> baseCurve
-        }
 
         CalculationTrace.log(
             stage = "GROUP_CALC_LINE_SELECTION",
             message =
                 "projectId=$projectId nominalCurrentA=${CalculationTrace.f(nominalCurrent)} " +
-                        "deviceType=$deviceType hasMotor=$hasMotor requiredMin=$requiredMin " +
-                        "selectedBreaker=$rating selectedCable=${CalculationTrace.f(cable)} " +
-                        "selectedCurve=$finalCurve path=GroupCalculator.selectBreaker()"
+                        "deviceType=$deviceType hasMotor=$hasMotor " +
+                        "selectedBreaker=${result.profile.breakerRating} " +
+                        "selectedCable=${CalculationTrace.f(result.profile.cableSection)} " +
+                        "selectedCurve=${result.profile.breakerType} " +
+                        "floor=${result.reason.floorBreakerA} " +
+                        "required=${result.reason.requiredBreakerA} " +
+                        "curveRule=${result.reason.curveRule}"
         )
 
-        return GroupProfile(
-            maxCurrent = rating.toDouble(),
-            breakerRating = rating,
-            cableSection = cable,
-            breakerType = finalCurve
-        )
+        return result.profile
     }
 
     /** FFD-упаковка устройств в группы с лимитом по номиналу автомата. */
@@ -280,7 +249,6 @@ class GroupCalculator(
                         "curve=${profile.breakerType}"
         )
 
-        // Одиночное устройство не должно превышать лимит группы
         val tooBig = sorted.firstOrNull { it.nominalCurrent() - limit > eps }
         require(tooBig == null) {
             "Устройство '${tooBig?.name}' в комнате '${room.name}' требует " +
@@ -322,16 +290,7 @@ class GroupCalculator(
     }
 
     /**
-     * Текущая canonical AUTO point сборки группы.
-     *
-     * ВАЖНО:
-     * - group.nominalCurrent формируется ЗДЕСЬ как canonical current группы;
-     * - именно это значение дальше используется:
-     *   1) как сохранённый расчётный ток группы в AUTO pipeline
-     *   2) как единственный weight for phase balancing
-     *   3) как вход для decision log распределения фаз
-     *
-     * Никаких отдельных "весов для балансировки" здесь быть не должно.
+     * Сборка обычной группы AUTO path.
      */
     private fun createGroup(
         devices: List<DeviceEntity>,
@@ -340,7 +299,6 @@ class GroupCalculator(
         groupNumber: Int,
         room: RoomEntity
     ): CircuitGroup {
-        // Единый canonical group load для AUTO-режима.
         val groupLoad = CurrentCalculator.calculateGroupLoad(
             devices.map { it.toLoadInput() }
         )
@@ -367,6 +325,7 @@ class GroupCalculator(
             circuitBreaker = profile.breakerRating,
             cableSection = profile.cableSection,
             breakerType = profile.breakerType,
+            whyBreakerSelected = profile.whyBreakerSelected,
             rcdRequired = safetyProfile.rcdRequired,
             rcdCurrent = safetyProfile.rcdCurrent,
             groupNumber = groupNumber,
@@ -376,11 +335,7 @@ class GroupCalculator(
     }
 
     /**
-     * Текущая canonical AUTO point сборки выделенной линии.
-     *
-     * ВАЖНО:
-     * - nominalCurrent здесь тоже является canonical current группы;
-     * - дальше он используется и как persisted current, и как balancing weight.
+     * Сборка выделенной линии AUTO path.
      */
     private fun createDedicatedGroup(
         device: DeviceEntity,
@@ -389,7 +344,6 @@ class GroupCalculator(
         groupNumber: Int,
         room: RoomEntity
     ): CircuitGroup {
-        // Единый canonical device load для AUTO-режима.
         val deviceLoad = CurrentCalculator.calculateDeviceLoad(device.toLoadInput())
 
         val nominalCurrent = deviceLoad.calculatedCurrentA
@@ -414,6 +368,7 @@ class GroupCalculator(
             circuitBreaker = profile.breakerRating,
             cableSection = profile.cableSection,
             breakerType = profile.breakerType,
+            whyBreakerSelected = profile.whyBreakerSelected,
             rcdRequired = safetyProfile.rcdRequired,
             rcdCurrent = safetyProfile.rcdCurrent,
             groupNumber = groupNumber,
@@ -436,29 +391,9 @@ class GroupCalculator(
         }
     }
 
-    // ------------------------------------------------------------------------
-    // ✅ Stable groupId allocator (Commit B1)
-    // ------------------------------------------------------------------------
-
-    /**
-     * Генерирует стабильные groupId для AUTO-результата.
-     *
-     * Гарантии:
-     * - id > 0
-     * - unique в пределах списка
-     * - stable (детерминированно): одинаковая структура => одинаковые id
-     *
-     * Ключ НЕ использует groupNumber (он может меняться при добавлении/удалении устройств).
-     *
-     * ВАЖНО:
-     * - порядок списка НЕ меняем (иначе downstream распределение фаз/решений станет недетерминированным)
-     * - разрешение коллизий делаем “salt++” в порядке прохода списка (а сам список уже детерминирован выше)
-     */
     private fun assignStableGroupIds(groups: List<CircuitGroup>): List<CircuitGroup> {
         if (groups.isEmpty()) return groups
 
-        // ✅ HARD FAIL: стабильный id на базе device.id имеет смысл только если id > 0.
-        // Если сюда пришли 0/-1 — значит калькулятор вызвали “не в том контексте” или модель битая.
         val badDeviceIdGroup = groups.firstOrNull { g -> g.devices.any { it.id <= 0L } }
         require(badDeviceIdGroup == null) {
             val badIds = badDeviceIdGroup!!.devices.filter { it.id <= 0L }.map { it.id }.take(20)
@@ -471,7 +406,6 @@ class GroupCalculator(
         return groups.map { g ->
             val baseKey = buildStableKey(g)
 
-            // На случай коллизий добавляем соль детерминированно.
             var attempt = 0
             var newId: Long
             while (true) {
@@ -484,12 +418,10 @@ class GroupCalculator(
                 }
             }
 
-            // Меняем ТОЛЬКО groupId.
             g.copy(groupId = newId)
         }
     }
 
-    /** Стабильный ключ устройств: сортируем device.id, чтобы порядок не влиял. */
     private fun stableDevicesKey(g: CircuitGroup): String =
         g.devices
             .asSequence()
@@ -497,7 +429,6 @@ class GroupCalculator(
             .sorted()
             .joinToString(separator = ",")
 
-    /** Базовый stable key группы. Здесь сознательно нет groupNumber. */
     private fun buildStableKey(g: CircuitGroup): String = buildString {
         append("pid=").append(projectId)
         append("|roomId=").append(g.roomId)
@@ -511,10 +442,6 @@ class GroupCalculator(
         append("|pW=").append(g.installedPowerW)
     }
 
-    /**
-     * Детерминированный Long > 0 на основе строки.
-     * Используем SHA-256 и берём первые 8 байт.
-     */
     private fun stablePositiveLong(input: String): Long {
         val md = MessageDigest.getInstance("SHA-256")
         val hash = md.digest(input.toByteArray(Charsets.UTF_8))
@@ -540,12 +467,7 @@ private fun DeviceEntity.toLoadInput(): LoadInput =
     )
 
 /**
- * Текущий canonical AUTO path для вклада устройства в ток группы.
- *
- * ВАЖНО:
- * - это единый путь через canonical calculation core;
- * - именно это значение используется в GroupCalculator для AUTO-расчёта групп;
- * - phase balancer не имеет права использовать иной "вес".
+ * Единый canonical AUTO path для вклада устройства в ток группы.
  */
 fun DeviceEntity.nominalCurrent(): Double =
     CurrentCalculator.calculateDeviceLoad(toLoadInput()).calculatedCurrentA
