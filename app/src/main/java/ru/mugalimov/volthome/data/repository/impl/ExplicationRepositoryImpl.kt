@@ -333,6 +333,19 @@ class ExplicationRepositoryImpl @Inject constructor(
                             val groupsToUpdateEntities = desiredExistingDraft.mapNotNull { gDraft ->
                                 val realId = tempToExistingId[gDraft.groupId] ?: gDraft.groupId
                                 val dbEntity = dbGroupsById[realId] ?: return@mapNotNull null
+
+                                // ✅ После введения line policy manual draft обязан приходить
+                                // уже с полностью рассчитанными параметрами линии.
+                                val resolvedBreaker = requireNotNull(gDraft.circuitBreaker) {
+                                    "MANUAL_SAVE: circuitBreaker is null for existing groupId=${gDraft.groupId} groupNumber=${gDraft.groupNumber}"
+                                }
+                                val resolvedCable = requireNotNull(gDraft.cableSection) {
+                                    "MANUAL_SAVE: cableSection is null for existing groupId=${gDraft.groupId} groupNumber=${gDraft.groupNumber}"
+                                }
+                                val resolvedBreakerType = requireNotNull(gDraft.breakerType) {
+                                    "MANUAL_SAVE: breakerType is null for existing groupId=${gDraft.groupId} groupNumber=${gDraft.groupNumber}"
+                                }
+
                                 dbEntity.copy(
                                     groupNumber = gDraft.groupNumber,
                                     roomId = gDraft.roomId,
@@ -340,9 +353,9 @@ class ExplicationRepositoryImpl @Inject constructor(
                                     groupType = gDraft.groupType.name,
                                     phase = gDraft.phase.name,
                                     nominalCurrent = gDraft.nominalCurrent ?: 0.0,
-                                    circuitBreaker = gDraft.circuitBreaker ?: 16,
-                                    cableSection = gDraft.cableSection ?: 2.5,
-                                    breakerType = gDraft.breakerType ?: "",
+                                    circuitBreaker = resolvedBreaker,
+                                    cableSection = resolvedCable,
+                                    breakerType = resolvedBreakerType,
                                     rcdRequired = gDraft.rcdRequired ?: false,
                                     rcdCurrent = gDraft.rcdCurrent ?: 30
                                 )
@@ -355,6 +368,17 @@ class ExplicationRepositoryImpl @Inject constructor(
                             val desiredNewDraftOrdered = desiredNewDraft.sortedBy { it.groupNumber }
 
                             val groupsToInsertEntities = desiredNewDraftOrdered.map { gDraft ->
+                                // ✅ Новая manual-группа перед коммитом тоже обязана уже иметь рассчитанную линию.
+                                val resolvedBreaker = requireNotNull(gDraft.circuitBreaker) {
+                                    "MANUAL_SAVE: circuitBreaker is null for new groupId=${gDraft.groupId} groupNumber=${gDraft.groupNumber}"
+                                }
+                                val resolvedCable = requireNotNull(gDraft.cableSection) {
+                                    "MANUAL_SAVE: cableSection is null for new groupId=${gDraft.groupId} groupNumber=${gDraft.groupNumber}"
+                                }
+                                val resolvedBreakerType = requireNotNull(gDraft.breakerType) {
+                                    "MANUAL_SAVE: breakerType is null for new groupId=${gDraft.groupId} groupNumber=${gDraft.groupNumber}"
+                                }
+
                                 CircuitGroupEntity(
                                     groupId = 0L, // ✅ Room назначает PK сам
                                     groupNumber = gDraft.groupNumber,
@@ -362,9 +386,9 @@ class ExplicationRepositoryImpl @Inject constructor(
                                     roomName = gDraft.roomName,
                                     groupType = gDraft.groupType.name,
                                     nominalCurrent = gDraft.nominalCurrent ?: 0.0,
-                                    circuitBreaker = gDraft.circuitBreaker ?: 16,
-                                    cableSection = gDraft.cableSection ?: 2.5,
-                                    breakerType = gDraft.breakerType ?: "",
+                                    circuitBreaker = resolvedBreaker,
+                                    cableSection = resolvedCable,
+                                    breakerType = resolvedBreakerType,
                                     rcdRequired = gDraft.rcdRequired ?: false,
                                     rcdCurrent = gDraft.rcdCurrent ?: 30,
                                     phase = gDraft.phase.name,

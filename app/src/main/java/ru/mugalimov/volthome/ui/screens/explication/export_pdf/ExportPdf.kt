@@ -146,17 +146,23 @@ fun exportExplicationPdf(
     activity: Activity,
     vm: ExplicationViewModel,
     caps: PlanCapabilities,
+    projectId: String,
     manualGuard: ManualModeGuard? = null
 ) {
     // ✅ Guard: в manual нельзя инициировать PDF без Save/Cancel/Stay
     if (manualGuard != null) {
         manualGuard.request(
+            projectId = projectId,
             action = ForbiddenAction.EXPORT_PDF,
             onProceed = {
                 val html = buildExplicationReportHtml(activity, vm, caps) ?: return@request
                 when (activity) {
-                    is ComponentActivity -> activity.lifecycleScope.launch { PdfPrinter(activity).printHtml(html) }
-                    else -> activity.runOnUiThread { PdfPrinter(activity).printHtml(html) }
+                    is ComponentActivity -> activity.lifecycleScope.launch {
+                        PdfPrinter(activity).printHtml(html)
+                    }
+                    else -> activity.runOnUiThread {
+                        PdfPrinter(activity).printHtml(html)
+                    }
                 }
             }
         )
@@ -166,7 +172,11 @@ fun exportExplicationPdf(
     // fallback (если guard не передали)
     val html = buildExplicationReportHtml(activity, vm, caps) ?: return
     when (activity) {
-        is ComponentActivity -> activity.lifecycleScope.launch { PdfPrinter(activity).printHtml(html) }
-        else -> activity.runOnUiThread { PdfPrinter(activity).printHtml(html) }
+        is ComponentActivity -> activity.lifecycleScope.launch {
+            PdfPrinter(activity).printHtml(html)
+        }
+        else -> activity.runOnUiThread {
+            PdfPrinter(activity).printHtml(html)
+        }
     }
 }

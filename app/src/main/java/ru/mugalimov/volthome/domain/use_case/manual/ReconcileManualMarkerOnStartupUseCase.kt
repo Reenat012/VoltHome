@@ -30,45 +30,23 @@ class ReconcileManualMarkerOnStartupUseCase @Inject constructor(
             projectId = GLOBAL_MARKER_KEY,
             opName = "MANUAL_RECONCILE_STARTUP"
         ) {
-            val session = manualRepo.getActiveSession()
-            val hasInMemory = session?.manualModeActive == true
-            val sessionPid = session?.projectId
-
+            // ✅ На старте приложения in-memory session не является надёжным источником истины.
+            // После kill-process памяти уже нет, а persisted marker может остаться.
+            // Поэтому здесь доверяем только marker в БД и приводим систему в безопасное состояние.
             val marked = projectLocalStateDao.getActiveManualProjectId()
 
             var action = Action.NOOP
 
-            // 1) marker есть, session нет -> чистим marker
-            if (marked != null && !hasInMemory) {
+            if (marked != null) {
                 val cleared = projectLocalStateDao.clearActiveManualMarkerGlobal()
-                Log.w(
-                    "MANUAL_RECON",
-                    "op=MANUAL_RECONCILE_STARTUP pid=$GLOBAL_MARKER_KEY case=marker_without_session " +
-                            "marked=$marked sessionPid=null clearedRows=$cleared"
-                )
-                action = Action.RESET
-            }
-            // 2) mismatch: marker=A, session=B -> приводим marker к sessionPid
-            else if (marked != null && hasInMemory && sessionPid != null && marked != sessionPid) {
-                val cleared = projectLocalStateDao.clearActiveManualMarkerGlobal()
-                projectLocalStateDao.ensureRow(sessionPid)
-                val rows = projectLocalStateDao.setActiveManualMarker(sessionPid)
-                require(rows == 1) { "Failed to fix marker on startup (rowsUpdated=$rows)" }
 
                 Log.w(
                     "MANUAL_RECON",
-                    "op=MANUAL_RECONCILE_STARTUP pid=$GLOBAL_MARKER_KEY case=mismatch " +
-                            "marked=$marked sessionPid=$sessionPid clearedRows=$cleared setRows=$rows"
+                    "op=MANUAL_RECONCILE_STARTUP pid=$GLOBAL_MARKER_KEY case=marker_cleared_on_startup " +
+                            "marked=$marked clearedRows=$cleared"
                 )
-                action = Action.RESTORE
-            } else {
-                if (marked != null || hasInMemory) {
-                    Log.d(
-                        "MANUAL_RECON",
-                        "op=MANUAL_RECONCILE_STARTUP pid=$GLOBAL_MARKER_KEY case=ok " +
-                                "marked=$marked sessionPid=$sessionPid"
-                    )
-                }
+
+                action = Action.RESET
             }
 
             action

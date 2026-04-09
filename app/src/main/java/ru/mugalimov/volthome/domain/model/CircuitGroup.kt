@@ -10,37 +10,38 @@ package ru.mugalimov.volthome.domain.model
  *   2) как weight for phase balancing,
  *   3) как источник для decision log распределения фаз.
  *
- * Отдельного "скрытого веса" для балансировки у группы быть не должно.
+ * Поля whyBreakerSelected / whyCableSelected пока живут только в домене.
+ * В БД и sync их не пишем.
  */
-// Каждая подгруппа содержит полную информацию для карточки
 data class CircuitGroup(
-    val groupId: Long = 0, // Добавляем ID
-    val groupNumber: Int,        // Уникальный номер группы
-    val roomName: String,        // Название комнаты
-    val roomId: Long,            // ID комнаты
-    val groupType: DeviceType,   // Тип группы (освещение, розетки и т.д.)
-    val devices: List<Device>,   // Устройства в группе
+    val groupId: Long = 0,
+    val groupNumber: Int,
+    val roomName: String,
+    val roomId: Long,
+    val groupType: DeviceType,
+    val devices: List<Device>,
 
-    // Расчетные параметры
-    val nominalCurrent: Double,  // Текущий расчётный ток группы (А) в AUTO path
+    // Расчётные параметры
+    val nominalCurrent: Double,
     val installedPowerW: Int,
-    val circuitBreaker: Int,     // Номинал автомата (А)
-    val cableSection: Double,    // Сечение кабеля (мм²)
-    val breakerType: String,     // Тип автомата ("B", "C", "D")
+    val circuitBreaker: Int,
+    val cableSection: Double,
+    val breakerType: String,
 
-    // Объяснение выбора автомата единым policy-слоем
+    // Объяснение выбора линии единым policy-слоем
     val whyBreakerSelected: LineSelectionReason? = null,
+    val whyCableSelected: CableSelectionReason? = null,
 
     // Параметры безопасности
-    val rcdRequired: Boolean,    // Требуется ли УЗО
-    val rcdCurrent: Int = 30,     // Ток утечки для УЗО (мА)
+    val rcdRequired: Boolean,
+    val rcdCurrent: Int = 30,
 
     // Фазы
     val phase: Phase = Phase.A
 ) {
     /**
-     * Явный алиас для мест, где группе нужен "вес" в балансировке.
-     * Это не отдельное поле, а просто читаемое имя того же canonical current.
+     * Явный алиас для мест, где группе нужен вес в балансировке.
+     * Это не отдельное поле, а то же самое значение canonical current.
      */
     val balancingWeightA: Double
         get() = nominalCurrent

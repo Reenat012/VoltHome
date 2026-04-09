@@ -158,6 +158,31 @@ class PhaseLoadViewModel @Inject constructor(
             draft.groups.map { g ->
                 val groupDevices = g.deviceIds.mapNotNull { id -> devicesById[id] }
 
+                // ✅ Не подменяем отсутствующий cable result "магическими" 2.5.
+                val resolvedBreaker = g.circuitBreaker ?: run {
+                    Log.e(
+                        "PHASE_MANUAL_GROUPS",
+                        "Missing circuitBreaker in manual draft groupId=${g.groupId} groupNumber=${g.groupNumber}"
+                    )
+                    16
+                }
+
+                val resolvedCable = g.cableSection ?: run {
+                    Log.e(
+                        "PHASE_MANUAL_GROUPS",
+                        "Missing cableSection in manual draft groupId=${g.groupId} groupNumber=${g.groupNumber}"
+                    )
+                    0.0
+                }
+
+                val resolvedBreakerType = g.breakerType ?: run {
+                    Log.e(
+                        "PHASE_MANUAL_GROUPS",
+                        "Missing breakerType in manual draft groupId=${g.groupId} groupNumber=${g.groupNumber}"
+                    )
+                    ""
+                }
+
                 CircuitGroup(
                     groupId = g.groupId,
                     groupNumber = g.groupNumber,
@@ -166,13 +191,19 @@ class PhaseLoadViewModel @Inject constructor(
                     groupType = g.groupType,
                     devices = groupDevices,
 
-                    // линия/номиналы живут в draft и пересчитываются ManualRepo
+                    // Линия/номиналы живут в draft и должны приходить уже после line recalc.
                     nominalCurrent = g.nominalCurrent ?: 0.0,
                     installedPowerW = groupDevices.sumOf { it.power },
 
-                    circuitBreaker = g.circuitBreaker ?: 16,
-                    cableSection = g.cableSection ?: 2.5,
-                    breakerType = g.breakerType ?: "",
+                    circuitBreaker = resolvedBreaker,
+                    cableSection = resolvedCable,
+                    breakerType = resolvedBreakerType,
+
+                    // ✅ Прокидываем explanation из manual draft,
+                    // чтобы MANUAL и AUTO не расходились по runtime-данным.
+                    whyBreakerSelected = g.whyBreakerSelected,
+                    whyCableSelected = g.whyCableSelected,
+
                     rcdRequired = g.rcdRequired ?: false,
                     rcdCurrent = g.rcdCurrent ?: 30,
                     phase = g.phase
@@ -279,7 +310,13 @@ class PhaseLoadViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            val session = manualRepo.getActiveSession()
+            val projectId = currentProjectIdOrNull()
+            if (projectId == null) {
+                _events.tryEmit("Не выбран проект")
+                return@launch
+            }
+
+            val session = manualRepo.getSession(projectId)
             if (session?.manualModeActive != true) {
                 _events.tryEmit("Ручной режим не активен")
                 return@launch
@@ -287,7 +324,8 @@ class PhaseLoadViewModel @Inject constructor(
 
             try {
                 manualRepo.apply(
-                    ManualEditAction.SetGroupPhase(
+                    projectId = projectId,
+                    action = ManualEditAction.SetGroupPhase(
                         groupId = groupId,
                         phase = targetPhase
                     )
@@ -305,24 +343,29 @@ class PhaseLoadViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            val session = manualRepo.getActiveSession()
+            val projectId = currentProjectIdOrNull()
+            if (projectId == null) {
+                _events.tryEmit("Не выбран проект")
+                return@launch
+            }
+
+            val session = manualRepo.getSession(projectId)
             if (session?.manualModeActive != true) {
                 _events.tryEmit("Ручной режим не активен")
                 return@launch
             }
 
             try {
-                // 1) выходим из manual сразу (черновик отброшен)
-                manualRepo.exitManualMode(session.projectId)
-                manualDraftResetNotifier.clearExpected(session.projectId)
+                // Выходим из manual строго для текущего проекта.
+                manualRepo.exitManualMode(projectId)
+                manualDraftResetNotifier.clearExpected(projectId)
 
-                // 2) полный авто-recalc + commit в БД (строго по projectId)
-                // ✅ стало
+                // После выхода выполняем полный auto-recalc тоже строго по текущему projectId.
                 val phaseMode = preferencesRepository.phaseMode.first()
 
                 resetManualOverridesAndAutoRecalcUseCase.execute(
                     ResetManualOverridesAndAutoRecalcUseCase.Params(
-                        projectId = session.projectId,
+                        projectId = projectId,
                         phaseMode = phaseMode
                     )
                 )
@@ -340,4 +383,13 @@ class PhaseLoadViewModel @Inject constructor(
 
     private fun isUserPro(): Boolean =
         userPlanRepository.planFlow.value.capabilities.phaseDragAndDrop
+
+    /**
+     * Возвращает текущий projectId в нормализованном виде.
+     */
+    private suspend fun currentProjectIdOrNull(): String? =
+        activeProjectDs.activeProjectId.first()
+            .orEmpty()
+            .trim()
+            .takeIf { it.isNotBlank() }
 }

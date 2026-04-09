@@ -45,6 +45,7 @@ class ManualModeGuard private constructor(
     val dialogState: StateFlow<DialogState?> = _dialogState.asStateFlow()
 
     data class DialogState(
+        val projectId: String,
         val action: ForbiddenAction,
         val onProceed: () -> Unit,
         val isProcessing: Boolean = false,
@@ -59,28 +60,48 @@ class ManualModeGuard private constructor(
     }
 
     fun request(
+        projectId: String,
         action: ForbiddenAction,
         onProceed: () -> Unit,
         forceDialog: Boolean = false,
     ) {
+        val pid = projectId.trim()
+        if (pid.isBlank()) {
+            scope.launch {
+                withContext(Dispatchers.Main.immediate) {
+                    onProceed()
+                }
+            }
+            return
+        }
+
         if (forceDialog) {
             scope.launch {
                 withContext(Dispatchers.Main.immediate) {
-                    _dialogState.value = DialogState(action = action, onProceed = onProceed)
+                    _dialogState.value = DialogState(
+                        projectId = pid,
+                        action = action,
+                        onProceed = onProceed
+                    )
                 }
             }
             return
         }
 
         scope.launch {
-            val s = runCatching { manualRepo.getActiveSession() }.getOrNull()
+            // ✅ Проверяем только сессию текущего проекта.
+            val s = runCatching { manualRepo.getSession(projectId) }.getOrNull()
             val manualActive = (s?.manualModeActive == true)
 
             withContext(Dispatchers.Main.immediate) {
                 if (!manualActive) {
                     onProceed()
                 } else {
-                    _dialogState.value = DialogState(action = action, onProceed = onProceed)
+                    _dialogState.value = DialogState(
+                        projectId = pid,
+                        action = action,
+                        onProceed = onProceed
+                    )
                 }
             }
         }
@@ -93,8 +114,11 @@ class ManualModeGuard private constructor(
         _dialogState.value = state.copy(isProcessing = true)
 
         scope.launch {
-            val session = runCatching { manualRepo.getActiveSession() }.getOrNull()
-            if (session == null) {
+            val projectId = state.projectId
+
+            // ✅ Берём только scoped session того проекта, ради которого открыт dialog.
+            val session = runCatching { manualRepo.getSession(projectId) }.getOrNull()
+            if (session?.manualModeActive != true) {
                 withContext(Dispatchers.Main.immediate) {
                     _dialogState.value = null
                     state.onProceed()
@@ -102,11 +126,7 @@ class ManualModeGuard private constructor(
                 return@launch
             }
 
-            val projectId = session.projectId
-
             val ok = runCatching {
-                // 1) commit draft -> локальная БД
-                // 2) cleaner + manualLock=true уже внутри usecase
                 commitManualDraftToLocalDb.execute(
                     CommitManualDraftToLocalDbUseCase.Params(
                         projectId = projectId,
@@ -114,7 +134,6 @@ class ManualModeGuard private constructor(
                     )
                 )
 
-                // 3) После успешного save просто выходим из manual
                 manualRepo.exitManualMode(projectId)
             }.onFailure {
                 Log.e(TAG, "onSaveClicked failed. projectId=$projectId", it)
@@ -125,7 +144,6 @@ class ManualModeGuard private constructor(
                     _dialogState.value = null
                     state.onProceed()
                 } else {
-                    // Ошибка — остаёмся в manual
                     _dialogState.value = state.copy(isProcessing = false)
                 }
             }
@@ -139,9 +157,10 @@ class ManualModeGuard private constructor(
         _dialogState.value = state.copy(isProcessing = true)
 
         scope.launch {
-            val session = runCatching { manualRepo.getActiveSession() }.getOrNull()
+            val projectId = state.projectId
+            val session = runCatching { manualRepo.getSession(projectId) }.getOrNull()
 
-            if (session == null) {
+            if (session?.manualModeActive != true) {
                 withContext(Dispatchers.Main.immediate) {
                     _dialogState.value = null
                     state.onProceed()
@@ -149,18 +168,13 @@ class ManualModeGuard private constructor(
                 return@launch
             }
 
-            val projectId = session.projectId
-
             val ok = runCatching {
-                // ✅ Cancel НЕ делает auto-recalc.
-                // ✅ Cancel чистит overrides только через единый cleaner.
                 val clearStats = ownershipOverridesCleaner.clearAll(projectId)
                 Log.w(
                     TAG,
                     "onCancelClicked cleaner done. projectId=$projectId totalDeleted=${clearStats.totalDeleted}"
                 )
 
-                // Выходим из manual, draft отбрасывается
                 manualRepo.exitManualMode(projectId)
             }.onFailure {
                 Log.e(TAG, "onCancelClicked failed. projectId=$projectId", it)

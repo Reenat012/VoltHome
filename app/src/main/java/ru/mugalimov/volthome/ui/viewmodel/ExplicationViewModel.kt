@@ -201,6 +201,33 @@ class ExplicationViewModel @Inject constructor(
             draft.groups.map { g ->
                 val groupDevices = g.deviceIds.mapNotNull { id -> devicesById[id] }
 
+                // ✅ После line policy manual draft должен уже содержать линию.
+                // Если нет — логируем это как дефект draft state, а не притворяемся,
+                // будто кабель всегда 2.5.
+                val resolvedBreaker = g.circuitBreaker ?: run {
+                    Log.e(
+                        "EXP_MANUAL_GROUPS",
+                        "Missing circuitBreaker in manual draft groupId=${g.groupId} groupNumber=${g.groupNumber}"
+                    )
+                    16
+                }
+
+                val resolvedCable = g.cableSection ?: run {
+                    Log.e(
+                        "EXP_MANUAL_GROUPS",
+                        "Missing cableSection in manual draft groupId=${g.groupId} groupNumber=${g.groupNumber}"
+                    )
+                    0.0
+                }
+
+                val resolvedBreakerType = g.breakerType ?: run {
+                    Log.e(
+                        "EXP_MANUAL_GROUPS",
+                        "Missing breakerType in manual draft groupId=${g.groupId} groupNumber=${g.groupNumber}"
+                    )
+                    ""
+                }
+
                 CircuitGroup(
                     groupId = g.groupId,
                     groupNumber = g.groupNumber,
@@ -210,9 +237,9 @@ class ExplicationViewModel @Inject constructor(
                     devices = groupDevices,
                     nominalCurrent = g.nominalCurrent ?: 0.0,
                     installedPowerW = groupDevices.sumOf { it.power },
-                    circuitBreaker = g.circuitBreaker ?: 16,
-                    cableSection = g.cableSection ?: 2.5,
-                    breakerType = g.breakerType ?: "",
+                    circuitBreaker = resolvedBreaker,
+                    cableSection = resolvedCable,
+                    breakerType = resolvedBreakerType,
                     rcdRequired = g.rcdRequired ?: false,
                     rcdCurrent = g.rcdCurrent ?: 30,
                     phase = g.phase
@@ -339,6 +366,15 @@ class ExplicationViewModel @Inject constructor(
         activeProjectIdState.value
             ?.trim()
             ?.takeIf { it.isNotBlank() }
+
+    /**
+     * Текущий activeProjectId для внешних UI-действий.
+     *
+     * Важно:
+     * - это не manualSession.projectId;
+     * - в AUTO-режиме projectId тоже должен быть доступен.
+     */
+    fun currentProjectId(): String? = currentProjectIdOrNull()
 
     /**
      * Берём manual-сессию строго по projectId.

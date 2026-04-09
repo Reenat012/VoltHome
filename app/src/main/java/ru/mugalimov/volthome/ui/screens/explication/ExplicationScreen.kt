@@ -122,10 +122,20 @@ fun ExplicationScreen(
             return@LaunchedEffect
         }
 
+        // Берём projectId строго из текущей manual/db-сессии экрана.
+        // projectId должен быть доступен и в AUTO, и в MANUAL.
+        val projectId = viewModel.currentProjectId().orEmpty()
+        if (projectId.isBlank()) {
+            Log.e("PDF_EXPORT", "Export aborted: projectId is blank")
+            viewModel.consumeEvent()
+            return@LaunchedEffect
+        }
+
         exportExplicationPdf(
             activity = activity,
             vm = viewModel,
             caps = caps,
+            projectId = projectId,
             manualGuard = manualGuard
         )
 

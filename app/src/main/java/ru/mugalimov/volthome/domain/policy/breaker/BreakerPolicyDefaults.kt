@@ -37,18 +37,4 @@ object BreakerPolicyDefaults {
         DeviceType.ELECTRIC_STOVE -> 25
         DeviceType.OTHER -> 10
     }
-
-    /**
-     * Product-default сечение по номиналу автомата.
-     *
-     * Пока не делаем отдельный сложный cable policy.
-     */
-    fun defaultCableSectionByBreaker(breakerA: Int): Double = when {
-        breakerA <= 10 -> 1.5
-        breakerA <= 20 -> 2.5
-        breakerA <= 25 -> 4.0
-        breakerA <= 32 -> 6.0
-        breakerA <= 50 -> 10.0
-        else -> 16.0
-    }
 }

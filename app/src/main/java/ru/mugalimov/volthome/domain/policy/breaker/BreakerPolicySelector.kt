@@ -14,6 +14,11 @@ import ru.mugalimov.volthome.domain.model.LineSelectionReason
  * - D только для реально тяжёлых моторных случаев начиная с 25A
  * - motor-like, но не тяжёлый случай = C
  * - без мотора остаётся базовая кривая
+ *
+ * ВАЖНО:
+ * - этот selector выбирает только автомат
+ * - кабель здесь больше не выбирается
+ * - реальный cableSection должен подставляться только в LinePolicySelector
  */
 class BreakerPolicySelector @Inject constructor() {
 
@@ -66,9 +71,16 @@ class BreakerPolicySelector @Inject constructor() {
         val profile = GroupProfile(
             maxCurrent = selectedBreakerA.toDouble(),
             breakerRating = selectedBreakerA,
-            cableSection = BreakerPolicyDefaults.defaultCableSectionByBreaker(selectedBreakerA),
+
+            // ВАЖНО:
+            // breaker policy больше не имеет права выбирать кабель.
+            // Здесь оставляем технический placeholder, который будет
+            // заменён в LinePolicySelector после выбора cable policy.
+            cableSection = 0.0,
+
             breakerType = finalCurve.name,
-            whyBreakerSelected = reason
+            whyBreakerSelected = reason,
+            whyCableSelected = null
         )
 
         return BreakerPolicyResult(

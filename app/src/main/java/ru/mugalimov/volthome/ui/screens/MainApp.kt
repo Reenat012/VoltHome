@@ -221,8 +221,9 @@ fun MainApp(
     LaunchedEffect(activeProjectId) {
         val projectId = activeProjectId ?: return@LaunchedEffect
 
-        val s = manualRepo.getActiveSession()
-        val hasActiveSession = (s?.projectId == projectId) && (s.manualModeActive)
+        // ✅ Проверяем только сессию текущего проекта.
+        val s = manualRepo.getSession(projectId)
+        val hasActiveSession = s?.manualModeActive == true
 
         if (manualDraftResetNotifier.consumeResetIfNeeded(projectId, hasActiveSession)) {
             snackbarHostState.showSnackbar("Черновик ручного режима был сброшен")
@@ -525,19 +526,16 @@ fun MainApp(
                 onManualSaveClick = {
                     scope.launch {
                         val projectId = activeProjectId.orEmpty()
-                        val s = manualRepo.getActiveSession()
+                        val s = if (projectId.isBlank()) null else manualRepo.getSession(projectId)
 
-                        if (projectId.isBlank() || s == null || s.projectId != projectId) {
+                        // ✅ Сохраняем только scoped session текущего проекта.
+                        if (projectId.isBlank() || s?.manualModeActive != true) {
                             snackbarHostState.showSnackbar("Нет активного черновика для сохранения")
                             dismissManualExitDialog()
                             return@launch
                         }
 
                         try {
-                            // ✅ Save usecase теперь сам:
-                            // 1) коммитит draft,
-                            // 2) чистит overrides через cleaner,
-                            // 3) фиксирует manualLock=true.
                             commitUseCase.execute(
                                 CommitManualDraftToLocalDbUseCase.Params(
                                     projectId = projectId,
@@ -545,7 +543,6 @@ fun MainApp(
                                 )
                             )
 
-                            // После успешного save просто выходим из manual
                             manualRepo.exitManualMode(projectId)
 
                             val proceed = pendingProceed
@@ -567,25 +564,23 @@ fun MainApp(
                             return@launch
                         }
 
-                        val session = manualRepo.getActiveSession()
-                        if (session == null || session.projectId != projectId) {
+                        // ✅ Только scoped session текущего проекта.
+                        val session = manualRepo.getSession(projectId)
+                        if (session?.manualModeActive != true) {
                             snackbarHostState.showSnackbar("Нет активного ручного режима")
                             dismissManualExitDialog()
                             return@launch
                         }
 
                         try {
-                            // ✅ Cancel НЕ делает auto-recalc и НЕ пишет auto-группы.
                             Log.w("MANUAL_CANCEL", "MAINAPP Cancel START (NO_RECALC) pid=$projectId")
 
-                            // ✅ Все overrides чистим только через единый cleaner.
                             val clearStats = ownershipOverridesCleaner.clearAll(projectId)
                             Log.w(
                                 "MANUAL_CANCEL",
                                 "MAINAPP Cancel cleaner done pid=$projectId totalDeleted=${clearStats.totalDeleted}"
                             )
 
-                            // Выходим из manual: UI вернётся к последнему сохранённому состоянию БД
                             manualRepo.exitManualMode(projectId)
 
                             val proceed = pendingProceed

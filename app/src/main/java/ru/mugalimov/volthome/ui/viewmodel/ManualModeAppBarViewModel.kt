@@ -94,14 +94,22 @@ class ManualModeAppBarViewModel @Inject constructor(
 
                 val TAG = "MANUAL_TOGGLE"
 
-                Log.d(TAG, "click projectId=$projectId, activeSession=${manualRepo.getActiveSession()?.projectId}")
+                // ✅ Логируем только сессию текущего проекта.
+                // Никаких getActiveSession(): он не project-scoped и в мультипроектности опасен.
+                Log.d(
+                    TAG,
+                    "click projectId=$projectId scopedSessionBefore=${manualRepo.getSession(projectId)?.projectId}"
+                )
 
                 manualRepo.enterManualMode(projectId = projectId, baseState = base)
 
                 Log.d(TAG, "base built: groups=${base.groups.size} devices=${base.devices.size}")
 
-                val s = manualRepo.getActiveSession()
-                Log.d(TAG, "entered: sessionPid=${s?.projectId} active=${s?.manualModeActive} groups=${s?.draftState?.groups?.size}")
+                val s = manualRepo.getSession(projectId)
+                Log.d(
+                    TAG,
+                    "entered: sessionPid=${s?.projectId} active=${s?.manualModeActive} groups=${s?.draftState?.groups?.size}"
+                )
 
 
                 messages.tryEmit("Ручной режим включён")

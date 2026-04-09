@@ -4,25 +4,25 @@ import javax.inject.Inject
 import ru.mugalimov.volthome.domain.model.GroupProfile
 import ru.mugalimov.volthome.domain.model.manual.ManualDeviceDraft
 import ru.mugalimov.volthome.domain.model.manual.ManualGroupDraft
-import ru.mugalimov.volthome.domain.policy.breaker.BreakerPolicyInput
-import ru.mugalimov.volthome.domain.policy.breaker.BreakerPolicySelector
+import ru.mugalimov.volthome.domain.policy.line.LinePolicyInput
+import ru.mugalimov.volthome.domain.policy.line.LinePolicySelector
 import ru.mugalimov.volthome.domain.use_case.CalculationTrace
 import ru.mugalimov.volthome.domain.use_case.CurrentCalculator
 import ru.mugalimov.volthome.domain.use_case.LoadInput
 
 /**
- * Пересчёт параметров линии (номинальный ток / автомат / сечение) при изменении состава группы.
+ * Пересчёт параметров линии при изменении состава группы.
  *
  * ВАЖНО:
- * - НЕ пересобирает группы и НЕ меняет их состав/тип/фазу.
- * - Допускает повышение/понижение номиналов.
- * - Manual path обязан использовать тот же calculation core и тот же breaker policy,
+ * - НЕ пересобирает группы и НЕ меняет их состав/тип/фазу;
+ * - допускает повышение/понижение номиналов;
+ * - manual path обязан использовать тот же calculation core и тот же line policy,
  *   что и AUTO path, иначе UI начнёт расходиться.
  */
 class RecalculateGroupLineUseCase @Inject constructor() {
 
-    // ✅ Единый selector policy
-    private val breakerPolicySelector = BreakerPolicySelector()
+    // ✅ Единый selector линии: breaker -> cable
+    private val linePolicySelector = LinePolicySelector()
 
     data class Params(
         val group: ManualGroupDraft,
@@ -51,6 +51,7 @@ class RecalculateGroupLineUseCase @Inject constructor() {
                 cableSection = null,
                 breakerType = p.group.breakerType,
                 whyBreakerSelected = null,
+                whyCableSelected = null,
                 rcdRequired = p.group.rcdRequired,
                 rcdCurrent = p.group.rcdCurrent,
             )
@@ -96,7 +97,9 @@ class RecalculateGroupLineUseCase @Inject constructor() {
                         "selectedCable=${CalculationTrace.f(line.cableSection)} " +
                         "selectedCurve=${line.breakerType} " +
                         "reasonFloor=${line.whyBreakerSelected?.floorBreakerA} " +
-                        "reasonRequired=${line.whyBreakerSelected?.requiredBreakerA}"
+                        "reasonRequired=${line.whyBreakerSelected?.requiredBreakerA} " +
+                        "cableNormFloor=${line.whyCableSelected?.normativeFloorSectionMm2} " +
+                        "cableDefault=${line.whyCableSelected?.productDefaultSectionMm2}"
         )
 
         return p.group.copy(
@@ -105,6 +108,7 @@ class RecalculateGroupLineUseCase @Inject constructor() {
             cableSection = line.cableSection,
             breakerType = line.breakerType,
             whyBreakerSelected = line.whyBreakerSelected,
+            whyCableSelected = line.whyCableSelected,
         )
     }
 
@@ -125,15 +129,19 @@ class RecalculateGroupLineUseCase @Inject constructor() {
     }
 
     /**
-     * ✅ Manual path теперь использует тот же selector, что и AUTO.
+     * ✅ Manual path теперь использует тот же line selector, что и AUTO.
+     *
+     * Порядок строго такой:
+     * 1) breaker
+     * 2) cable
      */
     private fun selectLineProfile(
         nominalCurrent: Double,
         hasMotor: Boolean,
         groupType: ru.mugalimov.volthome.domain.model.DeviceType
     ): GroupProfile {
-        return breakerPolicySelector.select(
-            BreakerPolicyInput(
+        return linePolicySelector.select(
+            LinePolicyInput(
                 nominalCurrentA = nominalCurrent,
                 deviceType = groupType,
                 hasMotor = hasMotor

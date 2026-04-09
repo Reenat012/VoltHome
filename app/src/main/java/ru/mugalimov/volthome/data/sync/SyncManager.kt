@@ -149,8 +149,13 @@ class SyncManager @Inject constructor(
                     // ------------------------------------------------
                     // ✅ MANUAL GUARD — блокируем только входящий PULL/APPLY
                     // ------------------------------------------------
-                    val active = manualEditSessionRepository.getActiveSession()
-                    Log.d("Sync", "manual session: active=${active != null} manualModeActive=${active?.manualModeActive}")
+                    // ✅ Sync должен смотреть только manual session текущего проекта.
+                    // Иначе manual в одном проекте начнёт блокировать входящий pull другого проекта.
+                    val active = manualEditSessionRepository.getSession(projectId)
+                    Log.d(
+                        "Sync",
+                        "manual session for project=$projectId: active=${active != null} manualModeActive=${active?.manualModeActive}"
+                    )
                     if (active?.manualModeActive == true) {
                         val wasPending = hasPendingIncoming(projectId)
                         pendingIncomingSyncProjects.add(projectId)

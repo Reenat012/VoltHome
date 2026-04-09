@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.domain.model.manual
 
+import ru.mugalimov.volthome.domain.model.CableSelectionReason
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.LineSelectionReason
 import ru.mugalimov.volthome.domain.model.Phase
@@ -27,9 +28,9 @@ data class ProjectEditState(
 }
 
 /**
- * Состав группы с точки зрения "правил смешения".
- * NORMAL — состав однородный (по типу группы/ожидаемому назначению).
- * MIXED_MANUAL — пользователь вручную смешал типы (допустимо, но помечаем и предупреждаем).
+ * Состав группы с точки зрения правил смешения.
+ * NORMAL — состав однородный.
+ * MIXED_MANUAL — пользователь вручную смешал типы.
  */
 enum class ManualGroupComposition {
     NORMAL,
@@ -42,10 +43,7 @@ data class ManualGroupDraft(
     val roomId: Long,
     val roomName: String,
     val groupType: DeviceType,
-
-    // Пометка смешанного состава (не меняет groupType)
     val composition: ManualGroupComposition = ManualGroupComposition.NORMAL,
-
     val phase: Phase,
     val deviceIds: List<Long>,
 
@@ -55,8 +53,9 @@ data class ManualGroupDraft(
     val cableSection: Double? = null,
     val breakerType: String? = null,
 
-    // Объяснение выбора автомата единым policy-слоем
+    // Объяснение выбора линии единым policy-слоем
     val whyBreakerSelected: LineSelectionReason? = null,
+    val whyCableSelected: CableSelectionReason? = null,
 
     val rcdRequired: Boolean? = null,
     val rcdCurrent: Int? = null,
@@ -74,8 +73,7 @@ data class ManualDeviceDraft(
     val powerW: Int?,
     val voltageType: VoltageType,
 
-    // ✅ manual path обязан хранить реальное напряжение устройства,
-    // иначе пересчёт линии уйдёт на дефолт 230/400 и начнёт расходиться с AUTO/breakdown.
+    // Manual path обязан хранить реальное напряжение устройства.
     val voltageValue: Int?,
 
     val demandRatio: Double?,

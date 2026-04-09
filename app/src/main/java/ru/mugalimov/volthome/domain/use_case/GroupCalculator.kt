@@ -13,8 +13,8 @@ import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.domain.model.SafetyProfile
-import ru.mugalimov.volthome.domain.policy.breaker.BreakerPolicyInput
-import ru.mugalimov.volthome.domain.policy.breaker.BreakerPolicySelector
+import ru.mugalimov.volthome.domain.policy.line.LinePolicyInput
+import ru.mugalimov.volthome.domain.policy.line.LinePolicySelector
 import ru.mugalimov.volthome.domain.use_case.PhaseDistributor.distributeGroupsBalancedWithLog
 import java.nio.ByteBuffer
 import java.security.MessageDigest
@@ -25,8 +25,8 @@ class GroupCalculator(
     private val groupRepository: ExplicationRepository
 ) {
 
-    // ✅ Единый selector policy
-    private val breakerPolicySelector = BreakerPolicySelector()
+    // ✅ Единый selector линии: breaker -> cable
+    private val linePolicySelector = LinePolicySelector()
 
     private val roomSafetyProfiles = mapOf(
         RoomType.BATHROOM to SafetyProfile(rcdRequired = true),
@@ -66,7 +66,7 @@ class GroupCalculator(
                                         "path=DeviceEntity.nominalCurrent()->CurrentCalculator.calculateNominalCurrent()"
                         )
 
-                        val profile = selectBreaker(
+                        val profile = selectLineProfile(
                             nominalCurrent = canonicalDeviceCurrent,
                             deviceType = d.deviceType,
                             hasMotor = d.hasMotor
@@ -103,7 +103,7 @@ class GroupCalculator(
                                     "maxCanonicalCurrentA=${CalculationTrace.f(maxI)} hasMotor=$hasMotor"
                     )
 
-                    val profile = selectBreaker(
+                    val profile = selectLineProfile(
                         nominalCurrent = maxI,
                         deviceType = deviceType,
                         hasMotor = hasMotor
@@ -194,18 +194,20 @@ class GroupCalculator(
         }
 
     /**
-     * ✅ Единый policy-вход для выбора автомата.
+     * ✅ Единый policy-вход для выбора полной линии.
      *
-     * Здесь больше нет локальной эвристики.
-     * AUTO path теперь пользуется тем же selector-ом, что и MANUAL.
+     * Важно:
+     * - сначала breaker;
+     * - потом cable;
+     * - AUTO path теперь использует тот же line selector, что и MANUAL.
      */
-    private fun selectBreaker(
+    private fun selectLineProfile(
         nominalCurrent: Double,
         deviceType: DeviceType,
         hasMotor: Boolean
     ): GroupProfile {
-        val result = breakerPolicySelector.select(
-            BreakerPolicyInput(
+        val result = linePolicySelector.select(
+            LinePolicyInput(
                 nominalCurrentA = nominalCurrent,
                 deviceType = deviceType,
                 hasMotor = hasMotor
@@ -220,15 +222,18 @@ class GroupCalculator(
                         "selectedBreaker=${result.profile.breakerRating} " +
                         "selectedCable=${CalculationTrace.f(result.profile.cableSection)} " +
                         "selectedCurve=${result.profile.breakerType} " +
-                        "floor=${result.reason.floorBreakerA} " +
-                        "required=${result.reason.requiredBreakerA} " +
-                        "curveRule=${result.reason.curveRule}"
+                        "breakerFloor=${result.profile.whyBreakerSelected?.floorBreakerA} " +
+                        "breakerRequired=${result.profile.whyBreakerSelected?.requiredBreakerA} " +
+                        "breakerRule=${result.profile.whyBreakerSelected?.productRule} " +
+                        "cableNormFloor=${result.profile.whyCableSelected?.normativeFloorSectionMm2} " +
+                        "cableProductDefault=${result.profile.whyCableSelected?.productDefaultSectionMm2} " +
+                        "cableRule=${result.profile.whyCableSelected?.productRule}"
         )
 
         return result.profile
     }
 
-    /** FFD-упаковка устройств в группы с лимитом по номиналу автомата. */
+    /** FFD-упаковка устройств в группы с лимитом по выбранному автомату. */
     private fun createCircuitGroups(
         devices: List<DeviceEntity>,
         profile: GroupProfile,
@@ -326,6 +331,7 @@ class GroupCalculator(
             cableSection = profile.cableSection,
             breakerType = profile.breakerType,
             whyBreakerSelected = profile.whyBreakerSelected,
+            whyCableSelected = profile.whyCableSelected,
             rcdRequired = safetyProfile.rcdRequired,
             rcdCurrent = safetyProfile.rcdCurrent,
             groupNumber = groupNumber,
@@ -369,6 +375,7 @@ class GroupCalculator(
             cableSection = profile.cableSection,
             breakerType = profile.breakerType,
             whyBreakerSelected = profile.whyBreakerSelected,
+            whyCableSelected = profile.whyCableSelected,
             rcdRequired = safetyProfile.rcdRequired,
             rcdCurrent = safetyProfile.rcdCurrent,
             groupNumber = groupNumber,
