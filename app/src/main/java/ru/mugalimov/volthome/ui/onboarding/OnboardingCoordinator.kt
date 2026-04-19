@@ -12,22 +12,14 @@ import ru.mugalimov.volthome.ui.onboarding.model.ActiveHint
 import ru.mugalimov.volthome.ui.onboarding.model.OnboardingDismissReason
 import ru.mugalimov.volthome.ui.onboarding.model.OnboardingHintId
 import ru.mugalimov.volthome.ui.onboarding.model.OnboardingScreen
+import ru.mugalimov.volthome.ui.onboarding.model.OnboardingTargetTag
 
 /**
  * Единая точка истины для active hint.
  *
- * В commit 1 координатор умеет только:
- * - хранить максимум одну активную подсказку
- * - проверять shown flag
- * - проверять cooldown
- * - принимать dismiss
- * - писать persisted state
- *
- * Здесь специально нет:
- * - экранной интеграции
- * - overlay
- * - targetTag / anchors
- * - request-моделей
+ * Commit 2 расширяет координатор только настолько, насколько это нужно host-у:
+ * - active hint теперь знает свой targetTag
+ * - никакой screen integration здесь по-прежнему нет
  */
 @Singleton
 class OnboardingCoordinator @Inject constructor(
@@ -37,7 +29,6 @@ class OnboardingCoordinator @Inject constructor(
     companion object {
         /**
          * Базовый cooldown между любыми подсказками.
-         * Вынесен в константу commit 1, без дополнительной конфигурации.
          */
         const val DEFAULT_COOLDOWN_MILLIS: Long = 30_000L
     }
@@ -51,13 +42,13 @@ class OnboardingCoordinator @Inject constructor(
     /**
      * Пытается активировать hint.
      *
-     * Возвращает:
-     * - true, если hint стал активным
-     * - false, если hint отклонён по любому guard-условию
+     * targetTag может быть null:
+     * - в этом случае host использует centered fallback
      */
     suspend fun tryShow(
         hintId: OnboardingHintId,
         screen: OnboardingScreen,
+        targetTag: OnboardingTargetTag? = null,
         nowMillis: Long = System.currentTimeMillis(),
         cooldownMillis: Long = DEFAULT_COOLDOWN_MILLIS
     ): Boolean = mutex.withLock {
@@ -77,6 +68,7 @@ class OnboardingCoordinator @Inject constructor(
         _activeHint.value = ActiveHint(
             hintId = hintId,
             screen = screen,
+            targetTag = targetTag,
             activatedAtMillis = nowMillis
         )
 
@@ -89,7 +81,7 @@ class OnboardingCoordinator @Inject constructor(
     /**
      * Закрывает текущий активный hint.
      *
-     * По MVP-правилу commit 1 persisted shown-flag пишется только
+     * По MVP-правилу persisted shown-flag пишется только
      * для пользовательских сценариев dismiss/skip.
      */
     suspend fun dismiss(reason: OnboardingDismissReason) = mutex.withLock {

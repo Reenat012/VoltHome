@@ -70,6 +70,7 @@ import ru.mugalimov.volthome.ui.model.UserProfileUi
 import ru.mugalimov.volthome.ui.navigation.MainBottomNavBar
 import ru.mugalimov.volthome.ui.navigation.NavGraphApp
 import ru.mugalimov.volthome.ui.navigation.Screens
+import ru.mugalimov.volthome.ui.onboarding.OnboardingRuntimeEntryPoint
 import ru.mugalimov.volthome.ui.paywall.PaywallEntryPoint
 import ru.mugalimov.volthome.ui.screens.start_drawer.AppScaffoldWithDrawer
 import ru.mugalimov.volthome.ui.screens.start_drawer.ManualModeChipState
@@ -79,6 +80,9 @@ import ru.mugalimov.volthome.ui.viewmodel.ManualModeAppBarViewModel
 import ru.mugalimov.volthome.ui.viewmodel.ProfileViewModel
 import ru.mugalimov.volthome.ui.viewmodel.ProjectsViewModel
 import ru.mugalimov.volthome.ui.viewmodel.UserPlanViewModel
+
+import ru.mugalimov.volthome.ui.onboarding.CoachMarkHost
+import ru.mugalimov.volthome.ui.onboarding.model.OnboardingScreen
 
 @Composable
 fun MainApp(
@@ -118,6 +122,18 @@ fun MainApp(
             PaywallEntryPoint::class.java
         ).paywallBus()
     }
+
+    // -----------------------------
+    // ✅ Onboarding runtime singletons
+    // -----------------------------
+    val onboardingEp = remember {
+        EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            OnboardingRuntimeEntryPoint::class.java
+        )
+    }
+    val onboardingCoordinator = remember { onboardingEp.onboardingCoordinator() }
+    val uiAnchorRegistry = remember { onboardingEp.uiAnchorRegistry() }
 
     // ✅ Snackbar host (глобально, один на всё приложение)
     val snackbarHostState = remember { SnackbarHostState() }
@@ -500,6 +516,25 @@ fun MainApp(
     val navBackStackEntry = appNavController.currentBackStackEntryAsState().value
     val currentRoute = navBackStackEntry?.destination?.route
 
+    // -----------------------------
+    // ✅ Текущий экран для onboarding host
+    // -----------------------------
+    val currentOnboardingScreen = remember(currentRoute, drawerState.currentValue) {
+        when {
+            // Drawer трактуем как контекст projects.
+            drawerState.currentValue == DrawerValue.Open -> OnboardingScreen.PROJECTS
+
+            currentRoute == Screens.RoomsList.route -> OnboardingScreen.ROOMS
+            currentRoute == Screens.LoadsScreen.route -> OnboardingScreen.LOADS
+            currentRoute == Screens.ExplicationScreen.route -> OnboardingScreen.EXPLICATION
+            currentRoute == Screens.AddRoom.route -> OnboardingScreen.ADD_ROOM_SHEET
+
+            currentRoute?.startsWith("room_detail/") == true -> OnboardingScreen.ROOM_DETAILS
+
+            else -> null
+        }
+    }
+
     CompositionLocalProvider(
         LocalUserPlan provides userPlan,
         LocalManualModeGuard provides manualGuard
@@ -692,6 +727,15 @@ fun MainApp(
                     authVm = authVm
                 )
             }
+
+            // ✅ Единый host coachmark-ов.
+            // Он только рендерит active hint и ничего не решает сам.
+            CoachMarkHost(
+                coordinator = onboardingCoordinator,
+                anchorRegistry = uiAnchorRegistry,
+                currentScreen = currentOnboardingScreen,
+                modifier = Modifier.fillMaxSize()
+            )
         }
     }
 }
