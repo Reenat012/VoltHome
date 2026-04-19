@@ -3,12 +3,14 @@ package ru.mugalimov.volthome.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.local.dao.OutboxDao
@@ -19,8 +21,8 @@ import ru.mugalimov.volthome.domain.model.ProFeature
 import ru.mugalimov.volthome.domain.model.Project
 import ru.mugalimov.volthome.domain.use_case.CreateProjectUseCase
 import ru.mugalimov.volthome.ui.model.ProjectUi
+import ru.mugalimov.volthome.ui.onboarding.model.ProjectsOnboardingFacts
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
-import javax.inject.Inject
 
 @HiltViewModel
 class ProjectsViewModel @Inject constructor(
@@ -61,6 +63,26 @@ class ProjectsViewModel @Inject constructor(
                 )
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * Канонический источник фактов для Projects onboarding.
+     *
+     * Важно:
+     * - используем только projectsUi
+     * - не плодим второй источник истины
+     */
+    val onboardingFacts =
+        projectsUi
+            .map { list ->
+                ProjectsOnboardingFacts(
+                    projectsCount = list.size
+                )
+            }
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5_000),
+                ProjectsOnboardingFacts()
+            )
 
     init {
         // ✅ FIX: paywall не должен появляться "сам по себе".

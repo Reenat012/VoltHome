@@ -54,7 +54,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.R
 import ru.mugalimov.volthome.data.billing.pending.PendingConfirmCoordinator
-import ru.mugalimov.volthome.data.local.dao.GroupPhaseOverrideDao
 import ru.mugalimov.volthome.data.ownership.OwnershipOverridesCleaner
 import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
 import ru.mugalimov.volthome.domain.model.PlanCapabilities
@@ -70,7 +69,9 @@ import ru.mugalimov.volthome.ui.model.UserProfileUi
 import ru.mugalimov.volthome.ui.navigation.MainBottomNavBar
 import ru.mugalimov.volthome.ui.navigation.NavGraphApp
 import ru.mugalimov.volthome.ui.navigation.Screens
+import ru.mugalimov.volthome.ui.onboarding.CoachMarkHost
 import ru.mugalimov.volthome.ui.onboarding.OnboardingRuntimeEntryPoint
+import ru.mugalimov.volthome.ui.onboarding.model.OnboardingScreen
 import ru.mugalimov.volthome.ui.paywall.PaywallEntryPoint
 import ru.mugalimov.volthome.ui.screens.start_drawer.AppScaffoldWithDrawer
 import ru.mugalimov.volthome.ui.screens.start_drawer.ManualModeChipState
@@ -80,9 +81,8 @@ import ru.mugalimov.volthome.ui.viewmodel.ManualModeAppBarViewModel
 import ru.mugalimov.volthome.ui.viewmodel.ProfileViewModel
 import ru.mugalimov.volthome.ui.viewmodel.ProjectsViewModel
 import ru.mugalimov.volthome.ui.viewmodel.UserPlanViewModel
-
-import ru.mugalimov.volthome.ui.onboarding.CoachMarkHost
-import ru.mugalimov.volthome.ui.onboarding.model.OnboardingScreen
+import ru.mugalimov.volthome.ui.onboarding.hints.BaseHints
+import ru.mugalimov.volthome.ui.onboarding.model.ProjectsOnboardingFacts
 
 @Composable
 fun MainApp(
@@ -176,6 +176,10 @@ fun MainApp(
 
     // activeProjectId нужен для one-shot проверки kill-process UX
     val activeProjectId = projectsVm.activeProjectId.collectAsState(initial = null).value
+
+    // ✅ Канонические facts для Projects onboarding.
+    val projectsOnboardingFacts =
+        projectsVm.onboardingFacts.collectAsState(initial = ProjectsOnboardingFacts()).value
 
     // -----------------------------
     // ✅ Ручной режим и "грязность" — считаем по сессии.
@@ -533,6 +537,56 @@ fun MainApp(
 
             else -> null
         }
+    }
+
+    // -----------------------------
+    // ✅ Единственная orchestration point для Projects onboarding
+    // -----------------------------
+    LaunchedEffect(currentOnboardingScreen, projectsOnboardingFacts) {
+        Log.d(
+            "ONBOARD_PROJECTS",
+            buildString {
+                append("ORCH_BEGIN")
+                append(" currentScreen=").append(currentOnboardingScreen?.name ?: "null")
+                append(" projectsCount=").append(projectsOnboardingFacts.projectsCount)
+                append(" drawerOpen=").append(drawerState.currentValue == DrawerValue.Open)
+            }
+        )
+
+        if (currentOnboardingScreen != OnboardingScreen.PROJECTS) {
+            Log.d(
+                "ONBOARD_PROJECTS",
+                "ORCH_SKIP reason=SCREEN_NOT_PROJECTS currentScreen=${currentOnboardingScreen?.name ?: "null"}"
+            )
+            return@LaunchedEffect
+        }
+
+        val hint = BaseHints.forProjects(projectsOnboardingFacts)
+        if (hint == null) {
+            Log.d(
+                "ONBOARD_PROJECTS",
+                "ORCH_SKIP reason=NO_HINT projectsCount=${projectsOnboardingFacts.projectsCount}"
+            )
+            return@LaunchedEffect
+        }
+
+        Log.d(
+            "ONBOARD_PROJECTS",
+            "ORCH_CANDIDATE hintId=${hint.hintId.name} priority=${hint.priority} targetTag=${hint.targetTag?.rawTag ?: "null"}"
+        )
+
+        val accepted = onboardingCoordinator.tryShow(
+            hintId = hint.hintId,
+            screen = hint.screen,
+            targetTag = hint.targetTag,
+            title = hint.title,
+            body = hint.body
+        )
+
+        Log.d(
+            "ONBOARD_PROJECTS",
+            "ORCH_END hintId=${hint.hintId.name} accepted=$accepted"
+        )
     }
 
     CompositionLocalProvider(

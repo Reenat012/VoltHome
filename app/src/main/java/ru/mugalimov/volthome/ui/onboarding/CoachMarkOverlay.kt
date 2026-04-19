@@ -24,12 +24,11 @@ import androidx.compose.ui.unit.coerceAtLeast
 import ru.mugalimov.volthome.ui.onboarding.model.ActiveHint
 
 /**
- * Простейший overlay для commit 2.
+ * Overlay для onboarding подсказок.
  *
- * Важно:
- * - это не финальный UX подсказок
- * - здесь нет текстовой системы hints
- * - overlay нужен, чтобы проверить host + anchor registry + fallback
+ * Commit 4:
+ * - показывает реальный title/body
+ * - anchored/fallback поведение остаётся прежним
  */
 @Composable
 fun CoachMarkOverlay(
@@ -49,7 +48,7 @@ fun CoachMarkOverlay(
                 .clickable(onClick = onDismiss)
         )
 
-        val cardWidth = 280.dp
+        val cardWidth = 300.dp
 
         // Если anchor найден и валиден — рисуем карточку рядом с target.
         // Если anchor нет — уходим в центр экрана.
@@ -60,7 +59,7 @@ fun CoachMarkOverlay(
 
             val y = (bounds.bottom.dp + 12.dp)
                 .coerceAtLeast(12.dp)
-                .coerceAtMost((maxHeight - 120.dp).coerceAtLeast(12.dp))
+                .coerceAtMost((maxHeight - 140.dp).coerceAtLeast(12.dp))
 
             AnchoredOffset(x = x, y = y)
         }
@@ -94,30 +93,23 @@ private fun CoachMarkCard(
     Card(modifier = modifier) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "Подсказка",
+                text = activeHint.title,
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
 
             Text(
-                text = "ID: ${activeHint.hintId.storageKey}",
-                style = MaterialTheme.typography.bodySmall,
+                text = activeHint.body,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 8.dp)
-            )
-
-            Text(
-                text = "Экран: ${activeHint.screen.name}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp)
             )
 
             TextButton(
                 onClick = onDismiss,
                 modifier = Modifier.padding(top = 12.dp)
             ) {
-                Text("Закрыть")
+                Text("Понятно")
             }
         }
     }

@@ -1,15 +1,16 @@
 package ru.mugalimov.volthome.ui.onboarding.model
 
 /**
- * Минимальная runtime-модель активной подсказки.
+ * Runtime-модель активной подсказки.
  *
- * В commit 2 сюда добавлен targetTag:
- * - host должен понимать, к какому target пытаться привязаться
- * - если targetTag == null или target невалиден, используется fallback по центру
+ * В commit 4 сюда добавлены title/body,
+ * чтобы overlay показывал реальный пользовательский текст, а не debug-id.
  */
 data class ActiveHint(
     val hintId: OnboardingHintId,
     val screen: OnboardingScreen,
     val targetTag: OnboardingTargetTag?,
+    val title: String,
+    val body: String,
     val activatedAtMillis: Long
 )

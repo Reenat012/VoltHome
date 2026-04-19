@@ -20,6 +20,7 @@ import ru.mugalimov.volthome.data.repository.RoomRepository
 import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.RoomWithDevicesPreview
 import ru.mugalimov.volthome.domain.use_case.DeleteRoomUseCase
+import ru.mugalimov.volthome.ui.onboarding.model.RoomsOnboardingFacts
 import ru.mugalimov.volthome.ui.screens.rooms.RoomUiState
 import ru.mugalimov.volthome.ui.screens.rooms.RoomWithDevicesPreviewUi
 
@@ -52,6 +53,26 @@ class RoomViewModel @Inject constructor(
                 viewModelScope,
                 SharingStarted.WhileSubscribed(5_000),
                 RoomUiState(isLoading = true)
+            )
+
+    /**
+     * Канонический источник фактов для Rooms onboarding.
+     *
+     * Источник:
+     * - только RoomViewModel.uiState
+     */
+    val onboardingFacts: StateFlow<RoomsOnboardingFacts> =
+        uiState
+            .map { state ->
+                RoomsOnboardingFacts(
+                    roomsCount = state.roomsPreview.size,
+                    isLoading = state.isLoading
+                )
+            }
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5_000),
+                RoomsOnboardingFacts()
             )
 
     fun setPhaseMode(mode: PhaseMode) {

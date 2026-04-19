@@ -41,6 +41,7 @@ import ru.mugalimov.volthome.domain.use_case.GetPhaseLoadUiUseCase
 import ru.mugalimov.volthome.domain.use_case.IncomerSelector
 import ru.mugalimov.volthome.domain.use_case.manual.ResetManualOverridesAndAutoRecalcUseCase
 import ru.mugalimov.volthome.domain.use_case.phase_load.PhaseLoadItemsBuilder
+import ru.mugalimov.volthome.ui.onboarding.model.LoadsOnboardingFacts
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
 import ru.mugalimov.volthome.ui.utilities.ManualDraftResetNotifier
 
@@ -230,6 +231,8 @@ class PhaseLoadViewModel @Inject constructor(
             .distinctUntilChanged()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
+
+
     // =========================
     // Phase items source: AUTO from usecase, MANUAL from draft groups
     // =========================
@@ -283,6 +286,29 @@ class PhaseLoadViewModel @Inject constructor(
                 SharingStarted.WhileSubscribed(5_000),
                 PhaseLoadUiState(isLoading = true)
             )
+
+    /**
+     * Канонический источник фактов для Loads onboarding.
+     *
+     * Источник:
+     * - только PhaseLoadViewModel
+     * - groupsCount + uiState
+     */
+    val onboardingFacts: StateFlow<LoadsOnboardingFacts> =
+        combine(
+            groupsCount,
+            uiState
+        ) { count, state ->
+            LoadsOnboardingFacts(
+                groupsCount = count,
+                phaseMode = state.mode,
+                isLoading = state.isLoading
+            )
+        }.stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            LoadsOnboardingFacts()
+        )
 
     // =========================
     // DnD API

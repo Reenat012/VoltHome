@@ -1,5 +1,6 @@
 package ru.mugalimov.volthome.ui.screens.loads
 
+import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,25 +26,18 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import dagger.hilt.EntryPoint
-import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
-import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.launch
-import ru.mugalimov.volthome.data.local.datastore.AppPreferences
 import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseGroupItem
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadMode
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
+import ru.mugalimov.volthome.ui.onboarding.OnboardingRuntimeEntryPoint
+import ru.mugalimov.volthome.ui.onboarding.hints.BaseHints
+import ru.mugalimov.volthome.ui.onboarding.model.LoadsOnboardingFacts
 import ru.mugalimov.volthome.ui.paywall.PaywallEntryPoint
 import ru.mugalimov.volthome.ui.screens.loads.single.PhaseLoadSingleReportContent
 import ru.mugalimov.volthome.ui.viewmodel.PhaseLoadViewModel
-
-@EntryPoint
-@InstallIn(SingletonComponent::class)
-interface AppPreferencesEntryPoint {
-    fun appPreferences(): AppPreferences
-}
 
 @Composable
 fun PhaseLoadScreen(
@@ -60,21 +54,19 @@ fun PhaseLoadScreen(
         ).paywallBus()
     }
 
-    val appPreferences = remember {
+    val onboardingCoordinator = remember {
         EntryPointAccessors.fromApplication(
             context.applicationContext,
-            AppPreferencesEntryPoint::class.java
-        ).appPreferences()
+            OnboardingRuntimeEntryPoint::class.java
+        ).onboardingCoordinator()
     }
-
-    val manualModeHintShown =
-        appPreferences.manualModeHintShown.collectAsStateWithLifecycle(initialValue = false).value
-    val firstDragHintShown =
-        appPreferences.firstDragHintShown.collectAsStateWithLifecycle(initialValue = false).value
 
     val canDrag = LocalUserPlan.current.capabilities.phaseDragAndDrop
     val uiState = viewModel.uiState.collectAsStateWithLifecycle().value
     val groupsCount = viewModel.groupsCount.collectAsStateWithLifecycle().value
+    val onboardingFacts = viewModel.onboardingFacts.collectAsStateWithLifecycle(
+        initialValue = LoadsOnboardingFacts()
+    ).value
 
     // Заголовок оставляем, но теперь рисуем его в контенте,
     // а не через внутренний TopAppBar, чтобы не было двойного верхнего отступа.
@@ -85,6 +77,55 @@ fun PhaseLoadScreen(
 
     val snackbarHostState = remember { SnackbarHostState() }
 
+    /**
+     * Единственная orchestration point для Loads onboarding.
+     */
+    /**
+     * Единственная orchestration point для Loads onboarding.
+     */
+    LaunchedEffect(onboardingFacts) {
+        Log.d(
+            "ONBOARD_LOADS",
+            buildString {
+                append("ORCH_BEGIN")
+                append(" groupsCount=").append(onboardingFacts.groupsCount)
+                append(" phaseMode=").append(onboardingFacts.phaseMode.name)
+                append(" isLoading=").append(onboardingFacts.isLoading)
+            }
+        )
+
+        val hint = BaseHints.forLoads(onboardingFacts)
+        if (hint == null) {
+            Log.d(
+                "ONBOARD_LOADS",
+                buildString {
+                    append("ORCH_SKIP reason=NO_HINT")
+                    append(" groupsCount=").append(onboardingFacts.groupsCount)
+                    append(" phaseMode=").append(onboardingFacts.phaseMode.name)
+                    append(" isLoading=").append(onboardingFacts.isLoading)
+                }
+            )
+            return@LaunchedEffect
+        }
+
+        Log.d(
+            "ONBOARD_LOADS",
+            "ORCH_CANDIDATE hintId=${hint.hintId.name} priority=${hint.priority} targetTag=${hint.targetTag?.rawTag ?: "null"}"
+        )
+
+        val accepted = onboardingCoordinator.tryShow(
+            hintId = hint.hintId,
+            screen = hint.screen,
+            targetTag = hint.targetTag,
+            title = hint.title,
+            body = hint.body
+        )
+
+        Log.d(
+            "ONBOARD_LOADS",
+            "ORCH_END hintId=${hint.hintId.name} accepted=$accepted"
+        )
+    }
     LaunchedEffect(Unit) {
         viewModel.events.collect { msg ->
             snackbarHostState.showSnackbar(msg)
@@ -206,20 +247,6 @@ fun PhaseLoadScreen(
                                         },
                                         onReset = { viewModel.onResetOverrides() },
                                         onDecisionDetailsClick = { _ -> Unit },
-
-                                        manualModeHintShown = manualModeHintShown,
-                                        firstDragHintShown = firstDragHintShown,
-
-                                        markManualModeHintShown = {
-                                            coroutineScope.launch {
-                                                appPreferences.setManualModeHintShown()
-                                            }
-                                        },
-                                        markFirstDragHintShown = {
-                                            coroutineScope.launch {
-                                                appPreferences.setFirstDragHintShown()
-                                            }
-                                        },
                                         onDropMissed = {
                                             coroutineScope.launch {
                                                 snackbarHostState.showSnackbar(

@@ -78,12 +78,6 @@ fun PhaseLoadContent(
     onGroupDropped: (groupId: Long, target: Phase) -> Unit,
     onDecisionDetailsClick: (groupNumber: Int) -> Unit,
     onReset: () -> Unit,
-
-    // Hints
-    manualModeHintShown: Boolean,
-    firstDragHintShown: Boolean,
-    markManualModeHintShown: () -> Unit,
-    markFirstDragHintShown: () -> Unit,
     onDropMissed: () -> Unit,
 ) {
     // Drop-zones в координатах ROOT (boundsInRoot) — ТОЛЬКО для A/B/C
@@ -122,13 +116,6 @@ fun PhaseLoadContent(
                 .firstOrNull { (_, rect) -> rect.contains(dragPosRoot) }
                 ?.key
                 ?.takeIf { it != p.fromPhase } // подсвечиваем только “чужую” фазу
-        }
-    }
-
-    // Hint 1: как только вошли в MANUAL и подсказка ещё не показывалась — фиксируем (один раз)
-    LaunchedEffect(phaseLoadMode, manualModeHintShown) {
-        if (phaseLoadMode == PhaseLoadMode.MANUAL && !manualModeHintShown) {
-            markManualModeHintShown()
         }
     }
 
@@ -239,18 +226,6 @@ fun PhaseLoadContent(
 //                }
 //            }
 
-            // Hint 1 — первый вход в ручной режим (MANUAL)
-            item {
-                val showHint1 = (phaseLoadMode == PhaseLoadMode.MANUAL) && !manualModeHintShown
-                if (showHint1) {
-                    Text(
-                        text = "Зажмите значок ⠿ у группы и перетащите её на фазу сверху.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
             // Донат / Индикатор вводного + маркетинговый замок для FREE
             item {
                 Box(Modifier.fillMaxWidth()) {
@@ -312,18 +287,6 @@ fun PhaseLoadContent(
 //                        }
 //                    )
 //                }
-            }
-
-            // Hint 2 — первый активный drag (пока dragging != null и флаг ещё не выставлен)
-            item {
-                val showHint2 = (dragging != null) && !firstDragHintShown
-                if (showHint2) {
-                    Text(
-                        text = "Отпустите палец на нужной фазе.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
             }
 
             val canStartDnD = (phaseLoadMode == PhaseLoadMode.MANUAL) && canDrag
@@ -390,8 +353,7 @@ fun PhaseLoadContent(
                                 // disabled-drop (своя фаза) — ничего, и без snackbar (по спекам "мимо фаз")
                             }
                             else -> {
-                                // ✅ успешный drop — как и раньше
-                                if (!firstDragHintShown) markFirstDragHintShown()
+                                // ✅ успешный drop — без legacy hint-флагов.
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 onGroupDropped(payload.groupId, target)
                             }

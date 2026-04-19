@@ -1,6 +1,7 @@
 package ru.mugalimov.volthome.ui.screens.rooms
 
 import android.annotation.SuppressLint
+import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,19 +31,24 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dagger.hilt.android.EntryPointAccessors
 import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.ui.components.ErrorView
 import ru.mugalimov.volthome.ui.components.LoadingView
+import ru.mugalimov.volthome.ui.onboarding.OnboardingRuntimeEntryPoint
+import ru.mugalimov.volthome.ui.onboarding.hints.BaseHints
+import ru.mugalimov.volthome.ui.onboarding.model.OnboardingScreen
+import ru.mugalimov.volthome.ui.onboarding.model.OnboardingTargetTag
+import ru.mugalimov.volthome.ui.onboarding.model.RoomsOnboardingFacts
+import ru.mugalimov.volthome.ui.onboarding.modifier.onboardingAnchor
 import ru.mugalimov.volthome.ui.viewmodel.RoomViewModel
 import ru.mugalimov.volthome.ui.viewmodel.RoomsAction
 import ru.mugalimov.volthome.ui.viewmodel.RoomsViewModel
-import androidx.compose.ui.platform.testTag
-import ru.mugalimov.volthome.ui.onboarding.model.OnboardingScreen
-import ru.mugalimov.volthome.ui.onboarding.model.OnboardingTargetTag
-import ru.mugalimov.volthome.ui.onboarding.modifier.onboardingAnchor
 
 @SuppressLint("NotConstructor")
 @Composable
@@ -56,9 +62,68 @@ fun RoomsScreen(
     val defaultDevices by addViewModel.defaultDevices.collectAsState()
     val isBusy by addViewModel.isBusy.collectAsState()
     val phaseMode by viewModel.phaseMode.collectAsStateWithLifecycle()
+    val onboardingFacts by viewModel.onboardingFacts.collectAsStateWithLifecycle(
+        initialValue = RoomsOnboardingFacts()
+    )
+
+    val context = LocalContext.current
+    val onboardingCoordinator = remember {
+        EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            OnboardingRuntimeEntryPoint::class.java
+        ).onboardingCoordinator()
+    }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val showAddRoom: MutableState<Boolean> = remember { mutableStateOf(false) }
+
+    /**
+     * Единственная orchestration point для Rooms onboarding.
+     *
+     * Запрещено вызывать tryShow() где-то ещё внутри этого экрана.
+     */
+    /**
+     * Единственная orchestration point для Rooms onboarding.
+     *
+     * Запрещено вызывать tryShow() где-то ещё внутри этого экрана.
+     */
+    LaunchedEffect(onboardingFacts) {
+        Log.d(
+            "ONBOARD_ROOMS",
+            buildString {
+                append("ORCH_BEGIN")
+                append(" roomsCount=").append(onboardingFacts.roomsCount)
+                append(" isLoading=").append(onboardingFacts.isLoading)
+            }
+        )
+
+        val hint = BaseHints.forRooms(onboardingFacts)
+        if (hint == null) {
+            Log.d(
+                "ONBOARD_ROOMS",
+                "ORCH_SKIP reason=NO_HINT roomsCount=${onboardingFacts.roomsCount} isLoading=${onboardingFacts.isLoading}"
+            )
+            return@LaunchedEffect
+        }
+
+        Log.d(
+            "ONBOARD_ROOMS",
+            "ORCH_CANDIDATE hintId=${hint.hintId.name} priority=${hint.priority} targetTag=${hint.targetTag?.rawTag ?: "null"}"
+        )
+
+        val accepted = onboardingCoordinator.tryShow(
+            hintId = hint.hintId,
+            screen = hint.screen,
+            targetTag = hint.targetTag,
+            title = hint.title,
+            body = hint.body
+        )
+
+        Log.d(
+            "ONBOARD_ROOMS",
+            "ORCH_END hintId=${hint.hintId.name} accepted=$accepted"
+        )
+    }
 
     LaunchedEffect(Unit) {
         addViewModel.actions.collect { action: RoomsAction ->
