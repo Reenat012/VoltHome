@@ -73,6 +73,13 @@ import ru.mugalimov.volthome.ui.model.ProjectUi
 import ru.mugalimov.volthome.ui.model.UserProfileUi
 import ru.mugalimov.volthome.ui.screens.debug.DebugProPanel
 import ru.mugalimov.volthome.ui.utilities.TelegramConsultationDialog
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.ui.platform.testTag
+import ru.mugalimov.volthome.ui.onboarding.model.OnboardingScreen
+import ru.mugalimov.volthome.ui.onboarding.model.OnboardingTargetTag
+import ru.mugalimov.volthome.ui.onboarding.modifier.onboardingAnchor
 
 // ✅ Состояние кнопки "Ручной режим" в AppBar.
 // AUTO  — ручной режим выключен
@@ -160,7 +167,12 @@ fun StartDrawer(
                     ) {
                         item { DrawerSectionTitle("Мои проекты") }
 
-                        items(projects, key = { it.id }) { p ->
+                        itemsIndexed(
+                            items = projects,
+                            key = { _, item -> item.id }
+                        ) { index, p ->
+                            val isFirstProjectTarget = index == 0
+
                             NavigationDrawerItem(
                                 label = {
                                     Row(
@@ -225,7 +237,20 @@ fun StartDrawer(
                                     selectedIconColor = t.textSecondary,
                                     unselectedIconColor = t.textSecondary
                                 ),
-                                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                                modifier = Modifier
+                                    .padding(NavigationDrawerItemDefaults.ItemPadding)
+                                    .then(
+                                        if (isFirstProjectTarget) {
+                                            Modifier
+                                                .testTag(OnboardingTargetTag.PROJECTS_FIRST_ITEM.rawTag)
+                                                .onboardingAnchor(
+                                                    targetTag = OnboardingTargetTag.PROJECTS_FIRST_ITEM,
+                                                    screenId = OnboardingScreen.PROJECTS
+                                                )
+                                        } else {
+                                            Modifier
+                                        }
+                                    )
                             )
                         }
 
@@ -260,7 +285,13 @@ fun StartDrawer(
                                         selectedIconColor = t.textSecondary,
                                         unselectedIconColor = t.textSecondary
                                     ),
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag(OnboardingTargetTag.PROJECTS_ADD_BUTTON.rawTag)
+                                        .onboardingAnchor(
+                                            targetTag = OnboardingTargetTag.PROJECTS_ADD_BUTTON,
+                                            screenId = OnboardingScreen.PROJECTS
+                                        )
                                 )
 
                                 // Инфо-строка: реактивно меняется при смене плана

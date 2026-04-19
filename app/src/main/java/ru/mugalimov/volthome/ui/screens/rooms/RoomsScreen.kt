@@ -39,6 +39,10 @@ import ru.mugalimov.volthome.ui.components.LoadingView
 import ru.mugalimov.volthome.ui.viewmodel.RoomViewModel
 import ru.mugalimov.volthome.ui.viewmodel.RoomsAction
 import ru.mugalimov.volthome.ui.viewmodel.RoomsViewModel
+import androidx.compose.ui.platform.testTag
+import ru.mugalimov.volthome.ui.onboarding.model.OnboardingScreen
+import ru.mugalimov.volthome.ui.onboarding.model.OnboardingTargetTag
+import ru.mugalimov.volthome.ui.onboarding.modifier.onboardingAnchor
 
 @SuppressLint("NotConstructor")
 @Composable
@@ -121,7 +125,13 @@ fun RoomsScreen(
                         showAddRoom.value = true
                     }
                 },
-                modifier = Modifier.alpha(fabAlpha)
+                modifier = Modifier
+                    .alpha(fabAlpha)
+                    .testTag(OnboardingTargetTag.ROOMS_ADD_FAB.rawTag)
+                    .onboardingAnchor(
+                        targetTag = OnboardingTargetTag.ROOMS_ADD_FAB,
+                        screenId = OnboardingScreen.ROOMS
+                    )
             ) {
                 Icon(
                     imageVector = Icons.Filled.Add,

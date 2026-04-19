@@ -49,7 +49,7 @@ fun PhaseLoadDonutChart(
     mode: PhaseMode = PhaseMode.THREE,
     incomerRating: Int? = null, // номинал вводного; нужен только в 1-фазе
     warnPct: Int = 60,          // ≤warn — зелёный
-    alertPct: Int = 80          // ≥alert — красный
+    alertPct: Int = 80,          // ≥alert — красный
 ) {
     val a = perPhase[Phase.A] ?: 0.0
     val b = perPhase[Phase.B] ?: 0.0

@@ -66,7 +66,8 @@ fun PhaseGroupTableItem(
     isDropTargetHighlighted: Boolean,
     onDragCancel: () -> Unit,
     // ✅ теперь не используется (оставлено для совместимости с вызовами)
-    onDecisionDetailsClick: (groupNumber: Int) -> Unit = {}
+    onDecisionDetailsClick: (groupNumber: Int) -> Unit = {},
+    modifier: Modifier = Modifier
 ) {
     val uiPhase = item.phase.toUiPhase()
     val phaseAccent = VhColors.phase(uiPhase).copy(alpha = 0.25f)
@@ -80,7 +81,7 @@ fun PhaseGroupTableItem(
     val borderWidth = if (isDropTargetHighlighted) 2.dp else 1.dp
 
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .animateContentSize()
             .border(borderWidth, borderColor, MaterialTheme.shapes.large)

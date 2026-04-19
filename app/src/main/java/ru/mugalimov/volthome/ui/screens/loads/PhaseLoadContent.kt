@@ -53,6 +53,10 @@ import ru.mugalimov.volthome.domain.model.phase_load.LoadThresholds
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadMode
 import kotlin.math.roundToInt
+import androidx.compose.ui.platform.testTag
+import ru.mugalimov.volthome.ui.onboarding.model.OnboardingScreen
+import ru.mugalimov.volthome.ui.onboarding.model.OnboardingTargetTag
+import ru.mugalimov.volthome.ui.onboarding.modifier.onboardingAnchor
 
 /**
  * Контент экрана «Нагрузки» ДЛЯ 3-ф режима.
@@ -255,7 +259,13 @@ fun PhaseLoadContent(
                         mode = PhaseMode.THREE,
                         incomerRating = incomerRating,
                         warnPct = thresholds.warnPct,
-                        alertPct = thresholds.alertPct
+                        alertPct = thresholds.alertPct,
+                        modifier = Modifier
+                            .testTag(OnboardingTargetTag.LOADS_DONUT_CHART.rawTag)
+                            .onboardingAnchor(
+                                targetTag = OnboardingTargetTag.LOADS_DONUT_CHART,
+                                screenId = OnboardingScreen.LOADS
+                            )
                     )
 
                     if (!canDrag) {
@@ -319,6 +329,8 @@ fun PhaseLoadContent(
             val canStartDnD = (phaseLoadMode == PhaseLoadMode.MANUAL) && canDrag
 
             items(phaseItems, key = { it.phase }) { item ->
+                val isFirstGroupTarget = item.phase == phaseItems.firstOrNull()?.phase
+
                 PhaseGroupTableItem(
                     item = item,
                     decisionsByGroupNumber = decisionsByGroupNumber,
@@ -386,6 +398,17 @@ fun PhaseLoadContent(
                         }
 
                         dragging = null
+                    },
+
+                    modifier = if (isFirstGroupTarget) {
+                        Modifier
+                            .testTag(OnboardingTargetTag.LOADS_FIRST_GROUP.rawTag)
+                            .onboardingAnchor(
+                                targetTag = OnboardingTargetTag.LOADS_FIRST_GROUP,
+                                screenId = OnboardingScreen.LOADS
+                            )
+                    } else {
+                        Modifier
                     }
                 )
             }
