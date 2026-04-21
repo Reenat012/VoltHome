@@ -302,6 +302,7 @@ class PhaseLoadViewModel @Inject constructor(
             LoadsOnboardingFacts(
                 groupsCount = count,
                 phaseMode = state.mode,
+                phaseLoadMode = state.phaseLoadMode,
                 isLoading = state.isLoading
             )
         }.stateIn(

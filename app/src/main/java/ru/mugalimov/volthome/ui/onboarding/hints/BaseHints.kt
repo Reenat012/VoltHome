@@ -95,7 +95,14 @@ object BaseHints {
      */
     fun forLoads(facts: LoadsOnboardingFacts): BaseHintSpec? {
         val candidates = buildList {
-            if (!facts.isLoading && facts.phaseMode == PhaseMode.THREE && facts.groupsCount > 0) {
+            // Показываем базовую подсказку про донат только в AUTO.
+            // В MANUAL пользователь уже решает другую задачу — там нужны отдельные advanced hints.
+            if (
+                !facts.isLoading &&
+                facts.phaseMode == PhaseMode.THREE &&
+                facts.phaseLoadMode == ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadMode.AUTO &&
+                facts.groupsCount > 0
+            ) {
                 add(LOADS_VIEW_PHASE_BALANCE)
             }
         }

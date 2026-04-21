@@ -14,21 +14,25 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.coerceAtLeast
 import ru.mugalimov.volthome.ui.onboarding.model.ActiveHint
+import ru.mugalimov.volthome.ui.onboarding.model.OnboardingTargetTag
 
 /**
- * Overlay для onboarding подсказок.
+ * Overlay для onboarding-подсказок.
  *
- * Commit 4:
- * - показывает реальный title/body
- * - anchored/fallback поведение остаётся прежним
+ * Ключевые исправления:
+ * - boundsInRoot() приходит в PX, поэтому переводим координаты через LocalDensity;
+ * - позиционируем карточку относительно ЦЕНТРА anchor, а не его левого края;
+ * - если снизу не хватает места — поднимаем карточку НАД anchor;
+ * - ограничиваем карточку safe-отступами, чтобы она не врезалась в bottom/navigation area.
  */
 @Composable
 fun CoachMarkOverlay(
@@ -37,6 +41,8 @@ fun CoachMarkOverlay(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val density = LocalDensity.current
+
     BoxWithConstraints(
         modifier = modifier.fillMaxSize()
     ) {
@@ -48,20 +54,59 @@ fun CoachMarkOverlay(
                 .clickable(onClick = onDismiss)
         )
 
-        val cardWidth = 300.dp
+        val horizontalSafe = 16.dp
+        val topSafe = 16.dp
+        val bottomSafe = 24.dp
 
-        // Если anchor найден и валиден — рисуем карточку рядом с target.
-        // Если anchor нет — уходим в центр экрана.
-        val anchoredOffset = anchorBounds?.let { bounds ->
-            val x = bounds.left.dp
-                .coerceAtLeast(12.dp)
-                .coerceAtMost((maxWidth - cardWidth - 12.dp).coerceAtLeast(12.dp))
+        // Ширину делаем адаптивной, а не жёстко 300 dp.
+        val cardWidth = remember(maxWidth) {
+            (maxWidth - horizontalSafe * 2)
+                .coerceAtMost(320.dp)
+                .coerceAtLeast(260.dp)
+        }
 
-            val y = (bounds.bottom.dp + 12.dp)
-                .coerceAtLeast(12.dp)
-                .coerceAtMost((maxHeight - 140.dp).coerceAtLeast(12.dp))
+        // Оценочная высота карточки.
+        // Нам не нужна математическая идеальность, нужна стабильная безопасная раскладка.
+        val estimatedCardHeight = when (activeHint.targetTag) {
+            OnboardingTargetTag.LOADS_DONUT_CHART -> 132.dp
+            else -> 148.dp
+        }
 
-            AnchoredOffset(x = x, y = y)
+        val anchoredOffset = anchorBounds?.let { boundsPx ->
+            with(density) {
+                val left = boundsPx.left.toDp()
+                val right = boundsPx.right.toDp()
+                val top = boundsPx.top.toDp()
+                val bottom = boundsPx.bottom.toDp()
+
+                val anchorCenterX = (left + right) / 2f
+                val preferredX = anchorCenterX - (cardWidth / 2)
+
+                // По умолчанию пытаемся показать ПОД anchor.
+                val belowY = bottom + 12.dp
+
+                // Если снизу места не хватает — показываем НАД anchor.
+                val aboveY = top - estimatedCardHeight - 12.dp
+
+                val fitsBelow = belowY + estimatedCardHeight <= maxHeight - bottomSafe
+
+                val finalX = preferredX
+                    .coerceAtLeast(horizontalSafe)
+                    .coerceAtMost((maxWidth - cardWidth - horizontalSafe).coerceAtLeast(horizontalSafe))
+
+                val finalY = if (fitsBelow) {
+                    belowY
+                } else {
+                    aboveY
+                        .coerceAtLeast(topSafe)
+                        .coerceAtMost((maxHeight - estimatedCardHeight - bottomSafe).coerceAtLeast(topSafe))
+                }
+
+                AnchoredOffset(
+                    x = finalX,
+                    y = finalY
+                )
+            }
         }
 
         if (anchoredOffset != null) {
