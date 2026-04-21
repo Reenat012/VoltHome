@@ -5,9 +5,9 @@ package ru.mugalimov.volthome.ui.onboarding.model
  *
  * Здесь нет текстов и UI-деталей.
  * Только ids, которые переживут:
- * - refactor
- * - переименование текстов
- * - смену локали
+ * - refactor,
+ * - переименование текстов,
+ * - смену локали.
  */
 enum class OnboardingHintId(
     val storageKey: String
@@ -24,6 +24,7 @@ enum class OnboardingHintId(
     LOADS_MANUAL_MODE_WARNING("loads_manual_mode_warning"),
 
     // Explication
+    EXPLICATION_MANUAL_MODE_INFO("explication_manual_mode_info"),
     EXPLICATION_OVERVIEW("explication_overview"),
     EXPLICATION_UNASSIGNED_DEVICES("explication_unassigned_devices"),
 

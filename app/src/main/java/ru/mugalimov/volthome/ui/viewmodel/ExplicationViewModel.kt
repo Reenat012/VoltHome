@@ -68,6 +68,7 @@ import ru.mugalimov.volthome.domain.use_case.manual.ResetManualOverridesAndAutoR
 import ru.mugalimov.volthome.domain.use_case.phaseCurrents
 import ru.mugalimov.volthome.domain.use_case.report.BuildProfessionalSectionsUseCase
 import ru.mugalimov.volthome.domain.util.PowerCurrentNormalizer
+import ru.mugalimov.volthome.ui.onboarding.model.ExplicationOnboardingFacts
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
 import ru.mugalimov.volthome.ui.screens.explication.sheets.CalcBlocksMapper
 import ru.mugalimov.volthome.ui.screens.explication.sheets.CalcDetailsState
@@ -348,6 +349,15 @@ class ExplicationViewModel @Inject constructor(
     private val _events = MutableStateFlow<UiEvent?>(null)
     val events: StateFlow<UiEvent?> = _events.asStateFlow()
 
+    /**
+     * Флаг активного PDF/export flow.
+     *
+     * Нужен не для красоты, а как канонический blocking state
+     * для advanced hints.
+     */
+    private val _isPdfExportInProgress = MutableStateFlow(false)
+    val isPdfExportInProgress: StateFlow<Boolean> = _isPdfExportInProgress.asStateFlow()
+
     sealed class UiEvent {
         data object ExportPdfRequested : UiEvent()
         data object PdfExportActionsRequested : UiEvent()
@@ -357,6 +367,22 @@ class ExplicationViewModel @Inject constructor(
 
     fun consumeEvent() {
         _events.value = null
+    }
+
+    /**
+     * Экспорт стартовал.
+     *
+     * Это canonical source для blocking state, а не локальный флажок в UI.
+     */
+    fun onPdfExportStarted() {
+        _isPdfExportInProgress.value = true
+    }
+
+    /**
+     * Экспорт завершился или был отменён.
+     */
+    fun onPdfExportFinished() {
+        _isPdfExportInProgress.value = false
     }
 
     /**
@@ -469,6 +495,36 @@ class ExplicationViewModel @Inject constructor(
 
     private val _showMixedWarningDialog = MutableStateFlow(false)
     val showMixedWarningDialog: StateFlow<Boolean> = _showMixedWarningDialog.asStateFlow()
+
+    /**
+     * Канонические факты для advanced onboarding на экране экспликации.
+     *
+     * Локальные transient-состояния вроде drag/bottom sheet/dialog
+     * экран добавит сверху сам, но база готовности экрана живёт здесь.
+     */
+    val onboardingFacts: StateFlow<ExplicationOnboardingFacts> =
+        combine(
+            uiState,
+            manualSession,
+            unassignedDevices,
+            isPdfExportInProgress
+        ) { state, session, unassigned, pdfBusy ->
+            val success = state as? GroupScreenState.Success
+
+            ExplicationOnboardingFacts(
+                isLoading = state is GroupScreenState.Loading,
+                isSuccess = success != null,
+                groupsCount = success?.groups?.size ?: 0,
+                manualModeActive = session?.manualModeActive == true,
+                unassignedCount = unassigned.size,
+                pdfAvailable = success != null,
+                pdfExportFlowActive = pdfBusy
+            )
+        }.stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            ExplicationOnboardingFacts()
+        )
 
     private data class PendingMixedMove(
         val deviceId: Long,
@@ -643,6 +699,8 @@ class ExplicationViewModel @Inject constructor(
                 dbGroupsFlow.combine(phaseMode) { groups: List<CircuitGroup>, mode: PhaseMode ->
                     DbGroupsAndMode(groups = groups, mode = mode)
                 }
+
+
 
             val withDecisionsFlow: Flow<DbWithDecisions> =
                 groupsAndModeFlow.combine(decisionsFlow) { gm: DbGroupsAndMode, decisions: List<DistributionDecision> ->

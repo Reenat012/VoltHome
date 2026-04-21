@@ -245,6 +245,7 @@ class HtmlReportBuilder(private val context: Context) {
             )
             .replace("{{donutSection}}", buildDonutSection(model.donut))
             .replace("{{legendSection}}", buildLegend(model.donut))
+            .replace("{{legalBlock}}", buildLegalBlock(model))
 
         val sectionsHtml = buildSectionsHtml(model)
 
@@ -367,6 +368,29 @@ class HtmlReportBuilder(private val context: Context) {
             }
             appendLine("""</ul></div>""")
         }
+    }
+
+    /**
+     * Постоянный legal/disclaimer block внутри экспортируемого PDF.
+     *
+     * Важно:
+     * - это не watermark "для красоты";
+     * - это часть документа;
+     * - текст должен жить в самом экспорте.
+     */
+    private fun buildLegalBlock(model: ReportModel): String {
+        val profileLabel = when (model.profile) {
+            ReportModel.ReportProfile.FREE -> "FREE"
+            ReportModel.ReportProfile.PRO -> "PRO"
+        }
+
+        return """
+            <div class="footer">
+              <b>Правовая оговорка.</b>
+              Отчёт сформирован приложением «ВольтХом» в профиле <b>${escapeHtml(profileLabel)}</b> и отражает расчётную модель проекта на момент экспорта.
+              Документ не является исполнительной документацией, актом допуска или подтверждением соответствия монтажа требованиям норм без отдельной инженерной проверки и проверки на объекте.
+            </div>
+        """.trimIndent()
     }
 
     private fun buildKpiBlock(model: ReportModel, includeInlineNormatives: Boolean): String {

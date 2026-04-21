@@ -49,11 +49,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
+import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.ui.manual.LocalManualModeGuard
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
+import ru.mugalimov.volthome.ui.onboarding.OnboardingRuntimeEntryPoint
+import ru.mugalimov.volthome.ui.onboarding.hints.ExplicationHints
+import ru.mugalimov.volthome.ui.onboarding.hints.ManualHints
+import ru.mugalimov.volthome.ui.onboarding.hints.PdfHints
+import ru.mugalimov.volthome.ui.onboarding.hints.pickHighestPriorityAdvanced
+import ru.mugalimov.volthome.ui.onboarding.model.ExplicationOnboardingFacts
+import ru.mugalimov.volthome.ui.onboarding.model.OnboardingScreen
+import ru.mugalimov.volthome.ui.onboarding.model.OnboardingTargetTag
+import ru.mugalimov.volthome.ui.onboarding.modifier.onboardingAnchor
 import ru.mugalimov.volthome.ui.screens.explication.export_pdf.exportExplicationPdf
 import ru.mugalimov.volthome.ui.screens.explication.manual.DragGhostOverlay
 import ru.mugalimov.volthome.ui.screens.explication.manual.MoveDeviceTargetsBar
@@ -81,8 +91,19 @@ fun ExplicationScreen(
     val state by viewModel.uiState.collectAsState()
     val ctx = LocalContext.current
 
+    // Runtime-доступ к onboarding coordinator.
+    val onboardingCoordinator = remember {
+        EntryPointAccessors.fromApplication(
+            ctx.applicationContext,
+            OnboardingRuntimeEntryPoint::class.java
+        ).onboardingCoordinator()
+    }
+
     val manualSession by viewModel.manualSession.collectAsState(initial = null)
     val isManual = manualSession?.manualModeActive == true
+
+    // Канонические факты для advanced onboarding.
+    val onboardingFacts by viewModel.onboardingFacts.collectAsState()
 
     val unassignedIds = manualSession?.draftState?.unassignedDeviceIds.orEmpty()
     val unassignedDevices by viewModel.unassignedDevices.collectAsState()
@@ -131,15 +152,90 @@ fun ExplicationScreen(
             return@LaunchedEffect
         }
 
-        exportExplicationPdf(
-            activity = activity,
-            vm = viewModel,
-            caps = caps,
-            projectId = projectId,
-            manualGuard = manualGuard
+        viewModel.onPdfExportStarted()
+        try {
+            exportExplicationPdf(
+                activity = activity,
+                vm = viewModel,
+                caps = caps,
+                projectId = projectId,
+                manualGuard = manualGuard
+            )
+        } finally {
+            // Важно:
+            // даже если guard отменил действие или export сорвался,
+            // blocking state надо снять.
+            viewModel.onPdfExportFinished()
+            viewModel.consumeEvent()
+        }
+    }
+
+    /**
+     * Экранные blocking states для advanced hints.
+     *
+     * Важно:
+     * - drag in progress;
+     * - move/reorder state active;
+     * - bottom sheet open;
+     * - confirm dialog open;
+     * - PDF/export flow active;
+     * - любой modal overlay active.
+     */
+    val advancedFacts = ExplicationOnboardingFacts(
+        isLoading = onboardingFacts.isLoading,
+        isSuccess = onboardingFacts.isSuccess,
+        groupsCount = onboardingFacts.groupsCount,
+        manualModeActive = onboardingFacts.manualModeActive,
+        unassignedCount = onboardingFacts.unassignedCount,
+        pdfAvailable = onboardingFacts.pdfAvailable,
+        dragInProgress = dragState.isActive,
+        moveStateActive = moveUi != null,
+        bottomSheetOpen = sheetPayload != null,
+        confirmDialogOpen = showResetManualConfirmDialog,
+        pdfExportFlowActive = onboardingFacts.pdfExportFlowActive,
+        modalOverlayActive = (sheetPayload != null) || showResetManualConfirmDialog
+    )
+
+    /**
+     * Единая orchestration point для advanced hints экспликации.
+     *
+     * Здесь нет ручных "if-ов по месту" в разных composable.
+     * Только selector-и + priority resolution.
+     */
+    LaunchedEffect(advancedFacts) {
+        val candidates = buildList {
+            ManualHints.forExplication(advancedFacts)?.let { add(it) }
+            ExplicationHints.forUnassigned(advancedFacts)?.let { add(it) }
+            ExplicationHints.forOverview(advancedFacts)?.let { add(it) }
+            PdfHints.forExplication(advancedFacts)?.let { add(it) }
+        }
+
+        val hint = pickHighestPriorityAdvanced(candidates)
+        if (hint == null) {
+            Log.d(
+                "ONBOARD_EXPLICATION",
+                "ORCH_SKIP reason=NO_HINT manual=${advancedFacts.manualModeActive} groups=${advancedFacts.groupsCount} unassigned=${advancedFacts.unassignedCount} blocking=${advancedFacts.hasBlockingState}"
+            )
+            return@LaunchedEffect
+        }
+
+        Log.d(
+            "ONBOARD_EXPLICATION",
+            "ORCH_CANDIDATE hintId=${hint.hintId.name} priority=${hint.priority} targetTag=${hint.targetTag?.rawTag ?: "null"}"
         )
 
-        viewModel.consumeEvent()
+        val accepted = onboardingCoordinator.tryShow(
+            hintId = hint.hintId,
+            screen = hint.screen,
+            targetTag = hint.targetTag,
+            title = hint.title,
+            body = hint.body
+        )
+
+        Log.d(
+            "ONBOARD_EXPLICATION",
+            "ORCH_END hintId=${hint.hintId.name} accepted=$accepted"
+        )
     }
 
     when (val s = state) {
@@ -268,7 +364,12 @@ fun ExplicationScreen(
                             incomer = s.incomer,
                             groups = displayGroups,
                             hasGroupRcds = s.hasGroupRcds,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .onboardingAnchor(
+                                    targetTag = OnboardingTargetTag.EXPLICATION_SHIELD_OVERVIEW,
+                                    screenId = OnboardingScreen.EXPLICATION
+                                ),
                             installedPowerW = s.installedPowerW,
                             calculatedPowerW = s.calculatedPowerW,
                             showProfessionalEvidence = canShowProSections,
@@ -285,7 +386,20 @@ fun ExplicationScreen(
                             onCalculatedPowerClick = { viewModel.onCalculatedPowerClick(it) }
                         )
                         Spacer(Modifier.height(12.dp))
+                    }
 
+                    if (isManual) {
+                        item {
+                            ManualModeLegalBanner(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .onboardingAnchor(
+                                        targetTag = OnboardingTargetTag.EXPLICATION_MANUAL_LEGAL_BANNER,
+                                        screenId = OnboardingScreen.EXPLICATION
+                                    )
+                            )
+                            Spacer(Modifier.height(12.dp))
+                        }
                     }
 
 
@@ -305,13 +419,11 @@ fun ExplicationScreen(
 
                                 // ✅ Drag из unassigned: fromGroupId виртуальный
                                 onDeviceDragStart = { deviceId, itemStartRoot, pointerStartRoot ->
-                                    // 1) включаем панель целей
                                     viewModel.onDeviceLongPressed(
                                         deviceId,
                                         ExplicationViewModel.FROM_UNASSIGNED
                                     )
 
-                                    // 2) запускаем dragState
                                     viewModel.startDrag(
                                         deviceId = deviceId,
                                         fromGroupId = ExplicationViewModel.FROM_UNASSIGNED,
@@ -344,11 +456,13 @@ fun ExplicationScreen(
                                     Log.d("DRAG_TRACE", "SCREEN onDeviceDragCancel")
                                     viewModel.cancelDrag()
                                 },
-
-                                // (опционально) клик
                                 onDeviceClick = { deviceId -> viewModel.onDeviceClick(deviceId) },
-
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .onboardingAnchor(
+                                        targetTag = OnboardingTargetTag.EXPLICATION_UNASSIGNED_BLOCK,
+                                        screenId = OnboardingScreen.EXPLICATION
+                                    )
                             )
                             Spacer(Modifier.height(12.dp))
                         }
@@ -454,6 +568,10 @@ fun ExplicationScreen(
                             width = 1.dp,
                             color = MaterialTheme.colorScheme.outlineVariant,
                             shape = FloatingActionButtonDefaults.shape
+                        )
+                        .onboardingAnchor(
+                            targetTag = OnboardingTargetTag.EXPLICATION_PDF_FAB,
+                            screenId = OnboardingScreen.EXPLICATION
                         ),
                     elevation = FloatingActionButtonDefaults.elevation(
                         defaultElevation = 0.dp,
@@ -575,5 +693,38 @@ private fun ResetManualOverridesButton(
         )
     ) {
         Text("Сбросить ручные изменения")
+    }
+}
+
+@Composable
+private fun ManualModeLegalBanner(
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .background(
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+                shape = MaterialTheme.shapes.large
+            )
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant,
+                shape = MaterialTheme.shapes.large
+            )
+            .padding(14.dp)
+    ) {
+        Column {
+            Text(
+                text = "Ручной режим",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "Изменения в этой зоне ты задаёшь вручную. Результат требует инженерной проверки и не заменяет контроль проекта по месту.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+        }
     }
 }

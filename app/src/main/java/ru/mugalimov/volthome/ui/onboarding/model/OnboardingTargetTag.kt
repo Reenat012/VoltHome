@@ -3,8 +3,9 @@ package ru.mugalimov.volthome.ui.onboarding.model
 /**
  * Централизованный список target tags для onboarding.
  *
- * В commit 2 tags уже централизуем, даже если commit 3 только начнёт
- * массово размечать реальные target-элементы.
+ * Важно:
+ * - tags живут централизованно;
+ * - screen + tag = стабильный ключ для anchor registry.
  */
 enum class OnboardingTargetTag(
     val rawTag: String
@@ -31,6 +32,7 @@ enum class OnboardingTargetTag(
 
     // Explication
     EXPLICATION_SHIELD_OVERVIEW("explication_shield_overview"),
+    EXPLICATION_MANUAL_LEGAL_BANNER("explication_manual_legal_banner"),
     EXPLICATION_UNASSIGNED_BLOCK("explication_unassigned_block"),
     EXPLICATION_PDF_FAB("explication_pdf_fab")
 }

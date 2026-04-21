@@ -97,7 +97,7 @@
             color: #333
         }
 
-        /* Донат + легенда (для 3-ф) */
+        /* Донат + легенда */
         .donut-wrap {
             display: flex;
             gap: 22pt;
@@ -197,34 +197,32 @@
             white-space: nowrap
         }
 
-        /* ✅ Левая колонка таблицы — слева (а не по центру) */
-.phase-table .center {
-    text-align: left
-}
+        /* Левая колонка таблицы — слева */
+        .phase-table .center {
+            text-align: left
+        }
 
-/* ✅ Заголовок группы и мета — тоже слева */
-.phase-table .group-row td {
-    padding: 10pt 0 2pt;
-    border: 0;
-    text-align: left;
-    break-after: avoid;
-    page-break-after: avoid;
-}
+        /* Заголовок группы и мета — тоже слева */
+        .phase-table .group-row td {
+            padding: 10pt 0 2pt;
+            border: 0;
+            text-align: left;
+            break-after: avoid;
+            page-break-after: avoid;
+        }
 
-.phase-table .group-meta td {
-    padding: 0 6pt 8pt;
-    border: 0;
-    text-align: left;
-    color: var(--muted);
-    font-size: 10.5pt
-}
+        .phase-table .group-meta td {
+            padding: 0 6pt 8pt;
+            border: 0;
+            text-align: left;
+            color: var(--muted);
+            font-size: 10.5pt
+        }
 
-        /* повторяемая шапка таблицы на каждой странице */
         thead {
             display: table-header-group;
         }
 
-        /* Переносы/разрывы */
         .section {
             page-break-inside: auto;
             break-inside: auto;
@@ -237,7 +235,19 @@
             break-inside: avoid;
         }
 
-        /* WATERMARK — НЕ УЧАСТВУЕТ В DOM FLOW */
+        /* Footer disclaimer */
+        .footer {
+            margin-top: 18pt;
+            padding-top: 10pt;
+            border-top: 1px solid #E5E7EB;
+            font-size: 10.5pt;
+            line-height: 1.45;
+            color: #5B6472;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* WATERMARK — не участвует в DOM flow */
         body.with-watermark::before {
             content: "";
             position: fixed;
@@ -253,7 +263,6 @@
         }
     </style>
 
-    <!-- локальный шрифт (если используешь) -->
     <link rel="preload" href="file:///android_asset/fonts/NotoSans-Regular.ttf" as="font"
           type="font/ttf" crossorigin>
     <style>
@@ -268,19 +277,15 @@
 
 <body class="with-watermark">
 
-<!-- ШАПКА -->
 <div class="header">
     <img class="header__logo" src="img/logo.png" alt="ВольтХом"/>
     <div class="header__title">{{projectName}}ВольтХом — Экспликация</div>
 </div>
 
-<!-- ТИТУЛ (генерируется в билдере) -->
 {{titleBlock}}
 
-<!-- KPI (генерируется в билдере) -->
 {{kpiBlock}}
 
-<!-- Донат + легенда -->
 <div class="donut-wrap">
     <div class="donut-col">{{donutSection}}</div>
     <div class="legend-col">{{legendSection}}</div>
@@ -288,14 +293,14 @@
 
 <div class="divider"></div>
 
-<!-- ШАГИ РАСЧЁТА (PRO-only, генерируется в билдере) -->
 {{stepsHtml}}
 
 <div class="divider"></div>
 
-<!-- Экспликация -->
 <h2 class="h2-tight">Экспликация по фазам</h2>
 {{phasesHtml}}
+
+{{legalBlock}}
 
 </body>
 </html>

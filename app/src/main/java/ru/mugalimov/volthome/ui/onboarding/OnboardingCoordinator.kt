@@ -18,9 +18,9 @@ import ru.mugalimov.volthome.ui.onboarding.model.OnboardingTargetTag
 /**
  * Единая точка истины для active hint.
  *
- * Commit 4:
- * - принимает пользовательский текст title/body
- * - по-прежнему не знает ничего о predicate или UI orchestration
+ * Важно:
+ * - coordinator ничего не знает о predicate/блокировках;
+ * - coordinator только применяет single-active + persisted shown + cooldown.
  */
 @Singleton
 class OnboardingCoordinator @Inject constructor(
@@ -29,11 +29,10 @@ class OnboardingCoordinator @Inject constructor(
 
     companion object {
         /**
-         * Для base hints 30 секунд — слишком жирно.
-         * Пользователь успевает пройти Rooms -> Projects -> Loads,
-         * а увидит только первую подсказку.
+         * Для base hints и advanced hints 30 секунд слишком много:
+         * пользователь проходит несколько экранов быстрее, чем истекает cooldown.
          *
-         * Поэтому уменьшаем cooldown до 5 секунд.
+         * Поэтому держим короткий глобальный cooldown.
          */
         const val DEFAULT_COOLDOWN_MILLIS: Long = 3_000L
 
@@ -51,7 +50,7 @@ class OnboardingCoordinator @Inject constructor(
      * Пытается активировать hint.
      *
      * targetTag может быть null:
-     * - в этом случае host использует centered fallback
+     * - тогда host использует centered fallback.
      */
     suspend fun tryShow(
         hintId: OnboardingHintId,
@@ -86,7 +85,7 @@ class OnboardingCoordinator @Inject constructor(
             }
         )
 
-        // Single-active invariant: пока один hint активен, второй не допускаем.
+        // Пока один hint активен, второй не допускаем.
         if (hasActiveHint) {
             Log.d(
                 TAG,
@@ -138,8 +137,8 @@ class OnboardingCoordinator @Inject constructor(
     /**
      * Закрывает текущий активный hint.
      *
-     * По MVP-правилу persisted shown-flag пишется только
-     * для пользовательских сценариев dismiss/skip.
+     * Persisted shown-flag пишется только
+     * для пользовательских dismiss/skip-сценариев.
      */
     suspend fun dismiss(reason: OnboardingDismissReason) {
         mutex.withLock {
