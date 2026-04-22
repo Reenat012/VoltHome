@@ -16,7 +16,7 @@ object ExplicationHints {
         targetTag = OnboardingTargetTag.EXPLICATION_UNASSIGNED_BLOCK,
         priority = 115,
         title = "Нераспределённые устройства требуют решения",
-        body = "Эти устройства пока не попали в группы. Их нужно распределить вручную или вернуть в автоматический расчёт."
+        body = "Эти устройства пока не попали в группы. Их можно вернуть в группы вручную или пересобрать структуру проекта."
     )
 
     val EXPLICATION_OVERVIEW = AdvancedHintSpec(

@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import ru.mugalimov.volthome.ui.model.ProjectUi
 import ru.mugalimov.volthome.ui.model.UserProfileUi
+import ru.mugalimov.volthome.ui.onboarding.model.OnboardingScreen
 
 /**
  * Обёртка для интеграции Drawer в основной контейнер.
@@ -40,15 +41,18 @@ fun AppScaffoldWithDrawer(
     onRenameProject: (id: String, newName: String) -> Unit = { _, _ -> },
     onDeleteProject: (id: String) -> Unit = {},
 
-    // ✅ единый триггер: вся логика в MainApp (enter/guard/save/cancel)
+    // ✅ Единый триггер: вся логика в MainApp (enter/guard/save/cancel)
     onManualModeClick: (() -> Unit)? = null,
 
-    // ✅ визуальный стейт чипа (AUTO/MANUAL/DIRTY)
+    // ✅ Визуальный стейт чипа (AUTO/MANUAL/DIRTY)
     manualChipState: ManualModeChipState = ManualModeChipState.AUTO,
+
+    // ✅ Текущий onboarding screen для привязки anchor к чипу ручного режима
+    manualChipOnboardingScreen: OnboardingScreen? = null,
 
     bottomBar: @Composable () -> Unit = {},
 
-    // ✅ диалог Save/Cancel/Stay (управляется из MainApp)
+    // ✅ Диалог Save/Cancel/Stay (управляется из MainApp)
     manualExitDialogVisible: Boolean = false,
     onManualExitDialogDismiss: () -> Unit = {},
     onManualSaveClick: () -> Unit = {},
@@ -75,13 +79,14 @@ fun AppScaffoldWithDrawer(
         onRenameProject = onRenameProject,
         onDeleteProject = onDeleteProject,
 
-        // ✅ ручной режим в AppBar
+        // ✅ Ручной режим в AppBar
         onManualModeClick = onManualModeClick,
         manualChipState = manualChipState,
+        manualChipOnboardingScreen = manualChipOnboardingScreen,
 
         bottomBar = bottomBar,
 
-        // ✅ единый диалог Save/Cancel/Stay
+        // ✅ Единый диалог Save/Cancel/Stay
         manualExitDialogVisible = manualExitDialogVisible,
         onManualExitDialogDismiss = onManualExitDialogDismiss,
         onManualSaveClick = onManualSaveClick,

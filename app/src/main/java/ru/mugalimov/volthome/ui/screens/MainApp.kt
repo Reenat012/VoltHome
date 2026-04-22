@@ -609,6 +609,10 @@ fun MainApp(
                 projectsFlow = projectsFlow,
                 drawerState = drawerState,
 
+                // ✅ Пробрасываем текущий экран вниз,
+                // чтобы чип "Ручной" мог стать anchor именно на Экспликации.
+                manualChipOnboardingScreen = currentOnboardingScreen,
+
                 manualExitDialogVisible = manualExitDialogVisible,
                 onManualExitDialogDismiss = { dismissManualExitDialog() },
 

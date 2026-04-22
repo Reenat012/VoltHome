@@ -204,7 +204,11 @@ fun ExplicationScreen(
      */
     LaunchedEffect(advancedFacts) {
         val candidates = buildList {
-            ManualHints.forExplication(advancedFacts)?.let { add(it) }
+            // ✅ Сначала action-oriented manual hints:
+            // long-press и сохранение через кнопку "Ручной".
+            addAll(ManualHints.forExplicationHints(advancedFacts))
+
+            // ✅ Затем второстепенные advanced hints.
             ExplicationHints.forUnassigned(advancedFacts)?.let { add(it) }
             ExplicationHints.forOverview(advancedFacts)?.let { add(it) }
             PdfHints.forExplication(advancedFacts)?.let { add(it) }
@@ -319,6 +323,20 @@ fun ExplicationScreen(
             val bg = MaterialTheme.colorScheme.background
             val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             val scope = rememberCoroutineScope()
+
+            // ✅ Нужна одна детерминированная цель для подсказки про long-press.
+            // Вычисляем её ВНЕ LazyColumn builder, в нормальном composable scope.
+            val firstAnchoredGroupId = remember(displayGroups) {
+                displayGroups
+                    .sortedWith(
+                        compareBy<CircuitGroup>(
+                            { (it.phase ?: Phase.A).ordinal },
+                            { it.groupNumber }
+                        )
+                    )
+                    .firstOrNull()
+                    ?.groupId
+            }
 
             Box(
                 modifier = Modifier
@@ -488,6 +506,13 @@ fun ExplicationScreen(
                                 GroupCardCompact(
                                     group = g,
                                     isManualMode = isManual,
+
+                                    // ✅ Только одна карточка на всём экране
+                                    // получает anchor на первом device chip.
+                                    anchorFirstDeviceChip = (
+                                            isManual &&
+                                                    g.groupId == firstAnchoredGroupId
+                                            ),
 
                                     onDeviceLongPress = { deviceId, fromGroupId ->
                                         viewModel.onDeviceLongPressed(deviceId, fromGroupId)
@@ -717,6 +742,18 @@ private fun ManualModeLegalBanner(
             Text(
                 text = "Ручной режим",
                 style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "Чтобы перенести устройство - зажми его (long-press) и перетяни в выпадающее меню сверху, выбрав нужное окно.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "Чтобы сохранить или отменить изменения - кликни на кнопку Ручной.",
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onTertiaryContainer
             )
             Spacer(Modifier.height(6.dp))

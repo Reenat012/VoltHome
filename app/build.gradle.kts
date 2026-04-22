@@ -17,7 +17,7 @@ android {
         minSdk = 24
         //noinspection EditedTargetSdkVersion
         targetSdk = 35
-        versionCode = 25
+        versionCode = 26
         versionName = "3.0"
 
 

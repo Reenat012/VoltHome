@@ -58,6 +58,10 @@ fun GroupCardCompact(
     group: CircuitGroup,
     isManualMode: Boolean,
 
+    // ✅ Только для одной карточки на экране включаем anchor
+    // на первом device chip, чтобы подсказка указывала в конкретную цель.
+    anchorFirstDeviceChip: Boolean = false,
+
     // Старое: включает "move-mode" (панель целей)
     onDeviceLongPress: (deviceId: Long, fromGroupId: Long) -> Unit,
 
@@ -214,9 +218,13 @@ fun GroupCardCompact(
 
                     enableLongPress = isManualMode,
                     maxVisible = 3,
-                    // ✅ Коммит 6:
-                    // Если DeviceChips хранит состояние (например, анимации/локальный state),
-                    // то ключ должен быть groupId, а не groupNumber.
+
+                    // ✅ Anchor вешаем только на первый device chip
+                    // первой карточки, которую выберет экран.
+                    anchorFirstVisibleDevice = anchorFirstDeviceChip,
+
+                    // ✅ Если DeviceChips хранит состояние,
+                    // ключ должен быть groupId, а не groupNumber.
                     groupKey = group.groupId
                 )
                 Spacer(Modifier.height(8.dp))

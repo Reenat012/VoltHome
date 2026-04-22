@@ -23,9 +23,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.unit.dp
 import ru.mugalimov.volthome.domain.model.Device
+import ru.mugalimov.volthome.ui.onboarding.model.OnboardingScreen
+import ru.mugalimov.volthome.ui.onboarding.model.OnboardingTargetTag
+import ru.mugalimov.volthome.ui.onboarding.modifier.onboardingAnchor
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -35,13 +37,12 @@ fun DeviceChips(
 
     /**
      * Старый контракт: long-press -> включает "move-mode" (панель целей).
-     * В этом коммите оставляем, чтобы не менять текущий UI.
+     * Оставляем, чтобы не ломать текущий UI pipeline.
      */
     onDeviceLongPress: ((Long) -> Unit)? = null,
 
     /**
      * Новый контракт: drag-цепочка событий (manual-only).
-     * В этом коммите UI ghost ещё нет — только VM события.
      */
     onDeviceDragStart: ((deviceId: Long, itemStartRoot: Offset, pointerStartRoot: Offset) -> Unit)? = null,
     onDeviceDragMove: ((pointerRoot: Offset) -> Unit)? = null,
@@ -50,68 +51,65 @@ fun DeviceChips(
 
     enableLongPress: Boolean = false,
     maxVisible: Int = 3,
-    groupKey: Any? = null // привязываем state раскрытия к группе
+    groupKey: Any? = null,
+
+    /**
+     * Если true — первый видимый device chip становится anchor-целью
+     * для подсказки про long-press.
+     */
+    anchorFirstVisibleDevice: Boolean = false
 ) {
     val rememberKey = groupKey ?: devices.joinToString("|") { it.id.toString() }
     val (expanded, setExpanded) = rememberSaveable(rememberKey) { mutableStateOf(false) }
 
-    val TAG_CHIPS = "EXP_CHIPS"
-
     val total = devices.size
     val overflow = (total - maxVisible).coerceAtLeast(0)
     val visible = if (expanded || total <= maxVisible) devices else devices.take(maxVisible)
-
-//    Log.d(
-//        TAG_CHIPS,
-//        "render groupKey=$groupKey rememberKey=$rememberKey total=$total visible=${visible.size} " +
-//                "overflow=$overflow expanded=$expanded enableLongPress=$enableLongPress"
-//    )
 
     FlowRow(
         modifier = Modifier.padding(top = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        visible.forEach { d ->
+        visible.forEachIndexed { index, d ->
             key(d.id) {
+                val chipModifier = if (anchorFirstVisibleDevice && index == 0) {
+                    Modifier.onboardingAnchor(
+                        targetTag = OnboardingTargetTag.EXPLICATION_FIRST_DEVICE_CHIP,
+                        screenId = OnboardingScreen.EXPLICATION
+                    )
+                } else {
+                    Modifier
+                }
+
                 DeviceChip(
                     text = d.name,
                     onClick = {
-//                        Log.d(TAG_CHIPS, "click deviceId=${d.id} name=${d.name}")
                         onDeviceClick(d.id)
                     },
-
                     enableDrag = enableLongPress,
                     onDragStart = { itemStartRoot, pointerStartRoot ->
-//                        Log.d(
-//                            TAG_CHIPS,
-//                            "dragStart deviceId=${d.id} name=${d.name} itemStartRoot=$itemStartRoot pointerStartRoot=$pointerStartRoot"
-//                        )
-
-                        // ВАЖНО: это старое поведение — включение панели целей
+                        // Сначала старый контракт, чтобы панель целей поднялась как раньше.
                         onDeviceLongPress?.invoke(d.id)
 
-                        // Новый контракт: startDrag в VM
+                        // Затем старт drag-state.
                         onDeviceDragStart?.invoke(d.id, itemStartRoot, pointerStartRoot)
                     },
                     onDragMove = { pointerRoot ->
-//                        Log.v(TAG_CHIPS, "dragMove deviceId=${d.id} name=${d.name} pointerRoot=$pointerRoot")
                         onDeviceDragMove?.invoke(pointerRoot)
                     },
                     onDragEnd = {
-//                        Log.d(TAG_CHIPS, "dragEnd deviceId=${d.id} name=${d.name}")
                         onDeviceDragEnd?.invoke()
                     },
                     onDragCancel = {
-//                        Log.w(TAG_CHIPS, "dragCancel deviceId=${d.id} name=${d.name}")
                         onDeviceDragCancel?.invoke()
-                    }
+                    },
+                    modifier = chipModifier
                 )
             }
         }
 
         if (!expanded && overflow > 0) {
-            // Кнопка раскрытия — обычный клик, long-press/drag не нужен
             DeviceChip(
                 text = "+$overflow",
                 onClick = { setExpanded(true) },
@@ -147,16 +145,15 @@ private fun DeviceChip(
     onDragStart: ((itemStartRoot: Offset, pointerStartRoot: Offset) -> Unit)?,
     onDragMove: ((pointerRoot: Offset) -> Unit)?,
     onDragEnd: (() -> Unit)?,
-    onDragCancel: (() -> Unit)?
+    onDragCancel: (() -> Unit)?,
+    modifier: Modifier = Modifier
 ) {
     val cs = MaterialTheme.colorScheme
 
-    // Координаты чипа в root-системе — нужны для вычисления itemStartRoot/pointerRoot.
-// ВАЖНО: LayoutCoordinates нельзя сохранять через rememberSaveable (не Bundle-тип).
-//    val TAG_CHIP = "EXP_CHIP"
+    // LayoutCoordinates нельзя хранить через rememberSaveable.
     val coordsState = remember { mutableStateOf<LayoutCoordinates?>(null) }
 
-    // ✅ Локальный флаг на чип: если end уже был — cancel игнорируем
+    // Если end уже произошёл — cancel игнорируем.
     val dragEndedOrCanceled = remember { mutableStateOf(false) }
 
     val dragModifier = if (enableDrag) {
@@ -165,8 +162,6 @@ private fun DeviceChip(
                 coordsState.value = coords
             }
             .pointerInput(Unit) {
-
-                // Каждый новый pointerInput lifecycle начинаем “чистым”
                 dragEndedOrCanceled.value = false
 
                 detectDragGesturesAfterLongPress(
@@ -194,7 +189,6 @@ private fun DeviceChip(
                         onDragEnd?.invoke()
                     },
                     onDragCancel = {
-                        // ✅ Ключевой фикс: cancel после end — игнор
                         if (dragEndedOrCanceled.value) {
                             Log.d("DRAG_TRACE", "UI onDragCancel IGNORED (already ended) text=$text")
                             return@detectDragGesturesAfterLongPress
@@ -206,19 +200,22 @@ private fun DeviceChip(
                     }
                 )
             }
-    } else Modifier
+    } else {
+        Modifier
+    }
 
     Surface(
         shape = MaterialTheme.shapes.large,
         color = cs.surfaceContainerHigh,
         border = BorderStroke(1.dp, cs.outlineVariant.copy(alpha = 0.60f)),
-        modifier = Modifier
+        modifier = modifier
             .then(dragModifier)
             .clip(MaterialTheme.shapes.large)
             .combinedClickable(
-                // ✅ Tap всегда работает (когда drag не активен)
+                // Обычный тап всегда работает.
                 onClick = onClick,
-                // ВАЖНО: onLongClick тут НЕ используем — long-press отрабатывает drag-детектор.
+                // Long click здесь не используем:
+                // long-press управляется drag-детектором.
                 onLongClick = null
             )
     ) {

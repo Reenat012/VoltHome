@@ -106,9 +106,12 @@ fun StartDrawer(
     onRenameProject: (id: String, newName: String) -> Unit = { _, _ -> },
     onDeleteProject: (id: String) -> Unit = {},
 
-    // ✅ клик по чипу (AUTO -> enter, MANUAL/DIRTY -> открыть диалог — решает MainApp)
+    // ✅ Клик по чипу (AUTO -> enter, MANUAL/DIRTY -> открыть диалог — решает MainApp)
     onManualModeClick: (() -> Unit)? = null,
     manualChipState: ManualModeChipState = ManualModeChipState.AUTO,
+
+    // ✅ Текущий onboarding screen для привязки anchor к чипу ручного режима
+    manualChipOnboardingScreen: OnboardingScreen? = null,
 
     // ✅ единый диалог Save/Cancel/Stay (контроль снаружи)
     manualExitDialogVisible: Boolean = false,
@@ -446,7 +449,19 @@ fun StartDrawer(
                                 Spacer(Modifier.width(8.dp))
                                 ManualModeChip(
                                     state = manualChipState,
-                                    onClick = { onManualModeClick.invoke() }
+                                    onClick = { onManualModeClick.invoke() },
+
+                                    // ✅ На Экспликации чип становится anchor для подсказки
+                                    // "как сохранить / выйти из ручного режима".
+                                    modifier = when (manualChipOnboardingScreen) {
+                                        OnboardingScreen.EXPLICATION -> {
+                                            Modifier.onboardingAnchor(
+                                                targetTag = OnboardingTargetTag.EXPLICATION_MANUAL_MODE_CHIP,
+                                                screenId = OnboardingScreen.EXPLICATION
+                                            )
+                                        }
+                                        else -> Modifier
+                                    }
                                 )
                             }
                         }
@@ -639,7 +654,8 @@ private fun DrawerSectionTitle(text: String) {
 @Composable
 private fun ManualModeChip(
     state: ManualModeChipState,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val t = VhColors.tokens
 
@@ -670,7 +686,8 @@ private fun ManualModeChip(
 
     TextButton(
         onClick = onClick,
-        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+        modifier = modifier
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
