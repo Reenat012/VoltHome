@@ -87,12 +87,10 @@ fun DeviceChips(
                     onClick = {
                         onDeviceClick(d.id)
                     },
+
                     enableDrag = enableLongPress,
                     onDragStart = { itemStartRoot, pointerStartRoot ->
-                        // Сначала старый контракт, чтобы панель целей поднялась как раньше.
                         onDeviceLongPress?.invoke(d.id)
-
-                        // Затем старт drag-state.
                         onDeviceDragStart?.invoke(d.id, itemStartRoot, pointerStartRoot)
                     },
                     onDragMove = { pointerRoot ->

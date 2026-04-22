@@ -16,6 +16,12 @@ data class ExplicationOnboardingFacts(
     val unassignedCount: Int = 0,
     val pdfAvailable: Boolean = false,
 
+    // Прогресс линейного manual onboarding.
+    val manualIntroShown: Boolean = false,
+    val longPressShown: Boolean = false,
+    val saveShown: Boolean = false,
+    val unassignedShown: Boolean = false,
+
     // Блокирующие состояния.
     val dragInProgress: Boolean = false,
     val moveStateActive: Boolean = false,
@@ -24,9 +30,6 @@ data class ExplicationOnboardingFacts(
     val pdfExportFlowActive: Boolean = false,
     val modalOverlayActive: Boolean = false,
 ) {
-    /**
-     * Единый канонический флаг блокировки advanced hints.
-     */
     val hasBlockingState: Boolean
         get() = dragInProgress ||
                 moveStateActive ||

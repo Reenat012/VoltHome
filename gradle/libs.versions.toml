@@ -50,6 +50,7 @@ foundationLayout = "1.10.0"
 foundation = "1.10.0"
 foundationVersion = "1.10.1"
 media3CommonKtx = "1.9.2"
+foundationLayoutVersion = "1.10.6"
 
 
 [libraries]
@@ -111,6 +112,7 @@ androidx-compose-foundation-layout = { group = "androidx.compose.foundation", na
 androidx-compose-foundation = { group = "androidx.compose.foundation", name = "foundation", version.ref = "foundation" }
 androidx-foundation = { group = "androidx.compose.foundation", name = "foundation", version.ref = "foundationVersion" }
 androidx-media3-common-ktx = { group = "androidx.media3", name = "media3-common-ktx", version.ref = "media3CommonKtx" }
+androidx-foundation-layout = { group = "androidx.compose.foundation", name = "foundation-layout", version.ref = "foundationLayoutVersion" }
 
 
 [plugins]

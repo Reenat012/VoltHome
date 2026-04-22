@@ -222,11 +222,9 @@ fun GroupCardCompact(
                     // ✅ Anchor вешаем только на первый device chip
                     // первой карточки, которую выберет экран.
                     anchorFirstVisibleDevice = anchorFirstDeviceChip,
-
-                    // ✅ Если DeviceChips хранит состояние,
-                    // ключ должен быть groupId, а не groupNumber.
                     groupKey = group.groupId
                 )
+
                 Spacer(Modifier.height(8.dp))
             }
 

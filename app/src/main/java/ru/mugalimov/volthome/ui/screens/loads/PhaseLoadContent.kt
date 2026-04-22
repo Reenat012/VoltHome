@@ -1,9 +1,12 @@
 package ru.mugalimov.volthome.ui.screens.loads
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,6 +18,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -29,6 +34,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,6 +46,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -52,18 +59,19 @@ import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.phase_load.LoadThresholds
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadMode
-import kotlin.math.roundToInt
-import androidx.compose.ui.platform.testTag
 import ru.mugalimov.volthome.ui.onboarding.model.OnboardingScreen
 import ru.mugalimov.volthome.ui.onboarding.model.OnboardingTargetTag
 import ru.mugalimov.volthome.ui.onboarding.modifier.onboardingAnchor
+import kotlin.math.roundToInt
 
 /**
  * Контент экрана «Нагрузки» ДЛЯ 3-ф режима.
  * SINGLE-режим рендерится отдельным экраном PhaseLoadSingleReportContent.
  *
  * ВАЖНО:
- * - здесь нет SINGLE веток, нет "отчёта", нет фолбэков "только A".
+ * - здесь нет SINGLE веток, нет "отчёта", нет фолбэков "только A";
+ * - поясняющий banner ручного режима теперь живёт ВНУТРИ общей ленты;
+ * - banner показывается над блоками с фазами.
  */
 @Composable
 fun PhaseLoadContent(
@@ -73,6 +81,7 @@ fun PhaseLoadContent(
     incomerRating: Int? = null,
     thresholds: LoadThresholds = LoadThresholds(),
     modifier: Modifier = Modifier,
+    showManualBanner: Boolean = false,
     canDrag: Boolean,
     onPaywall: () -> Unit,
     onGroupDropped: (groupId: Long, target: Phase) -> Unit,
@@ -80,58 +89,56 @@ fun PhaseLoadContent(
     onReset: () -> Unit,
     onDropMissed: () -> Unit,
 ) {
-    // Drop-zones в координатах ROOT (boundsInRoot) — ТОЛЬКО для A/B/C
+    // Drop-зоны в координатах ROOT — только для фаз A/B/C.
     val dropZones = remember { mutableStateMapOf<Phase, Rect>() }
 
     var overlayContainerSize by remember { mutableStateOf(IntSize.Zero) }
     var dragOverlaySize by remember { mutableStateOf(IntSize.Zero) }
 
     val density = LocalDensity.current
-    val overlayGapPx = with(density) { 12.dp.toPx() } // зазор между пальцем и карточкой
+    val overlayGapPx = with(density) { 12.dp.toPx() }
 
-    // Drag state
+    // Состояние drag-and-drop.
     var dragging by remember { mutableStateOf<PhaseLoadContentKt_DragPayload?>(null) }
 
-    // ✅ ВАЖНО: разделяем координаты
-    // - dragPosRoot: координаты ROOT — для попадания в drop-zones
-    // - dragPosLocal: координаты контейнера overlay — для рисования overlay
+    // Координаты указателя в ROOT.
     var dragPosRoot by remember { mutableStateOf(Offset.Zero) }
+
+    // Координаты указателя в локальной системе overlay-контейнера.
     var dragPosLocal by remember { mutableStateOf(Offset.Zero) }
 
-    // Top-left контейнера, в котором рисуем overlay (в координатах ROOT)
+    // Top-left контейнера overlay в координатах ROOT.
     var overlayContainerTopLeft by remember { mutableStateOf(Offset.Zero) }
 
     val haptic = LocalHapticFeedback.current
 
-    // ✅ быстрый доступ: решение по groupNumber
+    // Быстрый доступ к distribution decisions по groupNumber.
     val decisionsByGroupNumber = remember(decisions) {
-        decisions.groupBy { it.groupNumber } // Map<Int, List<DistributionDecision>>
+        decisions.groupBy { it.groupNumber }
     }
 
-    // ✅ Подсветка drop-зоны должна считаться в тех же координатах, что и Rect (ROOT)
+    // Подсветка текущей drop-зоны считается в ROOT координатах.
     val hoveredPhase by remember {
         derivedStateOf {
-            val p = dragging ?: return@derivedStateOf null
+            val payload = dragging ?: return@derivedStateOf null
             dropZones.entries
                 .firstOrNull { (_, rect) -> rect.contains(dragPosRoot) }
                 ?.key
-                ?.takeIf { it != p.fromPhase } // подсвечиваем только “чужую” фазу
+                ?.takeIf { it != payload.fromPhase }
         }
     }
 
-    // ===== Разделение данных: A/B/C отдельно, 3φ отдельно =====
-
-    // 3φ item (если есть)
+    // Выделяем отдельный 3-фазный блок, если он есть.
     val threePhaseItem = remember(phaseLoads) {
         phaseLoads.firstOrNull { it.phase == Phase.THREE_PHASE }
     }
 
-    // A/B/C items (3φ сюда не попадает)
+    // A/B/C блоки.
     val phaseItems = remember(phaseLoads) {
         phaseLoads.filter { it.phase == Phase.A || it.phase == Phase.B || it.phase == Phase.C }
     }
 
-    // Токи по фазам для доната/индикатора (только A/B/C)
+    // Токи по фазам для donut chart — только A/B/C.
     val perPhase = remember(phaseItems) {
         mapOf(
             Phase.A to (phaseItems.find { it.phase == Phase.A }?.totalCurrent ?: 0.0),
@@ -140,7 +147,7 @@ fun PhaseLoadContent(
         )
     }
 
-    // Локальное состояние разворота секций по фазам (только A/B/C)
+    // Локальное состояние раскрытия карточек фаз.
     val expandedMap = remember {
         mutableStateMapOf<Phase, Boolean>().apply {
             this[Phase.A] = false
@@ -149,17 +156,21 @@ fun PhaseLoadContent(
         }
     }
 
-    fun isExpanded(phase: Phase) = expandedMap[phase] == true
+    // Состояние раскрытия поясняющего блока ручного режима.
+    var manualBannerExpanded by rememberSaveable { mutableStateOf(false) }
+
+    fun isExpanded(phase: Phase): Boolean = expandedMap[phase] == true
+
     fun togglePhase(phase: Phase) {
         expandedMap[phase] = !(expandedMap[phase] ?: false)
     }
 
-    // Коммит 3: панель фаз видна только при drag
-    val showDropTargetsPanel = (dragging != null)
+    // Панель фаз показываем только во время активного drag.
+    val showDropTargetsPanel = dragging != null
 
     LaunchedEffect(showDropTargetsPanel) {
-        // Во время drag используем ТОЛЬКО панельные зоны.
-        // Вне drag зоны нам не нужны (и не должны влиять на подсветку).
+        // Во время drag drop-зоны задаёт только верхняя панель целей.
+        // Вне drag старые зоны нам не нужны.
         dropZones.clear()
     }
 
@@ -171,8 +182,7 @@ fun PhaseLoadContent(
                 overlayContainerSize = coords.size
             }
     ) {
-        // ===== Панель целей фаз (Variant A) — ТОЛЬКО ВИЗУАЛ =====
-        // visible = (dragging != null)
+        // Панель целей фаз — только как визуальный верхний overlay во время drag.
         AnimatedVisibility(
             visible = showDropTargetsPanel,
             modifier = Modifier
@@ -180,13 +190,12 @@ fun PhaseLoadContent(
                 .zIndex(900f)
                 .fillMaxWidth()
         ) {
-            val p = dragging
-            if (p != null) {
+            val payload = dragging
+            if (payload != null) {
                 PhaseDropTargetsPanel(
-                    fromPhase = p.fromPhase,
+                    fromPhase = payload.fromPhase,
                     highlightedPhase = hoveredPhase,
                     onRegisterDropZone = { phase, rect ->
-                        // Панель — главный источник dropZones во время drag
                         if (phase == Phase.A || phase == Phase.B || phase == Phase.C) {
                             dropZones[phase] = rect
                         }
@@ -199,34 +208,15 @@ fun PhaseLoadContent(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                // чтобы панель (оверлей) не перекрывала верхний контент во время drag
+                // Во время drag добавляем верхний отступ, чтобы overlay-панель
+                // не перекрывала верхнюю часть контента.
                 .padding(horizontal = 16.dp, vertical = 12.dp)
                 .padding(top = if (showDropTargetsPanel) 56.dp else 0.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item { Spacer(Modifier.height(8.dp)) }
 
-            // Режим работы экрана (коммит 1): Auto / Manual
-//            item {
-//                val modeLabel = when (phaseLoadMode) {
-//                    PhaseLoadMode.AUTO -> "Авто"
-//                    PhaseLoadMode.MANUAL -> "Ручной"
-//                }
-//
-//                Row(
-//                    modifier = Modifier.fillMaxWidth(),
-//                    verticalAlignment = Alignment.CenterVertically,
-//                    horizontalArrangement = Arrangement.SpaceBetween
-//                ) {
-//                    Text(
-//                        text = "Режим: $modeLabel",
-//                        style = MaterialTheme.typography.labelLarge,
-//                        color = MaterialTheme.colorScheme.onSurfaceVariant
-//                    )
-//                }
-//            }
-
-            // Донат / Индикатор вводного + маркетинговый замок для FREE
+            // Donut / индикатор вводного аппарата.
             item {
                 Box(Modifier.fillMaxWidth()) {
                     PhaseLoadDonutChart(
@@ -259,35 +249,31 @@ fun PhaseLoadContent(
                 }
             }
 
-            // Reset (PRO) / Paywall (FREE)
-            item {
-                val resetEnabled = (phaseLoadMode == PhaseLoadMode.MANUAL) && canDrag
-
-//                Row(
-//                    Modifier.fillMaxWidth(),
-//                    horizontalArrangement = Arrangement.End
-//                ) {
-//                    Text(
-//                        text = "Сбросить изменения и вернуться в режим Авто",
-//                        modifier = Modifier
-//                            .clickable(
-//                                enabled = resetEnabled || !canDrag,
-//                            ) {
-//                                when {
-//                                    !canDrag -> onPaywall()      // Free: объясняющая модалка (коммит 3)
-//                                    resetEnabled -> onReset()     // PRO + MANUAL: сброс + AUTO (коммит 5)
-//                                    else -> Unit                  // PRO + AUTO: ничего (уже baseline)
-//                                }
-//                            }
-//                            .padding(vertical = 6.dp),
-//                        color = when {
-//                            !canDrag -> MaterialTheme.colorScheme.onSurfaceVariant
-//                            resetEnabled -> MaterialTheme.colorScheme.primary
-//                            else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-//                        }
-//                    )
-//                }
+            // Поясняющий banner ручного режима — теперь В ЛЕНТЕ,
+            // над фазными блоками.
+            if (showManualBanner) {
+                item {
+                    LoadsManualModeLegalBanner(
+                        expanded = manualBannerExpanded,
+                        onToggle = {
+                            manualBannerExpanded = !manualBannerExpanded
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
+
+            // Блок reset / paywall оставлен как место под будущее,
+            // но UI сейчас не рисуем.
+//            item {
+//                val resetEnabled = (phaseLoadMode == PhaseLoadMode.MANUAL) && canDrag
+//
+//                // Намеренно пусто.
+//                // Сохраняем item, чтобы не ломать структуру ленты и будущее место под action.
+//                if (resetEnabled || !canDrag) {
+//                    Spacer(modifier = Modifier.height(0.dp))
+//                }
+//            }
 
             val canStartDnD = (phaseLoadMode == PhaseLoadMode.MANUAL) && canDrag
 
@@ -300,11 +286,10 @@ fun PhaseLoadContent(
                     expanded = isExpanded(item.phase),
                     onToggle = { togglePhase(item.phase) },
                     onDecisionDetailsClick = onDecisionDetailsClick,
-
                     isDropTargetHighlighted = (dragging != null && hoveredPhase == item.phase),
 
                     onRegisterDropZone = { phase, rect ->
-                        // ВАЖНО: во время drag drop-зоны задаёт панель, а не большие карточки фаз
+                        // Во время drag drop-зоны задаёт только панель целей сверху.
                         if (showDropTargetsPanel) return@PhaseGroupTableItem
 
                         if (phase == Phase.A || phase == Phase.B || phase == Phase.C) {
@@ -312,27 +297,29 @@ fun PhaseLoadContent(
                         }
                     },
 
-                    // ✅ ЕДИНАЯ точка gating-а: здесь решаем paywall/ignore/start
+                    // Единая точка gating-а для DnD.
                     onDragStartAttempt = { payload, startRoot ->
-                        // чтобы overlay не прыгал с (0,0), даже если старт разрешён
+                        // Сразу сохраняем стартовые координаты,
+                        // чтобы overlay не моргал с нулевой позиции.
                         dragPosRoot = startRoot
                         dragPosLocal = startRoot - overlayContainerTopLeft
 
                         when {
-                            !canDrag -> onPaywall()                      // Free: capability=false → модалка (коммит 5)
-                            phaseLoadMode != PhaseLoadMode.MANUAL -> Unit // PRO+AUTO: игнор
-                            else -> dragging = payload                   // PRO+MANUAL: стартуем
+                            !canDrag -> onPaywall()
+                            phaseLoadMode != PhaseLoadMode.MANUAL -> Unit
+                            else -> dragging = payload
                         }
                     },
 
                     onDragMove = { rootPos ->
-                        // двигаем только если DnD реально запущен (иначе это шум)
                         if (dragging == null) return@PhaseGroupTableItem
                         dragPosRoot = rootPos
                         dragPosLocal = rootPos - overlayContainerTopLeft
                     },
 
-                    onDragCancel = { dragging = null },
+                    onDragCancel = {
+                        dragging = null
+                    },
 
                     onDragEndAttempt = { payload ->
                         if (!canStartDnD || dragging == null) {
@@ -346,14 +333,15 @@ fun PhaseLoadContent(
 
                         when {
                             target == null -> {
-                                // ✅ Hint 3: промах мимо панельных целей
+                                // Промах мимо фазной цели.
                                 onDropMissed()
                             }
+
                             target == payload.fromPhase -> {
-                                // disabled-drop (своя фаза) — ничего, и без snackbar (по спекам "мимо фаз")
+                                // Бросили в свою же фазу — ничего не делаем.
                             }
+
                             else -> {
-                                // ✅ успешный drop — без legacy hint-флагов.
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 onGroupDropped(payload.groupId, target)
                             }
@@ -375,7 +363,7 @@ fun PhaseLoadContent(
                 )
             }
 
-            // ✅ 3φ — ПОСЛЕДНИМ блоком
+            // 3-фазный блок — последним.
             if (threePhaseItem != null && threePhaseItem.groups.isNotEmpty()) {
                 item {
                     ThreePhaseLoadsSection(
@@ -390,9 +378,9 @@ fun PhaseLoadContent(
             item { Spacer(Modifier.height(8.dp)) }
         }
 
-        // Drag overlay (появляется СЛЕВА от пальца/хэндла)
-        val p = dragging
-        if (p != null) {
+        // Карточка dragged item.
+        val payload = dragging
+        if (payload != null) {
             val containerW = overlayContainerSize.width
             val containerH = overlayContainerSize.height
 
@@ -400,7 +388,7 @@ fun PhaseLoadContent(
             val overlayH = dragOverlaySize.height
 
             val desiredX = (dragPosLocal.x - overlayW - overlayGapPx).roundToInt()
-            val desiredY = (dragPosLocal.y - overlayH * 0.25f).roundToInt() // чуть выше пальца
+            val desiredY = (dragPosLocal.y - overlayH * 0.25f).roundToInt()
 
             val clampedX = desiredX.coerceIn(0, (containerW - overlayW).coerceAtLeast(0))
             val clampedY = desiredY.coerceIn(0, (containerH - overlayH).coerceAtLeast(0))
@@ -408,7 +396,9 @@ fun PhaseLoadContent(
             Card(
                 modifier = Modifier
                     .zIndex(1000f)
-                    .onGloballyPositioned { coords -> dragOverlaySize = coords.size }
+                    .onGloballyPositioned { coords ->
+                        dragOverlaySize = coords.size
+                    }
                     .offset { IntOffset(clampedX, clampedY) }
                     .widthIn(max = 280.dp),
                 colors = CardDefaults.cardColors(
@@ -418,7 +408,7 @@ fun PhaseLoadContent(
                 shape = MaterialTheme.shapes.large
             ) {
                 Text(
-                    text = p.title,
+                    text = payload.title,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
@@ -494,7 +484,6 @@ private fun PhaseDropTargetChip(
         modifier = modifier
             .height(44.dp)
             .onGloballyPositioned { coords ->
-                // dropZones всегда в ROOT координатах
                 onRegisterDropZone(phase, coords.boundsInRoot())
             },
         colors = CardDefaults.cardColors(
@@ -507,7 +496,10 @@ private fun PhaseDropTargetChip(
             defaultElevation = if (highlighted) 4.dp else 1.dp
         )
     ) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
             Text(
                 text = when (phase) {
                     Phase.A -> "Фаза A"
@@ -522,5 +514,88 @@ private fun PhaseDropTargetChip(
     }
 }
 
-private fun fmt1(v: Double) = String.format("%.1f", v)
-private fun fmt0(v: Double) = String.format("%.0f", v)
+@Composable
+fun LoadsManualModeLegalBanner(
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+                shape = MaterialTheme.shapes.large
+            )
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant,
+                shape = MaterialTheme.shapes.large
+            )
+            .padding(14.dp)
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onToggle() },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Пояснения по работе ручного режима",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                )
+
+                Icon(
+                    imageVector = if (expanded) {
+                        Icons.Outlined.ExpandLess
+                    } else {
+                        Icons.Outlined.ExpandMore
+                    },
+                    contentDescription = if (expanded) {
+                        "Свернуть"
+                    } else {
+                        "Развернуть"
+                    },
+                    tint = MaterialTheme.colorScheme.onTertiaryContainer
+                )
+            }
+
+            AnimatedVisibility(visible = expanded) {
+                Column {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "Здесь ты задаёшь распределение групп по фазам вручную. Перетаскивай группу на нужную фазу сверху, чтобы изменить итоговый баланс.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "Пока ручной режим активен, автоматическое перераспределение больше не вмешивается в результат.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "После сохранения ручных изменений автоматическое распределение отключается.\n" +
+                                "Новые устройства больше не раскладываются по группам автоматически и попадают в “Нераспределённые”.\n" +
+                                "Дальше их нужно распределять вручную или сбросить ручные изменения, чтобы вернуть автоматический режим.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "Если нужно вернуться к автоматике, сбрось ручные изменения.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun fmt1(v: Double): String = String.format("%.1f", v)
+private fun fmt0(v: Double): String = String.format("%.0f", v)

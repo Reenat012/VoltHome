@@ -37,9 +37,6 @@ class OnboardingPreferences @Inject constructor(
         val LAST_ANY_HINT_SHOWN_AT = longPreferencesKey("last_any_hint_shown_at")
     }
 
-    /**
-     * Возвращает persisted shown-flag по конкретному hint id.
-     */
     suspend fun isShown(hintId: OnboardingHintId): Boolean {
         val key = booleanPreferencesKey("hint_shown_${hintId.storageKey}")
         return dataStore.data
@@ -47,9 +44,12 @@ class OnboardingPreferences @Inject constructor(
             .first()
     }
 
-    /**
-     * Помечает hint как уже показанный пользователю.
-     */
+    fun observeShown(hintId: OnboardingHintId) =
+        dataStore.data.map { prefs ->
+            val key = booleanPreferencesKey("hint_shown_${hintId.storageKey}")
+            prefs[key] ?: false
+        }
+
     suspend fun markShown(hintId: OnboardingHintId) {
         val key = booleanPreferencesKey("hint_shown_${hintId.storageKey}")
         dataStore.edit { prefs ->
@@ -57,18 +57,12 @@ class OnboardingPreferences @Inject constructor(
         }
     }
 
-    /**
-     * Читает глобальную временную отметку последнего показа любой подсказки.
-     */
     suspend fun getLastAnyHintShownAt(): Long {
         return dataStore.data
             .map { prefs -> prefs[LAST_ANY_HINT_SHOWN_AT] ?: 0L }
             .first()
     }
 
-    /**
-     * Пишет глобальную временную отметку последнего показа любой подсказки.
-     */
     suspend fun setLastAnyHintShownAt(value: Long) {
         dataStore.edit { prefs ->
             prefs[LAST_ANY_HINT_SHOWN_AT] = value

@@ -447,21 +447,20 @@ fun StartDrawer(
                             // ✅ Чип "Ручной режим" справа, прижат к правому краю AppBar
                             if (onManualModeClick != null) {
                                 Spacer(Modifier.width(8.dp))
+
+                                val chipModifier = if (manualChipOnboardingScreen == OnboardingScreen.EXPLICATION) {
+                                    Modifier.onboardingAnchor(
+                                        targetTag = OnboardingTargetTag.EXPLICATION_MANUAL_MODE_CHIP,
+                                        screenId = OnboardingScreen.EXPLICATION
+                                    )
+                                } else {
+                                    Modifier
+                                }
+
                                 ManualModeChip(
                                     state = manualChipState,
                                     onClick = { onManualModeClick.invoke() },
-
-                                    // ✅ На Экспликации чип становится anchor для подсказки
-                                    // "как сохранить / выйти из ручного режима".
-                                    modifier = when (manualChipOnboardingScreen) {
-                                        OnboardingScreen.EXPLICATION -> {
-                                            Modifier.onboardingAnchor(
-                                                targetTag = OnboardingTargetTag.EXPLICATION_MANUAL_MODE_CHIP,
-                                                screenId = OnboardingScreen.EXPLICATION
-                                            )
-                                        }
-                                        else -> Modifier
-                                    }
+                                    modifier = chipModifier
                                 )
                             }
                         }

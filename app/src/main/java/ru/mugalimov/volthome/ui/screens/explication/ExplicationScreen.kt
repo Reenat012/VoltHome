@@ -4,11 +4,15 @@ import android.os.Build
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.annotation.RequiresApi
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,6 +25,8 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -37,9 +43,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -105,7 +114,6 @@ fun ExplicationScreen(
     // Канонические факты для advanced onboarding.
     val onboardingFacts by viewModel.onboardingFacts.collectAsState()
 
-    val unassignedIds = manualSession?.draftState?.unassignedDeviceIds.orEmpty()
     val unassignedDevices by viewModel.unassignedDevices.collectAsState()
 
 //    // ✅ Подтягиваем "Нераспределённые" только в manual (и чистим при выходе)
@@ -203,22 +211,26 @@ fun ExplicationScreen(
      * Только selector-и + priority resolution.
      */
     LaunchedEffect(advancedFacts) {
-        val candidates = buildList {
-            // ✅ Сначала action-oriented manual hints:
-            // long-press и сохранение через кнопку "Ручной".
-            addAll(ManualHints.forExplicationHints(advancedFacts))
+        // ✅ Жёсткий линейный сценарий manual onboarding:
+        // 1. Что такое ручной режим
+        // 2. Как перенести устройство
+        // 3. Как сохранить
+        // 4. Что такое нераспределённые
+        val manualStepHint = ManualHints.forExplicationStep(advancedFacts)
+        val hint = manualStepHint ?: pickHighestPriorityAdvanced(
+            buildList {
+                ExplicationHints.forUnassigned(advancedFacts)?.let { add(it) }
+                ExplicationHints.forOverview(advancedFacts)?.let { add(it) }
+                PdfHints.forExplication(advancedFacts)?.let { add(it) }
+            }
+        )
 
-            // ✅ Затем второстепенные advanced hints.
-            ExplicationHints.forUnassigned(advancedFacts)?.let { add(it) }
-            ExplicationHints.forOverview(advancedFacts)?.let { add(it) }
-            PdfHints.forExplication(advancedFacts)?.let { add(it) }
-        }
-
-        val hint = pickHighestPriorityAdvanced(candidates)
         if (hint == null) {
             Log.d(
                 "ONBOARD_EXPLICATION",
-                "ORCH_SKIP reason=NO_HINT manual=${advancedFacts.manualModeActive} groups=${advancedFacts.groupsCount} unassigned=${advancedFacts.unassignedCount} blocking=${advancedFacts.hasBlockingState}"
+                "ORCH_SKIP reason=NO_HINT manual=${advancedFacts.manualModeActive} groups=${advancedFacts.groupsCount} unassigned=${advancedFacts.unassignedCount} " +
+                        "progress=[intro=${advancedFacts.manualIntroShown}, longPress=${advancedFacts.longPressShown}, save=${advancedFacts.saveShown}, unassigned=${advancedFacts.unassignedShown}] " +
+                        "blocking=${advancedFacts.hasBlockingState}"
             )
             return@LaunchedEffect
         }
@@ -324,8 +336,12 @@ fun ExplicationScreen(
             val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             val scope = rememberCoroutineScope()
 
+            // Состояние раскрытия поясняющего блока ручного режима.
+            var manualBannerExpanded by rememberSaveable { mutableStateOf(false) }
+
             // ✅ Нужна одна детерминированная цель для подсказки про long-press.
-            // Вычисляем её ВНЕ LazyColumn builder, в нормальном composable scope.
+
+            // Вычисляем её ВНЕ LazyColumn builder, в normal composable scope.
             val firstAnchoredGroupId = remember(displayGroups) {
                 displayGroups
                     .sortedWith(
@@ -409,6 +425,10 @@ fun ExplicationScreen(
                     if (isManual) {
                         item {
                             ManualModeLegalBanner(
+                                expanded = manualBannerExpanded,
+                                onToggle = {
+                                    manualBannerExpanded = !manualBannerExpanded
+                                },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .onboardingAnchor(
@@ -723,6 +743,8 @@ private fun ResetManualOverridesButton(
 
 @Composable
 private fun ManualModeLegalBanner(
+    expanded: Boolean,
+    onToggle: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -739,29 +761,64 @@ private fun ManualModeLegalBanner(
             .padding(14.dp)
     ) {
         Column {
-            Text(
-                text = "Ручной режим",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onTertiaryContainer
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = "Чтобы перенести устройство - зажми его (long-press) и перетяни в выпадающее меню сверху, выбрав нужное окно.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onTertiaryContainer
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = "Чтобы сохранить или отменить изменения - кликни на кнопку Ручной.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onTertiaryContainer
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = "Изменения в этой зоне ты задаёшь вручную. Результат требует инженерной проверки и не заменяет контроль проекта по месту.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onTertiaryContainer
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onToggle() },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Пояснения по работе ручного режима",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                )
+
+                Icon(
+                    imageVector = if (expanded) {
+                        Icons.Outlined.ExpandLess
+                    } else {
+                        Icons.Outlined.ExpandMore
+                    },
+                    contentDescription = if (expanded) {
+                        "Свернуть"
+                    } else {
+                        "Развернуть"
+                    },
+                    tint = MaterialTheme.colorScheme.onTertiaryContainer
+                )
+            }
+
+            AnimatedVisibility(visible = expanded) {
+                Column {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "Чтобы перенести устройство - зажми его (long-press) и перетяни в выпадающее меню сверху, выбрав нужное окно.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "Чтобы сохранить или отменить изменения - кликни на кнопку Ручной.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "После сохранения ручных изменений автоматическое распределение отключается.\n" +
+                                "Новые устройства больше не раскладываются по группам автоматически и попадают в “Нераспределённые”.\n" +
+                                "Дальше их нужно распределять вручную или сбросить ручные изменения, чтобы вернуть автоматический режим.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "Изменения в этой зоне ты задаёшь вручную. Результат требует инженерной проверки и не заменяет контроль проекта по месту.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                }
+            }
         }
     }
 }

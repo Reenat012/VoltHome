@@ -68,8 +68,10 @@ fun PhaseLoadScreen(
         initialValue = LoadsOnboardingFacts()
     ).value
 
-    // Заголовок оставляем, но теперь рисуем его в контенте,
-    // а не через внутренний TopAppBar, чтобы не было двойного верхнего отступа.
+    // Режим ручного управления нужен для UI-веток и сообщений.
+    val isManual = uiState.phaseLoadMode == PhaseLoadMode.MANUAL
+
+    // Заголовок экрана.
     val title = when (uiState.mode) {
         PhaseMode.SINGLE -> "Состояние вводного аппарата"
         PhaseMode.THREE -> "Распределение по фазам"
@@ -78,10 +80,7 @@ fun PhaseLoadScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     /**
-     * Единственная orchestration point для Loads onboarding.
-     */
-    /**
-     * Единственная orchestration point для Loads onboarding.
+     * Единая orchestration point для onboarding на экране нагрузок.
      */
     LaunchedEffect(onboardingFacts) {
         Log.d(
@@ -126,30 +125,11 @@ fun PhaseLoadScreen(
             "ORCH_END hintId=${hint.hintId.name} accepted=$accepted"
         )
     }
+
+    // Сообщения от ViewModel показываем через snackbar.
     LaunchedEffect(Unit) {
         viewModel.events.collect { msg ->
             snackbarHostState.showSnackbar(msg)
-        }
-    }
-
-    @Composable
-    fun LoadsEmptyState(
-        onRecalc: () -> Unit
-    ) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Text("Группы пока не созданы")
-                Spacer(modifier = Modifier.height(12.dp))
-                Button(onClick = onRecalc) {
-                    Text("Пересчитать")
-                }
-            }
         }
     }
 
@@ -162,16 +142,15 @@ fun PhaseLoadScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            // Заголовок экрана как обычный блок контента.
-            // Так он занимает адекватное место и не конфликтует с внешним AppBar.
+            // Заголовок рисуем в контенте,
+            // чтобы не конфликтовать с внешним app bar.
             Text(
                 text = title,
                 style = MaterialTheme.typography.headlineSmall,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)
             )
 
-            // Основную область даём через weight(1f),
-            // чтобы она занимала оставшуюся высоту под заголовком.
+            // Основной контент занимает всё оставшееся место.
             Box(
                 modifier = Modifier.weight(1f)
             ) {
@@ -198,22 +177,18 @@ fun PhaseLoadScreen(
                     }
 
                     else -> {
-                        // Пустоту определяем только по количеству групп,
-                        // потому что uiState.data может содержать "каркас фаз".
+                        // Пустоту определяем по groupsCount, а не по uiState.data,
+                        // потому что uiState.data может содержать каркас фаз.
                         if (groupsCount == 0) {
-                            val isManual = uiState.phaseLoadMode == PhaseLoadMode.MANUAL
-
                             LoadsEmptyState(
                                 onRecalc = {
                                     if (isManual) {
-                                        // В MANUAL пересчёт не делаем.
                                         coroutineScope.launch {
                                             snackbarHostState.showSnackbar(
                                                 "В ручном режиме пересчёт недоступен. Сначала сбросьте изменения."
                                             )
                                         }
                                     } else {
-                                        // В AUTO вызываем ближайшее доступное действие.
                                         viewModel.onResetOverrides()
                                     }
                                 }
@@ -236,9 +211,9 @@ fun PhaseLoadScreen(
                                         thresholds = uiState.thresholds,
                                         modifier = Modifier.fillMaxSize(),
                                         canDrag = canDrag,
+                                        showManualBanner = isManual,
                                         onPaywall = {
-                                            // Пока оставляю вызов как был,
-                                            // чтобы не менять существующее поведение.
+                                            // Сохраняем текущее поведение без лишних изменений.
                                             paywallBus
                                             viewModel.onDnDLockedTapped()
                                         },
@@ -260,6 +235,27 @@ fun PhaseLoadScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LoadsEmptyState(
+    onRecalc: () -> Unit
+) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text("Группы пока не созданы")
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(onClick = onRecalc) {
+                Text("Пересчитать")
             }
         }
     }

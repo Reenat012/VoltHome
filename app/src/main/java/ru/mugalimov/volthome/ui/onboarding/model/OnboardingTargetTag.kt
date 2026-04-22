@@ -31,10 +31,10 @@ enum class OnboardingTargetTag(
     LOADS_FIRST_GROUP("loads_first_group"),
 
     // Explication
-    EXPLICATION_FIRST_DEVICE_CHIP("explication_first_device_chip"),
-    EXPLICATION_MANUAL_MODE_CHIP("explication_manual_mode_chip"),
     EXPLICATION_SHIELD_OVERVIEW("explication_shield_overview"),
     EXPLICATION_MANUAL_LEGAL_BANNER("explication_manual_legal_banner"),
+    EXPLICATION_FIRST_DEVICE_CHIP("explication_first_device_chip"),
+    EXPLICATION_MANUAL_MODE_CHIP("explication_manual_mode_chip"),
     EXPLICATION_UNASSIGNED_BLOCK("explication_unassigned_block"),
     EXPLICATION_PDF_FAB("explication_pdf_fab")
 }

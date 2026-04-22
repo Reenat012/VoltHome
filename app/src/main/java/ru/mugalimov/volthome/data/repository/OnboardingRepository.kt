@@ -8,9 +8,13 @@ import ru.mugalimov.volthome.ui.onboarding.model.OnboardingHintId
  * Без flow-сложности и без экранной интеграции:
  * coordinator-у сейчас нужны только простые persisted-операции.
  */
+import kotlinx.coroutines.flow.Flow
+
 interface OnboardingRepository {
 
     suspend fun isShown(hintId: OnboardingHintId): Boolean
+
+    fun observeShown(hintId: OnboardingHintId): Flow<Boolean>
 
     suspend fun markShown(hintId: OnboardingHintId)
 

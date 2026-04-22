@@ -16,7 +16,7 @@ object ExplicationHints {
         targetTag = OnboardingTargetTag.EXPLICATION_UNASSIGNED_BLOCK,
         priority = 115,
         title = "Нераспределённые устройства требуют решения",
-        body = "Эти устройства пока не попали в группы. Их можно вернуть в группы вручную или пересобрать структуру проекта."
+        body = "Эти устройства пока не попали в группы. Их можно распределить вручную по группам или оставить для дальнейшего решения."
     )
 
     val EXPLICATION_OVERVIEW = AdvancedHintSpec(
@@ -32,7 +32,9 @@ object ExplicationHints {
         if (!facts.isSuccess) return null
         if (!facts.manualModeActive) return null
         if (facts.unassignedCount <= 0) return null
+        if (facts.unassignedShown) return null
         if (facts.hasBlockingState) return null
+        if (!facts.manualIntroShown || !facts.longPressShown || !facts.saveShown) return null
         return EXPLICATION_UNASSIGNED_DEVICES
     }
 
@@ -40,6 +42,9 @@ object ExplicationHints {
         if (!facts.isSuccess) return null
         if (facts.groupsCount <= 0) return null
         if (facts.hasBlockingState) return null
+        if (facts.manualModeActive && (!facts.manualIntroShown || !facts.longPressShown || !facts.saveShown)) {
+            return null
+        }
         return EXPLICATION_OVERVIEW
     }
 }

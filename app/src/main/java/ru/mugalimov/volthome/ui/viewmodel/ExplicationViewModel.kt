@@ -27,6 +27,7 @@ import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
 import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
+import ru.mugalimov.volthome.data.repository.OnboardingRepository
 import ru.mugalimov.volthome.data.repository.PreferencesRepository
 import ru.mugalimov.volthome.data.repository.ProjectOwnershipRepository
 import ru.mugalimov.volthome.data.repository.UserPlanRepository
@@ -69,6 +70,7 @@ import ru.mugalimov.volthome.domain.use_case.phaseCurrents
 import ru.mugalimov.volthome.domain.use_case.report.BuildProfessionalSectionsUseCase
 import ru.mugalimov.volthome.domain.util.PowerCurrentNormalizer
 import ru.mugalimov.volthome.ui.onboarding.model.ExplicationOnboardingFacts
+import ru.mugalimov.volthome.ui.onboarding.model.OnboardingHintId
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
 import ru.mugalimov.volthome.ui.screens.explication.sheets.CalcBlocksMapper
 import ru.mugalimov.volthome.ui.screens.explication.sheets.CalcDetailsState
@@ -95,10 +97,8 @@ class ExplicationViewModel @Inject constructor(
     private val paywallBus: PaywallBus,
     private val activeProjectDs: ActiveProjectDataStore,
     private val manualRepo: ManualEditSessionRepository,
-
-    // ✅ Commit 2: single entry-point bootstrap hook
+    private val onboardingRepository: OnboardingRepository,
     private val bootstrapManualLockUseCase: BootstrapManualLockUseCase,
-
     private val commitManualDraftToLocalDbUseCase: CommitManualDraftToLocalDbUseCase,
     private val saveAutoCalculatedGroupsToLocalDbUseCase: SaveAutoCalculatedGroupsToLocalDbUseCase,
     private val manualDraftResetNotifier: ManualDraftResetNotifier,
@@ -119,7 +119,6 @@ class ExplicationViewModel @Inject constructor(
     val uiState: StateFlow<GroupScreenState> = _uiState.asStateFlow()
 
     private val _isRecalculating = MutableStateFlow(false)
-    val isRecalculating: StateFlow<Boolean> = _isRecalculating.asStateFlow()
 
     // последний известный режим фаз (для buildReportSnapshotForPdf)
     private val _phaseMode = MutableStateFlow(PhaseMode.THREE)
@@ -132,7 +131,6 @@ class ExplicationViewModel @Inject constructor(
 
     // выбранный инстанс устройства для шита
     private val _selectedDevice = MutableStateFlow<Device?>(null)
-    val selectedDevice: StateFlow<Device?> = _selectedDevice.asStateFlow()
 
     // =========================
     // InfoSheet state
@@ -252,17 +250,6 @@ class ExplicationViewModel @Inject constructor(
     private val activeProjectIdState: StateFlow<String?> =
         activeProjectDs.activeProjectId
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
-
-    private val manualLockFlow: StateFlow<Boolean> =
-        activeProjectIdState
-            .filterNotNull()
-            .map { it.trim() }
-            .distinctUntilChanged()
-            .flatMapLatest { pid ->
-                if (pid.isBlank()) flowOf(false)
-                else projectOwnershipRepository.observeManualLock(pid)
-            }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
 
     // =========================
@@ -489,12 +476,8 @@ class ExplicationViewModel @Inject constructor(
     // =========================
 
     private val _mixedWarningBlocked = MutableStateFlow(false)
-    val mixedWarningBlocked: StateFlow<Boolean> = _mixedWarningBlocked.asStateFlow()
-
-    private val _mixedWarningDontShowAgain = MutableStateFlow(false)
 
     private val _showMixedWarningDialog = MutableStateFlow(false)
-    val showMixedWarningDialog: StateFlow<Boolean> = _showMixedWarningDialog.asStateFlow()
 
     /**
      * Канонические факты для advanced onboarding на экране экспликации.
@@ -502,23 +485,73 @@ class ExplicationViewModel @Inject constructor(
      * Локальные transient-состояния вроде drag/bottom sheet/dialog
      * экран добавит сверху сам, но база готовности экрана живёт здесь.
      */
+    private val manualIntroShownFlow =
+        onboardingRepository.observeShown(OnboardingHintId.EXPLICATION_MANUAL_MODE_INFO)
+
+    private val longPressShownFlow =
+        onboardingRepository.observeShown(OnboardingHintId.EXPLICATION_LONG_PRESS_DEVICE)
+
+    private val saveShownFlow =
+        onboardingRepository.observeShown(OnboardingHintId.EXPLICATION_SAVE_MANUAL_CHANGES)
+
+    private val unassignedShownFlow =
+        onboardingRepository.observeShown(OnboardingHintId.EXPLICATION_UNASSIGNED_DEVICES)
+
+    private data class OnboardingFactsInputs(
+        val state: GroupScreenState,
+        val session: ManualEditSession?,
+        val unassigned: List<Device>,
+        val pdfBusy: Boolean,
+        val manualIntroShown: Boolean,
+        val longPressShown: Boolean,
+        val saveShown: Boolean,
+        val unassignedShown: Boolean
+    )
+
     val onboardingFacts: StateFlow<ExplicationOnboardingFacts> =
         combine(
-            uiState,
-            manualSession,
-            unassignedDevices,
-            isPdfExportInProgress
-        ) { state, session, unassigned, pdfBusy ->
-            val success = state as? GroupScreenState.Success
+            combine(
+                uiState,
+                manualSession,
+                unassignedDevices,
+                isPdfExportInProgress
+            ) { state, session, unassigned, pdfBusy ->
+                arrayOf(state, session, unassigned, pdfBusy)
+            },
+            combine(
+                manualIntroShownFlow,
+                longPressShownFlow,
+                saveShownFlow,
+                unassignedShownFlow
+            ) { manualIntroShown, longPressShown, saveShown, unassignedShown ->
+                arrayOf(manualIntroShown, longPressShown, saveShown, unassignedShown)
+            }
+        ) { left, right ->
+            OnboardingFactsInputs(
+                state = left[0] as GroupScreenState,
+                session = left[1] as ManualEditSession?,
+                unassigned = left[2] as List<Device>,
+                pdfBusy = left[3] as Boolean,
+                manualIntroShown = right[0] as Boolean,
+                longPressShown = right[1] as Boolean,
+                saveShown = right[2] as Boolean,
+                unassignedShown = right[3] as Boolean
+            )
+        }.map { input ->
+            val success = input.state as? GroupScreenState.Success
 
             ExplicationOnboardingFacts(
-                isLoading = state is GroupScreenState.Loading,
+                isLoading = input.state is GroupScreenState.Loading,
                 isSuccess = success != null,
                 groupsCount = success?.groups?.size ?: 0,
-                manualModeActive = session?.manualModeActive == true,
-                unassignedCount = unassigned.size,
+                manualModeActive = input.session?.manualModeActive == true,
+                unassignedCount = input.unassigned.size,
                 pdfAvailable = success != null,
-                pdfExportFlowActive = pdfBusy
+                manualIntroShown = input.manualIntroShown,
+                longPressShown = input.longPressShown,
+                saveShown = input.saveShown,
+                unassignedShown = input.unassignedShown,
+                pdfExportFlowActive = input.pdfBusy
             )
         }.stateIn(
             viewModelScope,
@@ -534,7 +567,6 @@ class ExplicationViewModel @Inject constructor(
 
     private data class Quad<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
 
-    private val _pendingMixedMove = MutableStateFlow<PendingMixedMove?>(null)
 
     // =========================
     // Init
@@ -718,14 +750,6 @@ class ExplicationViewModel @Inject constructor(
                         mode = base.mode,
                         decisions = base.decisions,
                         session = s
-                    )
-                }
-
-            val withManualGroupsFlow: Flow<DbWithSessionAndManualGroups> =
-                withSessionFlow.combine(manualDisplayGroups) { base: DbWithSession, manualGroups: List<CircuitGroup> ->
-                    DbWithSessionAndManualGroups(
-                        base = base,
-                        manualGroups = manualGroups
                     )
                 }
 

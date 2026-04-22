@@ -78,15 +78,10 @@ fun AppScaffoldWithDrawer(
         onOpenAbout = onOpenAbout,
         onRenameProject = onRenameProject,
         onDeleteProject = onDeleteProject,
-
-        // ✅ Ручной режим в AppBar
         onManualModeClick = onManualModeClick,
         manualChipState = manualChipState,
         manualChipOnboardingScreen = manualChipOnboardingScreen,
-
         bottomBar = bottomBar,
-
-        // ✅ Единый диалог Save/Cancel/Stay
         manualExitDialogVisible = manualExitDialogVisible,
         onManualExitDialogDismiss = onManualExitDialogDismiss,
         onManualSaveClick = onManualSaveClick,
