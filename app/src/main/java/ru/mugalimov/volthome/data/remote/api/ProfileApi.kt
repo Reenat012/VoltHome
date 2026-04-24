@@ -6,10 +6,10 @@ import retrofit2.http.Body
 
 // GET /v1/profile/me
 data class ProfileMeDto(
-    val displayName: String,
+    val displayName: String?,
     val email: String?,
     val avatarUrl: String?,
-    val plan: String,
+    val plan: String?,
     val planUntilEpochSeconds: Long?,
     val uid: String
 )

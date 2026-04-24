@@ -499,10 +499,16 @@ fun MainApp(
                 is ProfileViewModel.UiState.Data -> {
                     val me = st.me
                     UserProfileUi(
-                        name = me.displayName.ifBlank { "Пользователь" },
-                        email = me.email,
-                        avatarUrl = me.avatarUrl,
+                        name = me.displayName
+                            ?.takeIf { it.isNotBlank() }
+                            ?: "Пользователь",
+                        email = me.email
+                            ?.takeIf { it.isNotBlank() },
+                        avatarUrl = me.avatarUrl
+                            ?.takeIf { it.isNotBlank() },
                         subscriptionStatus = me.plan
+                            ?.takeIf { it.isNotBlank() }
+                            ?: "free"
                     )
                 }
 

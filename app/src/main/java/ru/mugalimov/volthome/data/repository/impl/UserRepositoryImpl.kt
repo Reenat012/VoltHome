@@ -21,7 +21,11 @@ class UserRepositoryImpl @Inject constructor(
         return try {
             val current = profileApi.getMe()
 
-            val needsEnrich = current.displayName == "Volt User" || current.email.isNullOrBlank()
+            val needsEnrich =
+                current.displayName.isNullOrBlank() ||
+                        current.displayName == "Volt User" ||
+                        current.email.isNullOrBlank()
+
             if (!needsEnrich) return Result.success(current)
 
             // Берём сохранённый access_token Яндекса и тянем /info
@@ -34,7 +38,12 @@ class UserRepositoryImpl @Inject constructor(
             } else {
                 // Готовим апсерт: отправляем ТОЛЬКО улучшения
                 val displayNameUpd: String? =
-                    if (current.displayName == "Volt User") ya.bestName else null
+                    if (current.displayName.isNullOrBlank() || current.displayName == "Volt User") {
+                        ya.bestName
+                    } else {
+                        null
+                    }
+
                 val emailUpd: String? = current.email ?: ya.email
                 val avatarUpd: String? = current.avatarUrl ?: ya.avatarUrl()
 
