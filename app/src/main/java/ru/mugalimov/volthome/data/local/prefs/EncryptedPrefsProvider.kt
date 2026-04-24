@@ -24,6 +24,12 @@ import java.security.KeyStore
 class EncryptedPrefsProvider @Inject constructor(
     @ApplicationContext private val ctx: Context
 ) {
+    private companion object {
+        private const val TAG = "EncryptedPrefs"
+        private const val AUTH_PREFS_NAME = "auth_prefs"
+        private const val FALLBACK_PREFS_NAME = "auth_prefs_fallback"
+        private const val TINK_PREFS_NAME = "__androidx_security_crypto_encrypted_prefs__"
+    }
     @Volatile
     private var cached: SharedPreferences? = null
     private val mutex = Mutex()
@@ -54,7 +60,7 @@ class EncryptedPrefsProvider @Inject constructor(
         repeat(2) { attempt ->
             try {
                 if (attempt > 0) {
-                    Log.w("EncryptedPrefs", "retry init after reset")
+                    Log.w(TAG, "retry init after reset")
                 }
                 return createEncryptedPrefs()
             } catch (e: GeneralSecurityException) {
@@ -70,10 +76,13 @@ class EncryptedPrefsProvider @Inject constructor(
 
         // Если после сброса всё равно не взлетело — это уже системная беда,
         // даём понятный крэш с оригинальной причиной.
-        throw IllegalStateException(
-            "Failed to initialize EncryptedSharedPreferences after reset",
+        Log.e(
+            "EncryptedPrefs",
+            "EncryptedSharedPreferences failed after reset. Falling back to plain private SharedPreferences.",
             lastError
         )
+
+        return createFallbackPrefs()
     }
 
     private fun createEncryptedPrefs(): SharedPreferences {
@@ -83,11 +92,15 @@ class EncryptedPrefsProvider @Inject constructor(
 
         return EncryptedSharedPreferences.create(
             ctx,
-            "auth_prefs",
+            AUTH_PREFS_NAME,
             masterKey,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
         )
+    }
+
+    private fun createFallbackPrefs(): SharedPreferences {
+        return ctx.getSharedPreferences(FALLBACK_PREFS_NAME, Context.MODE_PRIVATE)
     }
 
     /**
@@ -100,7 +113,8 @@ class EncryptedPrefsProvider @Inject constructor(
         // 1. Наш файл encrypted prefs
         runCatching {
             Log.w("EncryptedPrefs", "deleteSharedPreferences(\"auth_prefs\")")
-            ctx.deleteSharedPreferences("auth_prefs")
+            ctx.deleteSharedPreferences(AUTH_PREFS_NAME)
+            ctx.deleteSharedPreferences(FALLBACK_PREFS_NAME)
         }
 
         // 2. Внутренний keyset EncryptedSharedPreferences (tink)
@@ -109,7 +123,7 @@ class EncryptedPrefsProvider @Inject constructor(
         //   "__androidx_security_crypto_encrypted_prefs__"
         runCatching {
             Log.w("EncryptedPrefs", "deleteSharedPreferences(\"__androidx_security_crypto_encrypted_prefs__\")")
-            ctx.deleteSharedPreferences("__androidx_security_crypto_encrypted_prefs__")
+            ctx.deleteSharedPreferences(TINK_PREFS_NAME)
         }
 
         // 3. Удаляем master key alias из AndroidKeyStore
