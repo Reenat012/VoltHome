@@ -55,11 +55,13 @@ import ru.mugalimov.volthome.domain.model.report.ReportGroup
 import ru.mugalimov.volthome.domain.model.report.ReportMeta
 import ru.mugalimov.volthome.domain.model.report.ReportPhase
 import ru.mugalimov.volthome.domain.model.report.professional.ProfessionalSections
+import ru.mugalimov.volthome.domain.model.singleline.SingleLineDiagram
 import ru.mugalimov.volthome.domain.telemetry.CreateDeviceOpBus
 import ru.mugalimov.volthome.domain.use_case.BootstrapManualLockUseCase
 import ru.mugalimov.volthome.domain.use_case.CalculateDeviceBreakdownUseCase
 import ru.mugalimov.volthome.domain.use_case.CalculateGroupBreakdownUseCase
 import ru.mugalimov.volthome.domain.use_case.CalculateShieldOverviewUseCase
+import ru.mugalimov.volthome.domain.use_case.GenerateSingleLineDiagramUseCase
 import ru.mugalimov.volthome.domain.use_case.GroupCalculatorFactory
 import ru.mugalimov.volthome.domain.use_case.IncomerSelector
 import ru.mugalimov.volthome.domain.use_case.SaveAutoCalculatedGroupsToLocalDbUseCase
@@ -105,6 +107,7 @@ class ExplicationViewModel @Inject constructor(
     private val createDeviceOpBus: CreateDeviceOpBus,
     private val projectOwnershipRepository: ProjectOwnershipRepository,
     private val resetManualOverridesAndAutoRecalcUseCase: ResetManualOverridesAndAutoRecalcUseCase,
+    private val generateSingleLineDiagramUseCase: GenerateSingleLineDiagramUseCase
 ) : ViewModel() {
 
     private val TAG_DND = "EXP_DND"
@@ -347,6 +350,16 @@ class ExplicationViewModel @Inject constructor(
 
     sealed class UiEvent {
         data object ExportPdfRequested : UiEvent()
+
+        /**
+         * Запрос на экспорт однолинейной схемы
+         *
+         * В событие передаем уже готовую доменную модель,
+         * чтобы UI не ходил в DAO и не запускал расчеты
+         */
+        data class SingleLineDiagramRequested(
+            val diagram: SingleLineDiagram
+        ) : UiEvent()
         data object PdfExportActionsRequested : UiEvent()
         data object AutoAssignUnassignedRequested : UiEvent()
         data class ShowSnackbar(val message: String) : UiEvent()
@@ -1071,6 +1084,53 @@ class ExplicationViewModel @Inject constructor(
             return
         }
         _events.value = UiEvent.PdfExportActionsRequested
+    }
+
+    /**
+
+     * Клик по кнопке "Однолинейная схема".
+
+     *
+
+     * Важно:
+
+     * - сначала проверяем PRO;
+
+     * - берём только текущий Success-state экспликации;
+
+     * - не читаем DAO повторно;
+
+     * - не запускаем пересчёт групп.
+
+     */
+
+    fun onSingleLineDiagramClick() {
+        val plan = userPlanRepository.planFlow.value
+
+        if (!plan.capabilities.pdfExport) {
+            paywallBus.request(ProFeature.PRO_REPORT)
+            return
+        }
+
+        val state = uiState.value as? GroupScreenState.Success
+
+        if (state == null) {
+            _events.value = UiEvent.ShowSnackbar(
+                "Сначала сформируйте структуру щита в разделе «Экспликация»."
+            )
+            return
+        }
+
+        val diagram = generateSingleLineDiagramUseCase(
+            projectName = "ВольтХом",
+            phaseMode = phaseMode.value,
+            groups = state.groups,
+            incomer = state.incomer,
+            totalInstalledPowerWatts = state.installedPowerW.value,
+            totalCalculatedPowerWatts = state.calculatedPowerW.value,
+            totalCurrentAmps = state.totalCurrent
+        )
+        _events.value = UiEvent.SingleLineDiagramRequested(diagram)
     }
 
     // =========================

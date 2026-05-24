@@ -14,6 +14,7 @@ import ru.mugalimov.volthome.domain.model.singleline.SingleLineInputBlock
 import ru.mugalimov.volthome.domain.model.singleline.SingleLinePhaseSection
 import ru.mugalimov.volthome.domain.model.singleline.SingleLineProtectionBlock
 import ru.mugalimov.volthome.domain.model.singleline.SingleLineProtectionType
+import javax.inject.Inject
 
 /**
  * Генерирует доменную модель однолинейной схемы
@@ -26,7 +27,7 @@ import ru.mugalimov.volthome.domain.model.singleline.SingleLineProtectionType
  * - не распределяет фазы;
  * - не выбирает автоматы/кабели.
  */
-class GenerateSingleLineDiagramUseCase {
+class GenerateSingleLineDiagramUseCase @Inject constructor() {
 
     operator fun invoke(
         projectName: String,
