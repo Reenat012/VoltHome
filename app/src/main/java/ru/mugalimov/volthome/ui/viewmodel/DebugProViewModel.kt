@@ -60,11 +60,11 @@ class DebugProViewModel @Inject constructor(
 
             Log.d(
                 "DEBUG_CONFIRM",
-                "BEGIN flowId=$flowId direct=true productId=volthome_pro_monthly"
+                "BEGIN flowId=$flowId direct=true productId=volthome.pro.monthly"
             )
 
             val result = subscriptionRepository.confirmRustorePurchase(
-                productId = "volthome_pro_monthly",
+                productId = "volthome.pro.monthly",
                 orderId = "debug-order-trm-b",
                 purchaseToken = "debug-token-trm",
                 flowId = flowId
@@ -96,7 +96,7 @@ class DebugProViewModel @Inject constructor(
 
             pendingCoordinator.onSdkSuccess(
                 flowId = flowId,
-                productId = "volthome_pro_monthly",
+                productId = "volthome.pro.monthly",
                 orderId = "debug-order-pending",
                 purchaseToken = "debug-token-pending"
             )
@@ -107,7 +107,7 @@ class DebugProViewModel @Inject constructor(
         viewModelScope.launch {
             val flowId = "debug-restore-${java.util.UUID.randomUUID().toString().take(8)}"
 
-            val productId = "volthome_pro_monthly"
+            val productId = "volthome.pro.monthly"
             val orderId = "debug-order-pending"
             val purchaseToken = "debug-token-pending"
 
@@ -206,7 +206,7 @@ class DebugProViewModel @Inject constructor(
 
     fun debugTryAcquireSameIdentityWhileReplay() {
         viewModelScope.launch {
-            val productId = "volthome_pro_monthly"
+            val productId = "volthome.pro.monthly"
             val orderId = "debug-order-pending"
             val purchaseToken = "debug-token-pending"
 

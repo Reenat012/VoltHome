@@ -19,4 +19,4 @@ data class ProProduct(
 )
 
 // Единственная точка правды для PRO SKU (пока один продукт).
-const val VOLTHOME_PRO_MONTHLY_PRODUCT_ID: String = "volthome_pro_monthly"
+const val VOLTHOME_PRO_MONTHLY_PRODUCT_ID: String = "volthome.pro.monthly"
