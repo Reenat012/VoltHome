@@ -27,13 +27,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.rounded.AccountTree
 import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -600,37 +603,67 @@ fun ExplicationScreen(
                     )
                 }
 
-                // FAB: PDF
-                FloatingActionButton(
-                    onClick = { viewModel.onExportPdfClick() },
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                // Compact export actions: однолинейная схема + текущий PDF-отчёт.
+                // Обе кнопки сделаны в одном стиле, чтобы не спорили визуально.
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .windowInsetsPadding(WindowInsets.navigationBars)
                         .padding(end = 16.dp, bottom = 16.dp)
-                        .border(
-                            width = 1.dp,
-                            color = MaterialTheme.colorScheme.outlineVariant,
-                            shape = FloatingActionButtonDefaults.shape
-                        )
-                        .onboardingAnchor(
-                            targetTag = OnboardingTargetTag.EXPLICATION_PDF_FAB,
-                            screenId = OnboardingScreen.EXPLICATION
-                        ),
-                    elevation = FloatingActionButtonDefaults.elevation(
-                        defaultElevation = 0.dp,
-                        pressedElevation = 0.dp,
-                        focusedElevation = 0.dp,
-                        hoveredElevation = 0.dp
-                    )
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.FileDownload,
-                        contentDescription = "Отчёт PDF",
-                        modifier = Modifier.size(26.dp),
-                        tint = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
+                    FilledTonalIconButton(
+                        onClick = { viewModel.onSingleLineDiagramClick() },
+                        enabled = !onboardingFacts.pdfExportFlowActive,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .border(
+                                width = 1.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant,
+                                shape = MaterialTheme.shapes.large
+                            ),
+                        colors = IconButtonDefaults.filledTonalIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.AccountTree,
+                            contentDescription = "Однолинейная схема",
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    FilledTonalIconButton(
+                        onClick = { viewModel.onExportPdfClick() },
+                        enabled = !onboardingFacts.pdfExportFlowActive,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .border(
+                                width = 1.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant,
+                                shape = MaterialTheme.shapes.large
+                            )
+                            .onboardingAnchor(
+                                targetTag = OnboardingTargetTag.EXPLICATION_PDF_FAB,
+                                screenId = OnboardingScreen.EXPLICATION
+                            ),
+                        colors = IconButtonDefaults.filledTonalIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.FileDownload,
+                            contentDescription = "Отчёт PDF",
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                 }
 
                 // BottomSheet: Info
