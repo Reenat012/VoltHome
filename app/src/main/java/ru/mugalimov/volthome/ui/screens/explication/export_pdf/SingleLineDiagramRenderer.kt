@@ -13,13 +13,21 @@ import ru.mugalimov.volthome.domain.model.singleline.SingleLineProtectionBlock
  * - renderer не рассчитывает токи, мощности, автоматы и кабели;
  * - renderer только отображает уже готовую модель SingleLineDiagram;
  * - layout рассчитан под A4 vertical;
- * - полноценная pagination будет отдельным коммитом.
+ * - большие щиты разбиваются на несколько страниц;
+ * - группы не должны резаться посередине страницы.
  */
 object SingleLineDiagramRenderer {
 
     private const val DISCLAIMER =
         "Однолинейная схема сформирована автоматически на основе данных, введённых пользователем в приложении ВольтХом. " +
                 "Материал является инженерной визуализацией и не заменяет проектную документацию, разработанную уполномоченным специалистом."
+
+    /**
+     * Примерный лимит групп на страницу.
+     *
+     * Это layout-лимит для A4 vertical, а не инженерный расчёт.
+     */
+    private const val GROUPS_PER_PAGE = 6
 
     fun render(
         diagram: SingleLineDiagram
@@ -46,6 +54,13 @@ object SingleLineDiagramRenderer {
                     .page {
                         width: 100%;
                         box-sizing: border-box;
+                        page-break-after: always;
+                        break-after: page;
+                    }
+
+                    .page:last-child {
+                        page-break-after: auto;
+                        break-after: auto;
                     }
 
                     .header {
@@ -81,6 +96,7 @@ object SingleLineDiagramRenderer {
                         padding: 10px;
                         margin-bottom: 10px;
                         page-break-inside: avoid;
+                        break-inside: avoid;
                     }
 
                     .block-title {
@@ -108,6 +124,7 @@ object SingleLineDiagramRenderer {
                         padding: 10px;
                         margin-bottom: 12px;
                         page-break-inside: avoid;
+                        break-inside: avoid;
                     }
 
                     .phase-a {
@@ -139,6 +156,7 @@ object SingleLineDiagramRenderer {
                         padding: 9px;
                         margin-bottom: 8px;
                         page-break-inside: avoid;
+                        break-inside: avoid;
                     }
 
                     .group-title {
@@ -215,30 +233,128 @@ object SingleLineDiagramRenderer {
                         line-height: 1.45;
                         color: #6b7280;
                     }
+
+                    .footer {
+                        margin-top: 12px;
+                        padding-top: 8px;
+                        border-top: 1px solid #e5e7eb;
+                        font-size: 9px;
+                        color: #6b7280;
+                        display: flex;
+                        justify-content: space-between;
+                    }
                 </style>
             </head>
             <body>
-                <main class="page">
-                    ${renderHeader(diagram)}
-                    <section class="scheme">
-                        ${renderInput(diagram)}
-                        <div class="arrow">↓</div>
-                        ${renderProtectionBlocks(diagram.protectionBlocks)}
-                        <div class="arrow">↓</div>
-                        ${
-            diagram.phaseSections.joinToString(separator = "\n") {
-                renderPhaseSection(
-                    it
-                )
-            }
-        }
-                        ${renderBuses(diagram)}
-                        ${renderLegend()}
-                        ${renderDisclaimer()}
-                    </section>
-                </main>
+                ${renderPages(diagram)}
             </body>
             </html>
+        """.trimIndent()
+    }
+
+    /**
+     * Делит схему на HTML-страницы.
+     *
+     * Важно:
+     * это не расчёт электрической части.
+     * Это только разбиение уже готовых блоков по PDF-страницам.
+     */
+    private fun renderPages(
+        diagram: SingleLineDiagram
+    ): String {
+        val pageGroups = diagram.phaseSections.flatMap { section ->
+            section.groups.map { group -> section.phase to group }
+        }.chunked(GROUPS_PER_PAGE)
+
+        if (pageGroups.isEmpty()) {
+            return renderPage(
+                diagram = diagram,
+                pageNumber = 1,
+                totalPages = 1,
+                includeInputAndProtection = true,
+                phaseSections = diagram.phaseSections.map { it.copy(groups = emptyList()) },
+                includeBusesLegendAndDisclaimer = true
+            )
+        }
+
+        val totalPages = pageGroups.size
+
+        return pageGroups.mapIndexed { index, pairs ->
+            val groupedByPhase = pairs.groupBy(
+                keySelector = { it.first },
+                valueTransform = { it.second }
+            )
+
+            val pageSections = diagram.phaseSections.mapNotNull { section ->
+                val groups = groupedByPhase[section.phase].orEmpty()
+
+                if (groups.isEmpty()) {
+                    null
+                } else {
+                    section.copy(groups = groups)
+                }
+            }
+
+            renderPage(
+                diagram = diagram,
+                pageNumber = index + 1,
+                totalPages = totalPages,
+                includeInputAndProtection = index == 0,
+                phaseSections = pageSections,
+                includeBusesLegendAndDisclaimer = index == totalPages - 1
+            )
+        }.joinToString(separator = "\n")
+    }
+
+    /**
+     * Одна A4 vertical страница схемы.
+     */
+    private fun renderPage(
+        diagram: SingleLineDiagram,
+        pageNumber: Int,
+        totalPages: Int,
+        includeInputAndProtection: Boolean,
+        phaseSections: List<SingleLinePhaseSection>,
+        includeBusesLegendAndDisclaimer: Boolean
+    ): String {
+        val topContent = if (includeInputAndProtection) {
+            """
+                ${renderInput(diagram)}
+                <div class="arrow">↓</div>
+                ${renderProtectionBlocks(diagram.protectionBlocks)}
+                <div class="arrow">↓</div>
+            """.trimIndent()
+        } else {
+            """
+                <section class="block">
+                    <div class="block-title">Продолжение схемы</div>
+                    <div class="block-row">Группы нагрузок, продолжение с предыдущей страницы</div>
+                </section>
+            """.trimIndent()
+        }
+
+        val bottomContent = if (includeBusesLegendAndDisclaimer) {
+            """
+                ${renderBuses(diagram)}
+                ${renderLegend()}
+                ${renderDisclaimer()}
+            """.trimIndent()
+        } else {
+            ""
+        }
+
+        return """
+            <main class="page">
+                ${renderHeader(diagram)}
+
+                <section class="scheme">
+                    $topContent
+                    ${phaseSections.joinToString(separator = "\n") { renderPhaseSection(it) }}
+                    $bottomContent
+                </section>
+
+                ${renderFooter(pageNumber, totalPages)}
+            </main>
         """.trimIndent()
     }
 
@@ -262,12 +378,8 @@ object SingleLineDiagramRenderer {
         return """
             <section class="block">
                 <div class="block-title">${input.title.escapeHtml()}</div>
-                <div class="block-row">Вводной аппарат: ${
-            input.incomerLabel.orDash().escapeHtml()
-        }</div>
-                <div class="block-row">Номинал ввода: ${
-            input.incomerNominalCurrentLabel.orDash().escapeHtml()
-        }</div>
+                <div class="block-row">Вводной аппарат: ${input.incomerLabel.orDash().escapeHtml()}</div>
+                <div class="block-row">Номинал ввода: ${input.incomerNominalCurrentLabel.orDash().escapeHtml()}</div>
                 <div class="block-row">Установленная мощность: ${input.totalInstalledPowerWatts.formatWatts()}</div>
                 <div class="block-row">Расчётная мощность: ${input.totalCalculatedPowerWatts.formatWatts()}</div>
                 <div class="block-row">Расчётный ток: ${input.totalCurrentAmps.formatAmps()}</div>
@@ -295,9 +407,7 @@ object SingleLineDiagramRenderer {
                     <div class="block-row">Фаза: ${block.phase?.name ?: "—"}</div>
                     <div class="block-row">Номинал: ${block.nominalCurrentAmps.formatAmps()}</div>
                     <div class="block-row">Ток утечки: ${block.leakageCurrentMilliAmps.formatMilliAmps()}</div>
-                    <div class="block-row">Описание: ${
-                block.description.orDash().escapeHtml()
-            }</div>
+                    <div class="block-row">Описание: ${block.description.orDash().escapeHtml()}</div>
                 </section>
             """.trimIndent()
         }
@@ -333,22 +443,13 @@ object SingleLineDiagramRenderer {
                     ${renderParam("УЗО/дифзащита", group.rcdLabel.orDash())}
                     ${renderParam("Ток утечки", group.leakageCurrentMilliAmps.formatMilliAmps())}
                     ${renderParam("Расчётный ток", group.calculatedCurrentAmps.formatAmps())}
-                    ${
-            renderParam(
-                "Установленная мощность",
-                group.installedPowerWatts.formatWatts()
-            )
-        }
+                    ${renderParam("Установленная мощность", group.installedPowerWatts.formatWatts())}
                     ${renderParam("Расчётная мощность", group.calculatedPowerWatts.formatWatts())}
                 </div>
 
                 <div class="devices">
-                    <b>Помещения:</b> ${
-            group.roomNames.joinToString().ifBlank { "—" }.escapeHtml()
-        }<br/>
-                    <b>Нагрузки:</b> ${
-            group.devices.joinToString { it.name }.ifBlank { "—" }.escapeHtml()
-        }
+                    <b>Помещения:</b> ${group.roomNames.joinToString().ifBlank { "—" }.escapeHtml()}<br/>
+                    <b>Нагрузки:</b> ${group.devices.joinToString { it.name }.ifBlank { "—" }.escapeHtml()}
                 </div>
 
                 ${renderWarnings(group)}
@@ -398,6 +499,18 @@ object SingleLineDiagramRenderer {
                 A/B/C — фазные секции; N — нейтральная шина; PE — защитная шина.
                 Подключения к N/PE показаны условно, без перегруза схемы линиями.
             </section>
+        """.trimIndent()
+    }
+
+    private fun renderFooter(
+        pageNumber: Int,
+        totalPages: Int
+    ): String {
+        return """
+            <footer class="footer">
+                <span>ВольтХом · Однолинейная схема</span>
+                <span>Страница $pageNumber из $totalPages</span>
+            </footer>
         """.trimIndent()
     }
 
