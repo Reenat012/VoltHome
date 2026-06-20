@@ -86,7 +86,7 @@ class GenerateSingleLineDiagramUseCase @Inject constructor() {
                     phase = phase,
                     phaseBus = SingleLineBus(
                         type = SingleLineBusType.PHASE,
-                        label = "Фаза $phase",
+                        label = phase.toSingleLineBusLabel(),
                         phase = phase
                     ),
                     totalCurrentAmps = phaseGroups.sumOf { it.nominalCurrent },
@@ -255,5 +255,20 @@ class GenerateSingleLineDiagramUseCase @Inject constructor() {
         }
 
         return "УЗО ${group.rcdCurrent}мА"
+    }
+}
+
+/**
+ * Подпись фазной шины для однолинейной схемы.
+ *
+ * THREE_PHASE не показываем как "Фаза THREE_PHASE",
+ * потому что это выглядит как четвёртая фаза.
+ */
+private fun Phase.toSingleLineBusLabel(): String {
+    return when (this) {
+        Phase.A -> "Фазная шина A"
+        Phase.B -> "Фазная шина B"
+        Phase.C -> "Фазная шина C"
+        Phase.THREE_PHASE -> "Трёхфазная линия 3P"
     }
 }

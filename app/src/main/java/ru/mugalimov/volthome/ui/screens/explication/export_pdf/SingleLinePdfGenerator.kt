@@ -25,25 +25,38 @@ fun exportSingleLineDiagramPdf(
     activity: Activity,
     diagram: SingleLineDiagram,
     projectId: String,
-    manualGuard: ManualModeGuard? = null
+    manualGuard: ManualModeGuard? = null,
+    onError: (Throwable) -> Unit = {}
 ) {
     val exportAction: () -> Unit = {
-        val html = SingleLineDiagramRenderer.render(diagram)
+        runCatching {
+            val html = SingleLineDiagramRenderer.render(diagram)
 
-        when (activity) {
-            is ComponentActivity -> {
-                activity.lifecycleScope.launch {
-                    PdfPrinter(activity).printHtml(html)
+            when (activity) {
+                is ComponentActivity -> {
+                    activity.lifecycleScope.launch {
+                        runCatching {
+                            PdfPrinter(activity).printHtml(html)
+                        }.onFailure { throwable ->
+                            onError(throwable)
+                        }
+                    }
+                    Unit
                 }
-                Unit
-            }
 
-            else -> {
-                activity.runOnUiThread {
-                    PdfPrinter(activity).printHtml(html)
+                else -> {
+                    activity.runOnUiThread {
+                        runCatching {
+                            PdfPrinter(activity).printHtml(html)
+                        }.onFailure { throwable ->
+                            onError(throwable)
+                        }
+                    }
+                    Unit
                 }
-                Unit
             }
+        }.onFailure { throwable ->
+            onError(throwable)
         }
     }
 

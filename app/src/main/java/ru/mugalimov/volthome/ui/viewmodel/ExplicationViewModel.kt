@@ -1087,28 +1087,19 @@ class ExplicationViewModel @Inject constructor(
     }
 
     /**
-
      * Клик по кнопке "Однолинейная схема".
-
      *
-
      * Важно:
-
      * - сначала проверяем PRO;
-
      * - берём только текущий Success-state экспликации;
-
      * - не читаем DAO повторно;
-
      * - не запускаем пересчёт групп.
-
      */
-
     fun onSingleLineDiagramClick() {
         val plan = userPlanRepository.planFlow.value
 
         if (!plan.capabilities.pdfExport) {
-            paywallBus.request(ProFeature.PRO_REPORT)
+            paywallBus.request(ProFeature.SINGLE_LINE_DIAGRAM)
             return
         }
 
@@ -1121,16 +1112,23 @@ class ExplicationViewModel @Inject constructor(
             return
         }
 
-        val diagram = generateSingleLineDiagramUseCase(
-            projectName = "ВольтХом",
-            phaseMode = phaseMode.value,
-            groups = state.groups,
-            incomer = state.incomer,
-            totalInstalledPowerWatts = state.installedPowerW.value,
-            totalCalculatedPowerWatts = state.calculatedPowerW.value,
-            totalCurrentAmps = state.totalCurrent
-        )
-        _events.value = UiEvent.SingleLineDiagramRequested(diagram)
+        try {
+            val diagram = generateSingleLineDiagramUseCase(
+                projectName = "ВольтХом",
+                phaseMode = phaseMode.value,
+                groups = state.groups,
+                incomer = state.incomer,
+                totalInstalledPowerWatts = state.installedPowerW.value,
+                totalCalculatedPowerWatts = state.calculatedPowerW.value,
+                totalCurrentAmps = state.totalCurrent
+            )
+            _events.value = UiEvent.SingleLineDiagramRequested(diagram)
+        } catch (t: Throwable) {
+            Log.e("SINGLE_LINE_EXPORT", "Failed to build SingleLineDiagram", t)
+            _events.value = UiEvent.ShowSnackbar(
+                "Не удалось сформировать однолинейную схему. Проверьте данные проекта и попробуйте еще раз."
+            )
+        }
     }
 
     // =========================

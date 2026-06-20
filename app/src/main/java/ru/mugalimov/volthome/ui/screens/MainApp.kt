@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.DragIndicator
 import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.rounded.AccountTree
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
@@ -291,6 +292,76 @@ fun MainApp(
         val feature = paywallFeature!!
 
         when (feature) {
+            ProFeature.SINGLE_LINE_DIAGRAM -> {
+                AlertDialog(
+                    onDismissRequest = { paywallFeature = null },
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Rounded.AccountTree,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            Text(
+                                text = "Однолинейная схема",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    },
+                    text = {
+                        Column {
+                            Text(
+                                text = "Когда щит уже собран в экспликации, пользователю всё равно нужно быстро понять его структуру: где ввод, какие фазы, какие группы, какие автоматы, кабели и нагрузки.",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            PaywallBulletItem(
+                                text = "не нужно вручную переносить данные из экспликации в отдельную схему"
+                            )
+
+                            PaywallBulletItem(
+                                text = "структура щита видна целиком: ввод → защита → фазы → группы"
+                            )
+
+                            PaywallBulletItem(
+                                text = "PDF удобно показать заказчику, коллеге или использовать для самопроверки"
+                            )
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Text(
+                                text = "Однолинейная схема в ВольтХом PRO собирает это автоматически из уже введённых данных проекта.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                paywallFeature = null
+                                appNavController.navigate(Screens.SubscriptionScreen.route) {
+                                    launchSingleTop = true
+                                }
+                            }
+                        ) {
+                            Text("Открыть схему в PRO")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { paywallFeature = null }) {
+                            Text("Не сейчас")
+                        }
+                    }
+                )
+            }
+
             ProFeature.PHASE_DND_TEASER -> {
                 AlertDialog(
                     onDismissRequest = { paywallFeature = null },
@@ -813,6 +884,7 @@ private fun isFeatureAllowed(feature: ProFeature, caps: PlanCapabilities): Boole
         ProFeature.CALC_EXPLANATIONS -> caps.professionalReportSections
         ProFeature.CALC_WARNINGS -> caps.professionalReportSections
         ProFeature.DECISION_DETAILS -> caps.professionalReportSections
+        ProFeature.SINGLE_LINE_DIAGRAM -> caps.pdfExport
     }
 }
 

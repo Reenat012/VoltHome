@@ -2,6 +2,7 @@ package ru.mugalimov.volthome.ui.screens.explication
 
 import android.os.Build
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.annotation.RequiresApi
 import androidx.compose.animation.AnimatedVisibility
@@ -77,6 +78,7 @@ import ru.mugalimov.volthome.ui.onboarding.model.OnboardingScreen
 import ru.mugalimov.volthome.ui.onboarding.model.OnboardingTargetTag
 import ru.mugalimov.volthome.ui.onboarding.modifier.onboardingAnchor
 import ru.mugalimov.volthome.ui.screens.explication.export_pdf.exportExplicationPdf
+import ru.mugalimov.volthome.ui.screens.explication.export_pdf.exportSingleLineDiagramPdf
 import ru.mugalimov.volthome.ui.screens.explication.manual.DragGhostOverlay
 import ru.mugalimov.volthome.ui.screens.explication.manual.MoveDeviceTargetsBar
 import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetContent
@@ -146,38 +148,87 @@ fun ExplicationScreen(
 
     // ✅ PDF: для всех, но в manual инициировать нельзя без Save/Cancel/Stay (guard)
     LaunchedEffect(event) {
-        if (event != ExplicationViewModel.UiEvent.ExportPdfRequested) return@LaunchedEffect
+        when (val currentEvent = event) {
+            ExplicationViewModel.UiEvent.ExportPdfRequested -> {
+                val activity = ctx as? ComponentActivity
+                if (activity == null) {
+                    viewModel.consumeEvent()
+                    return@LaunchedEffect
+                }
 
-        val activity = ctx as? ComponentActivity
-        if (activity == null) {
-            viewModel.consumeEvent()
-            return@LaunchedEffect
-        }
+                val projectId = viewModel.currentProjectId().orEmpty()
+                if (projectId.isBlank()) {
+                    Log.e("PDF_EXPORT", "Export aborted: projectId is blank")
+                    viewModel.consumeEvent()
+                    return@LaunchedEffect
+                }
 
-        // Берём projectId строго из текущей manual/db-сессии экрана.
-        // projectId должен быть доступен и в AUTO, и в MANUAL.
-        val projectId = viewModel.currentProjectId().orEmpty()
-        if (projectId.isBlank()) {
-            Log.e("PDF_EXPORT", "Export aborted: projectId is blank")
-            viewModel.consumeEvent()
-            return@LaunchedEffect
-        }
+                viewModel.onPdfExportStarted()
+                try {
+                    exportExplicationPdf(
+                        activity = activity,
+                        vm = viewModel,
+                        caps = caps,
+                        projectId = projectId,
+                        manualGuard = manualGuard
+                    )
+                } finally {
+                    viewModel.onPdfExportFinished()
+                    viewModel.consumeEvent()
+                }
+            }
 
-        viewModel.onPdfExportStarted()
-        try {
-            exportExplicationPdf(
-                activity = activity,
-                vm = viewModel,
-                caps = caps,
-                projectId = projectId,
-                manualGuard = manualGuard
-            )
-        } finally {
-            // Важно:
-            // даже если guard отменил действие или export сорвался,
-            // blocking state надо снять.
-            viewModel.onPdfExportFinished()
-            viewModel.consumeEvent()
+            is ExplicationViewModel.UiEvent.SingleLineDiagramRequested -> {
+                val activity = ctx as? ComponentActivity
+                if (activity == null) {
+                    viewModel.consumeEvent()
+                    return@LaunchedEffect
+                }
+
+                val projectId = viewModel.currentProjectId().orEmpty()
+                if (projectId.isBlank()) {
+                    Log.e("SINGLE_LINE_EXPORT", "Export aborted: projectId is blank")
+                    Toast.makeText(
+                        ctx,
+                        "Не удалось сформировать однолинейную схему. Проверьте данные проекта и попробуйте ещё раз.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    viewModel.consumeEvent()
+                    return@LaunchedEffect
+                }
+
+                viewModel.onPdfExportStarted()
+                try {
+                    exportSingleLineDiagramPdf(
+                        activity = activity,
+                        diagram = currentEvent.diagram,
+                        projectId = projectId,
+                        manualGuard = manualGuard,
+                        onError = { throwable ->
+                            Log.e("SINGLE_LINE_EXPORT", "PDF export failed", throwable)
+                            Toast.makeText(
+                                ctx,
+                                "Не удалось сформировать однолинейную схему. Проверьте данные проекта и попробуйте ещё раз.",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    )
+                } finally {
+                    viewModel.onPdfExportFinished()
+                    viewModel.consumeEvent()
+                }
+            }
+
+            is ExplicationViewModel.UiEvent.ShowSnackbar -> {
+                Toast.makeText(
+                    ctx,
+                    currentEvent.message,
+                    Toast.LENGTH_SHORT
+                ).show()
+                viewModel.consumeEvent()
+            }
+
+            else -> Unit
         }
     }
 
