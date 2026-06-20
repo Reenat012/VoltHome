@@ -68,6 +68,7 @@ import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.ui.manual.LocalManualModeGuard
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
+import ru.mugalimov.volthome.ui.navigation.Screens
 import ru.mugalimov.volthome.ui.onboarding.OnboardingRuntimeEntryPoint
 import ru.mugalimov.volthome.ui.onboarding.hints.ExplicationHints
 import ru.mugalimov.volthome.ui.onboarding.hints.ManualHints
@@ -664,6 +665,18 @@ fun ExplicationScreen(
                         .windowInsetsPadding(WindowInsets.navigationBars)
                         .padding(end = 16.dp, bottom = 16.dp)
                 ) {
+                    Button(
+                        onClick = {
+                            // Открываем MVP-экран визуализации щита из экспликации.
+                            navController.navigate(Screens.PanelVisualizationScreen.route) {
+                                launchSingleTop = true
+                            }
+                        },
+                        enabled = !onboardingFacts.pdfExportFlowActive
+                    ) {
+                        Text("Визуализация щита")
+                    }
+
                     FilledTonalIconButton(
                         onClick = { viewModel.onSingleLineDiagramClick() },
                         enabled = !onboardingFacts.pdfExportFlowActive,

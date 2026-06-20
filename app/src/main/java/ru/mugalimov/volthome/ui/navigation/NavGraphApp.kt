@@ -1,8 +1,13 @@
 package ru.mugalimov.volthome.ui.navigation
 
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.padding
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -11,11 +16,11 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
-import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.screens.about.SettingsScreen
 import ru.mugalimov.volthome.ui.screens.algoritm_about.AlgorithmExplanationScreen
 import ru.mugalimov.volthome.ui.screens.explication.ExplicationScreen
 import ru.mugalimov.volthome.ui.screens.loads.PhaseLoadScreen
+import ru.mugalimov.volthome.ui.screens.panel.PanelVisualizationScreen
 import ru.mugalimov.volthome.ui.screens.profile.ProfileScreen
 import ru.mugalimov.volthome.ui.screens.report_preview.ReportPreviewScreen
 import ru.mugalimov.volthome.ui.screens.room.RoomDetailScreen
@@ -26,10 +31,7 @@ import ru.mugalimov.volthome.ui.viewmodel.ProjectsViewModel
 import ru.mugalimov.volthome.ui.viewmodel.RoomDetailViewModel
 
 /**
- * Внутренний (main) граф приложения.
- * Гарантируем:
- *  - старт всегда RoomsList,
- *  - при смене активного проекта уходим в RoomsList даже с Profile/RoomDetail.
+ * Внутренний граф основного приложения.
  */
 @Composable
 fun NavGraphApp(
@@ -39,7 +41,7 @@ fun NavGraphApp(
     showOnboarding: () -> Unit,
     authVm: AuthViewModel
 ) {
-    // Одноразовый reset стека на входе в граф
+    // Одноразовый reset стека на входе в граф.
     var didReset by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         if (!didReset) {
@@ -55,11 +57,11 @@ fun NavGraphApp(
         }
     }
 
-    // 🔁 Реакция на смену активного проекта — жёсткий переход в RoomsList
+    // Реакция на смену активного проекта.
     val projectsVm: ProjectsViewModel = hiltViewModel()
     val activeProjectId by projectsVm.activeProjectId.collectAsState(initial = null)
 
-    // Роуты нижней навигации, куда можно оставаться
+    // Роуты нижней навигации, на которых можно оставаться при смене проекта.
     val bottomRoutes = remember {
         setOf(
             Screens.RoomsList.route,
@@ -72,10 +74,12 @@ fun NavGraphApp(
         if (activeProjectId != null) {
             val current = navController.currentDestination?.route
             if (current !in bottomRoutes) {
-                // Сначала пытаемся вернуться к RoomsList, если он есть в стеке
-                val popped = navController.popBackStack(Screens.RoomsList.route, inclusive = false)
+                val popped = navController.popBackStack(
+                    route = Screens.RoomsList.route,
+                    inclusive = false
+                )
+
                 if (!popped) {
-                    // Если в стеке нет — переходим и чистим до старта графа
                     navController.navigate(Screens.RoomsList.route) {
                         popUpTo(navController.graph.findStartDestination().id) {
                             saveState = true
@@ -91,11 +95,11 @@ fun NavGraphApp(
     NavHost(
         navController = navController,
         startDestination = Screens.RoomsList.route,
-        modifier = modifier // паддинги уже применены наверху
+        modifier = modifier
     ) {
         composable(route = Screens.RoomsList.route) {
             RoomsScreen(
-                onAddRoom = { /* ... */ },
+                onAddRoom = { /* Пока без действия */ },
                 onClickRoom = { roomId ->
                     navController.navigate(Screens.RoomDetailScreen.createRoute(roomId)) {
                         launchSingleTop = true
@@ -104,9 +108,18 @@ fun NavGraphApp(
             )
         }
 
-        composable(route = Screens.LoadsScreen.route) { PhaseLoadScreen() }
+        composable(route = Screens.LoadsScreen.route) {
+            PhaseLoadScreen()
+        }
+
         composable(route = Screens.ExplicationScreen.route) {
             ExplicationScreen(navController = navController)
+        }
+
+        // Экран MVP-визуализации щита.
+        // Открывается из экспликации и не добавляется в нижнюю навигацию.
+        composable(route = Screens.PanelVisualizationScreen.route) {
+            PanelVisualizationScreen()
         }
 
         composable(
@@ -114,7 +127,10 @@ fun NavGraphApp(
             arguments = listOf(navArgument("roomId") { type = NavType.LongType })
         ) {
             val vm: RoomDetailViewModel = hiltViewModel(it)
-            RoomDetailScreen(vm = vm, onBack = { navController.popBackStack() })
+            RoomDetailScreen(
+                vm = vm,
+                onBack = { navController.popBackStack() }
+            )
         }
 
         composable(Screens.SettingsScreen.route) {
@@ -128,10 +144,15 @@ fun NavGraphApp(
             AlgorithmExplanationScreen(navController)
         }
 
-        composable(Screens.PhaseLoadScreen.route) { PhaseLoadScreen() }
+        composable(Screens.PhaseLoadScreen.route) {
+            PhaseLoadScreen()
+        }
 
         composable(Screens.ProfileScreen.route) {
-            ProfileScreen(authVm = authVm, onBack = { navController.popBackStack() })
+            ProfileScreen(
+                authVm = authVm,
+                onBack = { navController.popBackStack() }
+            )
         }
 
         composable(Screens.SubscriptionScreen.route) {
@@ -144,7 +165,9 @@ fun NavGraphApp(
                 ReportPreviewScreen(
                     html = "",
                     showProHint = true,
-                    onUnlockClick = { navController.navigate(Screens.SubscriptionScreen.route) }
+                    onUnlockClick = {
+                        navController.navigate(Screens.SubscriptionScreen.route)
+                    }
                 )
                 return@composable
             }
@@ -162,7 +185,9 @@ fun NavGraphApp(
             ReportPreviewScreen(
                 html = fixedHtml.orEmpty(),
                 showProHint = true,
-                onUnlockClick = { navController.navigate(Screens.SubscriptionScreen.route) }
+                onUnlockClick = {
+                    navController.navigate(Screens.SubscriptionScreen.route)
+                }
             )
         }
     }
