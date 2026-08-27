@@ -4,13 +4,12 @@ import ru.mugalimov.volthome.data.local.entity.CircuitGroupEntity
 import ru.mugalimov.volthome.data.local.entity.CircuitGroupWithDevices
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.data.local.entity.GroupDeviceJoin
-import ru.mugalimov.volthome.data.local.entity.LoadEntity
 import ru.mugalimov.volthome.data.local.entity.RoomEntity
 import ru.mugalimov.volthome.domain.model.CircuitGroup
+import ru.mugalimov.volthome.domain.model.CalculationSource
 import ru.mugalimov.volthome.domain.model.DefaultDevice
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
-import ru.mugalimov.volthome.domain.model.Load
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.Room
 import ru.mugalimov.volthome.domain.model.RoomWithDevice
@@ -26,6 +25,10 @@ private fun String?.toPhaseOrDefaultA(): Phase =
 
 private fun String?.toDeviceTypeOrDefaultSocket(): DeviceType =
     runCatching { DeviceType.valueOf(this?.trim()?.uppercase().orEmpty()) }.getOrElse { DeviceType.SOCKET }
+
+private fun String?.toCalculationSource(): CalculationSource =
+    runCatching { CalculationSource.valueOf(this?.trim()?.uppercase().orEmpty()) }
+        .getOrElse { CalculationSource.LEGACY }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // DeviceEntity ↔ Device (одиночные объекты)
@@ -116,7 +119,36 @@ fun CircuitGroupEntity.toDomainGroup(devices: List<Device> = emptyList()): Circu
         breakerType = breakerType,
         rcdRequired = rcdRequired,
         rcdCurrent = rcdCurrent,
-        installedPowerW = devices.sumOf { it.power },
+        rcdReasonCodes = rcdReasonCodes.split(',').map(String::trim).filter(String::isNotBlank),
+        rcdSpec = if (rcdRequired) {
+            ru.mugalimov.volthome.domain.model.protection.RcdSpec(
+                kind = runCatching {
+                    ru.mugalimov.volthome.domain.model.protection.RcdKind.valueOf(rcdKind.orEmpty())
+                }.getOrDefault(ru.mugalimov.volthome.domain.model.protection.RcdKind.RCD),
+                ratedCurrentA = rcdNominalCurrent,
+                leakageCurrentMa = rcdCurrent,
+                type = runCatching {
+                    ru.mugalimov.volthome.domain.model.incomer.RcdType.valueOf(rcdType.orEmpty())
+                }.getOrDefault(ru.mugalimov.volthome.domain.model.incomer.RcdType.A),
+                poles = rcdPoles ?: if (phase.toPhaseOrDefaultA() == Phase.THREE_PHASE) 4 else 2,
+                selectivity = runCatching {
+                    ru.mugalimov.volthome.domain.model.incomer.RcdSelectivity.valueOf(rcdSelectivity)
+                }.getOrDefault(ru.mugalimov.volthome.domain.model.incomer.RcdSelectivity.NONE),
+                source = runCatching {
+                    CalculationSource.valueOf(rcdSource)
+                }.getOrDefault(CalculationSource.LEGACY)
+            )
+        } else null,
+        manualDeviationCodes = manualDeviationCodes
+            .split(',')
+            .map(String::trim)
+            .filter(String::isNotBlank),
+        calculationSource = calculationSource.toCalculationSource(),
+        algorithmVersion = algorithmVersion,
+        installedPowerW = ru.mugalimov.volthome.domain.use_case.CircuitLoadCalculator
+            .calculate(devices)
+            .installedPowerW
+            .toInt(),
         phase = phase.toPhaseOrDefaultA() // String → enum
     )
 
@@ -145,6 +177,16 @@ fun CircuitGroup.toEntityGroup(projectId: String): CircuitGroupEntity =
         breakerType = breakerType,
         rcdRequired = rcdRequired,
         rcdCurrent = rcdCurrent,
+        rcdReasonCodes = rcdReasonCodes.joinToString(","),
+        rcdNominalCurrent = rcdSpec?.ratedCurrentA,
+        rcdType = rcdSpec?.type?.name,
+        rcdPoles = rcdSpec?.poles,
+        rcdSelectivity = rcdSpec?.selectivity?.name ?: "NONE",
+        rcdKind = rcdSpec?.kind?.name,
+        rcdSource = rcdSpec?.source?.name ?: calculationSource.name,
+        manualDeviationCodes = manualDeviationCodes.joinToString(","),
+        calculationSource = calculationSource.name,
+        algorithmVersion = algorithmVersion,
         phase = phase.name,
         projectId = projectId
     )
@@ -202,12 +244,13 @@ fun RoomEntity.toDomainRoom(devices: List<Device> = emptyList()): Room =
         devices = devices
     )
 
-fun Room.toEntityRoom(): RoomEntity =
+fun Room.toEntityRoom(projectId: String): RoomEntity =
     RoomEntity(
         id = id,
         name = name,
         createdAt = createdAt,
-        roomType = roomType
+        roomType = roomType,
+        projectId = projectId
     )
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -223,8 +266,8 @@ fun List<RoomEntity>.mapToDomainRooms(
 ): List<Room> =
     map { re -> re.toDomainRoom(devicesByRoom[re.id].orEmpty()) }
 
-fun List<Room>.mapToRoomEntities(): List<RoomEntity> =
-    map { it.toEntityRoom() }
+fun List<Room>.mapToRoomEntities(projectId: String): List<RoomEntity> =
+    map { it.toEntityRoom(projectId) }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Совместимость со старыми моделями RoomWithDevicesEntity
@@ -245,24 +288,6 @@ fun List<RoomWithDevicesEntity>.toDomainModelListRoomWithDevices(): List<RoomWit
         RoomWithDevice(
             room = entity.room,
             devices = entity.devices
-        )
-    }
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// LoadEntity → Load
-// ──────────────────────────────────────────────────────────────────────────────
-
-fun List<LoadEntity>.toDomainModelListLoad(): List<Load> {
-    return map { entity ->
-        Load(
-            id = entity.id,
-            name = entity.name,
-            current = entity.currentRoom,
-            sumPower = entity.powerRoom,
-            countDevices = entity.countDevices,
-            createdAt = entity.createdAt,
-            roomId = entity.roomId
         )
     }
 }
@@ -298,5 +323,8 @@ private fun DefaultDevice.toCreateRequest(qty: Int): DeviceCreateRequest =
         ratedPowerW = this.power, // всегда Вт
         powerFactor = this.powerFactor,
         demandRatio = this.demandRatio,
-        voltage = this.voltage
+        voltage = this.voltage,
+        hasMotor = this.hasMotor,
+        requiresDedicatedCircuit = this.requiresDedicatedCircuit,
+        requiresSocketConnection = this.requiresSocketConnection
     )

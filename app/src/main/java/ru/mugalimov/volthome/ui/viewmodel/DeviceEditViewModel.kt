@@ -53,6 +53,7 @@ class DeviceEditViewModel @Inject constructor(
         professionalReportSections = false,
         phaseDragAndDrop = false,
         extendedDeviceEditor = false,
+        panelVisualization = false,
         unlimitedProjects = false
     )
 
@@ -81,6 +82,7 @@ class DeviceEditViewModel @Inject constructor(
                 professionalReportSections = true,
                 phaseDragAndDrop = true,
                 extendedDeviceEditor = true,
+                panelVisualization = true,
                 unlimitedProjects = true
             )
         } else {
@@ -89,6 +91,7 @@ class DeviceEditViewModel @Inject constructor(
                 professionalReportSections = false,
                 phaseDragAndDrop = false,
                 extendedDeviceEditor = false,
+                panelVisualization = false,
                 unlimitedProjects = false
             )
         }

@@ -14,6 +14,7 @@ data class SingleLineDiagram(
     val phaseMode: PhaseMode,
     val input: SingleLineInputBlock,
     val protectionBlocks: List<SingleLineProtectionBlock>,
+    val unassignedProtectionBlocks: List<SingleLineProtectionBlock> = emptyList(),
     val phaseSections: List<SingleLinePhaseSection>,
     val neutralBus: SingleLineBus,
     val protectiveEarthBus: SingleLineBus,

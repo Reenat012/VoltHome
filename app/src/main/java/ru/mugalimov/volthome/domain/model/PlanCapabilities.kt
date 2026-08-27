@@ -29,8 +29,14 @@ data class PlanCapabilities(
     /** Расширенный редактор параметров устройства */
     val extendedDeviceEditor: Boolean,
 
+    /** Фронтальная компоновка аппаратов по DIN-рейкам */
+    val panelVisualization: Boolean,
+
     /** Отсутствие лимита проектов (FREE лимит снят) */
     val unlimitedProjects: Boolean,
+
+    /** Полный расчёт кабельных линий по фактическим условиям прокладки */
+    val cableLineCalculation: Boolean = false,
 ) {
 
     /**
@@ -58,7 +64,9 @@ data class PlanCapabilities(
                 professionalReportSections = pro,
                 phaseDragAndDrop = pro,
                 extendedDeviceEditor = pro,
+                panelVisualization = pro,
                 unlimitedProjects = pro,
+                cableLineCalculation = pro,
             )
         }
     }

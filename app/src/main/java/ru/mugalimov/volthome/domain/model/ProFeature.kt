@@ -14,6 +14,8 @@ enum class ProFeature {
     // professional artifacts
     PRO_REPORT,          // export actions для отчёта (save/share/export PDF) и полный PRO-отчёт
     SINGLE_LINE_DIAGRAM, // отдельный paywall для однолинейной схемы
+    PANEL_VISUALIZATION, // фронтальная компоновка щита по DIN-рейкам
+    CABLE_LINE_CALCULATION, // длина, условия прокладки, Iz и падение напряжения
     CALC_EXPLANATIONS,   // обоснования / шаги / прозрачность расчётов
     CALC_WARNINGS,       // предупреждения по расчёту/данным
 

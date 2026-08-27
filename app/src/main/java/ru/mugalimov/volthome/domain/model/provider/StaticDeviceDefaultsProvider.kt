@@ -15,7 +15,7 @@ class StaticDeviceDefaultsProvider @Inject constructor() : DeviceDefaultsProvide
             power = 150,
             powerFactor = 0.90,
             demandRatio = 0.80,
-            voltage = Voltage(220, VoltageType.AC_1PHASE),
+            voltage = Voltage(230, VoltageType.AC_1PHASE),
             hasMotor = false,
             requiresDedicatedCircuit = false,
             requiresSocketConnection = false
@@ -25,7 +25,7 @@ class StaticDeviceDefaultsProvider @Inject constructor() : DeviceDefaultsProvide
             power = 1000,
             powerFactor = 0.95,
             demandRatio = 0.60,
-            voltage = Voltage(220, VoltageType.AC_1PHASE),
+            voltage = Voltage(230, VoltageType.AC_1PHASE),
             hasMotor = false,
             requiresDedicatedCircuit = false,
             requiresSocketConnection = true
@@ -35,7 +35,7 @@ class StaticDeviceDefaultsProvider @Inject constructor() : DeviceDefaultsProvide
             power = 2500,
             powerFactor = 0.90,
             demandRatio = 1.00,
-            voltage = Voltage(220, VoltageType.AC_1PHASE),
+            voltage = Voltage(230, VoltageType.AC_1PHASE),
             hasMotor = true,
             requiresDedicatedCircuit = true,
             requiresSocketConnection = false
@@ -46,7 +46,7 @@ class StaticDeviceDefaultsProvider @Inject constructor() : DeviceDefaultsProvide
             power = 2000,
             powerFactor = 0.85,
             demandRatio = 0.90,
-            voltage = Voltage(220, VoltageType.AC_1PHASE),
+            voltage = Voltage(230, VoltageType.AC_1PHASE),
             hasMotor = true,
             requiresDedicatedCircuit = true,
             requiresSocketConnection = true
@@ -56,7 +56,7 @@ class StaticDeviceDefaultsProvider @Inject constructor() : DeviceDefaultsProvide
             power = 7000,
             powerFactor = 1.00,
             demandRatio = 1.00,
-            voltage = Voltage(380, VoltageType.AC_3PHASE),
+            voltage = Voltage(400, VoltageType.AC_3PHASE),
             hasMotor = false,
             requiresDedicatedCircuit = true,
             requiresSocketConnection = false
@@ -66,7 +66,7 @@ class StaticDeviceDefaultsProvider @Inject constructor() : DeviceDefaultsProvide
             power = 3000,
             powerFactor = 0.95,
             demandRatio = 1.00,
-            voltage = Voltage(220, VoltageType.AC_1PHASE),
+            voltage = Voltage(230, VoltageType.AC_1PHASE),
             hasMotor = false,
             requiresDedicatedCircuit = true,
             requiresSocketConnection = false
@@ -76,7 +76,7 @@ class StaticDeviceDefaultsProvider @Inject constructor() : DeviceDefaultsProvide
             power = 2200,
             powerFactor = 0.90,
             demandRatio = 1.00,
-            voltage = Voltage(220, VoltageType.AC_1PHASE),
+            voltage = Voltage(230, VoltageType.AC_1PHASE),
             hasMotor = true,
             requiresDedicatedCircuit = true,
             requiresSocketConnection = true
@@ -86,7 +86,7 @@ class StaticDeviceDefaultsProvider @Inject constructor() : DeviceDefaultsProvide
             power = 1800,
             powerFactor = 0.95,
             demandRatio = 1.00,
-            voltage = Voltage(220, VoltageType.AC_1PHASE),
+            voltage = Voltage(230, VoltageType.AC_1PHASE),
             hasMotor = false,
             requiresDedicatedCircuit = true,
             requiresSocketConnection = true
@@ -96,7 +96,7 @@ class StaticDeviceDefaultsProvider @Inject constructor() : DeviceDefaultsProvide
             power = 3000,
             powerFactor = 0.98,
             demandRatio = 1.00,
-            voltage = Voltage(220, VoltageType.AC_1PHASE),
+            voltage = Voltage(230, VoltageType.AC_1PHASE),
             hasMotor = false,
             requiresDedicatedCircuit = true,
             requiresSocketConnection = false
@@ -107,7 +107,7 @@ class StaticDeviceDefaultsProvider @Inject constructor() : DeviceDefaultsProvide
             power = 1000,
             powerFactor = 0.90,
             demandRatio = 0.80,
-            voltage = Voltage(220, VoltageType.AC_1PHASE),
+            voltage = Voltage(230, VoltageType.AC_1PHASE),
             hasMotor = false,
             requiresDedicatedCircuit = false,
             requiresSocketConnection = true

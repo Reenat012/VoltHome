@@ -1,31 +1,46 @@
 package ru.mugalimov.volthome.ui.components.device
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ElectricBolt
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CoroutineScope
@@ -37,242 +52,227 @@ import ru.mugalimov.volthome.ui.utilities.label
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DeviceParamsEditor(
-    // FREE-поля
     name: String,
     onNameChange: (String) -> Unit,
     nameError: String? = null,
-
     powerText: String,
     onPowerTextChange: (String) -> Unit,
     powerError: String?,
-
-    // PRO-поля
     deviceType: DeviceType,
     onDeviceTypeChange: (DeviceType) -> Unit,
-
     powerFactorText: String,
     onPowerFactorTextChange: (String) -> Unit,
     powerFactorError: String?,
-
     demandRatioText: String,
     onDemandRatioTextChange: (String) -> Unit,
     demandRatioError: String?,
-
     voltageType: VoltageType,
     onVoltageTypeChange: (VoltageType) -> Unit,
-
     hasMotor: Boolean,
     onHasMotorChange: (Boolean) -> Unit,
     requiresDedicatedCircuit: Boolean,
     onRequiresDedicatedCircuitChange: (Boolean) -> Unit,
     requiresSocketConnection: Boolean,
     onRequiresSocketConnectionChange: (Boolean) -> Unit,
-
-    // Ограничение PRO-функций
     locked: Boolean,
     onLockedClick: () -> Unit,
-
     bringIntoViewRequester: androidx.compose.foundation.relocation.BringIntoViewRequester? = null,
     scope: CoroutineScope? = null,
 ) {
     val context = LocalContext.current
+    var advancedExpanded by remember { mutableStateOf(false) }
 
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        // FREE: название устройства
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            text = "Основные параметры",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
         OutlinedTextField(
             value = name,
             onValueChange = onNameChange,
             label = { Text("Название") },
             singleLine = true,
             isError = nameError != null,
-            supportingText = { nameError?.let { Text(it) } },
-            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 56.dp)
-                .maybeBringIntoView(bringIntoViewRequester, scope)
+            supportingText = nameError?.let { error -> ({ Text(error) }) },
+            shape = MaterialTheme.shapes.large,
+            modifier = Modifier.fillMaxWidth().maybeBringIntoView(bringIntoViewRequester, scope)
         )
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            // FREE: мощность
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedTextField(
                 value = powerText,
                 onValueChange = onPowerTextChange,
-                label = { Text("Мощность (Вт)") },
+                label = { Text("Мощность, Вт") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 trailingIcon = { Icon(Icons.Rounded.ElectricBolt, contentDescription = null) },
                 isError = powerError != null,
-                supportingText = { powerError?.let { Text(it) } },
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 56.dp)
+                supportingText = if (powerError != null) {
+                    { Text(powerError) }
+                } else {
+                    { Text("Для мощных приборов можно указать значение выше 5 кВт") }
+                },
+                shape = MaterialTheme.shapes.large,
+                modifier = (if (locked) Modifier.fillMaxWidth() else Modifier.weight(1f))
                     .maybeBringIntoView(bringIntoViewRequester, scope)
             )
-
-            // PRO: тип устройства
-            EnumDropdownField(
-                label = "Тип устройства",
-                value = deviceType,
-                values = DeviceType.values().toList(),
-                valueLabel = { it.label(context) },
-                locked = locked,
-                onLockedClick = onLockedClick,
-                onValueChange = onDeviceTypeChange,
-                modifier = Modifier.weight(1f)
-            )
+            if (!locked) {
+                DeviceTypeField(
+                    value = deviceType,
+                    label = { it.label(context) },
+                    onValueChange = onDeviceTypeChange,
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            // PRO: коэффициент мощности
-            LockedDecimalField(
-                label = "Коэфф. мощности (PF)",
-                value = powerFactorText,
-                locked = locked,
-                hint = "Влияет на расчёт тока",
-                error = powerFactorError,
-                onLockedClick = onLockedClick,
-                onValueChange = onPowerFactorTextChange,
-                modifier = Modifier.weight(1f),
-                bringIntoViewRequester = bringIntoViewRequester,
-                scope = scope
-            )
+        if (locked) {
+            Surface(
+                modifier = Modifier.fillMaxWidth().clickable(onClick = onLockedClick),
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Rounded.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Расширенные параметры", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = "Коэффициенты, напряжение и способ подключения",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text("PRO", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+        } else {
+            Surface(
+                modifier = Modifier.fillMaxWidth().clickable { advancedExpanded = !advancedExpanded },
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Расширенные параметры", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = "Коэффициенты и параметры подключения",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Icon(
+                        if (advancedExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                        contentDescription = if (advancedExpanded) "Свернуть" else "Развернуть"
+                    )
+                }
+            }
 
-            // PRO: коэффициент спроса
-            LockedDecimalField(
-                label = "Коэфф. спроса",
-                value = demandRatioText,
-                locked = locked,
-                hint = "Учитывает реальную нагрузку",
-                error = demandRatioError,
-                onLockedClick = onLockedClick,
-                onValueChange = onDemandRatioTextChange,
-                modifier = Modifier.weight(1f),
-                bringIntoViewRequester = bringIntoViewRequester,
-                scope = scope
-            )
-        }
+            AnimatedVisibility(
+                visible = advancedExpanded,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        CompactDecimalField(
+                            label = "cos φ",
+                            value = powerFactorText,
+                            error = powerFactorError,
+                            onValueChange = onPowerFactorTextChange,
+                            modifier = Modifier.weight(1f),
+                            bringIntoViewRequester = bringIntoViewRequester,
+                            scope = scope
+                        )
+                        CompactDecimalField(
+                            label = "Спрос",
+                            value = demandRatioText,
+                            error = demandRatioError,
+                            onValueChange = onDemandRatioTextChange,
+                            modifier = Modifier.weight(1f),
+                            bringIntoViewRequester = bringIntoViewRequester,
+                            scope = scope
+                        )
+                    }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            // PRO: напряжение
-            VoltageTypeDropdownField(
-                label = "Напряжение",
-                value = voltageType,
-                locked = locked,
-                onLockedClick = onLockedClick,
-                onValueChange = onVoltageTypeChange,
-                modifier = Modifier.weight(1f)
-            )
+                    Text(
+                        text = "cos φ влияет на расчёт тока, коэффициент спроса — на одновременную нагрузку.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
 
-            // PRO: подключение розеткой
-            YesNoDropdownField(
-                label = "Подключение розеткой",
-                value = requiresSocketConnection,
-                locked = locked,
-                onLockedClick = onLockedClick,
-                onValueChange = onRequiresSocketConnectionChange,
-                modifier = Modifier.weight(1f)
-            )
-        }
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Напряжение", style = MaterialTheme.typography.labelLarge)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = voltageType == VoltageType.AC_1PHASE,
+                                onClick = { onVoltageTypeChange(VoltageType.AC_1PHASE) },
+                                label = { Text("AC · 1 фаза") }
+                            )
+                            FilterChip(
+                                selected = voltageType == VoltageType.AC_3PHASE,
+                                onClick = { onVoltageTypeChange(VoltageType.AC_3PHASE) },
+                                label = { Text("AC · 3 фазы") }
+                            )
+                        }
+                    }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            // PRO: есть двигатель
-            YesNoDropdownField(
-                label = "Есть двигатель",
-                value = hasMotor,
-                locked = locked,
-                onLockedClick = onLockedClick,
-                onValueChange = onHasMotorChange,
-                modifier = Modifier.weight(1f)
-            )
-
-            // PRO: выделенная линия
-            YesNoDropdownField(
-                label = "Выделенная линия",
-                value = requiresDedicatedCircuit,
-                locked = locked,
-                onLockedClick = onLockedClick,
-                onValueChange = onRequiresDedicatedCircuitChange,
-                modifier = Modifier.weight(1f)
-            )
+                    BooleanSetting("Есть двигатель", hasMotor, onHasMotorChange)
+                    BooleanSetting("Выделенная линия", requiresDedicatedCircuit, onRequiresDedicatedCircuitChange)
+                    BooleanSetting("Подключение через розетку", requiresSocketConnection, onRequiresSocketConnectionChange)
+                    Text(
+                        text = "Этот признак описывает способ подключения прибора. Отдельное УЗО выбирается для розеточной линии, а не для каждого подключённого к ней устройства.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
     }
 }
 
-/* -------------------- Вспомогательные блоки -------------------- */
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun <T> EnumDropdownField(
-    label: String,
-    value: T,
-    values: List<T>,
-    valueLabel: (T) -> String,
-    locked: Boolean,
-    onLockedClick: () -> Unit,
-    onValueChange: (T) -> Unit,
+private fun DeviceTypeField(
+    value: DeviceType,
+    label: (DeviceType) -> String,
+    onValueChange: (DeviceType) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
-
-    // Если поле заблокировано, сразу открываем paywall.
-    val open = {
-        if (locked) onLockedClick() else expanded = true
-    }
-
     ExposedDropdownMenuBox(
         expanded = expanded,
-        onExpandedChange = { open() },
+        onExpandedChange = { expanded = it },
         modifier = modifier
-            .fillMaxWidth()
-            .heightIn(min = 56.dp)
     ) {
         OutlinedTextField(
-            value = valueLabel(value),
+            value = label(value),
             onValueChange = {},
             readOnly = true,
-            enabled = true,
             singleLine = true,
-            label = { Text(label) },
-            trailingIcon = {
-                if (locked) {
-                    Icon(Icons.Rounded.Lock, contentDescription = null)
-                } else {
-                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
-                }
-            },
-            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+            label = { Text("Тип") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            shape = MaterialTheme.shapes.large,
             modifier = Modifier
-                .menuAnchor()
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable, enabled = true)
                 .fillMaxWidth()
-                // Гарантируем, что даже на readOnly/locked anchor
-                // пользователь не получит "тишину" при тапе.
-                .clickable { open() }
         )
-
-        ExposedDropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
-            values.forEach { item ->
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DeviceType.entries.forEach { item ->
                 DropdownMenuItem(
-                    text = { Text(valueLabel(item)) },
+                    text = { Text(label(item)) },
                     onClick = {
                         expanded = false
                         onValueChange(item)
@@ -283,178 +283,48 @@ private fun <T> EnumDropdownField(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun VoltageTypeDropdownField(
-    label: String,
-    value: VoltageType,
-    locked: Boolean,
-    onLockedClick: () -> Unit,
-    onValueChange: (VoltageType) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var expanded by remember { mutableStateOf(false) }
-
-    // Если поле заблокировано, сразу открываем paywall.
-    val open = {
-        if (locked) onLockedClick() else expanded = true
-    }
-
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { open() },
-        modifier = modifier
-            .fillMaxWidth()
-            .heightIn(min = 56.dp)
-    ) {
-        OutlinedTextField(
-            value = when (value) {
-                VoltageType.AC_1PHASE -> "AC 1ф"
-                VoltageType.AC_3PHASE -> "AC 3ф"
-                VoltageType.DC -> "DC"
-            },
-            onValueChange = {},
-            readOnly = true,
-            enabled = true,
-            singleLine = true,
-            label = { Text(label) },
-            supportingText = { Text("DC пока недоступен") },
-            trailingIcon = {
-                if (locked) {
-                    Icon(Icons.Rounded.Lock, contentDescription = null)
-                } else {
-                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
-                }
-            },
-            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-            modifier = Modifier
-                .menuAnchor()
-                .fillMaxWidth()
-                // Гарантируем, что даже на readOnly/locked anchor
-                // пользователь не получит "тишину" при тапе.
-                .clickable { open() }
-        )
-
-        ExposedDropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
-            DropdownMenuItem(
-                text = { Text("AC 1ф") },
-                onClick = {
-                    expanded = false
-                    onValueChange(VoltageType.AC_1PHASE)
-                }
-            )
-
-            DropdownMenuItem(
-                text = { Text("AC 3ф") },
-                onClick = {
-                    expanded = false
-                    onValueChange(VoltageType.AC_3PHASE)
-                }
-            )
-
-            DropdownMenuItem(
-                enabled = false,
-                text = { Text("DC — скоро") },
-                onClick = {}
-            )
-        }
-    }
-}
-
-@Composable
-private fun YesNoDropdownField(
-    label: String,
-    value: Boolean,
-    locked: Boolean,
-    onLockedClick: () -> Unit,
-    onValueChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    EnumDropdownField(
-        label = label,
-        value = value,
-        values = listOf(true, false),
-        valueLabel = { if (it) "Да" else "Нет" },
-        locked = locked,
-        onLockedClick = onLockedClick,
-        onValueChange = onValueChange,
-        modifier = modifier
-    )
-}
-
-@Composable
-private fun LockedDecimalField(
+private fun CompactDecimalField(
     label: String,
     value: String,
-    locked: Boolean,
-    hint: String?,
     error: String?,
-    onLockedClick: () -> Unit,
     onValueChange: (String) -> Unit,
     modifier: Modifier,
     bringIntoViewRequester: androidx.compose.foundation.relocation.BringIntoViewRequester?,
     scope: CoroutineScope?
 ) {
-    // Не вешаем clickable прямо на OutlinedTextField:
-    // такие клики иногда ведут себя нестабильно.
-    // Вместо этого кладём прозрачный overlay поверх поля.
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .heightIn(min = 56.dp)
-            .maybeBringIntoView(bringIntoViewRequester, scope)
-    ) {
-        OutlinedTextField(
-            value = value,
-            onValueChange = { if (!locked) onValueChange(it) },
-            label = { Text(label) },
-            enabled = true,
-            readOnly = locked,
-            singleLine = true,
-            isError = error != null && !locked,
-            supportingText = {
-                when {
-                    locked && hint != null -> Text(hint)
-                    !locked && error != null -> Text(error)
-                    hint != null -> Text(hint)
-                }
-            },
-            trailingIcon = {
-                if (locked) {
-                    Icon(Icons.Rounded.Lock, contentDescription = null)
-                }
-            },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth()
-        )
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label) },
+        singleLine = true,
+        isError = error != null,
+        supportingText = error?.let { message -> ({ Text(message) }) },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+        shape = MaterialTheme.shapes.large,
+        modifier = modifier.maybeBringIntoView(bringIntoViewRequester, scope)
+    )
+}
 
-        if (locked) {
-            // Прозрачный слой гарантирует,
-            // что tap по любой части заблокированного поля откроет paywall.
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .clickable { onLockedClick() }
-            )
-        }
+@Composable
+private fun BooleanSetting(label: String, value: Boolean, onValueChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable { onValueChange(!value) }
+            .padding(horizontal = 4.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyLarge)
+        Switch(checked = value, onCheckedChange = onValueChange)
     }
 }
 
 private fun Modifier.maybeBringIntoView(
-    bringIntoViewRequester: androidx.compose.foundation.relocation.BringIntoViewRequester?,
+    requester: androidx.compose.foundation.relocation.BringIntoViewRequester?,
     scope: CoroutineScope?
 ): Modifier {
-    if (bringIntoViewRequester == null || scope == null) return this
-
-    return this.onFocusChanged {
-        bringIntoViewOnFocus(
-            scope = scope,
-            requester = bringIntoViewRequester,
-            focused = it.isFocused
-        )
+    if (requester == null || scope == null) return this
+    return onFocusChanged {
+        bringIntoViewOnFocus(scope = scope, requester = requester, focused = it.isFocused)
     }
 }

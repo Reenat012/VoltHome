@@ -7,6 +7,8 @@ data class PhaseGroupItem(
     val roomId: Long,
     val devices: List<PhaseDeviceItem>, // Названия устройств
     val totalPower: Double, // Вт
-    val totalCurrent: Double // А
+    /** Расчётный ток группы. */
+    val totalCurrent: Double,
+    /** Паспортный ток группы. */
+    val installedCurrent: Double = totalCurrent
 )
-

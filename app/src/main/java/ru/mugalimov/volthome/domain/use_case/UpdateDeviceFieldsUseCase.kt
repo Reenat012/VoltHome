@@ -6,8 +6,9 @@ import kotlinx.coroutines.withContext
 import ru.mugalimov.volthome.core.validation.PowerValidator
 import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
 import ru.mugalimov.volthome.data.repository.DeviceRepository
-import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.data.repository.PreferencesRepository
+import ru.mugalimov.volthome.data.repository.ProjectSetupRepository
+import ru.mugalimov.volthome.data.repository.resolve
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
@@ -26,9 +27,9 @@ class UpdateDeviceFieldsUseCase @Inject constructor(
     private val deviceRepository: DeviceRepository,
     private val activeProjectDataStore: ActiveProjectDataStore,
     private val preferencesRepository: PreferencesRepository,
+    private val projectSetupRepository: ProjectSetupRepository,
     private val groupCalculatorFactory: GroupCalculatorFactory,
     private val saveAutoCalculatedGroupsToLocalDbUseCase: SaveAutoCalculatedGroupsToLocalDbUseCase,
-    private val explicationRepository: ExplicationRepository,
     @IoDispatcher private val io: CoroutineDispatcher
 ) {
 
@@ -93,37 +94,37 @@ class UpdateDeviceFieldsUseCase @Inject constructor(
             requiresSocketConnection = newRequiresSocketConnection ?: current.requiresSocketConnection
         )
 
-        // 1. Сохраняем устройство
-        deviceRepository.updateDevice(updated)
-
-        // 2. Сразу пересчитываем и пересохраняем группы активного проекта
+        // До записи проверяем, что есть однозначная граница проекта.
         val projectId = activeProjectDataStore.activeProjectId.first().orEmpty().trim()
-        if (projectId.isBlank()) {
-            // Не валим сохранение устройства, но честно сигналим вверх
-            error("Устройство сохранено, но активный projectId пуст — группы не пересчитаны")
-        }
+        require(projectId.isNotBlank()) { "Не выбран активный проект" }
 
-        val phaseMode = preferencesRepository.phaseMode.first()
+        val phaseMode = projectSetupRepository.resolve(
+            projectId = projectId,
+            legacyFallbackPhaseMode = preferencesRepository.phaseMode.first()
+        ).phaseMode
         val calculator = groupCalculatorFactory.create(projectId)
 
-        when (val result = calculator.calculateGroups(phaseMode)) {
-            is GroupingResult.Error -> {
-                error("Устройство сохранено, но пересчёт групп не выполнен: ${result.message}")
-            }
-
-            is GroupingResult.Success -> {
-                saveAutoCalculatedGroupsToLocalDbUseCase.execute(
-                    SaveAutoCalculatedGroupsToLocalDbUseCase.Params(
-                        projectId = projectId,
-                        groups = result.system.groups,
-                        distributionDecisions = result.distributionDecisions,
-                        source = "UpdateDeviceFieldsUseCase.invoke",
-                        opId = null
+        deviceRepository.updateDevice(updated)
+        try {
+            when (val result = calculator.calculateGroups(phaseMode)) {
+                is GroupingResult.Error -> error("Пересчёт групп не выполнен: ${result.message}")
+                is GroupingResult.Success -> {
+                    saveAutoCalculatedGroupsToLocalDbUseCase.execute(
+                        SaveAutoCalculatedGroupsToLocalDbUseCase.Params(
+                            projectId = projectId,
+                            groups = result.system.groups,
+                            distributionDecisions = result.distributionDecisions,
+                            source = "UpdateDeviceFieldsUseCase.invoke",
+                            opId = null
+                        )
                     )
-                )
-
-                explicationRepository.setLastDistributionDecisions(result.distributionDecisions)
+                }
             }
+        } catch (failure: Throwable) {
+            // Не оставляем новые поля устройства рядом со старыми расчётами.
+            runCatching { deviceRepository.updateDevice(current) }
+                .onFailure { rollbackFailure -> failure.addSuppressed(rollbackFailure) }
+            throw failure
         }
     }
 }

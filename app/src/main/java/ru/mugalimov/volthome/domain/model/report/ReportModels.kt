@@ -14,7 +14,9 @@ data class ReportMeta(
 
 data class ReportPhase(
     val name: String,                // "Фаза A"
-    val groups: List<ReportGroup>
+    val groups: List<ReportGroup>,
+    val totalCurrentA: Double? = null,
+    val installedPowerW: Int? = null
 )
 
 /**
@@ -25,6 +27,16 @@ data class ReportPhase(
 data class ReportGroup(
     val title: String,
     val devices: List<ReportDevice>,
+
+    // Явные поля для клиентского отчёта. Старые aliases ниже оставлены для совместимости.
+    val number: Int? = null,
+    val roomName: String? = null,
+    val purpose: String? = null,
+    val phaseLabel: String? = null,
+    val installedPowerW: Int? = null,
+    val installedCurrentA: Double? = null,
+    val calculatedCurrentA: Double? = null,
+    val manualNotes: List<String> = emptyList(),
 
     // --- Алиасы для описания коммутационного аппарата (любой из них может быть заполнен) ---
     val switchLabel: String? = null,

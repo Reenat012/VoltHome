@@ -6,8 +6,12 @@ package ru.mugalimov.volthome.domain.model.panel
  */
 
 enum class ModuleType {
-    INCOMER,
     BREAKER,
     RCD,
-    RCBO
+    RCBO,
+    VOLTAGE_RELAY,
+    PHASE_CONTROL_RELAY,
+    CURRENT_RELAY,
+    MODULAR_CONTACTOR,
+    SURGE_PROTECTION_DEVICE
 }

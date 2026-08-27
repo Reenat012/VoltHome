@@ -109,7 +109,7 @@ object DeviceParamsValidator {
             return "Минимум ${InputConstraints.MIN_POWER_W} Вт"
         }
         if (asInt > InputConstraints.MAX_POWER_W) {
-            return "Максимум ${InputConstraints.MAX_POWER_W} Вт"
+            return "Технический предел — 1 000 000 Вт"
         }
         return null
     }

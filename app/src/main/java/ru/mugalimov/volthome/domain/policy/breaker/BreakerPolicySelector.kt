@@ -23,6 +23,9 @@ import ru.mugalimov.volthome.domain.model.LineSelectionReason
 class BreakerPolicySelector @Inject constructor() {
 
     fun select(input: BreakerPolicyInput): BreakerPolicyResult {
+        require(input.nominalCurrentA.isFinite() && input.nominalCurrentA >= 0.0) {
+            "Расчётный ток линии должен быть конечным неотрицательным числом"
+        }
         val flooredCurrentA = ceil(input.nominalCurrentA).toInt()
         val floorBreakerA = BreakerPolicyDefaults.floorByDeviceType(input.deviceType)
         val requiredBreakerA = maxOf(flooredCurrentA, floorBreakerA)
@@ -35,7 +38,6 @@ class BreakerPolicySelector @Inject constructor() {
 
         val baseCurve = when (selectedBreakerA) {
             10 -> BreakerCurve.B
-            50, 63 -> BreakerCurve.D
             else -> BreakerCurve.C
         }
 

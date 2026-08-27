@@ -2,15 +2,22 @@ package ru.mugalimov.volthome.ui.onboarding
 
 import android.util.Log
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.ui.onboarding.model.OnboardingDismissReason
 import ru.mugalimov.volthome.ui.onboarding.model.OnboardingScreen
 
 private const val HOST_TAG = "ONBOARD_HOST"
+private const val TARGET_WAIT_MILLIS = 1_500L
+private const val LAYOUT_SETTLE_MILLIS = 350L
 
 /**
  * Единый host overlay.
@@ -19,7 +26,7 @@ private const val HOST_TAG = "ONBOARD_HOST"
  * - подписывается на activeHint из coordinator
  * - находит валидный anchor в registry
  * - игнорирует stale anchors
- * - при отсутствии валидного anchor использует centered fallback
+ * - ждёт появления anchor и отменяет показ при timeout
  *
  * Host НЕ:
  * - принимает решение о показе
@@ -36,6 +43,10 @@ fun CoachMarkHost(
     val activeHint by coordinator.activeHint.collectAsState()
     val anchors by anchorRegistry.anchors.collectAsState()
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(currentScreen) {
+        coordinator.onScreenChanged(currentScreen)
+    }
 
     val hint = activeHint ?: return
 
@@ -57,6 +68,36 @@ fun CoachMarkHost(
         }
     }
 
+    var readyToRender by remember(hint.hintId, hint.activatedAtMillis) {
+        mutableStateOf(false)
+    }
+
+    LaunchedEffect(
+        hint.hintId,
+        hint.activatedAtMillis,
+        currentScreen,
+        resolvedAnchor
+    ) {
+        readyToRender = false
+
+        if (hint.targetTag != null && resolvedAnchor == null) {
+            delay(TARGET_WAIT_MILLIS)
+            Log.d(
+                HOST_TAG,
+                "HOST_CANCEL reason=TARGET_TIMEOUT hintId=${hint.hintId.name} targetTag=${hint.targetTag.rawTag}"
+            )
+            coordinator.dismiss(OnboardingDismissReason.SYSTEM_CANCELLED)
+            return@LaunchedEffect
+        }
+
+        // Даём навигации, LazyColumn и анимациям закончить первый layout.
+        delay(LAYOUT_SETTLE_MILLIS)
+        coordinator.markPresented(hint.hintId)
+        readyToRender = true
+    }
+
+    if (!readyToRender) return
+
     if (hint.targetTag == null) {
         Log.d(
             HOST_TAG,
@@ -67,29 +108,24 @@ fun CoachMarkHost(
             HOST_TAG,
             "HOST_RENDER mode=ANCHORED hintId=${hint.hintId.name} screen=${currentScreen.name} targetTag=${hint.targetTag.rawTag} bounds=${resolvedAnchor.bounds}"
         )
-    } else {
-        val sameTagAnyScreen = anchors.firstOrNull { it.targetTag == hint.targetTag }
-        Log.d(
-            HOST_TAG,
-            buildString {
-                append("HOST_RENDER mode=FALLBACK_MISSING_ANCHOR")
-                append(" hintId=").append(hint.hintId.name)
-                append(" screen=").append(currentScreen.name)
-                append(" targetTag=").append(hint.targetTag.rawTag)
-                append(" anchorsCount=").append(anchors.size)
-                append(" sameTagAnyScreen=").append(sameTagAnyScreen != null)
-                append(" sameTagScreen=").append(sameTagAnyScreen?.screenId?.name ?: "null")
-                append(" sameTagAttached=").append(sameTagAnyScreen?.isAttached ?: false)
-            }
-        )
     }
 
     CoachMarkOverlay(
         activeHint = hint,
         anchorBounds = resolvedAnchor?.bounds,
-        onDismiss = {
+        onConfirmed = {
             scope.launch {
-                coordinator.dismiss(OnboardingDismissReason.USER_DISMISSED)
+                coordinator.dismiss(OnboardingDismissReason.USER_CONFIRMED)
+            }
+        },
+        onDeferred = {
+            scope.launch {
+                coordinator.dismiss(OnboardingDismissReason.USER_DEFERRED)
+            }
+        },
+        onSkipAll = {
+            scope.launch {
+                coordinator.disableAll()
             }
         },
         modifier = modifier

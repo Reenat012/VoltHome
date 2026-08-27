@@ -7,6 +7,7 @@ import ru.mugalimov.volthome.domain.model.phase_load.PhaseDeviceItem
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseGroupItem
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
 import ru.mugalimov.volthome.domain.use_case.CalculationTrace
+import ru.mugalimov.volthome.domain.use_case.CircuitLoadCalculator
 import ru.mugalimov.volthome.domain.use_case.CurrentCalculator
 import ru.mugalimov.volthome.domain.use_case.LoadInput
 
@@ -33,6 +34,17 @@ object PhaseLoadItemsBuilder {
             .flatMap { g -> g.devices.map { d -> g to d } }
             .filter { (_, d) -> d.voltage.type == VoltageType.AC_3PHASE }
 
+        groups.forEach { group ->
+            val voltageTypes = group.devices.map { it.voltage.type }.distinct()
+            require(voltageTypes.size <= 1) {
+                "Группа №${group.groupNumber} смешивает 1ф и 3ф устройства"
+            }
+            val containsThreePhase = voltageTypes.singleOrNull() == VoltageType.AC_3PHASE
+            require(!containsThreePhase || group.phase == Phase.THREE_PHASE) {
+                "Группа №${group.groupNumber} с 3ф устройством имеет некорректную фазу ${group.phase}"
+            }
+        }
+
         val threePhaseGroups: List<PhaseGroupItem> =
             threePhaseDevices
                 .groupBy(
@@ -45,16 +57,7 @@ object PhaseLoadItemsBuilder {
                     val devices = items.map { it.second }
 
                     val deviceRows = devices.map { d ->
-                        PhaseDeviceItem(
-                            deviceId = d.id,
-                            name = d.name,
-                            power = d.power.toDouble(),
-                            current = d.calculateCurrent()
-                        )
-                    }
-
-                    val groupLoad = CurrentCalculator.calculateGroupLoad(
-                        devices.map { d ->
+                        val load = CurrentCalculator.calculateDeviceLoad(
                             LoadInput(
                                 powerW = d.power.toDouble(),
                                 voltage = d.voltage.value.toDouble(),
@@ -63,14 +66,22 @@ object PhaseLoadItemsBuilder {
                                 voltageType = d.voltage.type,
                                 label = d.name
                             )
-                        }
-                    )
+                        )
+                        PhaseDeviceItem(
+                            deviceId = d.id,
+                            name = d.name,
+                            power = d.power.toDouble(),
+                            current = load.calculatedCurrentA,
+                            installedCurrent = load.installedCurrentA
+                        )
+                    }
+                    val groupLoad = CircuitLoadCalculator.calculate(devices)
 
                     CalculationTrace.log(
                         stage = "PHASE_LOAD_BUILDER_GROUP_UI_TOTAL",
                         message =
                             "groupNumber=${g.groupNumber} groupId=${g.groupId} phase=${g.phase} " +
-                                    "uiTotalCurrentA=${CalculationTrace.f(groupLoad.calculatedCurrentA)} " +
+                                    "uiTotalCurrentA=${CalculationTrace.f(g.nominalCurrent)} " +
                                     "groupNominalCurrentField=${CalculationTrace.f(g.nominalCurrent)} " +
                                     "segment=THREE_PHASE"
                     )
@@ -81,8 +92,9 @@ object PhaseLoadItemsBuilder {
                         roomName = g.roomName,
                         devices = deviceRows,
                         roomId = g.roomId,
-                        totalPower = deviceRows.sumOf { it.power },
-                        totalCurrent = groupLoad.calculatedCurrentA
+                        totalPower = groupLoad.installedPowerW,
+                        totalCurrent = g.nominalCurrent,
+                        installedCurrent = groupLoad.installedCurrentA
                     )
                 }
 
@@ -90,7 +102,8 @@ object PhaseLoadItemsBuilder {
         val i3Total = threePhaseGroups.sumOf { it.totalCurrent }
 
         val p3PerPhase = p3Total / 3.0
-        val i3PerPhase = i3Total / 3.0
+        // calculatedCurrentA для 3ф уже является линейным током каждой фазы.
+        val i3PerPhase = i3Total
 
         val phaseItems = listOf(Phase.A, Phase.B, Phase.C).map { phase ->
             val groupsOfPhase = groups.filter { it.phase == phase }
@@ -99,16 +112,7 @@ object PhaseLoadItemsBuilder {
                 val onePhaseDevices = g.devices.filter { it.voltage.type != VoltageType.AC_3PHASE }
 
                 val deviceRows = onePhaseDevices.map { d ->
-                    PhaseDeviceItem(
-                        deviceId = d.id,
-                        name = d.name,
-                        power = d.power.toDouble(),
-                        current = d.calculateCurrent()
-                    )
-                }
-
-                val groupLoad = CurrentCalculator.calculateGroupLoad(
-                    onePhaseDevices.map { d ->
+                    val load = CurrentCalculator.calculateDeviceLoad(
                         LoadInput(
                             powerW = d.power.toDouble(),
                             voltage = d.voltage.value.toDouble(),
@@ -117,14 +121,22 @@ object PhaseLoadItemsBuilder {
                             voltageType = d.voltage.type,
                             label = d.name
                         )
-                    }
-                )
+                    )
+                    PhaseDeviceItem(
+                        deviceId = d.id,
+                        name = d.name,
+                        power = d.power.toDouble(),
+                        current = load.calculatedCurrentA,
+                        installedCurrent = load.installedCurrentA
+                    )
+                }
+                val groupLoad = CircuitLoadCalculator.calculate(onePhaseDevices)
 
                 CalculationTrace.log(
                     stage = "PHASE_LOAD_BUILDER_GROUP_UI_TOTAL",
                     message =
                         "groupNumber=${g.groupNumber} groupId=${g.groupId} phase=${g.phase} " +
-                                "uiTotalCurrentA=${CalculationTrace.f(groupLoad.calculatedCurrentA)} " +
+                                "uiTotalCurrentA=${CalculationTrace.f(g.nominalCurrent)} " +
                                 "groupNominalCurrentField=${CalculationTrace.f(g.nominalCurrent)} " +
                                 "segment=ONE_PHASE"
                 )
@@ -135,8 +147,9 @@ object PhaseLoadItemsBuilder {
                     roomName = g.roomName,
                     devices = deviceRows,
                     roomId = g.roomId,
-                    totalPower = deviceRows.sumOf { it.power },
-                    totalCurrent = groupLoad.calculatedCurrentA
+                    totalPower = groupLoad.installedPowerW,
+                    totalCurrent = g.nominalCurrent,
+                    installedCurrent = groupLoad.installedCurrentA
                 )
             }
 

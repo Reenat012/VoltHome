@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -28,17 +29,26 @@ import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
 import ru.mugalimov.volthome.data.repository.PreferencesRepository
+import ru.mugalimov.volthome.data.repository.ProjectSetupRepository
+import ru.mugalimov.volthome.data.repository.observeResolved
 import ru.mugalimov.volthome.data.repository.UserPlanRepository
 import ru.mugalimov.volthome.domain.model.CircuitGroup
+import ru.mugalimov.volthome.domain.model.CalculationAlgorithm
+import ru.mugalimov.volthome.domain.model.CalculationSource
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.Phase
+import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.ProFeature
+import ru.mugalimov.volthome.domain.model.VoltageType
 import ru.mugalimov.volthome.domain.model.manual.ManualEditAction
 import ru.mugalimov.volthome.domain.model.phase_load.LoadThresholds
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadMode
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadUiState
 import ru.mugalimov.volthome.domain.use_case.GetPhaseLoadUiUseCase
+import ru.mugalimov.volthome.domain.use_case.CircuitLoadCalculator
 import ru.mugalimov.volthome.domain.use_case.IncomerSelector
+import ru.mugalimov.volthome.domain.use_case.ObserveProjectCoverageUseCase
+import ru.mugalimov.volthome.domain.model.ProjectCoverage
 import ru.mugalimov.volthome.domain.use_case.manual.ResetManualOverridesAndAutoRecalcUseCase
 import ru.mugalimov.volthome.domain.use_case.phase_load.PhaseLoadItemsBuilder
 import ru.mugalimov.volthome.ui.onboarding.model.LoadsOnboardingFacts
@@ -46,9 +56,11 @@ import ru.mugalimov.volthome.ui.paywall.PaywallBus
 import ru.mugalimov.volthome.ui.utilities.ManualDraftResetNotifier
 
 @HiltViewModel
+@OptIn(ExperimentalCoroutinesApi::class)
 class PhaseLoadViewModel @Inject constructor(
     private val getPhaseLoadUiUseCase: GetPhaseLoadUiUseCase,
     private val preferencesRepository: PreferencesRepository,
+    private val projectSetupRepository: ProjectSetupRepository,
     private val explicationRepository: ExplicationRepository,
     private val deviceRepository: DeviceRepository,
     private val incomerSelector: IncomerSelector,
@@ -58,7 +70,46 @@ class PhaseLoadViewModel @Inject constructor(
     private val paywallBus: PaywallBus,
     private val manualDraftResetNotifier: ManualDraftResetNotifier,
     private val resetManualOverridesAndAutoRecalcUseCase: ResetManualOverridesAndAutoRecalcUseCase,
+    observeProjectCoverageUseCase: ObserveProjectCoverageUseCase,
 ) : ViewModel() {
+
+    val projectCoverage: StateFlow<ProjectCoverage> = observeProjectCoverageUseCase()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ProjectCoverage.Empty)
+
+    private data class ElectricalContext(
+        val phaseMode: PhaseMode,
+        val availablePowerKw: Double?,
+        val unassignedDeviceCount: Int
+    )
+
+    /** Настройки конкретного проекта имеют приоритет над глобальным legacy-параметром. */
+    private val electricalContext: StateFlow<ElectricalContext> =
+        activeProjectDs.activeProjectId
+            .flatMapLatest { projectId ->
+                val pid = projectId.orEmpty().trim()
+                if (pid.isBlank()) {
+                    preferencesRepository.phaseMode.map { fallbackMode ->
+                        ElectricalContext(fallbackMode, null, 0)
+                    }
+                } else {
+                    val legacyFallbackMode = preferencesRepository.phaseMode.first()
+                    combine(
+                        projectSetupRepository.observeResolved(pid, legacyFallbackMode),
+                        projectCoverage
+                    ) { setup, coverage ->
+                        ElectricalContext(
+                            phaseMode = setup.phaseMode,
+                            availablePowerKw = setup.inputPowerKw,
+                            unassignedDeviceCount = coverage.unassignedDevices.size
+                        )
+                    }
+                }
+            }
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5_000),
+                ElectricalContext(PhaseMode.THREE, null, 0)
+            )
 
     // =========================
     // Mode: AUTO/MANUAL
@@ -194,7 +245,10 @@ class PhaseLoadViewModel @Inject constructor(
 
                     // Линия/номиналы живут в draft и должны приходить уже после line recalc.
                     nominalCurrent = g.nominalCurrent ?: 0.0,
-                    installedPowerW = groupDevices.sumOf { it.power },
+                    installedPowerW = CircuitLoadCalculator
+                        .calculate(groupDevices)
+                        .installedPowerW
+                        .toInt(),
 
                     circuitBreaker = resolvedBreaker,
                     cableSection = resolvedCable,
@@ -207,6 +261,9 @@ class PhaseLoadViewModel @Inject constructor(
 
                     rcdRequired = g.rcdRequired ?: false,
                     rcdCurrent = g.rcdCurrent ?: 30,
+                    rcdReasonCodes = g.rcdReasons.map { it.name },
+                    calculationSource = CalculationSource.MANUAL,
+                    algorithmVersion = CalculationAlgorithm.VERSION,
                     phase = g.phase
                 )
             }
@@ -255,26 +312,34 @@ class PhaseLoadViewModel @Inject constructor(
     val uiState: StateFlow<PhaseLoadUiState> =
         combine(
             phaseItemsFlow,
-            preferencesRepository.phaseMode,
+            electricalContext,
             groupsFlow,
             explicationRepository.observeDistributionDecisions(),
             phaseLoadMode
-        ) { items, mode, groups, decisions, currentMode ->
+        ) { items, context, groups, decisions, currentMode ->
 
             val hasGroupRcds = groups.any { it.rcdRequired }
-            val incomer = incomerSelector.select(
+            val incomerAssessment = incomerSelector.assess(
                 IncomerSelector.Params(
                     groups = groups,
                     preferRcbo = false,
-                    hasGroupRcds = hasGroupRcds
+                    hasGroupRcds = hasGroupRcds,
+                    availablePowerKw = context.availablePowerKw,
+                    unassignedDeviceCount = context.unassignedDeviceCount,
+                    voltageTypeOverride = when (context.phaseMode) {
+                        PhaseMode.SINGLE -> VoltageType.AC_1PHASE
+                        PhaseMode.THREE -> VoltageType.AC_3PHASE
+                    }
                 )
             )
+            val incomer = incomerAssessment.spec
 
             PhaseLoadUiState(
                 data = items,
-                mode = mode,
+                mode = context.phaseMode,
                 phaseLoadMode = currentMode,
                 incomer = incomer,
+                incomerAssessment = incomerAssessment,
                 thresholds = LoadThresholds(),
                 decisions = decisions
             )
@@ -357,6 +422,11 @@ class PhaseLoadViewModel @Inject constructor(
                         phase = targetPhase
                     )
                 )
+            } catch (t: IllegalArgumentException) {
+                _events.tryEmit(
+                    t.message?.substringAfter(": ")
+                        ?: "Эту группу нельзя назначить на выбранную фазу"
+                )
             } catch (_: Throwable) {
                 _events.tryEmit("Не удалось изменить фазу. Попробуйте ещё раз.")
             }
@@ -388,7 +458,7 @@ class PhaseLoadViewModel @Inject constructor(
                 manualDraftResetNotifier.clearExpected(projectId)
 
                 // После выхода выполняем полный auto-recalc тоже строго по текущему projectId.
-                val phaseMode = preferencesRepository.phaseMode.first()
+                val phaseMode = electricalContext.value.phaseMode
 
                 resetManualOverridesAndAutoRecalcUseCase.execute(
                     ResetManualOverridesAndAutoRecalcUseCase.Params(
@@ -397,7 +467,7 @@ class PhaseLoadViewModel @Inject constructor(
                     )
                 )
 
-                _events.tryEmit("Ручные изменения сброшены, вернулись в авто-режим")
+                _events.tryEmit("Ручные изменения сброшены. Включён автоматический режим")
             } catch (_: Throwable) {
                 _events.tryEmit("Не удалось сбросить ручные изменения")
             }

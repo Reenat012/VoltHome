@@ -72,7 +72,7 @@ fun DeviceSpecSheet(
             Spacer(Modifier.height(4.dp))
 
             // --- Технические параметры ---
-            SpecRow(Icons.Outlined.Power, "Мощность", "${device.power} Вт")
+            SpecRow(Icons.Outlined.Power, "Мощность", "${device.power}\u00A0Вт")
             SpecRow(Icons.Outlined.Bolt, "Напряжение", device.voltage?.let { "$it В" } ?: "—")
             SpecRow(Icons.Outlined.Calculate, "Коэффициент спроса", device.demandRatio?.toString() ?: "—")
             SpecRow(Icons.Outlined.Emergency, "Коэффициент мощности", device.powerFactor?.toString() ?: "—")
@@ -80,7 +80,7 @@ fun DeviceSpecSheet(
             // Пояснения (только когда есть смысл: детали доступны, т.е. мы в PRO)
             if (detailsState == CalcDetailsState.AVAILABLE) {
                 Text(
-                    text = "Расчётная мощность определяется как Pрасч = Pуст × kспроса.",
+                    text = "Расчётная мощность равна установленной мощности с учётом коэффициента спроса.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

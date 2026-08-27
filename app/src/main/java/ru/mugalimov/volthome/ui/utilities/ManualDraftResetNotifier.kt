@@ -4,6 +4,8 @@ import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Маркер для UX после убийства процесса (kill-process).
@@ -19,17 +21,19 @@ import javax.inject.Singleton
 class ManualDraftResetNotifier @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
-    private val prefs = context.getSharedPreferences("manual_draft_notifier", Context.MODE_PRIVATE)
+    private val prefs by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        context.getSharedPreferences("manual_draft_notifier", Context.MODE_PRIVATE)
+    }
 
     private fun key(projectId: String) = "manual_expected__$projectId"
 
     /** Ставим маркер: пользователь вошёл в manual, значит при следующем запуске ожидаем сессию. */
-    fun markExpected(projectId: String) {
+    suspend fun markExpected(projectId: String) = withContext(Dispatchers.IO) {
         prefs.edit().putBoolean(key(projectId), true).apply()
     }
 
     /** Снимаем маркер: manual завершён корректно (Save/Cancel). */
-    fun clearExpected(projectId: String) {
+    suspend fun clearExpected(projectId: String) = withContext(Dispatchers.IO) {
         prefs.edit().remove(key(projectId)).apply()
     }
 
@@ -39,15 +43,16 @@ class ManualDraftResetNotifier @Inject constructor(
      * @param hasActiveSession true если сейчас действительно есть активная manual-сессия для projectId.
      * @return true если нужно показать snackbar "Черновик ручного режима был сброшен".
      */
-    fun consumeResetIfNeeded(projectId: String, hasActiveSession: Boolean): Boolean {
+    suspend fun consumeResetIfNeeded(projectId: String, hasActiveSession: Boolean): Boolean =
+        withContext(Dispatchers.IO) {
         val expected = prefs.getBoolean(key(projectId), false)
-        if (!expected) return false
+        if (!expected) return@withContext false
 
         // Флаг есть, но сессии нет => процесс убили/сессию потеряли.
         if (!hasActiveSession) {
-            clearExpected(projectId) // one-shot
-            return true
+            prefs.edit().remove(key(projectId)).apply()
+            return@withContext true
         }
-        return false
+        false
     }
 }

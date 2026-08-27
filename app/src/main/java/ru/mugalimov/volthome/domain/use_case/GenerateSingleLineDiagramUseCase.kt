@@ -14,6 +14,10 @@ import ru.mugalimov.volthome.domain.model.singleline.SingleLineInputBlock
 import ru.mugalimov.volthome.domain.model.singleline.SingleLinePhaseSection
 import ru.mugalimov.volthome.domain.model.singleline.SingleLineProtectionBlock
 import ru.mugalimov.volthome.domain.model.singleline.SingleLineProtectionType
+import ru.mugalimov.volthome.domain.model.panel.PanelCustomModuleSnapshot
+import ru.mugalimov.volthome.domain.model.catalog.AuxiliaryApparatusKind
+import ru.mugalimov.volthome.domain.model.catalog.AuxiliaryConnectionPoint
+import ru.mugalimov.volthome.domain.model.cable.CableLineCalculation
 import javax.inject.Inject
 
 /**
@@ -37,6 +41,8 @@ class GenerateSingleLineDiagramUseCase @Inject constructor() {
         totalInstalledPowerWatts: Double?,
         totalCalculatedPowerWatts: Double?,
         totalCurrentAmps: Double?,
+        cableCalculations: Map<Long, CableLineCalculation> = emptyMap(),
+        customModules: List<PanelCustomModuleSnapshot> = emptyList(),
         generatedAtMillis: Long = System.currentTimeMillis()
     ): SingleLineDiagram {
 
@@ -69,7 +75,20 @@ class GenerateSingleLineDiagramUseCase @Inject constructor() {
 
         // Блок вводного автомата.
         // Создаётся только если данные реально есть.
-        val protectionBlocks = buildProtectionBlocks(incomer)
+        val auxiliaryBlocks = customModules.map(::mapAuxiliary)
+        val inputAuxiliary = customModules
+            .filter { it.apparatus.connection.isDefined }
+            .filter { it.apparatus.connection.point != AuxiliaryConnectionPoint.GROUP }
+            .sortedBy { it.apparatus.connection.point.chainOrder() }
+            .map(::mapAuxiliary)
+        val protectionBlocks = inputAuxiliary
+            .filter { block ->
+                customModules.firstOrNull { it.designation == block.id }
+                    ?.apparatus?.connection?.point == AuxiliaryConnectionPoint.PANEL_INPUT
+            } + buildProtectionBlocks(incomer) + inputAuxiliary.filterNot { block ->
+            customModules.firstOrNull { it.designation == block.id }
+                ?.apparatus?.connection?.point == AuxiliaryConnectionPoint.PANEL_INPUT
+        }
 
         // Группируем существующие группы по фазам.
         // Важно:
@@ -79,7 +98,16 @@ class GenerateSingleLineDiagramUseCase @Inject constructor() {
             .map { (phase, phaseGroups) ->
 
                 val mappedGroups = phaseGroups.map { group ->
-                    mapGroup(group)
+                    mapGroup(
+                        group = group,
+                        cableCalculation = cableCalculations[group.groupId],
+                        auxiliaryBlocks = customModules
+                            .filter {
+                                it.apparatus.connection.point == AuxiliaryConnectionPoint.GROUP &&
+                                    it.apparatus.connection.groupId == group.groupId
+                            }
+                            .map(::mapAuxiliary)
+                    )
                 }
 
                 SingleLinePhaseSection(
@@ -111,6 +139,7 @@ class GenerateSingleLineDiagramUseCase @Inject constructor() {
             phaseMode = phaseMode,
             input = inputBlock,
             protectionBlocks = protectionBlocks,
+            unassignedProtectionBlocks = auxiliaryBlocks.filter { it.warning != null },
             phaseSections = phaseSections,
             neutralBus = neutralBus,
             protectiveEarthBus = protectiveEarthBus,
@@ -129,7 +158,9 @@ class GenerateSingleLineDiagramUseCase @Inject constructor() {
      * - изменение фаз.
      */
     private fun mapGroup(
-        group: CircuitGroup
+        group: CircuitGroup,
+        cableCalculation: CableLineCalculation? = null,
+        auxiliaryBlocks: List<SingleLineProtectionBlock> = emptyList()
     ): SingleLineGroupBlock {
 
         val warnings = buildList {
@@ -138,6 +169,9 @@ class GenerateSingleLineDiagramUseCase @Inject constructor() {
             if (group.cableSection <= 0.0) {
                 add("Кабель не указан")
             }
+            cableCalculation?.checks
+                ?.filter { it.status == ru.mugalimov.volthome.domain.model.cable.CableCheckStatus.FAILED }
+                ?.forEach { add(it.message) }
 
             // Ток отсутствует
             if (group.nominalCurrent <= 0.0) {
@@ -156,14 +190,36 @@ class GenerateSingleLineDiagramUseCase @Inject constructor() {
             calculatedPowerWatts = null,
             calculatedCurrentAmps = group.nominalCurrent,
             breakerLabel = buildBreakerLabel(group),
-            cableLabel = buildCableLabel(group),
+            cableLabel = cableCalculation?.let { calculation ->
+                buildString {
+                    append(calculation.cable.compactLabel)
+                    calculation.input.lengthM?.let { append(" · ${formatLength(it)} м") }
+                    calculation.voltageDropPercent?.let { append(" · ΔU ${formatLength(it)}%") }
+                }
+            } ?: buildCableLabel(group),
             rcdLabel = buildRcdLabel(group),
             leakageCurrentMilliAmps = if (group.rcdRequired) {
                 group.rcdCurrent
             } else {
                 null
             },
+            auxiliaryProtectionBlocks = auxiliaryBlocks,
             warnings = warnings
+        )
+    }
+
+    private fun mapAuxiliary(custom: PanelCustomModuleSnapshot): SingleLineProtectionBlock {
+        val apparatus = custom.apparatus
+        val connection = apparatus.connection
+        return SingleLineProtectionBlock(
+            id = custom.designation,
+            title = apparatus.function.displayTitle(),
+            type = apparatus.function.singleLineType(),
+            phase = connection.phase,
+            nominalCurrentAmps = apparatus.ratedCurrentA?.toDouble(),
+            leakageCurrentMilliAmps = null,
+            description = apparatus.displayName,
+            warning = if (connection.isDefined) null else "Точка подключения не задана"
         )
     }
 
@@ -236,11 +292,15 @@ class GenerateSingleLineDiagramUseCase @Inject constructor() {
     ): String {
 
         return if (group.cableSection > 0.0) {
-            "3×${group.cableSection}"
+            val conductors = if (group.phase == Phase.THREE_PHASE) 5 else 3
+            "$conductors×${group.cableSection}"
         } else {
             "Кабель не указан"
         }
     }
+
+    private fun formatLength(value: Double): String =
+        String.format(java.util.Locale("ru", "RU"), "%.2f", value)
 
     /**
      * Формирует label УЗО
@@ -254,8 +314,38 @@ class GenerateSingleLineDiagramUseCase @Inject constructor() {
             return null
         }
 
-        return "УЗО ${group.rcdCurrent}мА"
+        val spec = group.rcdSpec
+        return if (spec != null) {
+            val rated = spec.ratedCurrentA?.let { "$it А / " }.orEmpty()
+            "УЗО $rated${spec.leakageCurrentMa} мА, тип ${spec.type.name}, ${spec.poles}P"
+        } else {
+            "УЗО ${group.rcdCurrent} мА"
+        }
     }
+}
+
+private fun AuxiliaryConnectionPoint.chainOrder(): Int = when (this) {
+    AuxiliaryConnectionPoint.PANEL_INPUT -> 0
+    AuxiliaryConnectionPoint.AFTER_INCOMER -> 2
+    AuxiliaryConnectionPoint.DISTRIBUTION_BUS -> 3
+    AuxiliaryConnectionPoint.GROUP -> 4
+    AuxiliaryConnectionPoint.UNASSIGNED -> 5
+}
+
+private fun AuxiliaryApparatusKind.displayTitle(): String = when (this) {
+    AuxiliaryApparatusKind.VOLTAGE_RELAY -> "Реле напряжения"
+    AuxiliaryApparatusKind.PHASE_CONTROL_RELAY -> "Реле контроля фаз"
+    AuxiliaryApparatusKind.CURRENT_RELAY -> "Реле тока"
+    AuxiliaryApparatusKind.MODULAR_CONTACTOR -> "Модульный контактор"
+    AuxiliaryApparatusKind.SURGE_PROTECTION_DEVICE -> "УЗИП"
+}
+
+private fun AuxiliaryApparatusKind.singleLineType(): SingleLineProtectionType = when (this) {
+    AuxiliaryApparatusKind.VOLTAGE_RELAY -> SingleLineProtectionType.VOLTAGE_RELAY
+    AuxiliaryApparatusKind.PHASE_CONTROL_RELAY -> SingleLineProtectionType.PHASE_CONTROL_RELAY
+    AuxiliaryApparatusKind.CURRENT_RELAY -> SingleLineProtectionType.CURRENT_RELAY
+    AuxiliaryApparatusKind.MODULAR_CONTACTOR -> SingleLineProtectionType.MODULAR_CONTACTOR
+    AuxiliaryApparatusKind.SURGE_PROTECTION_DEVICE -> SingleLineProtectionType.SURGE_PROTECTION
 }
 
 /**

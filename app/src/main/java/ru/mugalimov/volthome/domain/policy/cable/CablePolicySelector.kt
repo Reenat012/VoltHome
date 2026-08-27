@@ -8,21 +8,22 @@ import ru.mugalimov.volthome.domain.model.CableSelectionReason
  *
  * Правила:
  * - кабель выбирается только после автомата;
- * - selectedSection >= normativeFloor;
+ * - selectedSection >= productFloor;
  * - selectedSection >= productDefault;
  * - пока advanced override нет.
  */
 class CablePolicySelector @Inject constructor() {
 
     fun select(input: CablePolicyInput): CablePolicyResult {
-        val normativeFloor = CablePolicyDefaults.typeAwareFloorByBreaker(
+        require(input.breakerA > 0) { "Номинал автомата должен быть положительным" }
+        val productFloor = CablePolicyDefaults.typeAwareFloorByBreaker(
             breakerA = input.breakerA,
             deviceType = input.deviceType
         )
 
         val productDefault = CablePolicyDefaults.productDefaultByBreaker(input.breakerA)
 
-        val requiredSection = maxOf(normativeFloor, productDefault)
+        val requiredSection = maxOf(productFloor, productDefault)
 
         val selectedSection = CablePolicyDefaults.supportedSectionsMm2
             .firstOrNull { it >= requiredSection }
@@ -33,10 +34,10 @@ class CablePolicySelector @Inject constructor() {
         val reason = CableSelectionReason(
             breakerA = input.breakerA,
             deviceType = input.deviceType,
-            normativeFloorSectionMm2 = normativeFloor,
+            minimumProductSectionMm2 = productFloor,
             productDefaultSectionMm2 = productDefault,
             selectedSectionMm2 = selectedSection,
-            selectionRule = "selected=first_supported_section_ge_max(normative_floor, product_default)",
+            selectionRule = "selected=first_supported_section_ge_max(product_floor, product_default)",
             productRule = "cable_selected_after_breaker"
         )
 

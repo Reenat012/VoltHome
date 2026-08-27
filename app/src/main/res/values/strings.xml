@@ -1,8 +1,5 @@
 <resources>
     <string name="app_name">ВольтХом</string>
-    <string name="notification_channel_sync_name">Синхронизация</string>
-    <string name="notification_sync_title">Синхронизация проекта</string>
-    <string name="notification_sync_text">Отправка изменений…</string>
     <string name="rustore_console_app_id">2063638579</string>
     <string name="rustore_pay_deeplink_scheme">volthome-pay</string>
 
@@ -51,17 +48,35 @@
     </string>
 
     <string name="pro_button_buy">Открыть ВольтХом PRO</string>
+    <string name="pro_button_buy_with_price">Оформить PRO за %1$s / месяц</string>
+    <string name="pro_button_start_trial">Попробовать 7 дней бесплатно</string>
     <string name="pro_button_active">Подписка уже активна</string>
     <string name="pro_restore_purchases">Восстановить покупки</string>
 
-    <string name="pro_payment_info">
-        Оплата проходит через RuStore. После покупки подписка автоматически привязывается к вашему аккаунту Яндекс ID. Автопродление подписки отключится автоматически.
-    </string>
+    <string name="pro_payment_info">Оплата выполняется через RuStore. Пробный период доступен один раз, затем подписка продлевается за 499 ₽ в месяц, пока автопродление не отключено.</string>
 
     <!-- PRO screen: layout / sections -->
     <string name="pro_hero_supporting">Для электриков, монтажников и работы с реальными объектами.</string>
     <string name="pro_status_title">Текущий тариф</string>
     <string name="pro_cta_title">Откройте профессиональные функции ВольтХом</string>
+    <string name="pro_comparison_title">Что доступно в Free и PRO</string>
+    <string name="pro_price_fallback">499 ₽</string>
+    <string name="pro_price_monthly">%1$s / месяц</string>
+    <string name="pro_price_description">Подписка с автопродлением. Итоговые условия подтверждаются до оформления; управлять будущими списаниями можно кнопкой ниже.</string>
+    <string name="pro_trial_title">7 дней бесплатно</string>
+    <string name="pro_trial_then_price">Затем %1$s / месяц</string>
+    <string name="pro_manage_subscription">Управлять автопродлением</string>
+    <string name="pro_manage_subscription_note">Отключение действует и во время пробного периода. Доступ PRO сохранится до окончания текущего периода.</string>
+    <string name="pro_manage_subscription_dialog_title">Управление автопродлением</string>
+    <string name="pro_manage_subscription_dialog_text">RuStore не позволяет приложению отключать подписку напрямую. Мы откроем раздел подписок: выберите «ВольтХом PRO» и нажмите «Отменить подписку». Новых списаний не будет, а PRO останется доступен до конца текущего периода.</string>
+    <string name="pro_manage_subscription_dialog_confirm">Открыть подписки</string>
+    <string name="pro_manage_subscription_error">Не удалось открыть RuStore. Установите или обновите RuStore, затем откройте: Профиль → Подписки → ВольтХом PRO.</string>
+    <string name="action_cancel">Отмена</string>
+    <string name="pro_demo_title">Посмотрите ВольтХом на готовом проекте</string>
+    <string name="pro_demo_description">Откроем настоящую демонстрационную квартиру с комнатами, нагрузками, сформированными линиями и расчётами.</string>
+    <string name="pro_demo_button">Открыть демо-проект</string>
+    <string name="pro_demo_loading">Готовим проект…</string>
+    <string name="pro_demo_note">Демо доступно бесплатно, не занимает лимит проектов и восстанавливается при повторном открытии.</string>
 
     <!-- PRO screen: feature cards -->
     <string name="pro_feature_projects_title">Неограниченное количество проектов</string>
@@ -127,10 +142,10 @@
         Функция входит в ВольтХом PRO и подходит для настройки расчёта под фактическое оборудование.
     </string>
 
-    <string name="pro_temporary_price_title">Текущая цена действует временно</string>
+    <string name="pro_temporary_price_title">Стоимость подписки</string>
 
     <string name="pro_temporary_price_description">
-    Текущая стоимость подписки действует на этапе стабилизации PRO-функций. По мере развития и расширения возможностей ВольтХом PRO условия подписки могут измениться.
+    Стоимость и период подписки показываются до подтверждения покупки в RuStore.
 </string>
 
     <!-- ========================================================= -->

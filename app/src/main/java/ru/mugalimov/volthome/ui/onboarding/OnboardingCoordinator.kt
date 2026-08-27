@@ -3,9 +3,12 @@ package ru.mugalimov.volthome.ui.onboarding
 import android.util.Log
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import ru.mugalimov.volthome.data.repository.OnboardingRepository
@@ -45,6 +48,9 @@ class OnboardingCoordinator @Inject constructor(
     // Храним максимум одну активную подсказку.
     private val _activeHint = MutableStateFlow<ActiveHint?>(null)
     val activeHint: StateFlow<ActiveHint?> = _activeHint.asStateFlow()
+    private var presentedHintActivatedAt: Long? = null
+    private var currentScreen: OnboardingScreen? = null
+    private var presentedOnCurrentVisit: Boolean = false
 
     /**
      * Пытается активировать hint.
@@ -60,85 +66,171 @@ class OnboardingCoordinator @Inject constructor(
         body: String,
         nowMillis: Long = System.currentTimeMillis(),
         cooldownMillis: Long = DEFAULT_COOLDOWN_MILLIS
-    ): Boolean = mutex.withLock {
-        val hasActiveHint = (_activeHint.value != null)
+    ): Boolean {
+        var effectiveNowMillis = nowMillis
 
-        // Сначала читаем persisted state и cooldown для прозрачной диагностики.
-        val alreadyShown = repository.isShown(hintId)
-        val lastAnyHintShownAt = repository.getLastAnyHintShownAt()
-        val cooldownActive =
-            lastAnyHintShownAt > 0L && (nowMillis - lastAnyHintShownAt) < cooldownMillis
+        while (true) {
+            var remainingCooldownMillis = 0L
+            var waitForActiveHint = false
+            val accepted = mutex.withLock {
+                val hasActiveHint = (_activeHint.value != null)
 
-        Log.d(
-            TAG,
-            buildString {
-                append("TRY_SHOW")
-                append(" hintId=").append(hintId.name)
-                append(" screen=").append(screen.name)
-                append(" targetTag=").append(targetTag?.rawTag ?: "null")
-                append(" hasActiveHint=").append(hasActiveHint)
-                append(" alreadyShown=").append(alreadyShown)
-                append(" lastAnyHintShownAt=").append(lastAnyHintShownAt)
-                append(" nowMillis=").append(nowMillis)
-                append(" cooldownMillis=").append(cooldownMillis)
-                append(" cooldownActive=").append(cooldownActive)
+                // Сначала читаем persisted state и cooldown для прозрачной диагностики.
+                val alreadyShown = repository.isShown(hintId)
+                val hintsEnabled = repository.areHintsEnabled()
+                val lastAnyHintShownAt = repository.getLastAnyHintShownAt()
+                val cooldownActive =
+                    lastAnyHintShownAt > 0L &&
+                            (effectiveNowMillis - lastAnyHintShownAt) < cooldownMillis
+
+                Log.d(
+                    TAG,
+                    buildString {
+                        append("TRY_SHOW")
+                        append(" hintId=").append(hintId.name)
+                        append(" screen=").append(screen.name)
+                        append(" targetTag=").append(targetTag?.rawTag ?: "null")
+                        append(" hasActiveHint=").append(hasActiveHint)
+                        append(" alreadyShown=").append(alreadyShown)
+                        append(" hintsEnabled=").append(hintsEnabled)
+                        append(" lastAnyHintShownAt=").append(lastAnyHintShownAt)
+                        append(" nowMillis=").append(effectiveNowMillis)
+                        append(" cooldownMillis=").append(cooldownMillis)
+                        append(" cooldownActive=").append(cooldownActive)
+                    }
+                )
+
+                // Запрос не теряем: ждём освобождения active slot. Корутинa
+                // привязана к экранному LaunchedEffect и отменится при уходе.
+                if (hasActiveHint) {
+                    Log.d(
+                        TAG,
+                        "TRY_SHOW_WAIT reason=ACTIVE_EXISTS hintId=${hintId.name} activeHint=${_activeHint.value?.hintId?.name}"
+                    )
+                    waitForActiveHint = true
+                    return@withLock false
+                }
+
+                // Если hint уже был подтверждён, повтор не допускаем.
+                if (alreadyShown) {
+                    Log.d(
+                        TAG,
+                        "TRY_SHOW_REJECT reason=ALREADY_SHOWN hintId=${hintId.name}"
+                    )
+                    return false
+                }
+
+                if (!hintsEnabled) {
+                    Log.d(TAG, "TRY_SHOW_REJECT reason=HINTS_DISABLED hintId=${hintId.name}")
+                    return false
+                }
+
+                // Не устраиваем каскад карточек: максимум одна фактически
+                // показанная подсказка за одно посещение экрана.
+                if (currentScreen == screen && presentedOnCurrentVisit) {
+                    Log.d(
+                        TAG,
+                        "TRY_SHOW_REJECT reason=ALREADY_PRESENTED_THIS_VISIT hintId=${hintId.name}"
+                    )
+                    return false
+                }
+
+                // Cooldown теперь не теряет запрос: ждём остаток времени, после чего
+                // повторно проверяем persisted/active state.
+                if (cooldownActive) {
+                    remainingCooldownMillis =
+                        (cooldownMillis - (effectiveNowMillis - lastAnyHintShownAt))
+                            .coerceAtLeast(1L)
+                    Log.d(
+                        TAG,
+                        "TRY_SHOW_WAIT reason=COOLDOWN hintId=${hintId.name} remainingMs=$remainingCooldownMillis"
+                    )
+                    return@withLock false
+                }
+
+                // Активируем hint. Момент фактического показа host подтвердит
+                // отдельно, когда anchor стабилизируется.
+                _activeHint.value = ActiveHint(
+                    hintId = hintId,
+                    screen = screen,
+                    targetTag = targetTag,
+                    title = title,
+                    body = body,
+                    activatedAtMillis = effectiveNowMillis
+                )
+                presentedHintActivatedAt = null
+
+                Log.d(
+                    TAG,
+                    "TRY_SHOW_ACCEPT hintId=${hintId.name} screen=${screen.name} targetTag=${targetTag?.rawTag ?: "null"}"
+                )
+                true
             }
-        )
 
-        // Пока один hint активен, второй не допускаем.
-        if (hasActiveHint) {
-            Log.d(
-                TAG,
-                "TRY_SHOW_REJECT reason=ACTIVE_EXISTS hintId=${hintId.name} activeHint=${_activeHint.value?.hintId?.name}"
-            )
-            return@withLock false
+            if (accepted) return true
+
+            if (waitForActiveHint) {
+                activeHint.filter { it == null }.first()
+            } else {
+                delay(remainingCooldownMillis)
+            }
+            effectiveNowMillis = System.currentTimeMillis()
         }
+    }
 
-        // Если hint уже был показан и подтверждён persisted state, повтор не допускаем.
-        if (alreadyShown) {
-            Log.d(
-                TAG,
-                "TRY_SHOW_REJECT reason=ALREADY_SHOWN hintId=${hintId.name}"
-            )
-            return@withLock false
+    /**
+     * Вызывается host-ом только после того, как целевой элемент найден и
+     * карточка действительно готова появиться на экране.
+     */
+    suspend fun markPresented(hintId: OnboardingHintId) {
+        mutex.withLock {
+            val current = _activeHint.value ?: return@withLock
+            if (current.hintId != hintId) return@withLock
+            if (presentedHintActivatedAt == current.activatedAtMillis) return@withLock
+
+            repository.setLastAnyHintShownAt(System.currentTimeMillis())
+            presentedHintActivatedAt = current.activatedAtMillis
+            presentedOnCurrentVisit = true
+            Log.d(TAG, "PRESENTED hintId=${hintId.name}")
         }
+    }
 
-        // Глобальный cooldown между любыми hint.
-        if (cooldownActive) {
-            val remainingMs = (cooldownMillis - (nowMillis - lastAnyHintShownAt)).coerceAtLeast(0L)
-            Log.d(
-                TAG,
-                "TRY_SHOW_REJECT reason=COOLDOWN hintId=${hintId.name} remainingMs=$remainingMs"
-            )
-            return@withLock false
+    /**
+     * Не даёт подсказке предыдущего экрана скрыто блокировать всю очередь.
+     */
+    suspend fun onScreenChanged(newScreen: OnboardingScreen?) {
+        val shouldCancel = mutex.withLock {
+            if (currentScreen != newScreen) {
+                currentScreen = newScreen
+                presentedOnCurrentVisit = false
+            }
+            val current = _activeHint.value
+            current != null && current.screen != newScreen
         }
+        if (shouldCancel) dismiss(OnboardingDismissReason.SYSTEM_CANCELLED)
+    }
 
-        // Активируем hint.
-        _activeHint.value = ActiveHint(
-            hintId = hintId,
-            screen = screen,
-            targetTag = targetTag,
-            title = title,
-            body = body,
-            activatedAtMillis = nowMillis
-        )
+    suspend fun resetAll() {
+        mutex.withLock {
+            _activeHint.value = null
+            presentedHintActivatedAt = null
+            presentedOnCurrentVisit = false
+            repository.resetAll()
+        }
+    }
 
-        // Фиксируем момент показа для глобального cooldown.
-        repository.setLastAnyHintShownAt(nowMillis)
-
-        Log.d(
-            TAG,
-            "TRY_SHOW_ACCEPT hintId=${hintId.name} screen=${screen.name} targetTag=${targetTag?.rawTag ?: "null"}"
-        )
-
-        return@withLock true
+    suspend fun disableAll() {
+        mutex.withLock {
+            _activeHint.value = null
+            presentedHintActivatedAt = null
+            repository.disableHints()
+        }
     }
 
     /**
      * Закрывает текущий активный hint.
      *
-     * Persisted shown-flag пишется только
-     * для пользовательских dismiss/skip-сценариев.
+     * Persisted shown-flag пишется только после явного «Понятно».
      */
     suspend fun dismiss(reason: OnboardingDismissReason) {
         mutex.withLock {
@@ -166,6 +258,7 @@ class OnboardingCoordinator @Inject constructor(
             }
 
             _activeHint.value = null
+            presentedHintActivatedAt = null
 
             Log.d(
                 TAG,

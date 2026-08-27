@@ -8,7 +8,7 @@ import ru.mugalimov.volthome.domain.model.VoltageType
 import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsValidator.validated
 
 /**
- * Для AddRoomSheet / DevicePickerSheet / DeviceEditSheet.
+ * Для AddRoomScreen / DevicePickerSheet / DeviceEditSheet.
  * Хранит drafts/errors/expanded per key и отдаёт единый контракт в editor.
  *
  * ЕДИНСТВЕННАЯ точка правды:
@@ -40,19 +40,14 @@ class InMemoryDeviceParamsAdapter<K>(
 
     @Composable
     override fun state(key: K, seed: DeviceParamsDraft): DeviceParamsEditorState<K> {
-        // ensure state exists
-        val currentDraft = drafts[key] ?: run {
-            setDraft(key, seed)
-            drafts.getValue(key)
-        }
+        // Чтение composable не должно мутировать snapshot-state. Состояние появится
+        // в картах только после первого пользовательского изменения или peek при сохранении.
+        val currentDraft = drafts[key] ?: seed
 
         val isExpanded = expanded[key] ?: false
 
-        val currentErrors = errors[key] ?: run {
-            // гарантируем, что ошибки созданы через setDraft
-            setDraft(key, currentDraft)
-            errors.getValue(key)
-        }
+        val currentErrors = errors[key]
+            ?: DeviceParamsValidator.validateForPlan(validated(currentDraft).normalized, isAllowed)
 
         fun update(block: (DeviceParamsDraft) -> DeviceParamsDraft) {
             val base = drafts[key] ?: seed

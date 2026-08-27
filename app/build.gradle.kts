@@ -1,4 +1,5 @@
 import java.util.Properties
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.android.application)
@@ -7,6 +8,23 @@ plugins {
     id("com.google.dagger.hilt.android")
     kotlin("kapt")
 }
+
+val localSecrets = Properties().apply {
+    rootProject.file("secrets.properties")
+        .takeIf { it.isFile }
+        ?.reader(Charsets.UTF_8)
+        ?.use(::load)
+}
+
+fun configurationValue(name: String): String =
+    providers.environmentVariable(name).orNull?.trim().takeUnless { it.isNullOrEmpty() }
+        ?: providers.gradleProperty(name).orNull?.trim().takeUnless { it.isNullOrEmpty() }
+        ?: localSecrets.getProperty(name)?.trim().orEmpty()
+
+fun String.asBuildConfigString(): String =
+    "\"${replace("\\", "\\\\").replace("\"", "\\\"")}\""
+
+val appMetricaApiKey = configurationValue("APP_METRICA_API_KEY")
 
 android {
     namespace = "ru.mugalimov.volthome"
@@ -17,8 +35,8 @@ android {
         minSdk = 24
         //noinspection EditedTargetSdkVersion
         targetSdk = 35
-        versionCode = 30
-        versionName = "3.1"
+        versionCode = 35
+        versionName = "3.6"
 
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -28,50 +46,20 @@ android {
             "YANDEX_CLIENT_ID",
             "\"${project.findProperty("YANDEX_CLIENT_ID") ?: ""}\""
         )
+        buildConfigField(
+            "String",
+            "APP_METRICA_API_KEY",
+            appMetricaApiKey.asBuildConfigString()
+        )
         manifestPlaceholders["YANDEX_CLIENT_ID"] =
             project.findProperty("YANDEX_CLIENT_ID") as String? ?: ""
 
-        buildConfigField(
-            "String",
-            "API_BASE_URL",
-            "\"${project.findProperty("API_BASE_URL") ?: ""}\""
-        )
-
-        // ---------------------------------------------------------
-        // 🔥 COMMIT 2 — FEATURE FLAG ДЛЯ REAL PRODUCT LOADING
-        // ---------------------------------------------------------
-        // true = используем RuStore SDK для загрузки продуктов
-        // false = fallback UI режим (без возможности покупки)
-        buildConfigField(
-            "boolean",
-            "BILLING_REAL_PRODUCT_LOADING_ENABLED",
-            "true"
-        )
-
-        buildConfigField(
-            "boolean",
-            "BILLING_PENDING_CONFIRM_ENABLED",
-            "true"
-        )
-
-        // ---------------------------------------------------------
-        // 🔥 COMMIT 5 — FEATURE FLAGS ДЛЯ RESTORE / RECOVERY
-        // ---------------------------------------------------------
         // true = ручное восстановление покупок через SDK разрешено
         // false = кнопка restore и recovery path должны быть отключены
         buildConfigField(
             "boolean",
             "BILLING_RESTORE_ENABLED",
             "true"
-        )
-
-        // true = разрешаем контролируемый auto-restore на старте / после логина
-        // false = auto-restore выключен, доступен только manual restore
-        // На rollout держим false, чтобы не словить лишние recovery-гонки.
-        buildConfigField(
-            "boolean",
-            "BILLING_AUTO_RESTORE_ON_START_ENABLED",
-            "false"
         )
 
 //        addManifestPlaceholders(
@@ -87,13 +75,23 @@ android {
     signingConfigs {
         val properties = Properties()
         val file = rootProject.file("keystore.properties")
-        if (file.exists()) properties.load(file.inputStream())
+        if (file.exists()) file.reader(Charsets.UTF_8).use(properties::load)
+
+        val releaseStorePath = configurationValue("VOLTHOME_KEYSTORE_PATH")
+            .ifBlank { properties.getProperty("storeFile", "") }
+            .takeIf { it.isNotBlank() }
+        val releaseStorePassword = configurationValue("VOLTHOME_KEYSTORE_PASSWORD")
+            .ifBlank { properties.getProperty("storePassword", "") }
+        val releaseKeyAlias = configurationValue("VOLTHOME_KEY_ALIAS")
+            .ifBlank { properties.getProperty("keyAlias", "upload_key") }
+        val releaseKeyPassword = configurationValue("VOLTHOME_KEY_PASSWORD")
+            .ifBlank { properties.getProperty("keyPassword", "") }
 
         create("release") {
-            storeFile = file("/Users/mugalimovrinat/Documents/VoltHome/Публикация/Key/upload_key")
-            storePassword = properties.getProperty("storePassword", "")
-            keyAlias = "upload_key"
-            keyPassword = properties.getProperty("keyPassword", "")
+            storeFile = releaseStorePath?.let(::file)
+            storePassword = releaseStorePassword
+            keyAlias = releaseKeyAlias
+            keyPassword = releaseKeyPassword
             enableV1Signing = true
             enableV2Signing = true
         }
@@ -115,23 +113,33 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
         isCoreLibraryDesugaringEnabled = true
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
     buildFeatures {
         compose = true
         buildConfig = true
     }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+    sourceSets["androidTest"].assets.srcDir("$projectDir/schemas")
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
+    }
+}
+
+kapt {
+    arguments {
+        arg("room.schemaLocation", "$projectDir/schemas")
+    }
 }
 
 dependencies {
-    implementation(libs.androidx.hilt.common)
-    implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.foundation.layout)
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.foundation)
-    implementation(libs.androidx.media3.common.ktx)
     implementation(libs.androidx.foundation.layout)
 //    implementation(libs.compose.material3)
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
@@ -140,10 +148,6 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
-    implementation(libs.androidx.benchmark.macro)
-    implementation(libs.firebase.crashlytics.buildtools)
-    implementation(libs.litert.support.api)
-    implementation(libs.androidx.storage)
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.browser)
 //    implementation(libs.androidx.foundation.desktop)
@@ -160,8 +164,9 @@ dependencies {
 
     // Room
     implementation(libs.androidx.room.runtime)
-    kapt("androidx.room:room-compiler:2.7.2")
+    kapt("androidx.room:room-compiler:2.8.0")
     implementation(libs.androidx.room.ktx)
+    androidTestImplementation("androidx.room:room-testing:2.8.0")
 
     // Hilt (опционально, но рекомендуется)
     implementation(libs.hilt.android)
@@ -178,13 +183,6 @@ dependencies {
 
     implementation(libs.coil.compose)
     implementation(libs.coil.svg) // Для поддержки SVG
-
-    // Lottie для векторных анимаций
-    implementation("com.airbnb.android:lottie-compose:6.3.0")
-
-    // Карусель
-    implementation("com.google.accompanist:accompanist-pager:0.34.0")
-    implementation("com.google.accompanist:accompanist-pager-indicators:0.34.0")
 
     // DataStore
     implementation("androidx.datastore:datastore-preferences:1.0.0")
@@ -207,20 +205,11 @@ dependencies {
     implementation("com.yandex.android:authsdk:3.1.4")
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
 
     // DataStore (Proto/Custom Serializer)
     implementation("androidx.datastore:datastore-core:1.1.1")
 
 // Шифрование (Tink + Android Keystore)
-    implementation("com.google.crypto.tink:tink-android:1.12.0")
-
-    implementation("com.squareup.retrofit2:retrofit:2.11.0")
-    implementation("com.squareup.retrofit2:converter-gson:2.11.0")
-
-    implementation("androidx.hilt:hilt-work:1.2.0")
-    kapt ("androidx.hilt:hilt-compiler:1.2.0")
-
     // Если снова не найдёт капчу — ВРЕМЕННО добавь явные зависимости:
 //     implementation("com.vk.id.captcha:okhttp-interceptors:0.0.4")
 //     implementation("com.vk.id.captcha:vkid-captcha:0.0.4")
@@ -244,7 +233,26 @@ configurations.all {
 configurations.all {
     resolutionStrategy {
         force("com.squareup.okhttp3:okhttp:4.12.0")
-        force("com.squareup.okhttp3:logging-interceptor:4.12.0")
         force("com.yandex.android:authsdk:3.1.4")
+    }
+}
+
+// room-testing 2.8.x использует json 1.8.x; выравниваем только test APK,
+// иначе старый serialization-core из Compose падает до запуска миграции.
+configurations.matching { it.name.contains("AndroidTest", ignoreCase = true) }.configureEach {
+    resolutionStrategy.force(
+        "org.jetbrains.kotlinx:kotlinx-serialization-core:1.8.1",
+        "org.jetbrains.kotlinx:kotlinx-serialization-core-jvm:1.8.1",
+        "org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1",
+        "org.jetbrains.kotlinx:kotlinx-serialization-json-jvm:1.8.1"
+    )
+}
+
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+    doFirst {
+        check(appMetricaApiKey.isNotBlank()) {
+            "APP_METRICA_API_KEY is required for a release build. " +
+                "Set it in secrets.properties, ~/.gradle/gradle.properties or the environment."
+        }
     }
 }

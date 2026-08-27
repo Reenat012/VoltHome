@@ -13,8 +13,14 @@ interface GroupPhaseOverrideDao {
     """)
     fun observeByProject(projectId: String): Flow<List<GroupPhaseOverrideEntity>>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Query("SELECT * FROM group_phase_overrides WHERE project_id = :projectId")
+    suspend fun getByProject(projectId: String): List<GroupPhaseOverrideEntity>
+
+    @Upsert
     suspend fun upsert(entity: GroupPhaseOverrideEntity)
+
+    @Upsert
+    suspend fun upsertAll(entities: List<GroupPhaseOverrideEntity>)
 
     @Query("""
         DELETE FROM group_phase_overrides

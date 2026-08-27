@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -12,12 +13,18 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.data.repository.PreferencesRepository
+import ru.mugalimov.volthome.data.repository.ProjectSetupRepository
+import ru.mugalimov.volthome.data.repository.observeResolved
+import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
 import ru.mugalimov.volthome.domain.model.DefaultDevice
 import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.RoomType
@@ -29,12 +36,15 @@ import ru.mugalimov.volthome.domain.use_case.DeleteDevicesUseCase
 import ru.mugalimov.volthome.domain.use_case.DeleteRoomUseCase
 
 @HiltViewModel
+@OptIn(ExperimentalCoroutinesApi::class)
 class RoomsViewModel @Inject constructor(
     private val createRoom: CreateRoomWithDevicesUseCase,
     private val addDevices: AddDevicesToRoomUseCase,
     private val deleteRoom: DeleteRoomUseCase,
     private val deleteDevices: DeleteDevicesUseCase,
     private val preferencesRepository: PreferencesRepository,
+    private val activeProjectDataStore: ActiveProjectDataStore,
+    private val projectSetupRepository: ProjectSetupRepository,
     deviceRepository: DeviceRepository
 ) : ViewModel() {
 
@@ -54,7 +64,17 @@ class RoomsViewModel @Inject constructor(
 
     // Текущее значение режима для UI (с дефолтом THREE)
     val phaseMode: StateFlow<PhaseMode> =
-        preferencesRepository.phaseMode
+        activeProjectDataStore.activeProjectId
+            .flatMapLatest { projectId ->
+                if (projectId.isNullOrBlank()) {
+                    preferencesRepository.phaseMode
+                } else {
+                    val legacyFallbackMode = preferencesRepository.phaseMode.first()
+                    projectSetupRepository.observeResolved(projectId, legacyFallbackMode)
+                        .map { setup -> setup.phaseMode }
+                }
+            }
+            .distinctUntilChanged()
             .stateIn(viewModelScope, SharingStarted.Lazily, PhaseMode.THREE)
 
     /**
@@ -142,7 +162,14 @@ class RoomsViewModel @Inject constructor(
     }
 
     fun setPhaseMode(mode: PhaseMode) {
-        viewModelScope.launch { preferencesRepository.setPhaseMode(mode) }
+        viewModelScope.launch {
+            val projectId = activeProjectDataStore.activeProjectId.first().orEmpty().trim()
+            if (projectId.isNotBlank()) {
+                projectSetupRepository.updatePhaseMode(projectId, mode)
+            }
+            // Legacy fallback для старых проектов и мастера создания проекта.
+            preferencesRepository.setPhaseMode(mode)
+        }
     }
 
     /**
@@ -235,4 +262,3 @@ class RoomsViewModel @Inject constructor(
             .trim()
             .take(40)
 }
-

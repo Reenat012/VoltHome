@@ -1,147 +1,183 @@
 package ru.mugalimov.volthome.ui.screens.onboarding
 
-
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import ru.mugalimov.volthome.R
+import ru.mugalimov.volthome.core.theme.VhColors
+import ru.mugalimov.volthome.ui.components.VhPrimaryButton
 
-
+/**
+ * Короткое знакомство с продуктом. Текст остаётся нативным Compose-контентом,
+ * а PNG используется только как иллюстрация — это сохраняет доступность и
+ * корректную вёрстку на экранах разного размера.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun OnboardingScreen(
     onComplete: () -> Unit,
-    animationResources: List<String>
+    finalActionLabel: String = "Создать первый проект",
+    modifier: Modifier = Modifier
 ) {
-    // Состояние пейджера для управления карасульею
-    val pagerState = rememberPagerState(pageCount = { animationResources.size })
+    val pages = onboardingPages
+    val pagerState = rememberPagerState(pageCount = { pages.size })
+    val scope = rememberCoroutineScope()
+    val isLastPage = pagerState.currentPage == pages.lastIndex
+    val t = VhColors.tokens
 
-    // Область видимости для корутин (для анимации)
-    val coroutineScope = rememberCoroutineScope()
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(t.bg)
+            .safeDrawingPadding()
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+        ) {
+            if (pagerState.currentPage > 0) {
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            pagerState.animateScrollToPage(pagerState.currentPage - 1)
+                        }
+                    },
+                    modifier = Modifier.align(Alignment.CenterStart)
+                ) {
+                    Text("Назад", color = t.textSecondary)
+                }
+            }
 
-    // 1. Состояние для контроля воспроизведения анимаций
-    val animationPlayStates = remember {
-        animationResources.map { mutableStateOf(true) }
-    }
+            TextButton(
+                onClick = onComplete,
+                modifier = Modifier.align(Alignment.CenterEnd)
+            ) {
+                Text("Пропустить", color = t.textSecondary)
+            }
+        }
 
-    // Автозапуск первой анимации
-    LaunchedEffect(Unit) {
-        animationPlayStates[0].value = true
-    }
-
-//    // Флаг для управления автопрокруткой
-//    val autoScrollEnabled by remember { mutableStateOf(true) }
-
-    // Основной контейнер экрана
-    Box(modifier = Modifier.fillMaxSize()) {
-
-        /** Горизонтальный пейджер (карусель)
-         * count - количество страниц
-         * state - состояние прокрутки
-         * userScrollEnabled - разрешаем ручную прокрутку свайпом
-         **/
         HorizontalPager(
             state = pagerState,
-            modifier = Modifier.fillMaxSize(),
-            pageContent = { pageIndex ->
-                // Компонент векторной анимации для текущего шага
-                LottieAnimationItem(
-                    animationPath = animationResources[pageIndex],
-                    isPlaying = animationPlayStates[pageIndex].value,
-                    onAnimationEnd = {
-                        // Для не-последних страниц: переходим дальше с задержкой
-                        if (pageIndex < animationResources.lastIndex) {
-                            coroutineScope.launch {
-                                delay(300) // Задержка для финального кадра
-                                pagerState.animateScrollToPage(pageIndex + 1)
-                            }
-                        }
-                    }
-                )
-            }
-        )
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            verticalAlignment = Alignment.CenterVertically
+        ) { pageIndex ->
+            OnboardingPage(
+                page = pages[pageIndex],
+                modifier = Modifier.fillMaxSize()
+            )
+        }
 
-        CustomPageIndicator(
-            pageCount = animationResources.size,
+        PageIndicator(
+            pageCount = pages.size,
             currentPage = pagerState.currentPage,
             modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 32.dp)
+                .align(Alignment.CenterHorizontally)
+                .padding(top = 8.dp, bottom = 20.dp)
         )
 
-        // Кнопка пропустить вызывает onComplete при нажатии
-        TextButton(
-            onClick = onComplete,
-            modifier = Modifier.align(Alignment.TopEnd)
-        ) {
-            Text("Пропустить")
-        }
-
-        // Кнопка "Далее" (только не на последней странице)
-        if (pagerState.currentPage < animationResources.lastIndex) {
-            Button(
-                onClick = {
-                    coroutineScope.launch {
+        VhPrimaryButton(
+            text = if (isLastPage) finalActionLabel else "Далее",
+            onClick = {
+                if (isLastPage) {
+                    onComplete()
+                } else {
+                    scope.launch {
                         pagerState.animateScrollToPage(pagerState.currentPage + 1)
                     }
-                },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(16.dp)
-            ) {
-                Text("Далее")
-            }
-        }
-    }
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+        )
 
-    // Обработчик смены страниц
-    LaunchedEffect(pagerState.currentPage) {
-        // Выключаем все анимации
-        animationPlayStates.forEach { it.value = false }
-
-        // Включаем только текущую
-        animationPlayStates[pagerState.currentPage].value = true
-
-        // Автозавершение для последней страницы
-        if (pagerState.currentPage == animationResources.lastIndex) {
-            coroutineScope.launch {
-                delay(2500) // Ждём завершения анимации
-                onComplete()
-            }
-        }
+        Spacer(Modifier.height(20.dp))
     }
 }
 
 @Composable
-fun CustomPageIndicator(
+private fun OnboardingPage(
+    page: OnboardingPageModel,
+    modifier: Modifier = Modifier
+) {
+    val t = VhColors.tokens
+
+    Column(
+        modifier = modifier.padding(horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Image(
+            painter = painterResource(page.imageRes),
+            contentDescription = null,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .padding(horizontal = 4.dp)
+        )
+
+        Text(
+            text = page.title,
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            color = t.textPrimary,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        Text(
+            text = page.description,
+            style = MaterialTheme.typography.bodyLarge,
+            color = t.textSecondary,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(Modifier.height(12.dp))
+    }
+}
+
+@Composable
+private fun PageIndicator(
     pageCount: Int,
     currentPage: Int,
     modifier: Modifier = Modifier
 ) {
+    val t = VhColors.tokens
+
     Row(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -150,13 +186,36 @@ fun CustomPageIndicator(
         repeat(pageCount) { index ->
             Box(
                 modifier = Modifier
-                    .size(if (index == currentPage) 12.dp else 8.dp)
+                    .size(if (index == currentPage) 10.dp else 7.dp)
                     .clip(CircleShape)
                     .background(
-                        if (index == currentPage) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.outlineVariant
+                        if (index == currentPage) t.primary else t.divider
                     )
             )
         }
     }
 }
+
+private data class OnboardingPageModel(
+    @param:DrawableRes val imageRes: Int,
+    val title: String,
+    val description: String
+)
+
+private val onboardingPages = listOf(
+    OnboardingPageModel(
+        imageRes = R.drawable.onboarding_rooms,
+        title = "Соберите объект по помещениям",
+        description = "Добавьте комнаты и электроприборы — ВольтХом рассчитает нагрузки и сформирует структуру проекта."
+    ),
+    OnboardingPageModel(
+        imageRes = R.drawable.onboarding_protection,
+        title = "Получите группы и защиту",
+        description = "Приложение сформирует линии, предложит автоматы и УЗО и объяснит принятые решения."
+    ),
+    OnboardingPageModel(
+        imageRes = R.drawable.onboarding_panel,
+        title = "Соберите и проверьте щит до монтажа",
+        description = "Расположите аппараты на DIN-рейках, выберите совместимые модели и оцените ориентировочную стоимость."
+    )
+)

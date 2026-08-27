@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import ru.mugalimov.volthome.ui.model.ProjectUi
 import ru.mugalimov.volthome.ui.model.UserProfileUi
+import ru.mugalimov.volthome.ui.model.ManualModeControlAvailability
 import ru.mugalimov.volthome.ui.onboarding.model.OnboardingScreen
 
 /**
@@ -47,6 +48,9 @@ fun AppScaffoldWithDrawer(
     // ✅ Визуальный стейт чипа (AUTO/MANUAL/DIRTY)
     manualChipState: ManualModeChipState = ManualModeChipState.AUTO,
 
+    manualModeControlAvailability: ManualModeControlAvailability =
+        ManualModeControlAvailability.HIDDEN,
+
     // ✅ Текущий onboarding screen для привязки anchor к чипу ручного режима
     manualChipOnboardingScreen: OnboardingScreen? = null,
 
@@ -80,6 +84,7 @@ fun AppScaffoldWithDrawer(
         onDeleteProject = onDeleteProject,
         onManualModeClick = onManualModeClick,
         manualChipState = manualChipState,
+        manualModeControlAvailability = manualModeControlAvailability,
         manualChipOnboardingScreen = manualChipOnboardingScreen,
         bottomBar = bottomBar,
         manualExitDialogVisible = manualExitDialogVisible,

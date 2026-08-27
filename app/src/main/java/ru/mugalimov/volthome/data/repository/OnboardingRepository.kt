@@ -21,4 +21,10 @@ interface OnboardingRepository {
     suspend fun getLastAnyHintShownAt(): Long
 
     suspend fun setLastAnyHintShownAt(value: Long)
+
+    suspend fun areHintsEnabled(): Boolean
+
+    suspend fun disableHints()
+
+    suspend fun resetAll()
 }

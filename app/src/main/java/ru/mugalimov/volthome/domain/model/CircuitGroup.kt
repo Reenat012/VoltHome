@@ -35,6 +35,13 @@ data class CircuitGroup(
     // Параметры безопасности
     val rcdRequired: Boolean,
     val rcdCurrent: Int = 30,
+    val rcdReasonCodes: List<String> = emptyList(),
+    val rcdSpec: ru.mugalimov.volthome.domain.model.protection.RcdSpec? = null,
+    val manualDeviationCodes: List<String> = emptyList(),
+
+    // Происхождение и версия решения нужны для прозрачности после перезапуска.
+    val calculationSource: CalculationSource = CalculationSource.LEGACY,
+    val algorithmVersion: Int = 0,
 
     // Фазы
     val phase: Phase = Phase.A

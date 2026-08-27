@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.FloatingActionButton
@@ -23,21 +22,17 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dagger.hilt.android.EntryPointAccessors
-import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.ui.components.ErrorView
 import ru.mugalimov.volthome.ui.components.LoadingView
 import ru.mugalimov.volthome.ui.onboarding.OnboardingRuntimeEntryPoint
@@ -48,19 +43,16 @@ import ru.mugalimov.volthome.ui.onboarding.model.RoomsOnboardingFacts
 import ru.mugalimov.volthome.ui.onboarding.modifier.onboardingAnchor
 import ru.mugalimov.volthome.ui.viewmodel.RoomViewModel
 import ru.mugalimov.volthome.ui.viewmodel.RoomsAction
-import ru.mugalimov.volthome.ui.viewmodel.RoomsViewModel
 
 @SuppressLint("NotConstructor")
 @Composable
 fun RoomsScreen(
     onClickRoom: (Long) -> Unit,
-    onAddRoom: () -> Unit, // legacy
-    viewModel: RoomViewModel = hiltViewModel(),
-    addViewModel: RoomsViewModel = hiltViewModel()
+    onAddRoom: () -> Unit,
+    onReconfigureProject: () -> Unit,
+    viewModel: RoomViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val defaultDevices by addViewModel.defaultDevices.collectAsState()
-    val isBusy by addViewModel.isBusy.collectAsState()
     val phaseMode by viewModel.phaseMode.collectAsStateWithLifecycle()
     val onboardingFacts by viewModel.onboardingFacts.collectAsStateWithLifecycle(
         initialValue = RoomsOnboardingFacts()
@@ -75,13 +67,7 @@ fun RoomsScreen(
     }
 
     val snackbarHostState = remember { SnackbarHostState() }
-    val showAddRoom: MutableState<Boolean> = remember { mutableStateOf(false) }
 
-    /**
-     * Единственная orchestration point для Rooms onboarding.
-     *
-     * Запрещено вызывать tryShow() где-то ещё внутри этого экрана.
-     */
     /**
      * Единственная orchestration point для Rooms onboarding.
      *
@@ -126,38 +112,6 @@ fun RoomsScreen(
     }
 
     LaunchedEffect(Unit) {
-        addViewModel.actions.collect { action: RoomsAction ->
-            when (action) {
-                is RoomsAction.RoomCreated -> {
-                    onClickRoom(action.roomId)
-
-                    val res = snackbarHostState.showSnackbar(
-                        message = "Комната создана (+${action.deviceIds.size})",
-                        actionLabel = "Отменить",
-                        withDismissAction = true
-                    )
-
-                    if (res == SnackbarResult.ActionPerformed) {
-                        addViewModel.undoCreateRoom(action.roomId)
-                    }
-                }
-
-                is RoomsAction.DevicesAdded -> Unit
-
-                is RoomsAction.UserMessage -> {
-                    snackbarHostState.showSnackbar(action.message)
-                }
-
-                is RoomsAction.Error -> {
-                    snackbarHostState.showSnackbar(
-                        "Ошибка: ${action.throwable.localizedMessage ?: "неизвестная"}"
-                    )
-                }
-            }
-        }
-    }
-
-    LaunchedEffect(Unit) {
         viewModel.actions.collect { action: RoomsAction ->
             when (action) {
                 is RoomsAction.UserMessage -> {
@@ -175,9 +129,6 @@ fun RoomsScreen(
         }
     }
 
-    val fabDisabled = isBusy
-    val fabAlpha = if (fabDisabled) 0.5f else 1f
-
     Scaffold(
         // Внутренний Scaffold не должен повторно добавлять системные insets,
         // потому что верх уже обработан внешним контейнером.
@@ -185,13 +136,8 @@ fun RoomsScreen(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = {
-                    if (!fabDisabled) {
-                        showAddRoom.value = true
-                    }
-                },
+                onClick = onAddRoom,
                 modifier = Modifier
-                    .alpha(fabAlpha)
                     .testTag(OnboardingTargetTag.ROOMS_ADD_FAB.rawTag)
                     .onboardingAnchor(
                         targetTag = OnboardingTargetTag.ROOMS_ADD_FAB,
@@ -226,8 +172,7 @@ fun RoomsScreen(
 
                 PhaseModeMenu(
                     mode = phaseMode,
-                    onSelect = viewModel::setPhaseMode,
-                    modifier = Modifier.widthIn(min = 170.dp, max = 170.dp)
+                    onOpenConfiguration = onReconfigureProject
                 )
             }
 
@@ -247,6 +192,7 @@ fun RoomsScreen(
                         RoomList(
                             rooms = uiState.roomsPreview,
                             onDelete = viewModel::deleteRoom,
+                            onAddRoom = onAddRoom,
                             modifier = Modifier.fillMaxSize(),
                             onClickRoom = onClickRoom
                         )
@@ -256,21 +202,4 @@ fun RoomsScreen(
         }
     }
 
-    if (showAddRoom.value) {
-        AddRoomSheet(
-            defaultDevices = defaultDevices,
-            roomTypes = RoomType.entries,
-            onConfirm = { name, type, customizedRequests ->
-                addViewModel.createRoomWithDevicesCustomized(
-                    name = name,
-                    roomType = type,
-                    devices = customizedRequests
-                )
-                showAddRoom.value = false
-            },
-            onDismiss = {
-                showAddRoom.value = false
-            }
-        )
-    }
 }

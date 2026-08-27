@@ -59,6 +59,9 @@ interface ExplicationRepository {
      */
     suspend fun getAllDevicesByProject(projectId: String): List<Device>
 
+    /** Реактивный project-scoped список, включая устройства без группы. */
+    fun observeAllDevicesByProject(projectId: String): Flow<List<Device>>
+
     /**
      * ## Manual Save (v1.1): DIFF-COMMIT контракт (Вариант B / идеальный)
      */

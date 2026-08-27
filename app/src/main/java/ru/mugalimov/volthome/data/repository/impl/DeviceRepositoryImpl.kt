@@ -1,6 +1,8 @@
 package ru.mugalimov.volthome.data.repository.impl
 
 import android.util.Log
+import android.content.Context
+import androidx.room.withTransaction
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
@@ -15,8 +17,8 @@ import ru.mugalimov.volthome.data.local.dao.RoomDao
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.data.repository.DeviceRepository
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
-import ru.mugalimov.volthome.di.database.AppDatabase
 import ru.mugalimov.volthome.di.database.IoDispatcher
+import ru.mugalimov.volthome.di.database.AppDatabase
 import ru.mugalimov.volthome.domain.mapper.mapToDomainDevices
 import ru.mugalimov.volthome.domain.mapper.toDomainDevice
 import ru.mugalimov.volthome.domain.mapper.toEntityDevice
@@ -25,35 +27,17 @@ import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.ui.components.JsonParser
 import java.util.Date
 import javax.inject.Inject
-import android.content.Context
-
-// 🔹 outbox / tombstones
-import ru.mugalimov.volthome.data.local.dao.OutboxDao
-import ru.mugalimov.volthome.data.local.dao.TombstoneDao
-import ru.mugalimov.volthome.data.local.entity.OutboxEntity
-import ru.mugalimov.volthome.data.local.entity.OutboxOpType
-import ru.mugalimov.volthome.data.local.entity.TombstoneEntity
-import ru.mugalimov.volthome.data.local.entity.TombstoneEntityType
 import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
-import ru.mugalimov.volthome.data.sync.outbox.DeviceCreatePayload
-import ru.mugalimov.volthome.data.sync.outbox.DeviceUpdatePayload
-import ru.mugalimov.volthome.data.sync.outbox.DeviceDeletePayload
-import ru.mugalimov.volthome.data.sync.outbox.OutboxPushWorker
-import ru.mugalimov.volthome.data.sync.outbox.toJson
 
 class DeviceRepositoryImpl @Inject constructor(
     private val deviceDao: DeviceDao,
+    private val database: AppDatabase,
     private val roomDao: RoomDao,
     private val explicationRepository: ExplicationRepository,
     private val manualEditSessionRepository: ManualEditSessionRepository,
-    @IoDispatcher private val dispatchers: CoroutineDispatcher,
     @ApplicationContext private val context: Context,
-    private val appDb: AppDatabase,
-    private val outboxDao: OutboxDao,
-    private val tombstoneDao: TombstoneDao
+    @IoDispatcher private val dispatchers: CoroutineDispatcher
 ) : DeviceRepository {
-
-    private val uuidDao get() = appDb.uuidMapDao()
 
     // --------------------------- Observe ---------------------------
 
@@ -72,11 +56,10 @@ class DeviceRepositoryImpl @Inject constructor(
                 val room = device.roomId?.let { roomDao.getRoomById(it) }
                     ?: throw IllegalArgumentException("roomId=null или комната не найдена")
                 val projectId = room.projectId
-                    ?: throw IllegalArgumentException("У комнаты нет projectId")
 
                 // 2) Локальная вставка
                 val createdAt = Date()
-                val localId = deviceDao.addDevice(
+                deviceDao.addDevice(
                     DeviceEntity(
                         name = device.name,
                         power = device.power,
@@ -93,32 +76,6 @@ class DeviceRepositoryImpl @Inject constructor(
                     )
                 )
 
-                // 3) Outbox → DEVICE_CREATE
-                outboxDao.insert(
-                    OutboxEntity(
-                        project_id = projectId,
-                        op_type = OutboxOpType.DEVICE_CREATE,
-                        payload_json = DeviceCreatePayload(
-                            projectId = projectId,
-                            localId = localId,
-                            roomLocalId = device.roomId!!,
-                            name = device.name,
-                            power = device.power,
-                            voltage = device.voltage,
-                            demandRatio = device.demandRatio,
-                            createdAt = createdAt.time,
-                            deviceType = device.deviceType,
-                            powerFactor = device.powerFactor,
-                            hasMotor = device.hasMotor,
-                            requiresDedicatedCircuit = device.requiresDedicatedCircuit,
-                            requiresSocketConnection = device.requiresSocketConnection
-                        ).toJson(),
-                        group_key = "device:create:$projectId:$localId"
-                    )
-                )
-
-                // 4) Запускаем пушер (если сеть есть — уйдёт сразу; если нет — дождётся)
-                OutboxPushWorker.enqueueProject(context, projectId)
             } catch (e: Exception) {
                 Log.e("DeviceRepo", "Ошибка при добавлении устройства: ${e.message}", e)
                 throw e
@@ -134,7 +91,6 @@ class DeviceRepositoryImpl @Inject constructor(
                 ?: throw DeviceNotFoundException("Устройство ${device.id} не найдено")
 
             val pid = current.projectId
-                ?: throw IllegalStateException("DEVICE_UPDATE: у устройства ${device.id} нет projectId в БД")
 
             val updatedDevice = device.copy(
                 roomId = device.roomId ?: current.roomId
@@ -157,81 +113,26 @@ class DeviceRepositoryImpl @Inject constructor(
                         "pf=${updatedDevice.powerFactor} dr=${updatedDevice.demandRatio} " +
                         "voltage=${updatedDevice.voltage.value}/${updatedDevice.voltage.type}"
             )
-
-            // 3) outbox
-            if (pid.isNotBlank()) {
-                outboxDao.insert(
-                    OutboxEntity(
-                        project_id = pid,
-                        op_type = OutboxOpType.DEVICE_UPDATE,
-                        payload_json = DeviceUpdatePayload(
-                            projectId = pid,
-                            localId = updatedDevice.id,
-                            roomLocalId = updatedDevice.roomId,
-                            name = updatedDevice.name,
-                            power = updatedDevice.power,
-                            voltage = updatedDevice.voltage,
-                            demandRatio = updatedDevice.demandRatio,
-                            deviceType = updatedDevice.deviceType,
-                            powerFactor = updatedDevice.powerFactor,
-                            hasMotor = updatedDevice.hasMotor,
-                            requiresDedicatedCircuit = updatedDevice.requiresDedicatedCircuit,
-                            requiresSocketConnection = updatedDevice.requiresSocketConnection
-                        ).toJson(),
-                        group_key = "device:update:$pid:${updatedDevice.id}"
-                    )
-                )
-                OutboxPushWorker.enqueueProject(context, pid)
-            }
+            Unit
         }
 
     // --------------------------- Delete (single) -------------------
 
     override suspend fun deleteDevice(deviceId: Long) {
         withContext(dispatchers) {
-            val existing = deviceDao.getDeviceById(deviceId.toInt())
-                ?: throw DeviceNotFoundException("Устройство с ID $deviceId не найдено")
-
-            val projectId = existing.projectId
-            if (projectId.isNullOrBlank()) {
-                // Без projectId удаляем просто локально
-                val rows = deviceDao.deleteDeviceById(deviceId)
-                if (rows == 0) throw DeviceNotFoundException("Устройство с ID $deviceId не найдено")
-                explicationRepository.handleDeviceDeletion(deviceId)
-                return@withContext
+            if (deviceDao.getDeviceById(deviceId.toInt()) == null) {
+                throw DeviceNotFoundException("Устройство с ID $deviceId не найдено")
             }
 
-            // 1) tombstone — чтобы UI/квери исключали
-            tombstoneDao.insert(
-                TombstoneEntity(
-                    project_id = projectId,
-                    entity_type = TombstoneEntityType.DEVICE,
-                    local_id = deviceId,
-                    server_uuid = uuidDao.getDeviceUuidByLocal(deviceId)
-                )
-            )
-
-            // 2) outbox DEVICE_DELETE
-            outboxDao.insert(
-                OutboxEntity(
-                    project_id = projectId,
-                    op_type = OutboxOpType.DEVICE_DELETE,
-                    payload_json = DeviceDeletePayload(
-                        projectId = projectId,
-                        localId = deviceId,
-                        serverUuid = uuidDao.getDeviceUuidByLocal(deviceId)
-                    ).toJson(),
-                    group_key = "device:delete:$projectId:$deviceId"
-                )
-            )
-
-            // 3) локально удаляем и обслуживаем каскад
-            val rowsDeleted = deviceDao.deleteDeviceById(deviceId)
-            if (rowsDeleted == 0) throw DeviceNotFoundException("Устройство с ID $deviceId не найдено")
-            explicationRepository.handleDeviceDeletion(deviceId)
-
-            // 4) пушер
-            OutboxPushWorker.enqueueProject(context, projectId)
+            database.withTransaction {
+                // Сначала обновляем зависимые группы, пока связи ещё доступны.
+                // Любая ошибка откатывает всю операцию.
+                explicationRepository.handleDeviceDeletion(deviceId)
+                val rowsDeleted = deviceDao.deleteDeviceById(deviceId)
+                if (rowsDeleted == 0) {
+                    throw DeviceNotFoundException("Устройство с ID $deviceId не найдено")
+                }
+            }
         }
     }
 

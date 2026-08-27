@@ -1,0 +1,45 @@
+{
+  "updatedAt": "2026-08-07",
+  "entries": [
+    { "kind": "MCB", "poles": 1, "minRatedCurrentA": 1, "maxRatedCurrentA": 10, "price": { "minKopecks": 30000, "typicalKopecks": 55000, "maxKopecks": 95000 } },
+    { "kind": "MCB", "poles": 1, "minRatedCurrentA": 11, "maxRatedCurrentA": 16, "price": { "minKopecks": 35000, "typicalKopecks": 65000, "maxKopecks": 110000 } },
+    { "kind": "MCB", "poles": 1, "minRatedCurrentA": 17, "maxRatedCurrentA": 25, "price": { "minKopecks": 40000, "typicalKopecks": 75000, "maxKopecks": 125000 } },
+    { "kind": "MCB", "poles": 1, "minRatedCurrentA": 26, "maxRatedCurrentA": 40, "price": { "minKopecks": 48000, "typicalKopecks": 90000, "maxKopecks": 150000 } },
+    { "kind": "MCB", "poles": 1, "minRatedCurrentA": 41, "maxRatedCurrentA": 63, "price": { "minKopecks": 60000, "typicalKopecks": 110000, "maxKopecks": 185000 } },
+
+    { "kind": "MCB", "poles": 2, "minRatedCurrentA": 1, "maxRatedCurrentA": 10, "price": { "minKopecks": 70000, "typicalKopecks": 120000, "maxKopecks": 200000 } },
+    { "kind": "MCB", "poles": 2, "minRatedCurrentA": 11, "maxRatedCurrentA": 16, "price": { "minKopecks": 80000, "typicalKopecks": 140000, "maxKopecks": 230000 } },
+    { "kind": "MCB", "poles": 2, "minRatedCurrentA": 17, "maxRatedCurrentA": 25, "price": { "minKopecks": 90000, "typicalKopecks": 160000, "maxKopecks": 265000 } },
+    { "kind": "MCB", "poles": 2, "minRatedCurrentA": 26, "maxRatedCurrentA": 40, "price": { "minKopecks": 105000, "typicalKopecks": 190000, "maxKopecks": 310000 } },
+    { "kind": "MCB", "poles": 2, "minRatedCurrentA": 41, "maxRatedCurrentA": 63, "price": { "minKopecks": 125000, "typicalKopecks": 230000, "maxKopecks": 380000 } },
+
+    { "kind": "MCB", "poles": 3, "minRatedCurrentA": 1, "maxRatedCurrentA": 10, "price": { "minKopecks": 105000, "typicalKopecks": 190000, "maxKopecks": 310000 } },
+    { "kind": "MCB", "poles": 3, "minRatedCurrentA": 11, "maxRatedCurrentA": 16, "price": { "minKopecks": 120000, "typicalKopecks": 220000, "maxKopecks": 360000 } },
+    { "kind": "MCB", "poles": 3, "minRatedCurrentA": 17, "maxRatedCurrentA": 25, "price": { "minKopecks": 140000, "typicalKopecks": 250000, "maxKopecks": 410000 } },
+    { "kind": "MCB", "poles": 3, "minRatedCurrentA": 26, "maxRatedCurrentA": 40, "price": { "minKopecks": 165000, "typicalKopecks": 300000, "maxKopecks": 490000 } },
+    { "kind": "MCB", "poles": 3, "minRatedCurrentA": 41, "maxRatedCurrentA": 63, "price": { "minKopecks": 200000, "typicalKopecks": 360000, "maxKopecks": 590000 } },
+
+    { "kind": "MCB", "poles": 4, "minRatedCurrentA": 1, "maxRatedCurrentA": 10, "price": { "minKopecks": 150000, "typicalKopecks": 260000, "maxKopecks": 420000 } },
+    { "kind": "MCB", "poles": 4, "minRatedCurrentA": 11, "maxRatedCurrentA": 16, "price": { "minKopecks": 170000, "typicalKopecks": 300000, "maxKopecks": 480000 } },
+    { "kind": "MCB", "poles": 4, "minRatedCurrentA": 17, "maxRatedCurrentA": 25, "price": { "minKopecks": 195000, "typicalKopecks": 340000, "maxKopecks": 550000 } },
+    { "kind": "MCB", "poles": 4, "minRatedCurrentA": 26, "maxRatedCurrentA": 40, "price": { "minKopecks": 230000, "typicalKopecks": 400000, "maxKopecks": 650000 } },
+    { "kind": "MCB", "poles": 4, "minRatedCurrentA": 41, "maxRatedCurrentA": 63, "price": { "minKopecks": 280000, "typicalKopecks": 480000, "maxKopecks": 780000 } },
+    { "kind": "MCB", "poles": 1, "minRatedCurrentA": 64, "maxRatedCurrentA": 160, "price": { "minKopecks": 90000, "typicalKopecks": 160000, "maxKopecks": 280000 } },
+    { "kind": "MCB", "poles": 2, "minRatedCurrentA": 64, "maxRatedCurrentA": 160, "price": { "minKopecks": 180000, "typicalKopecks": 300000, "maxKopecks": 500000 } },
+    { "kind": "MCB", "poles": 3, "minRatedCurrentA": 64, "maxRatedCurrentA": 160, "price": { "minKopecks": 280000, "typicalKopecks": 480000, "maxKopecks": 800000 } },
+    { "kind": "MCB", "poles": 4, "minRatedCurrentA": 64, "maxRatedCurrentA": 160, "price": { "minKopecks": 360000, "typicalKopecks": 620000, "maxKopecks": 980000 } },
+
+    { "kind": "RCD", "poles": 2, "minRatedCurrentA": 1, "maxRatedCurrentA": 63, "rcdType": "AC", "selective": false, "price": { "minKopecks": 100000, "typicalKopecks": 190000, "maxKopecks": 330000 } },
+    { "kind": "RCD", "poles": 2, "minRatedCurrentA": 1, "maxRatedCurrentA": 63, "rcdType": "A", "selective": false, "price": { "minKopecks": 140000, "typicalKopecks": 260000, "maxKopecks": 500000 } },
+    { "kind": "RCD", "poles": 4, "minRatedCurrentA": 1, "maxRatedCurrentA": 63, "rcdType": "AC", "selective": false, "price": { "minKopecks": 180000, "typicalKopecks": 340000, "maxKopecks": 540000 } },
+    { "kind": "RCD", "poles": 4, "minRatedCurrentA": 1, "maxRatedCurrentA": 63, "rcdType": "A", "selective": false, "price": { "minKopecks": 250000, "typicalKopecks": 470000, "maxKopecks": 720000 } },
+    { "kind": "RCD", "poles": 2, "minRatedCurrentA": 1, "maxRatedCurrentA": 160, "selective": true, "price": { "minKopecks": 250000, "typicalKopecks": 480000, "maxKopecks": 800000 } },
+    { "kind": "RCD", "poles": 4, "minRatedCurrentA": 1, "maxRatedCurrentA": 160, "selective": true, "price": { "minKopecks": 450000, "typicalKopecks": 750000, "maxKopecks": 1200000 } },
+    { "kind": "RCD", "poles": 2, "minRatedCurrentA": 64, "maxRatedCurrentA": 160, "selective": false, "price": { "minKopecks": 220000, "typicalKopecks": 400000, "maxKopecks": 700000 } },
+    { "kind": "RCD", "poles": 4, "minRatedCurrentA": 64, "maxRatedCurrentA": 160, "selective": false, "price": { "minKopecks": 420000, "typicalKopecks": 700000, "maxKopecks": 1100000 } },
+
+    { "kind": "RCBO", "poles": 2, "minRatedCurrentA": 1, "maxRatedCurrentA": 63, "rcdType": "AC", "price": { "minKopecks": 140000, "typicalKopecks": 260000, "maxKopecks": 480000 } },
+    { "kind": "RCBO", "poles": 2, "minRatedCurrentA": 1, "maxRatedCurrentA": 63, "rcdType": "A", "price": { "minKopecks": 180000, "typicalKopecks": 340000, "maxKopecks": 620000 } },
+    { "kind": "RCBO", "poles": 4, "minRatedCurrentA": 1, "maxRatedCurrentA": 63, "rcdType": "A", "price": { "minKopecks": 450000, "typicalKopecks": 760000, "maxKopecks": 1250000 } }
+  ]
+}

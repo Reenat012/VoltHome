@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.runningFold
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import ru.mugalimov.volthome.data.local.dao.DeviceDao
 import ru.mugalimov.volthome.data.local.dao.GroupDao
@@ -22,6 +23,8 @@ import ru.mugalimov.volthome.data.local.dao.GroupDeviceJoinDao
 import ru.mugalimov.volthome.data.local.dao.GroupNominalCurrentUpdate
 import ru.mugalimov.volthome.data.local.dao.RoomDao
 import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
+import ru.mugalimov.volthome.data.repository.ProjectSetupRepository
+import ru.mugalimov.volthome.data.repository.observeResolved
 import ru.mugalimov.volthome.domain.model.GroupingResult
 import ru.mugalimov.volthome.domain.model.PhaseMode
 import javax.inject.Inject
@@ -49,6 +52,7 @@ class RecalculateGroupsOnDeviceChangeUseCase @Inject constructor(
     private val joinDao: GroupDeviceJoinDao,
     private val calculatorFactory: GroupCalculatorFactory,
     private val preferencesRepository: ru.mugalimov.volthome.data.repository.PreferencesRepository,
+    private val projectSetupRepository: ProjectSetupRepository,
     private val updateDerivedGroupFieldsUseCase: UpdateDerivedGroupFieldsUseCase // ✅ Коммит 4
 ) {
 
@@ -114,10 +118,16 @@ class RecalculateGroupsOnDeviceChangeUseCase @Inject constructor(
                 }
 
                 // 5) Собираем snapshot "входов"
+                val legacyFallbackMode = preferencesRepository.phaseMode.first()
+                val projectPhaseModeFlow = projectSetupRepository
+                    .observeResolved(projectId, legacyFallbackMode)
+                    .map { setup -> setup.phaseMode }
+                    .distinctUntilChanged()
+
                 combine(
                     devicesInProjectFlow,
                     joinsInProjectFlow,
-                    preferencesRepository.phaseMode
+                    projectPhaseModeFlow
                 ) { devices, joins, mode ->
 
                     // DEVICE sig: берём только поля, влияющие на расчёт.

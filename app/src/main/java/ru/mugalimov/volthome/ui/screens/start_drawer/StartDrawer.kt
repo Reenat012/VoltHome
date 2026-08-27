@@ -20,13 +20,18 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Payment
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.EditNote
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.automirrored.outlined.Login
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Divider
 import androidx.compose.material3.DrawerState
@@ -69,10 +74,11 @@ import ru.mugalimov.volthome.BuildConfig
 import ru.mugalimov.volthome.R
 import ru.mugalimov.volthome.core.theme.VhColors
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
+import ru.mugalimov.volthome.ui.model.ManualModeControlAvailability
 import ru.mugalimov.volthome.ui.model.ProjectUi
 import ru.mugalimov.volthome.ui.model.UserProfileUi
 import ru.mugalimov.volthome.ui.screens.debug.DebugProPanel
-import ru.mugalimov.volthome.ui.utilities.TelegramConsultationDialog
+import ru.mugalimov.volthome.ui.components.VhStatusBadge
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -86,7 +92,11 @@ import ru.mugalimov.volthome.ui.onboarding.modifier.onboardingAnchor
 // MANUAL — ручной режим включен, без несохранённых правок
 // DIRTY — ручной режим включен, есть несохранённые правки (черновик отличается)
 enum class ManualModeChipState {
-    AUTO, MANUAL, DIRTY
+    AUTO,
+    /** Ручная структура сохранена, но редактор сейчас закрыт. */
+    SAVED_MANUAL,
+    MANUAL,
+    DIRTY
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -109,6 +119,8 @@ fun StartDrawer(
     // ✅ Клик по чипу (AUTO -> enter, MANUAL/DIRTY -> открыть диалог — решает MainApp)
     onManualModeClick: (() -> Unit)? = null,
     manualChipState: ManualModeChipState = ManualModeChipState.AUTO,
+    manualModeControlAvailability: ManualModeControlAvailability =
+        ManualModeControlAvailability.HIDDEN,
 
     // ✅ Текущий onboarding screen для привязки anchor к чипу ручного режима
     manualChipOnboardingScreen: OnboardingScreen? = null,
@@ -126,7 +138,6 @@ fun StartDrawer(
     var menuForProjectId by remember { mutableStateOf<String?>(null) }
     var renameDialog by remember { mutableStateOf<Pair<String, String>?>(null) }
     var deleteConfirmForId by remember { mutableStateOf<String?>(null) }
-    var showConsultDialog by remember { mutableStateOf(false) }
 
     val t = VhColors.tokens
 
@@ -136,7 +147,7 @@ fun StartDrawer(
     val context = LocalContext.current
     fun openUrl(url: String) {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-        context.startActivity(intent)
+        runCatching { context.startActivity(intent) }
     }
 
     BackHandler(enabled = drawerState.isOpen) {
@@ -154,6 +165,7 @@ fun StartDrawer(
                 Column(modifier = Modifier.fillMaxHeight()) {
                     DrawerHeader(
                         profile = profile,
+                        isPro = userPlan.isPro,
                         onLogout = {
                             scope.launch {
                                 drawerState.close()
@@ -231,7 +243,17 @@ fun StartDrawer(
                                         onSelectProject(p.id)
                                     }
                                 },
-                                icon = {},
+                                icon = {
+                                    Icon(
+                                        imageVector = if (p.isActive) {
+                                            Icons.Outlined.CheckCircle
+                                        } else {
+                                            Icons.Outlined.Folder
+                                        },
+                                        contentDescription = null,
+                                        tint = if (p.isActive) t.primary else t.textMuted
+                                    )
+                                },
                                 colors = NavigationDrawerItemDefaults.colors(
                                     selectedContainerColor = t.surfaceAlt,
                                     unselectedContainerColor = t.bg,
@@ -271,7 +293,7 @@ fun StartDrawer(
                                     .padding(NavigationDrawerItemDefaults.ItemPadding)
                             ) {
                                 NavigationDrawerItem(
-                                    label = { Text("+ Добавить проект", color = t.textPrimary) },
+                                    label = { Text("Новый проект", color = t.textPrimary) },
                                     selected = false,
                                     onClick = {
                                         scope.launch {
@@ -279,7 +301,7 @@ fun StartDrawer(
                                             onCreateProject()
                                         }
                                     },
-                                    icon = { Icon(Icons.Default.Shield, contentDescription = null, tint = t.textSecondary) },
+                                    icon = { Icon(Icons.Outlined.Add, contentDescription = null, tint = t.primary) },
                                     colors = NavigationDrawerItemDefaults.colors(
                                         selectedContainerColor = t.surfaceAlt,
                                         unselectedContainerColor = t.bg,
@@ -302,14 +324,14 @@ fun StartDrawer(
                                     "PRO: без лимита • Проекты: $count"
                                 } else {
                                     val capped = minOf(count, freeLimit)
-                                    "Free: $capped/$freeLimit • Проекты: $count"
+                                    "FREE: $capped/$freeLimit • Проекты: $count"
                                 }
 
                                 Text(
                                     text = info,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = t.textSecondary,
-                                    modifier = Modifier.padding(start = 16.dp, top = 4.dp)
+                                    modifier = Modifier.padding(start = 56.dp, top = 4.dp)
                                 )
                             }
                         }
@@ -355,7 +377,7 @@ fun StartDrawer(
 
                         item {
                             NavigationDrawerItem(
-                                label = { Text("Информация") },
+                                label = { Text("Справка и документы") },
                                 selected = false,
                                 onClick = { scope.launch { drawerState.close(); onOpenSettings() } },
                                 icon = { Icon(Icons.Default.Info, contentDescription = null) },
@@ -371,17 +393,16 @@ fun StartDrawer(
                             )
                         }
 
-                        // --- Соцсети ---
-                        item {
-                            Divider(modifier = Modifier.padding(vertical = 8.dp), color = t.divider)
-                            DrawerSectionTitle("Соцсети")
+                        item { HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = t.divider) }
+                        item { DrawerSectionTitle("Соцсети") }
 
+                        item {
                             NavigationDrawerItem(
                                 label = {
                                     Column {
-                                        Text("Канал ВольтХом", color = t.textPrimary)
+                                        Text("Канал ВольтХом")
                                         Text(
-                                            text = "Алгоритмы и решения",
+                                            text = "Новости, алгоритмы и решения",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = t.textSecondary,
                                             maxLines = 1,
@@ -390,7 +411,10 @@ fun StartDrawer(
                                     }
                                 },
                                 selected = false,
-                                onClick = { openUrl("https://t.me/volthomeapp") },
+                                onClick = {
+                                    scope.launch { drawerState.close() }
+                                    openUrl("https://t.me/volthomeapp")
+                                },
                                 icon = {
                                     Icon(
                                         painter = painterResource(R.drawable.telegram),
@@ -409,20 +433,18 @@ fun StartDrawer(
                                 modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                             )
                         }
+
                     }
 
                     if (BuildConfig.DEBUG) {
-                        Divider(
-                            modifier = Modifier.padding(vertical = 8.dp),
-                            color = t.divider
-                        )
-
+                        HorizontalDivider(color = t.divider)
                         DebugProPanel(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 12.dp, vertical = 8.dp)
                         )
                     }
+
                 }
             }
         }
@@ -445,7 +467,10 @@ fun StartDrawer(
                             )
 
                             // ✅ Чип "Ручной режим" справа, прижат к правому краю AppBar
-                            if (onManualModeClick != null) {
+                            if (
+                                onManualModeClick != null &&
+                                manualModeControlAvailability != ManualModeControlAvailability.HIDDEN
+                            ) {
                                 Spacer(Modifier.width(8.dp))
 
                                 val chipModifier = if (manualChipOnboardingScreen == OnboardingScreen.EXPLICATION) {
@@ -473,23 +498,31 @@ fun StartDrawer(
                                 tint = t.textSecondary
                             )
                         }
-                    }
+                    },
+                    colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
+                        containerColor = t.surface,
+                        scrolledContainerColor = t.surface,
+                        titleContentColor = t.textPrimary,
+                        navigationIconContentColor = t.textSecondary,
+                        actionIconContentColor = t.textSecondary
+                    )
                 )
             },
             bottomBar = bottomBar
         ) { innerPadding ->
-            Box(modifier = Modifier.padding(innerPadding)) {
-                content { scope.launch { drawerState.open() } }
+            Column(modifier = Modifier.padding(innerPadding)) {
+                if (manualChipState != ManualModeChipState.AUTO) {
+                    ManualEditingStatusStrip(
+                        state = manualChipState,
+                        statusOnly = manualModeControlAvailability ==
+                            ManualModeControlAvailability.STATUS_ONLY
+                    )
+                }
+                Box(modifier = Modifier.weight(1f)) {
+                    content { scope.launch { drawerState.open() } }
+                }
             }
         }
-    }
-
-    if (showConsultDialog) {
-        TelegramConsultationDialog(
-            botName = "VoltHomeBot",
-            startPayloadBase64 = null,
-            onDismiss = { showConsultDialog = false }
-        )
     }
 
     // -----------------------------
@@ -506,6 +539,8 @@ fun StartDrawer(
                             "Есть несохранённые изменения. Сохранить изменения или отменить и выйти из ручного режима?"
                         ManualModeChipState.MANUAL ->
                             "Завершить ручной режим? Можно сохранить текущее распределение или выйти без сохранения."
+                        ManualModeChipState.SAVED_MANUAL ->
+                            "Структура проекта сохранена вручную."
                         ManualModeChipState.AUTO ->
                             "Ручной режим не активен."
                     },
@@ -574,9 +609,11 @@ fun StartDrawer(
 @Composable
 private fun DrawerHeader(
     profile: UserProfileUi?,
+    isPro: Boolean,
     onLogout: () -> Unit
 ) {
     val t = VhColors.tokens
+    val isGuest = profile?.email.isNullOrBlank()
 
     Column(
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
@@ -608,7 +645,8 @@ private fun DrawerHeader(
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    text = profile?.name ?: "Пользователь",
+                    text = profile?.name?.takeIf { it.isNotBlank() }
+                        ?: if (isGuest) "Гостевой режим" else "Пользователь",
                     style = MaterialTheme.typography.titleMedium,
                     color = t.textPrimary,
                     maxLines = 1,
@@ -624,11 +662,16 @@ private fun DrawerHeader(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+                Spacer(Modifier.height(6.dp))
+                VhStatusBadge(
+                    text = if (isPro) "PRO" else "FREE",
+                    emphasized = isPro
+                )
             }
             IconButton(onClick = onLogout) {
                 Icon(
-                    Icons.Default.ExitToApp,
-                    contentDescription = "Выйти",
+                    if (isGuest) Icons.AutoMirrored.Outlined.Login else Icons.AutoMirrored.Filled.ExitToApp,
+                    contentDescription = if (isGuest) "Войти" else "Выйти",
                     tint = t.textSecondary
                 )
             }
@@ -645,8 +688,8 @@ private fun DrawerSectionTitle(text: String) {
     Text(
         text = text,
         modifier = Modifier.padding(start = 16.dp, bottom = 8.dp, top = 4.dp),
-        style = MaterialTheme.typography.labelLarge,
-        color = t.primary
+        style = MaterialTheme.typography.labelMedium,
+        color = t.textMuted
     )
 }
 
@@ -661,8 +704,9 @@ private fun ManualModeChip(
     // ✅ Текст и “грязность” черновика
     val label = when (state) {
         ManualModeChipState.AUTO -> "Авто"
-        ManualModeChipState.MANUAL -> "Ручной"
-        ManualModeChipState.DIRTY -> "Ручной"
+        ManualModeChipState.SAVED_MANUAL -> "Ручная схема"
+        ManualModeChipState.MANUAL -> "Редактирование"
+        ManualModeChipState.DIRTY -> "Есть правки"
     }
 
     val showDirtyDot = (state == ManualModeChipState.DIRTY)
@@ -673,14 +717,16 @@ private fun ManualModeChip(
     // - DIRTY: как MANUAL + точка
     val container = when (state) {
         ManualModeChipState.AUTO -> t.surfaceAlt
-        ManualModeChipState.MANUAL -> t.primary.copy(alpha = 0.14f)
-        ManualModeChipState.DIRTY -> t.primary.copy(alpha = 0.14f)
+        ManualModeChipState.SAVED_MANUAL -> t.warning.copy(alpha = 0.12f)
+        ManualModeChipState.MANUAL -> t.warning.copy(alpha = 0.18f)
+        ManualModeChipState.DIRTY -> t.warning.copy(alpha = 0.24f)
     }
 
     val content = when (state) {
         ManualModeChipState.AUTO -> t.textPrimary
-        ManualModeChipState.MANUAL -> t.primary
-        ManualModeChipState.DIRTY -> t.primary
+        ManualModeChipState.SAVED_MANUAL -> t.warning
+        ManualModeChipState.MANUAL -> t.warning
+        ManualModeChipState.DIRTY -> t.warning
     }
 
     TextButton(
@@ -696,6 +742,15 @@ private fun ManualModeChip(
                     .padding(horizontal = 10.dp, vertical = 6.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (state != ManualModeChipState.AUTO) {
+                        Icon(
+                            imageVector = Icons.Outlined.EditNote,
+                            contentDescription = null,
+                            tint = content,
+                            modifier = Modifier.size(17.dp)
+                        )
+                        Spacer(Modifier.width(5.dp))
+                    }
                     Text(
                         text = label,
                         color = content,
@@ -715,6 +770,54 @@ private fun ManualModeChip(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ManualEditingStatusStrip(
+    state: ManualModeChipState,
+    statusOnly: Boolean
+) {
+    val t = VhColors.tokens
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(t.warning.copy(alpha = 0.12f))
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(9.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.EditNote,
+            contentDescription = null,
+            tint = t.warning,
+            modifier = Modifier.size(18.dp)
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = when (state) {
+                    ManualModeChipState.SAVED_MANUAL -> "Структура щита зафиксирована вручную"
+                    ManualModeChipState.DIRTY -> "Ручная корректировка · есть несохранённые правки"
+                    ManualModeChipState.MANUAL -> "Ручная корректировка включена"
+                    ManualModeChipState.AUTO -> "Автоматический режим"
+                },
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = t.textPrimary
+            )
+            Text(
+                text = if (state == ManualModeChipState.SAVED_MANUAL) {
+                    "Автоперестройка выключена до сброса изменений"
+                } else if (statusOnly) {
+                    "Изменение структуры доступно на экранах «Нагрузки» и «Щит»"
+                } else {
+                    "Автоматическое распределение приостановлено"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = t.textSecondary,
+                maxLines = 2
+            )
         }
     }
 }

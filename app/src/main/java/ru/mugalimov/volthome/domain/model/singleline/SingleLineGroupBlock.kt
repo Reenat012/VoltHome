@@ -22,5 +22,6 @@ data class SingleLineGroupBlock(
     val cableLabel: String?,
     val rcdLabel: String?,
     val leakageCurrentMilliAmps: Int?,
+    val auxiliaryProtectionBlocks: List<SingleLineProtectionBlock> = emptyList(),
     val warnings: List<String>
 )

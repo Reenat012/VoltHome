@@ -45,6 +45,11 @@ object PhaseDistributor {
         input: List<CircuitGroup>
     ): Pair<List<CircuitGroup>, List<DistributionDecision>> {
         if (input.isEmpty()) return emptyList<CircuitGroup>() to emptyList()
+        input.forEach { group ->
+            require(group.nominalCurrent.isFinite() && group.nominalCurrent >= 0.0) {
+                "Группа №${group.groupNumber}: некорректный ток ${group.nominalCurrent} A"
+            }
+        }
 
         CalculationTrace.log(
             stage = "PHASE_BALANCER_START",
@@ -173,7 +178,7 @@ object PhaseDistributor {
         // Локальная оптимизация тоже детерминированная.
         val heavy = sorted.take(min(TOP_N, sorted.size))
 
-        repeat(MAX_PASSES) { pass ->
+        for (pass in 0 until MAX_PASSES) {
             var improved = false
 
             for (g in heavy) {
@@ -274,7 +279,7 @@ object PhaseDistributor {
                 }
             }
 
-            if (!improved) return@repeat
+            if (!improved) break
         }
 
         val onePhaseResult = (assigned[0] + assigned[1] + assigned[2])

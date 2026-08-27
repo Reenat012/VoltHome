@@ -4,7 +4,10 @@ import ru.mugalimov.volthome.domain.model.CableSelectionReason
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.LineSelectionReason
 import ru.mugalimov.volthome.domain.model.Phase
+import ru.mugalimov.volthome.domain.model.PhaseMode
+import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.domain.model.VoltageType
+import ru.mugalimov.volthome.domain.policy.protection.RcdSelectionReason
 
 /**
  * Проектное состояние для ручного редактирования.
@@ -16,13 +19,16 @@ data class ProjectEditState(
     val devices: List<ManualDeviceDraft>,
     val unassignedDeviceIds: Set<Long>,
     val nextGroupNumber: Int,
+    val phaseMode: PhaseMode = PhaseMode.THREE,
+    val roomTypesById: Map<Long, RoomType> = emptyMap(),
 ) {
 
     fun deepCopy(): ProjectEditState {
         return copy(
             groups = groups.map { it.deepCopy() },
             devices = devices.map { it.deepCopy() },
-            unassignedDeviceIds = unassignedDeviceIds.toSet()
+            unassignedDeviceIds = unassignedDeviceIds.toSet(),
+            roomTypesById = roomTypesById.toMap()
         )
     }
 }
@@ -42,6 +48,7 @@ data class ManualGroupDraft(
     val groupNumber: Int,
     val roomId: Long,
     val roomName: String,
+    val roomType: RoomType = RoomType.STANDARD,
     val groupType: DeviceType,
     val composition: ManualGroupComposition = ManualGroupComposition.NORMAL,
     val phase: Phase,
@@ -59,6 +66,9 @@ data class ManualGroupDraft(
 
     val rcdRequired: Boolean? = null,
     val rcdCurrent: Int? = null,
+    val rcdReasons: List<RcdSelectionReason> = emptyList(),
+    val rcdSpec: ru.mugalimov.volthome.domain.model.protection.RcdSpec? = null,
+    val deviationCodes: List<String> = emptyList(),
 ) {
     fun deepCopy(): ManualGroupDraft {
         return copy(deviceIds = deviceIds.toList())
@@ -69,6 +79,7 @@ data class ManualDeviceDraft(
     val deviceId: Long,
     val roomId: Long,
     val roomName: String,
+    val roomType: RoomType = RoomType.STANDARD,
     val deviceType: DeviceType,
     val powerW: Int?,
     val voltageType: VoltageType,
@@ -80,6 +91,17 @@ data class ManualDeviceDraft(
     val powerFactor: Double?,
     val hasMotor: Boolean,
     val requiresDedicatedCircuit: Boolean,
+    val requiresSocketConnection: Boolean,
 ) {
     fun deepCopy(): ManualDeviceDraft = copy()
 }
+
+fun ManualDeviceDraft.toCompatibilityInput() =
+    ru.mugalimov.volthome.domain.policy.compatibility.CircuitCompatibilityPolicy.DeviceInput(
+        id = deviceId,
+        roomId = roomId,
+        deviceType = deviceType,
+        voltageType = voltageType,
+        requiresDedicatedCircuit = requiresDedicatedCircuit,
+        requiresSocketConnection = requiresSocketConnection
+    )

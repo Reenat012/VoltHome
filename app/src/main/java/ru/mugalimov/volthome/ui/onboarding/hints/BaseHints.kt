@@ -54,6 +54,15 @@ object BaseHints {
         body = "Сначала добавь комнату, а потом наполни её устройствами."
     )
 
+    val ADD_ROOM_BUILD_ROOM = BaseHintSpec(
+        hintId = OnboardingHintId.ADD_ROOM_BUILD_ROOM,
+        screen = OnboardingScreen.ADD_ROOM_SHEET,
+        targetTag = OnboardingTargetTag.ADD_ROOM_NAME_FIELD,
+        priority = 85,
+        title = "Соберите помещение",
+        body = "Задайте название и тип комнаты, затем отметьте нужные устройства. Кнопка создания всегда остаётся внизу экрана."
+    )
+
     val LOADS_VIEW_PHASE_BALANCE = BaseHintSpec(
         hintId = OnboardingHintId.LOADS_VIEW_PHASE_BALANCE,
         screen = OnboardingScreen.LOADS,
@@ -61,6 +70,24 @@ object BaseHints {
         priority = 80,
         title = "Смотри баланс фаз",
         body = "Здесь видно, как нагрузка распределена между фазами A, B и C."
+    )
+
+    val LOADS_VIEW_INPUT_LOAD = BaseHintSpec(
+        hintId = OnboardingHintId.LOADS_VIEW_INPUT_LOAD,
+        screen = OnboardingScreen.LOADS,
+        targetTag = OnboardingTargetTag.LOADS_SINGLE_OVERVIEW,
+        priority = 80,
+        title = "Контролируйте нагрузку на ввод",
+        body = "Здесь показаны расчётный ток, загрузка вводного автомата и оставшийся запас."
+    )
+
+    val PANEL_VISUALIZATION_OVERVIEW = BaseHintSpec(
+        hintId = OnboardingHintId.PANEL_VISUALIZATION_OVERVIEW,
+        screen = OnboardingScreen.PANEL_VISUALIZATION,
+        targetTag = OnboardingTargetTag.PANEL_SUMMARY,
+        priority = 80,
+        title = "Щит представлен по DIN-рейкам",
+        body = "Здесь видны рассчитанные аппараты, занятые модули и стоимость. Нажмите на аппарат, чтобы выбрать модель и уточнить цену."
     )
 
     /**
@@ -71,6 +98,7 @@ object BaseHints {
      * - если проекты есть -> select
      */
     fun forProjects(facts: ProjectsOnboardingFacts): BaseHintSpec? {
+        if (facts.isLoading) return null
         val candidates = buildList {
             if (facts.projectsCount == 0) add(PROJECTS_ADD_FIRST_PROJECT)
             if (facts.projectsCount > 0) add(PROJECTS_SELECT_PROJECT)
@@ -104,6 +132,13 @@ object BaseHints {
                 facts.groupsCount > 0
             ) {
                 add(LOADS_VIEW_PHASE_BALANCE)
+            }
+            if (
+                !facts.isLoading &&
+                facts.phaseMode == PhaseMode.SINGLE &&
+                facts.groupsCount > 0
+            ) {
+                add(LOADS_VIEW_INPUT_LOAD)
             }
         }
         return pickHighestPriority(candidates)

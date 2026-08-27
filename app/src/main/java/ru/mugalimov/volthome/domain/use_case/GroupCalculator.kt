@@ -6,6 +6,8 @@ import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.data.repository.RoomRepository
 import ru.mugalimov.volthome.domain.mapper.toDomainDevice
 import ru.mugalimov.volthome.domain.model.CircuitGroup
+import ru.mugalimov.volthome.domain.model.CalculationAlgorithm
+import ru.mugalimov.volthome.domain.model.CalculationSource
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.GroupProfile
 import ru.mugalimov.volthome.domain.model.GroupingResult
@@ -13,8 +15,13 @@ import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.domain.model.SafetyProfile
+import ru.mugalimov.volthome.domain.policy.compatibility.CircuitCompatibilityPolicy
+import ru.mugalimov.volthome.domain.policy.breaker.BreakerPolicyDefaults
 import ru.mugalimov.volthome.domain.policy.line.LinePolicyInput
 import ru.mugalimov.volthome.domain.policy.line.LinePolicySelector
+import ru.mugalimov.volthome.domain.policy.protection.RcdDeviceInput
+import ru.mugalimov.volthome.domain.policy.protection.RcdSelectionPolicy
+import ru.mugalimov.volthome.domain.policy.protection.RcdSpecFactory
 import ru.mugalimov.volthome.domain.use_case.PhaseDistributor.distributeGroupsBalancedWithLog
 import java.nio.ByteBuffer
 import java.security.MessageDigest
@@ -25,24 +32,50 @@ class GroupCalculator(
     private val groupRepository: ExplicationRepository
 ) {
 
+    private data class GroupBucketKey(
+        val deviceType: DeviceType,
+        val voltageType: ru.mugalimov.volthome.domain.model.VoltageType,
+        val requiresSocketConnection: Boolean
+    )
+
     // ✅ Единый selector линии: breaker -> cable
     private val linePolicySelector = LinePolicySelector()
 
-    private val roomSafetyProfiles = mapOf(
-        RoomType.BATHROOM to SafetyProfile(rcdRequired = true),
-        RoomType.KITCHEN to SafetyProfile(rcdRequired = true),
-        RoomType.OUTDOOR to SafetyProfile(rcdRequired = true),
-        RoomType.STANDARD to SafetyProfile(rcdRequired = false)
-    )
+    private val rcdSelectionPolicy = RcdSelectionPolicy()
 
     suspend fun calculateGroups(mode: PhaseMode): GroupingResult {
         return try {
             val rooms = roomRepository.getRoomsWithDevicesByProject(projectId)
+            if (mode == PhaseMode.SINGLE) {
+                val threePhaseDevice = rooms
+                    .asSequence()
+                    .flatMap { it.devices.asSequence() }
+                    .firstOrNull { it.voltage.type == ru.mugalimov.volthome.domain.model.VoltageType.AC_3PHASE }
+                require(threePhaseDevice == null) {
+                    "Устройство '${threePhaseDevice?.name}' требует трёхфазную сеть"
+                }
+            }
 
             CalculationTrace.log(
                 stage = "GROUP_CALC_START",
                 message = "projectId=$projectId mode=$mode rooms=${rooms.size}"
             )
+
+            val unsupportedDeviceIds = rooms
+                .asSequence()
+                .flatMap { it.devices.asSequence() }
+                .filter { it.installedCurrent() > BreakerPolicyDefaults.maxSupportedNominalA }
+                .map { it.deviceId }
+                .toSet()
+
+            if (unsupportedDeviceIds.isNotEmpty()) {
+                CalculationTrace.log(
+                    stage = "GROUP_CALC_UNSUPPORTED_DEVICES",
+                    message =
+                        "projectId=$projectId maxSupportedCurrentA=${BreakerPolicyDefaults.maxSupportedNominalA} " +
+                            "deviceIds=${unsupportedDeviceIds.sorted().joinToString()} action=leave_unassigned"
+                )
+            }
 
             var totalGroupNumber = 1
             val allGroups = mutableListOf<CircuitGroup>()
@@ -50,12 +83,13 @@ class GroupCalculator(
             // 1) Выделенные линии
             rooms.forEach { roomWithDevices ->
                 val room = roomWithDevices.room
-                val safety = roomSafetyProfiles[room.roomType] ?: SafetyProfile()
-
                 roomWithDevices.devices
+                    .filterNot { it.deviceId in unsupportedDeviceIds }
                     .filter(::isHeavy)
                     .forEach { d ->
+                        val safety = safetyProfileFor(room.roomType, listOf(d))
                         val canonicalDeviceCurrent = d.nominalCurrent()
+                        val lineDeviceCurrent = d.installedCurrent()
 
                         CalculationTrace.log(
                             stage = "GROUP_CALC_DEVICE_CONTRIBUTION",
@@ -67,7 +101,7 @@ class GroupCalculator(
                         )
 
                         val profile = selectLineProfile(
-                            nominalCurrent = canonicalDeviceCurrent,
+                            nominalCurrent = lineDeviceCurrent,
                             deviceType = d.deviceType,
                             hasMotor = d.hasMotor
                         )
@@ -85,13 +119,24 @@ class GroupCalculator(
             // 2) Обычные группы: FFD по типам
             rooms.forEach { roomWithDevices ->
                 val room = roomWithDevices.room
-                val safety = roomSafetyProfiles[room.roomType] ?: SafetyProfile()
-                val commonDevices = roomWithDevices.devices.filterNot(::isHeavy)
-                val byType = commonDevices.groupBy { it.deviceType }
+                val commonDevices = roomWithDevices.devices
+                    .filterNot { it.deviceId in unsupportedDeviceIds }
+                    .filterNot(::isHeavy)
+                // Устройства с разным числом фаз и типом подключения не могут
+                // оказаться на одной групповой линии, даже если deviceType совпадает.
+                val byType = commonDevices.groupBy {
+                    GroupBucketKey(
+                        deviceType = it.deviceType,
+                        voltageType = it.voltage.type,
+                        requiresSocketConnection = it.requiresSocketConnection
+                    )
+                }
 
-                byType.forEach { (deviceType, devicesOfType) ->
+                byType.forEach { (bucket, devicesOfType) ->
+                    val deviceType = bucket.deviceType
+                    val safety = safetyProfileFor(room.roomType, devicesOfType)
                     val maxI: Double = devicesOfType.maxOfOrNull { device: DeviceEntity ->
-                        device.nominalCurrent()
+                        device.installedCurrent()
                     } ?: 0.0
                     val hasMotor = devicesOfType.any { it.hasMotor }
 
@@ -162,16 +207,28 @@ class GroupCalculator(
                             "phases=" + distributed.joinToString { g -> "g#${g.groupNumber}:${g.phase}" }
             )
 
-            validateBeforeSave(distributed)
+            val finalGroups = distributed.map { group ->
+                group.copy(
+                    rcdSpec = RcdSpecFactory.createGroupRecommendation(
+                        required = group.rcdRequired,
+                        leakageCurrentMa = group.rcdCurrent,
+                        breakerRatingA = group.circuitBreaker,
+                        phase = group.phase,
+                        source = CalculationSource.AUTO
+                    )
+                )
+            }
+
+            validateBeforeSave(finalGroups, mode)
 
             CalculationTrace.log(
                 stage = "GROUP_CALC_FINISH",
                 message =
-                    "projectId=$projectId groups=${distributed.size} result=SUCCESS"
+                    "projectId=$projectId groups=${finalGroups.size} result=SUCCESS"
             )
 
             GroupingResult.Success(
-                system = ru.mugalimov.volthome.domain.model.ElectricalSystem(distributed),
+                system = ru.mugalimov.volthome.domain.model.ElectricalSystem(finalGroups),
                 distributionDecisions = decisionLog
             )
         } catch (e: Exception) {
@@ -185,13 +242,38 @@ class GroupCalculator(
 
     /** Явные критерии выделенных линий. */
     private fun isHeavy(d: DeviceEntity): Boolean =
-        d.requiresDedicatedCircuit || when (d.deviceType) {
+        d.requiresDedicatedCircuit || d.installedCurrent() > 16.0 || when (d.deviceType) {
             DeviceType.OVEN,
             DeviceType.AIR_CONDITIONER,
             DeviceType.ELECTRIC_STOVE,
             DeviceType.HEAVY_DUTY -> true
             else -> false
         }
+
+    /**
+     * УЗО выбирается по фактическому назначению и окончанию групповой линии:
+     * особое помещение, бытовая розетка или нагрузка с розеточным подключением.
+     */
+    private fun safetyProfileFor(
+        roomType: RoomType,
+        devices: List<DeviceEntity>
+    ): SafetyProfile {
+        val decision = rcdSelectionPolicy.select(
+            roomType = roomType,
+            devices = devices.map {
+                RcdDeviceInput(
+                    deviceType = it.deviceType,
+                    requiresSocketConnection = it.requiresSocketConnection
+                )
+            }
+        )
+
+        return SafetyProfile(
+            rcdRequired = decision.required,
+            rcdCurrent = decision.leakageCurrentMa ?: 30,
+            reasons = decision.reasons
+        )
+    }
 
     /**
      * ✅ Единый policy-вход для выбора полной линии.
@@ -225,7 +307,7 @@ class GroupCalculator(
                         "breakerFloor=${result.profile.whyBreakerSelected?.floorBreakerA} " +
                         "breakerRequired=${result.profile.whyBreakerSelected?.requiredBreakerA} " +
                         "breakerRule=${result.profile.whyBreakerSelected?.productRule} " +
-                        "cableNormFloor=${result.profile.whyCableSelected?.normativeFloorSectionMm2} " +
+                        "cableProductFloor=${result.profile.whyCableSelected?.minimumProductSectionMm2} " +
                         "cableProductDefault=${result.profile.whyCableSelected?.productDefaultSectionMm2} " +
                         "cableRule=${result.profile.whyCableSelected?.productRule}"
         )
@@ -241,7 +323,12 @@ class GroupCalculator(
         startGroupNumber: Int,
         room: RoomEntity
     ): List<CircuitGroup> {
-        val sorted = devices.sortedByDescending { it.nominalCurrent() }
+        val isGeneralSocketBucket = devices.isNotEmpty() && devices.all {
+            it.deviceType == DeviceType.SOCKET &&
+                !it.requiresSocketConnection &&
+                !it.requiresDedicatedCircuit
+        }
+        val sorted = devices.sortedByDescending { it.installedCurrent() }
         val limit = profile.maxCurrent
         val eps = 1e-6
 
@@ -254,24 +341,36 @@ class GroupCalculator(
                         "curve=${profile.breakerType}"
         )
 
-        val tooBig = sorted.firstOrNull { it.nominalCurrent() - limit > eps }
+        val tooBig = sorted.firstOrNull { it.installedCurrent() - limit > eps }
         require(tooBig == null) {
             "Устройство '${tooBig?.name}' в комнате '${room.name}' требует " +
-                    "ток ${"%.2f".format(tooBig!!.nominalCurrent())} А > лимита группы ${limit} А. Нужна выделенная линия."
+                    "ток ${"%.2f".format(tooBig!!.installedCurrent())} А > лимита группы ${limit} А. Нужна выделенная линия."
         }
 
-        val bins = mutableListOf<MutableList<DeviceEntity>>()
-        val sums = mutableListOf<Double>()
+        // Розеточные точки одного помещения относятся к одной общей линии.
+        // Они не являются отдельными потребителями по 2,2 кВт каждая.
+        val bins = if (isGeneralSocketBucket) {
+            mutableListOf(sorted.toMutableList())
+        } else {
+            mutableListOf<MutableList<DeviceEntity>>()
+        }
+        val sums = if (isGeneralSocketBucket) {
+            mutableListOf(sorted.maxOfOrNull { it.installedCurrent() } ?: 0.0)
+        } else {
+            mutableListOf<Double>()
+        }
 
-        for (d in sorted) {
-            val cur = d.nominalCurrent()
-            val idx = sums.indices.firstOrNull { sums[it] + cur <= limit + eps }
-            if (idx != null) {
-                bins[idx].add(d)
-                sums[idx] += cur
-            } else {
-                bins += mutableListOf(d)
-                sums += cur
+        if (!isGeneralSocketBucket) {
+            for (d in sorted) {
+                val cur = d.installedCurrent()
+                val idx = sums.indices.firstOrNull { sums[it] + cur <= limit + eps }
+                if (idx != null) {
+                    bins[idx].add(d)
+                    sums[idx] += cur
+                } else {
+                    bins += mutableListOf(d)
+                    sums += cur
+                }
             }
         }
 
@@ -284,9 +383,18 @@ class GroupCalculator(
 
         var number = startGroupNumber
         return bins.map { bin ->
+            // После FFD подбираем характеристику по фактическому составу bin.
+            // Мотор в соседней группе не должен менять кривую этой линии.
+            val binDomainDevices = bin.map { it.toDomainDevice() }
+            val binInstalledCurrent = CircuitLoadCalculator.calculate(binDomainDevices).installedCurrentA
+            val binProfile = selectLineProfile(
+                nominalCurrent = binInstalledCurrent,
+                deviceType = bin.first().deviceType,
+                hasMotor = bin.any { it.hasMotor }
+            )
             createGroup(
                 devices = bin,
-                profile = profile,
+                profile = binProfile,
                 safetyProfile = safetyProfile,
                 groupNumber = number++,
                 room = room
@@ -304,9 +412,7 @@ class GroupCalculator(
         groupNumber: Int,
         room: RoomEntity
     ): CircuitGroup {
-        val groupLoad = CurrentCalculator.calculateGroupLoad(
-            devices.map { it.toLoadInput() }
-        )
+        val groupLoad = CircuitLoadCalculator.calculate(devices.map { it.toDomainDevice() })
 
         val nominalCurrent = groupLoad.calculatedCurrentA
         val installedPowerW = groupLoad.installedPowerW.toInt()
@@ -334,6 +440,9 @@ class GroupCalculator(
             whyCableSelected = profile.whyCableSelected,
             rcdRequired = safetyProfile.rcdRequired,
             rcdCurrent = safetyProfile.rcdCurrent,
+            rcdReasonCodes = safetyProfile.reasons.map { it.name },
+            calculationSource = CalculationSource.AUTO,
+            algorithmVersion = CalculationAlgorithm.VERSION,
             groupNumber = groupNumber,
             installedPowerW = installedPowerW,
             roomId = room.id
@@ -378,23 +487,55 @@ class GroupCalculator(
             whyCableSelected = profile.whyCableSelected,
             rcdRequired = safetyProfile.rcdRequired,
             rcdCurrent = safetyProfile.rcdCurrent,
+            rcdReasonCodes = safetyProfile.reasons.map { it.name },
+            calculationSource = CalculationSource.AUTO,
+            algorithmVersion = CalculationAlgorithm.VERSION,
             groupNumber = groupNumber,
             installedPowerW = installedPowerW,
             roomId = room.id
         )
     }
 
-    private fun validateBeforeSave(groups: List<CircuitGroup>) {
+    private fun validateBeforeSave(groups: List<CircuitGroup>, mode: PhaseMode) {
         val eps = 1e-6
         groups.forEach { g ->
             requireNotNull(g.phase) { "Группа №${g.groupNumber} без фазы" }
             require(g.nominalCurrent <= g.circuitBreaker + eps) {
                 "Группа №${g.groupNumber}: ${"%.2f".format(g.nominalCurrent)} А > ${g.circuitBreaker} А"
             }
+            val installedCurrent = CircuitLoadCalculator.calculate(g.devices).installedCurrentA
+            require(installedCurrent <= g.circuitBreaker + eps) {
+                "Группа №${g.groupNumber}: паспортный ток ${"%.2f".format(installedCurrent)} А > ${g.circuitBreaker} А"
+            }
             require(g.devices.isNotEmpty()) { "Группа №${g.groupNumber} не содержит устройств" }
             require(g.devices.all { it.deviceType == g.groupType }) {
                 "Группа №${g.groupNumber}: тип группы ${g.groupType} не совпадает с типами устройств"
             }
+            require(g.devices.map { it.voltage.type }.distinct().size == 1) {
+                "Группа №${g.groupNumber}: нельзя смешивать 1ф и 3ф устройства"
+            }
+            require(g.devices.map { it.requiresSocketConnection }.distinct().size == 1) {
+                "Группа №${g.groupNumber}: нельзя смешивать розеточное и стационарное подключение"
+            }
+            CircuitCompatibilityPolicy.evaluateGroup(
+                CircuitCompatibilityPolicy.GroupInput(
+                    phaseMode = mode,
+                    phase = g.phase,
+                    roomId = g.roomId,
+                    devices = g.devices.map { device ->
+                        CircuitCompatibilityPolicy.DeviceInput(
+                            id = device.id,
+                            roomId = requireNotNull(device.roomId) {
+                                "Устройство ${device.id} не привязано к помещению"
+                            },
+                            deviceType = device.deviceType,
+                            voltageType = device.voltage.type,
+                            requiresDedicatedCircuit = device.requiresDedicatedCircuit,
+                            requiresSocketConnection = device.requiresSocketConnection
+                        )
+                    }
+                )
+            ).requireAllowed("AUTO группа №${g.groupNumber}")
         }
     }
 
@@ -441,12 +582,6 @@ class GroupCalculator(
         append("|roomId=").append(g.roomId)
         append("|type=").append(g.groupType.name)
         append("|devs=").append(stableDevicesKey(g))
-        append("|breaker=").append(g.circuitBreaker)
-        append("|cable=").append(g.cableSection)
-        append("|rcdReq=").append(if (g.rcdRequired) 1 else 0)
-        append("|rcdCur=").append(g.rcdCurrent)
-        append("|bt=").append(g.breakerType)
-        append("|pW=").append(g.installedPowerW)
     }
 
     private fun stablePositiveLong(input: String): Long {
@@ -478,3 +613,7 @@ private fun DeviceEntity.toLoadInput(): LoadInput =
  */
 fun DeviceEntity.nominalCurrent(): Double =
     CurrentCalculator.calculateDeviceLoad(toLoadInput()).calculatedCurrentA
+
+/** Ток для подбора групповой линии без коэффициента спроса. */
+fun DeviceEntity.installedCurrent(): Double =
+    CurrentCalculator.calculateDeviceLoad(toLoadInput()).installedCurrentA

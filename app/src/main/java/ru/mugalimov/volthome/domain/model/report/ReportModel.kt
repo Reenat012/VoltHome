@@ -67,7 +67,8 @@ data class ReportModel(
             phases: List<ReportPhase>,
             profile: ReportProfile,
             phaseMode: PhaseMode,
-            appVersion: String
+            appVersion: String,
+            projectName: String = ""
         ): ReportModel {
             val headline = meta.headlineCurrents
             val totalGroups = meta.totalGroups
@@ -75,7 +76,7 @@ data class ReportModel(
             return ReportModel(
                 profile = profile,
                 header = Header(
-                    projectName = "",
+                    projectName = projectName,
                     date = meta.date,
                     incomerLabel = meta.incomerLabel ?: "",
                     phaseMode = phaseMode,

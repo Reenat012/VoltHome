@@ -2,6 +2,8 @@ package ru.mugalimov.volthome.domain.use_case
 
 import android.util.Log
 import javax.inject.Inject
+import ru.mugalimov.volthome.core.analytics.AnalyticsEvent
+import ru.mugalimov.volthome.core.analytics.AnalyticsTracker
 import ru.mugalimov.volthome.data.local.dao.DeviceDao
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.domain.model.CircuitGroup
@@ -33,6 +35,7 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
     private val structuralWriteMutex: ProjectStructuralWriteMutex, // ✅ single-flight
     private val projectOwnershipRepository: ru.mugalimov.volthome.data.repository.ProjectOwnershipRepository, // ✅ bastion lock SoT
     private val deviceDao: DeviceDao, // ✅ NEW: инвариант "не сохранять пустые devices при наличии устройств"
+    private val analytics: AnalyticsTracker,
 ) {
 
     data class Params(
@@ -153,6 +156,9 @@ class SaveAutoCalculatedGroupsToLocalDbUseCase @Inject constructor(
             explicationRepository.setLastDistributionDecisions(params.distributionDecisions)
 
             Log.w("AUTO_SAVE", "AUTO_SAVE END projectId=$projectId opId=$opId source=$source groups=${groups.size}")
+            analytics.track(
+                AnalyticsEvent.CalculationCompleted(linesCount = groups.size)
+            )
         } catch (t: Throwable) {
             Log.e("AUTO_SAVE", "AUTO_SAVE FAILED projectId=$projectId opId=$opId source=$source groups=${groups.size}", t)
             throw t

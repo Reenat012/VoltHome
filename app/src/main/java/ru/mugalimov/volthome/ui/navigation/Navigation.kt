@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
@@ -20,6 +21,11 @@ import androidx.compose.material.icons.filled.Payment
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.automirrored.outlined.ListAlt
+import androidx.compose.material.icons.rounded.GridView
+import androidx.compose.material.icons.outlined.SpaceDashboard
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Divider
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -43,22 +49,38 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
-import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import kotlinx.coroutines.launch
+import ru.mugalimov.volthome.core.theme.VhColors
+import ru.mugalimov.volthome.core.theme.VhDimens
+import ru.mugalimov.volthome.ui.model.LocalUserPlan
 
 // ---------- Bottom bar модели (как у тебя было) ----------
 
 sealed class BottomNavItem(
     val title: String,
     val icon: ImageVector,
-    val route: String
+    val route: String,
+    val proFeature: Boolean = false
 ) {
-    data object Rooms : BottomNavItem("Комнаты", Icons.Default.Home, "rooms")
-    data object Loads : BottomNavItem("Нагрузки", Icons.Default.Speed, "loads")
-    data object Explication : BottomNavItem("Экспликация", Icons.Default.List, "explication")
+    data object Rooms : BottomNavItem("Комнаты", Icons.Outlined.SpaceDashboard, Screens.RoomsList.route)
+    data object Loads : BottomNavItem("Нагрузки", Icons.Default.Speed, Screens.LoadsScreen.route)
+    data object Explication : BottomNavItem("Линии", Icons.AutoMirrored.Outlined.ListAlt, Screens.ExplicationScreen.route)
+    data object Panel : BottomNavItem(
+        "Щит",
+        Icons.Rounded.GridView,
+        Screens.PanelVisualizationScreen.route,
+        proFeature = true
+    )
 }
+
+val mainBottomNavItems: List<BottomNavItem> = listOf(
+    BottomNavItem.Rooms,
+    BottomNavItem.Loads,
+    BottomNavItem.Explication,
+    BottomNavItem.Panel
+)
 
 // ---------- Drawer state через CompositionLocal ----------
 
@@ -69,31 +91,51 @@ val LocalDrawerState = staticCompositionLocalOf<DrawerState?> { null }
 @Composable
 fun MainBottomNavBar(navController: NavHostController) {
     val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
+    val t = VhColors.tokens
+    val panelVisualizationAllowed = LocalUserPlan.current.capabilities.panelVisualization
 
-    NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
-        listOf(
-            BottomNavItem.Rooms,
-            BottomNavItem.Loads,
-            BottomNavItem.Explication
-        ).forEach { item ->
+    NavigationBar(
+        containerColor = t.surface,
+        tonalElevation = 0.dp,
+        modifier = Modifier.heightIn(min = 68.dp)
+    ) {
+        mainBottomNavItems.forEach { item ->
             NavigationBarItem(
-                icon = { Icon(item.icon, item.title) },
+                icon = {
+                    if (item.proFeature && !panelVisualizationAllowed) {
+                        BadgedBox(
+                            badge = {
+                                Badge(
+                                    containerColor = t.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                ) {
+                                    Text("PRO")
+                                }
+                            }
+                        ) {
+                            Icon(item.icon, item.title)
+                        }
+                    } else {
+                        Icon(item.icon, item.title)
+                    }
+                },
                 label = { Text(item.title) },
                 selected = currentRoute == item.route,
                 onClick = {
                     navController.navigate(item.route) {
-                        popUpTo(navController.graph.findStartDestination().id) {
-                            saveState = true
-                        }
+                        // Нижние разделы находятся в одном плоском графе. Сохранение стека
+                        // стартовой вкладки здесь восстанавливало лежащие поверх «Комнат»
+                        // экраны (например, «Линии») вместо самой вкладки.
+                        popUpTo(Screens.RoomsList.route) { inclusive = false }
                         launchSingleTop = true
-                        restoreState = true
                     }
                 },
                 colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = MaterialTheme.colorScheme.primary,
-                    selectedTextColor = MaterialTheme.colorScheme.primary,
-                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    selectedIconColor = t.primary,
+                    selectedTextColor = t.primary,
+                    indicatorColor = t.primarySurface,
+                    unselectedIconColor = t.textMuted,
+                    unselectedTextColor = t.textSecondary
                 )
             )
         }

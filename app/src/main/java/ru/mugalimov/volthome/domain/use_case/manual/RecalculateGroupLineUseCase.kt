@@ -4,9 +4,15 @@ import javax.inject.Inject
 import ru.mugalimov.volthome.domain.model.GroupProfile
 import ru.mugalimov.volthome.domain.model.manual.ManualDeviceDraft
 import ru.mugalimov.volthome.domain.model.manual.ManualGroupDraft
+import ru.mugalimov.volthome.domain.model.RoomType
 import ru.mugalimov.volthome.domain.policy.line.LinePolicyInput
 import ru.mugalimov.volthome.domain.policy.line.LinePolicySelector
+import ru.mugalimov.volthome.domain.policy.protection.RcdDeviceInput
+import ru.mugalimov.volthome.domain.policy.protection.RcdSelectionPolicy
+import ru.mugalimov.volthome.domain.policy.protection.RcdSelectionReason
+import ru.mugalimov.volthome.domain.policy.protection.RcdSpecFactory
 import ru.mugalimov.volthome.domain.use_case.CalculationTrace
+import ru.mugalimov.volthome.domain.use_case.CircuitLoadCalculator
 import ru.mugalimov.volthome.domain.use_case.CurrentCalculator
 import ru.mugalimov.volthome.domain.use_case.LoadInput
 
@@ -23,6 +29,7 @@ class RecalculateGroupLineUseCase @Inject constructor() {
 
     // ✅ Единый selector линии: breaker -> cable
     private val linePolicySelector = LinePolicySelector()
+    private val rcdSelectionPolicy = RcdSelectionPolicy()
 
     data class Params(
         val group: ManualGroupDraft,
@@ -38,6 +45,8 @@ class RecalculateGroupLineUseCase @Inject constructor() {
         )
 
         if (p.devicesInGroup.isEmpty()) {
+            val preservedReasons = p.group.rcdReasons
+                .filter { it == RcdSelectionReason.SPECIAL_ROOM }
             CalculationTrace.log(
                 stage = "MANUAL_LINE_RECALC_FINISH",
                 message =
@@ -52,10 +61,17 @@ class RecalculateGroupLineUseCase @Inject constructor() {
                 breakerType = p.group.breakerType,
                 whyBreakerSelected = null,
                 whyCableSelected = null,
-                rcdRequired = p.group.rcdRequired,
+                rcdRequired = preservedReasons.isNotEmpty(),
                 rcdCurrent = p.group.rcdCurrent,
+                rcdReasons = preservedReasons,
+                rcdSpec = null,
             )
         }
+
+        // MANUAL не блокирует даже смешанную топологию. CurrentCalculator считает
+        // вклад каждого устройства по его собственному типу напряжения, после чего
+        // используется консервативная сумма токов. Несовместимость сохраняется в
+        // deviationCodes и показывается пользователю как осознанное отклонение.
 
         CalculationTrace.log(
             stage = "MANUAL_LINE_RECALC_INPUT",
@@ -66,25 +82,38 @@ class RecalculateGroupLineUseCase @Inject constructor() {
                 }
         )
 
-        val groupLoad = CurrentCalculator.calculateGroupLoad(
-            p.devicesInGroup.map { it.toLoadInput() }
+        val groupLoad = CircuitLoadCalculator.calculateEntries(
+            p.devicesInGroup.map { device ->
+                CircuitLoadCalculator.Entry(
+                    roomId = device.roomId,
+                    deviceType = device.deviceType,
+                    requiresSocketConnection = device.requiresSocketConnection,
+                    requiresDedicatedCircuit = device.requiresDedicatedCircuit,
+                    loadInput = device.toLoadInput()
+                )
+            }
         )
 
         val nominalI = groupLoad.calculatedCurrentA
+        val installedI = groupLoad.installedCurrentA
         val groupType = p.group.groupType
         val hasMotor = p.devicesInGroup.any { it.hasMotor }
 
-        val line = selectLineProfile(
-            nominalCurrent = nominalI,
+        val line = selectStrictestLineProfile(
+            nominalCurrent = installedI,
             hasMotor = hasMotor,
-            groupType = groupType
+            deviceTypes = p.devicesInGroup.map { it.deviceType }.toSet()
+        )
+        val rcdReasons = selectRcdReasons(
+            group = p.group,
+            devices = p.devicesInGroup
         )
 
         CalculationTrace.log(
             stage = "MANUAL_LINE_RECALC_CURRENT_PATH",
             message =
                 "devices=${p.devicesInGroup.size} manualCurrentA=${CalculationTrace.f(nominalI)} " +
-                        "formulaPath=CurrentCalculator.calculateGroupLoad()"
+                        "formulaPath=CircuitLoadCalculator.calculate()"
         )
 
         CalculationTrace.log(
@@ -98,7 +127,7 @@ class RecalculateGroupLineUseCase @Inject constructor() {
                         "selectedCurve=${line.breakerType} " +
                         "reasonFloor=${line.whyBreakerSelected?.floorBreakerA} " +
                         "reasonRequired=${line.whyBreakerSelected?.requiredBreakerA} " +
-                        "cableNormFloor=${line.whyCableSelected?.normativeFloorSectionMm2} " +
+                        "cableProductFloor=${line.whyCableSelected?.minimumProductSectionMm2} " +
                         "cableDefault=${line.whyCableSelected?.productDefaultSectionMm2}"
         )
 
@@ -109,6 +138,16 @@ class RecalculateGroupLineUseCase @Inject constructor() {
             breakerType = line.breakerType,
             whyBreakerSelected = line.whyBreakerSelected,
             whyCableSelected = line.whyCableSelected,
+            rcdRequired = rcdReasons.isNotEmpty(),
+            rcdCurrent = if (rcdReasons.isNotEmpty()) 30 else p.group.rcdCurrent,
+            rcdReasons = rcdReasons,
+            rcdSpec = RcdSpecFactory.createGroupRecommendation(
+                required = rcdReasons.isNotEmpty(),
+                leakageCurrentMa = if (rcdReasons.isNotEmpty()) 30 else null,
+                breakerRatingA = line.breakerRating,
+                phase = p.group.phase,
+                source = ru.mugalimov.volthome.domain.model.CalculationSource.MANUAL
+            ),
         )
     }
 
@@ -126,6 +165,28 @@ class RecalculateGroupLineUseCase @Inject constructor() {
             voltageType = voltageType,
             label = null
         )
+    }
+
+    private fun selectRcdReasons(
+        group: ManualGroupDraft,
+        devices: List<ManualDeviceDraft>
+    ): List<RcdSelectionReason> {
+        val dynamic = rcdSelectionPolicy.select(
+            roomType = group.roomType,
+            devices = devices.map { device ->
+                RcdDeviceInput(
+                    deviceType = device.deviceType,
+                    requiresSocketConnection = device.requiresSocketConnection
+                )
+            }
+        ).reasons
+
+        return buildList {
+            if (RcdSelectionReason.SPECIAL_ROOM in group.rcdReasons) {
+                add(RcdSelectionReason.SPECIAL_ROOM)
+            }
+            addAll(dynamic)
+        }.distinct()
     }
 
     /**
@@ -147,5 +208,38 @@ class RecalculateGroupLineUseCase @Inject constructor() {
                 hasMotor = hasMotor
             )
         ).profile
+    }
+
+    /**
+     * MANUAL может содержать устройства разных назначений. В таком случае
+     * нельзя продолжать выбирать линию по историческому groupType: берём
+     * наиболее строгий результат среди фактических типов устройств.
+     */
+    private fun selectStrictestLineProfile(
+        nominalCurrent: Double,
+        hasMotor: Boolean,
+        deviceTypes: Set<ru.mugalimov.volthome.domain.model.DeviceType>
+    ): GroupProfile {
+        require(deviceTypes.isNotEmpty()) { "Нельзя выбрать линию для пустого набора типов" }
+        return deviceTypes
+            .map { type ->
+                selectLineProfile(
+                    nominalCurrent = nominalCurrent,
+                    hasMotor = hasMotor,
+                    groupType = type
+                )
+            }
+            .maxWith(
+                compareBy<GroupProfile> { it.breakerRating }
+                    .thenBy { it.cableSection }
+                    .thenBy { curveRank(it.breakerType) }
+            )
+    }
+
+    private fun curveRank(curve: String): Int = when (curve.uppercase()) {
+        "D" -> 3
+        "C" -> 2
+        "B" -> 1
+        else -> 0
     }
 }

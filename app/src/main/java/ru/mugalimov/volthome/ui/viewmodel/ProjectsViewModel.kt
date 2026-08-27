@@ -11,15 +11,21 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import ru.mugalimov.volthome.data.local.dao.OutboxDao
 import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
+import ru.mugalimov.volthome.core.analytics.AnalyticsEvent
+import ru.mugalimov.volthome.core.analytics.AnalyticsMode
+import ru.mugalimov.volthome.core.analytics.AnalyticsTracker
 import ru.mugalimov.volthome.data.repository.ProjectsRepository
+import ru.mugalimov.volthome.data.repository.PreferencesRepository
+import ru.mugalimov.volthome.data.repository.ProjectSetupRepository
 import ru.mugalimov.volthome.domain.errors.ProjectLimitError.ProjectLimitReached
 import ru.mugalimov.volthome.domain.model.ProFeature
 import ru.mugalimov.volthome.domain.model.Project
 import ru.mugalimov.volthome.domain.use_case.CreateProjectUseCase
+import ru.mugalimov.volthome.domain.use_case.EnsureCalculationVersionUseCase
 import ru.mugalimov.volthome.ui.model.ProjectUi
 import ru.mugalimov.volthome.ui.onboarding.model.ProjectsOnboardingFacts
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
@@ -29,8 +35,11 @@ class ProjectsViewModel @Inject constructor(
     private val repo: ProjectsRepository,
     private val activeDs: ActiveProjectDataStore,
     private val paywallBus: PaywallBus,
-    private val outboxDao: OutboxDao,
     private val createProjectUseCase: CreateProjectUseCase,
+    private val analytics: AnalyticsTracker,
+    private val preferencesRepository: PreferencesRepository,
+    private val projectSetupRepository: ProjectSetupRepository,
+    private val ensureCalculationVersion: EnsureCalculationVersionUseCase,
 ) : ViewModel() {
 
     /**
@@ -72,26 +81,19 @@ class ProjectsViewModel @Inject constructor(
      * - не плодим второй источник истины
      */
     val onboardingFacts =
-        projectsUi
+        repo.listProjects()
             .map { list ->
                 ProjectsOnboardingFacts(
-                    projectsCount = list.size
+                    projectsCount = list.size,
+                    isLoading = false
                 )
             }
+            .onStart { emit(ProjectsOnboardingFacts(isLoading = true)) }
             .stateIn(
                 viewModelScope,
                 SharingStarted.WhileSubscribed(5_000),
                 ProjectsOnboardingFacts()
             )
-
-    init {
-        // ✅ FIX: paywall не должен появляться "сам по себе".
-        // Ранее тут был listener outbox FAILED_FATAL + PROJECT_CREATE и paywallBus.request(...)
-        // Теперь init не инициирует paywall вообще.
-        //
-        // outboxDao остаётся в зависимостях (может использоваться в других сценариях / будущем),
-        // но paywall показываем только из пользовательских действий.
-    }
 
     fun createNewProject(name: String? = null) {
         viewModelScope.launch {
@@ -100,7 +102,10 @@ class ProjectsViewModel @Inject constructor(
 
             when (val outcome = createProjectUseCase(name = title, note = null)) {
                 is CreateProjectUseCase.Outcome.Success -> {
-                    // "Как раньше": активируем и открываем (openProject запускает синк/подгрузки).
+                    analytics.track(
+                        AnalyticsEvent.ProjectCreated(mode = AnalyticsMode.AUTOMATIC)
+                    )
+                    // Активируем локально созданный проект.
                     activeDs.setActiveProjectId(outcome.projectId)
                     repo.openProject(outcome.projectId)
                 }
@@ -120,9 +125,14 @@ class ProjectsViewModel @Inject constructor(
 
     fun selectProject(id: String) {
         viewModelScope.launch {
+            synchronizeProjectSettings(id)
             activeDs.setActiveProjectId(id)
             repo.openProject(id)
         }
+    }
+
+    fun synchronizeActiveProjectSettings(id: String) {
+        viewModelScope.launch { synchronizeProjectSettings(id) }
     }
 
     fun renameProject(id: String, newName: String) {
@@ -136,6 +146,7 @@ class ProjectsViewModel @Inject constructor(
             if (current == id) {
                 val next = repo.listProjects().first().firstOrNull { !it.isDeleted }
                 if (next != null) {
+                    synchronizeProjectSettings(next.id)
                     activeDs.setActiveProjectId(next.id)
                     repo.openProject(next.id)
                 } else {
@@ -153,5 +164,12 @@ class ProjectsViewModel @Inject constructor(
             .mapNotNull { p -> re.find(p.name)?.groupValues?.getOrNull(1)?.toIntOrNull() }
             .maxOrNull() ?: 0
         return "Проект №${max + 1}"
+    }
+
+    private suspend fun synchronizeProjectSettings(projectId: String) {
+        val fallback = preferencesRepository.phaseMode.first()
+        val setup = projectSetupRepository.getOrCreate(projectId, fallback)
+        if (fallback != setup.phaseMode) preferencesRepository.setPhaseMode(setup.phaseMode)
+        ensureCalculationVersion.execute(projectId)
     }
 }

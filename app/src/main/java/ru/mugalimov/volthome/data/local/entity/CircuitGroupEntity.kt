@@ -16,11 +16,18 @@ import java.util.Date
             parentColumns = ["id"],
             childColumns = ["room_id"],
             onDelete = ForeignKey.CASCADE
+        ),
+        ForeignKey(
+            entity = ProjectEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["project_id"],
+            onDelete = ForeignKey.CASCADE
         )
     ],
     indices = [
         Index(name = "idx_groups_room_id", value = ["room_id"]),
-        Index(name = "idx_groups_project_id", value = ["project_id"])
+        Index(name = "idx_groups_project_id", value = ["project_id"]),
+        Index(name = "idx_groups_project_room_id", value = ["project_id", "room_id"])
     ]
 )
 data class CircuitGroupEntity(
@@ -58,6 +65,36 @@ data class CircuitGroupEntity(
     @ColumnInfo(name = "rcd_current")
     val rcdCurrent: Int = 30,
 
+    @ColumnInfo(name = "rcd_reason_codes")
+    val rcdReasonCodes: String = "",
+
+    @ColumnInfo(name = "rcd_nominal_current")
+    val rcdNominalCurrent: Int? = null,
+
+    @ColumnInfo(name = "rcd_type")
+    val rcdType: String? = null,
+
+    @ColumnInfo(name = "rcd_poles")
+    val rcdPoles: Int? = null,
+
+    @ColumnInfo(name = "rcd_selectivity")
+    val rcdSelectivity: String = "NONE",
+
+    @ColumnInfo(name = "rcd_kind")
+    val rcdKind: String? = null,
+
+    @ColumnInfo(name = "rcd_source")
+    val rcdSource: String = "LEGACY",
+
+    @ColumnInfo(name = "manual_deviation_codes")
+    val manualDeviationCodes: String = "",
+
+    @ColumnInfo(name = "calculation_source")
+    val calculationSource: String = "LEGACY",
+
+    @ColumnInfo(name = "algorithm_version")
+    val algorithmVersion: Int = 0,
+
     @ColumnInfo(name = "created_at")
     val createdAt: Date = Date(),
 
@@ -66,5 +103,5 @@ data class CircuitGroupEntity(
 
     // 🔹 Привязка к проекту (может быть null для мигрированных старых данных)
     @ColumnInfo(name = "project_id")
-    val projectId: String? = null
+    val projectId: String
 )

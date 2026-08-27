@@ -130,6 +130,44 @@ fun AlgorithmExplanationContent() {
             chips = listOf("Автоделение", "Контроль нагрузки")
         )
 
+        InfoCard(
+            title = "Как считается ток",
+            icon = {
+                Icon(
+                    Icons.Filled.Equalizer,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            },
+            paragraphs = listOf(
+                "Для однофазной нагрузки ток определяется по мощности, напряжению и коэффициенту мощности. " +
+                        "Для трёхфазной используется линейное напряжение и множитель √3."
+            ),
+            bullets = listOf(
+                "Установленный ток: I = P / (U × cos φ) для 1 фазы.",
+                "Расчётный вклад: мощность дополнительно умножается на коэффициент спроса.",
+                "Автомат группы подбирается по установленному току: max(округление вверх, минимум для типа линии)."
+            ),
+            chips = listOf("P", "U", "cos φ", "Коэффициент спроса")
+        )
+
+        InfoCard(
+            title = "Автомат и кабель",
+            icon = {
+                Icon(
+                    Icons.Filled.Bolt,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            },
+            bullets = listOf(
+                "Автомат выбирается первым из поддерживаемого ряда 10–63 А.",
+                "Характеристика B используется для обычной линии 10 А, C — базовая и для умеренной моторной нагрузки, D — для моторной нагрузки от 25 А.",
+                "После автомата кабель выбирается из продуктовой матрицы: 1,5; 2,5; 4; 6; 10; 16 мм²."
+            ),
+            chips = listOf("Автомат → кабель", "Единое правило AUTO/MANUAL")
+        )
+
         PhaseBalanceCard()
 
         InfoCard(
@@ -142,11 +180,51 @@ fun AlgorithmExplanationContent() {
                 )
             },
             bullets = listOf(
-                "Для влажных зон (ванная, кухня, улица) добавляем защиту от утечки тока (УЗО/дифавтомат) — это защищает человека при повреждении изоляции.",
+                "Для ванной, кухни и улицы алгоритм назначает групповое УЗО 30 мА.",
+                "В обычной комнате УЗО 30 мА получает линия, в которой добавлена «Розетка бытовая».",
+                "Любая самостоятельная группа с прибором, отмеченным «Подключение через розетку», получает УЗО 30 мА на эту группу.",
+                "Например, отдельная группа микроволновой печи не зависит от другой группы «Розетка бытовая»: обе линии защищаются самостоятельно.",
                 "Для каждой линии подбираем автоматический выключатель и кабель по нормам.",
                 "Согласуем защиту с вводным автоматом, чтобы при аварии отключалась только нужная линия."
             ),
             chips = listOf("Защита от утечки", "Подбор автомата", "Селективность")
+        )
+
+        InfoCard(
+            title = "Вводной аппарат",
+            icon = {
+                Icon(
+                    Icons.Filled.Power,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            },
+            bullets = listOf(
+                "За основу берётся максимальный расчётный ток фазы.",
+                "Расчётный ток делится на 0,8 — так закладывается 20% резерва.",
+                "Выбирается первый подходящий номинал из ряда 6–160 А.",
+                "Для трёхфазной сети используется 3P+N, для однофазной — 1P+N."
+            ),
+            chips = listOf("20% резерва", "Максимальная фаза")
+        )
+
+        InfoCard(
+            title = "Границы автоматического расчёта",
+            icon = {
+                Icon(
+                    Icons.Filled.Description,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            },
+            bullets = listOf(
+                "Для линии с заданной длиной учитываются материал, изоляция, способ прокладки, температура, группировка и падение напряжения.",
+                "Без длины линии сечение остаётся предварительным и подбирается по автомату.",
+                "Не рассчитываются ток короткого замыкания, петля повреждения и время автоматического отключения.",
+                "Приложение не определяет фактические границы влажных зон и не проверяет договорную мощность.",
+                "Результат является расчётной рекомендацией и требует проверки специалистом перед монтажом."
+            ),
+            chips = listOf("Проверить перед монтажом")
         )
 
         InfoCard(
@@ -172,27 +250,34 @@ fun AlgorithmExplanationContent() {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun HeaderCard() {
-    ElevatedCard(
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        ),
+    val t = VhColors.tokens
+    Surface(
+        color = t.primarySurface,
+        shape = RoundedCornerShape(22.dp),
         modifier = Modifier
             .fillMaxWidth()
             .border(
                 width = 1.dp,
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = RoundedCornerShape(16.dp)
+                color = t.primary.copy(alpha = 0.42f),
+                shape = RoundedCornerShape(22.dp)
             )
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
-                "Умное распределение по группам и фазам",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold)
+                "МЕТОДИКА · АЛГОРИТМ 3",
+                style = MaterialTheme.typography.labelMedium,
+                color = t.primary,
+                fontWeight = FontWeight.Bold
             )
             Text(
-                "ВольтХом группирует приборы, подбирает защиту и равномерно распределяет нагрузку по фазам A/B/C. Учёт «реальной» нагрузки и того, что не всё включено одновременно.",
-                style = MaterialTheme.typography.bodyMedium
+                "От исходных данных до структуры щита",
+                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                color = t.textPrimary
+            )
+            Text(
+                "Показываем не только результат, но и последовательность инженерных решений, исходные допущения и границы автоматического расчёта.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = t.textSecondary
             )
 
             FlowRow(
@@ -201,8 +286,8 @@ private fun HeaderCard() {
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 SmallChip("Равномерные фазы")
-                SmallChip("Нормы ПУЭ")
-                SmallChip("Безопасность")
+                SmallChip("Объяснимый расчёт")
+                SmallChip("Проверка специалистом")
             }
         }
     }
@@ -217,32 +302,36 @@ private fun InfoCard(
     paragraphs: List<String> = emptyList(),
     chips: List<String> = emptyList()
 ) {
-    ElevatedCard(
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
+    val t = VhColors.tokens
+    Surface(
+        color = t.surfaceAlt,
+        shape = RoundedCornerShape(18.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp))
+            .border(1.dp, t.divider, RoundedCornerShape(18.dp))
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                if (icon != null) icon()
+                if (icon != null) {
+                    Surface(shape = RoundedCornerShape(10.dp), color = t.primarySurface) {
+                        Box(Modifier.padding(8.dp)) { icon() }
+                    }
+                }
                 Text(
                     title,
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = t.textPrimary,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            paragraphs.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
+            paragraphs.forEach { Text(it, style = MaterialTheme.typography.bodyMedium, color = t.textSecondary) }
             if (bullets.isNotEmpty()) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    bullets.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium) }
+                    bullets.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium, color = t.textSecondary) }
                 }
             }
             if (chips.isNotEmpty()) {
@@ -286,7 +375,9 @@ private fun PhaseBalanceCard() {
                 )
             }
             Text(
-                "После формирования групп система распределяет их по трём фазам так, чтобы нагрузка была максимально ровной. Это помогает избежать перекоса и шумов в сети.",
+                "Однофазные группы сортируются по расчётному току от большей к меньшей. Каждая группа " +
+                        "ставится на фазу с наименьшим результирующим перекосом; затем алгоритм до трёх раз " +
+                        "проверяет перенос 15 самых тяжёлых групп. При равенстве используется стабильный порядок A → B → C.",
                 style = MaterialTheme.typography.bodyMedium
             )
 

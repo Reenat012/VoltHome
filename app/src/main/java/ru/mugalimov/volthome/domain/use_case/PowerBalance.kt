@@ -10,6 +10,9 @@ import kotlin.math.abs
  * Возвращает также фазы с макс/мин током и среднее.
  */
 fun calcPhaseBalance(a: Double, b: Double, c: Double): PhaseBalance {
+    require(a.isFinite() && b.isFinite() && c.isFinite()) {
+        "Токи фаз должны быть конечными числами"
+    }
     val ia = abs(a)
     val ib = abs(b)
     val ic = abs(c)
@@ -61,4 +64,3 @@ fun balanceStatus(pct: Double): BalanceStatus = when {
     pct < 25.0 -> BalanceStatus.MINOR    // 10..25% — умеренный перекос
     else       -> BalanceStatus.HIGH     // >25% — сильный перекос
 }
-

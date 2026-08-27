@@ -10,88 +10,28 @@ import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 
 @Dao
 interface DeviceDao {
-
-    /* ------------ OBSERVE / READ (tombstones filtered) ------------ */
-
-    @Query("""
-        SELECT d.* FROM devices d
-        WHERE NOT EXISTS (
-            SELECT 1 FROM tombstones t
-            WHERE t.entity_type = 'DEVICE'
-              AND t.local_id = d.device_id
-        )
-        ORDER BY d.created_at ASC, d.device_id ASC
-    """)
+    @Query("SELECT * FROM devices ORDER BY created_at, device_id")
     fun observeAllDevices(): Flow<List<DeviceEntity>>
 
-    @Query("""
-        SELECT d.* FROM devices d
-        WHERE d.room_id = :roomId
-          AND NOT EXISTS (
-              SELECT 1 FROM tombstones t
-              WHERE t.entity_type = 'DEVICE'
-                AND t.local_id = d.device_id
-          )
-        ORDER BY d.created_at ASC, d.device_id ASC
-    """)
+    @Query("SELECT * FROM devices WHERE room_id=:roomId ORDER BY created_at, device_id")
     fun observeDevicesByIdRoom(roomId: Long): Flow<List<DeviceEntity>>
 
-    @Query("""
-        SELECT d.* FROM devices d
-        WHERE d.device_id = :deviceId
-          AND NOT EXISTS (
-              SELECT 1 FROM tombstones t
-              WHERE t.entity_type = 'DEVICE'
-                AND t.local_id = d.device_id
-          )
-        LIMIT 1
-    """)
+    @Query("SELECT * FROM devices WHERE device_id=:deviceId LIMIT 1")
     suspend fun getDeviceById(deviceId: Int): DeviceEntity?
 
-    @Query("""
-        SELECT d.* FROM devices d
-        WHERE d.room_id = :roomId
-          AND NOT EXISTS (
-              SELECT 1 FROM tombstones t
-              WHERE t.entity_type = 'DEVICE'
-                AND t.local_id = d.device_id
-          )
-        ORDER BY d.created_at ASC, d.device_id ASC
-    """)
+    @Query("SELECT * FROM devices WHERE room_id=:roomId ORDER BY created_at, device_id")
     suspend fun getAllDevicesByRoomId(roomId: Long): List<DeviceEntity>
 
-    @Query("""
-        SELECT d.* FROM devices d
-        WHERE NOT EXISTS (
-            SELECT 1 FROM tombstones t
-            WHERE t.entity_type = 'DEVICE'
-              AND t.local_id = d.device_id
-        )
-        ORDER BY d.created_at ASC, d.device_id ASC
-    """)
+    @Query("SELECT * FROM devices ORDER BY created_at, device_id")
     suspend fun getAllDevices(): List<DeviceEntity>
 
-    /* ------------ LOOKUPS ------------ */
-
-    @Query("""
-        SELECT * FROM devices d
-        WHERE d.room_id = :roomId
-          AND d.name = :name
-          AND NOT EXISTS (
-              SELECT 1 FROM tombstones t
-              WHERE t.entity_type = 'DEVICE'
-                AND t.local_id = d.device_id
-          )
-        LIMIT 1
-    """)
+    @Query("SELECT * FROM devices WHERE room_id=:roomId AND name=:name LIMIT 1")
     suspend fun findByRoomAndName(roomId: Long, name: String): DeviceEntity?
 
-    /* ------------ WRITE ------------ */
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(entity: DeviceEntity): Long
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun addDevice(entity: DeviceEntity): Long
 
     @Update
@@ -100,79 +40,30 @@ interface DeviceDao {
     @Query("DELETE FROM devices WHERE device_id IN (:ids)")
     suspend fun deleteDevicesByIds(ids: List<Long>)
 
-    @Query("DELETE FROM devices WHERE device_id = :deviceId")
+    @Query("DELETE FROM devices WHERE device_id=:deviceId")
     suspend fun deleteDeviceById(deviceId: Long): Int
 
-    /* ------------ Bulk ops for project ------------ */
-
-    @Query("UPDATE devices SET project_id = :newProjectId WHERE project_id = :oldProjectId")
+    @Query("UPDATE devices SET project_id=:newProjectId WHERE project_id=:oldProjectId")
     suspend fun rebindProjectDevices(oldProjectId: String, newProjectId: String): Int
 
-    @Query("DELETE FROM devices WHERE project_id = :projectId")
+    @Query("DELETE FROM devices WHERE project_id=:projectId")
     suspend fun deleteDevicesByProject(projectId: String)
 
-    /* ------------ Project-scoped fetch ------------ */
-
-    @Query("""
-        SELECT d.* FROM devices d
-        WHERE d.project_id = :projectId
-          AND NOT EXISTS (
-              SELECT 1 FROM tombstones t
-              WHERE t.entity_type = 'DEVICE'
-                AND t.local_id = d.device_id
-          )
-        ORDER BY d.created_at ASC, d.device_id ASC
-    """)
+    @Query("SELECT * FROM devices WHERE project_id=:projectId ORDER BY created_at, device_id")
     suspend fun getAllDevicesByProject(projectId: String): List<DeviceEntity>
 
-    @Query("""
-        SELECT COUNT(*) FROM devices d
-        WHERE d.project_id = :projectId
-    """)
+    @Query("SELECT * FROM devices WHERE project_id=:projectId ORDER BY created_at, device_id")
+    fun observeAllDevicesByProject(projectId: String): Flow<List<DeviceEntity>>
+
+    @Query("SELECT COUNT(*) FROM devices WHERE project_id=:projectId")
     suspend fun countByProjectId(projectId: String): Int
 
-    @Query("""
-        SELECT d.* FROM devices d
-        WHERE d.device_id IN (:ids)
-          AND NOT EXISTS (
-              SELECT 1 FROM tombstones t
-              WHERE t.entity_type = 'DEVICE'
-                AND t.local_id = d.device_id
-          )
-    """)
+    @Query("SELECT * FROM devices WHERE device_id IN (:ids)")
     suspend fun getDevicesByIds(ids: List<Long>): List<DeviceEntity>
 
-    /**
-     * ✅ Commit 1: tombstone-consistent count по проекту.
-     * Считаем только "живые" устройства, исключая помеченные tombstone.
-     */
-    @Query("""
-        SELECT COUNT(*) FROM devices d
-        WHERE d.project_id = :projectId
-          AND NOT EXISTS (
-              SELECT 1 FROM tombstones t
-              WHERE t.entity_type = 'DEVICE'
-                AND t.local_id = d.device_id
-          )
-    """)
+    @Query("SELECT COUNT(*) FROM devices WHERE project_id=:projectId")
     suspend fun countActiveByProjectId(projectId: String): Int
 
-    /**
-     * ✅ Commit 3: ЕДИНЫЙ критерий activeIds для bootstrap diff.
-     *
-     * Важно:
-     * - Используется только в read-only bootstrapping/diff.
-     * - Никаких "фильтров по месту" — чтобы diff был детерминированный.
-     */
-    @Query("""
-        SELECT d.device_id FROM devices d
-        WHERE d.project_id = :projectId
-          AND NOT EXISTS (
-              SELECT 1 FROM tombstones t
-              WHERE t.entity_type = 'DEVICE'
-                AND t.local_id = d.device_id
-          )
-        ORDER BY d.created_at ASC, d.device_id ASC
-    """)
+    @Query("SELECT device_id FROM devices WHERE project_id=:projectId ORDER BY created_at, device_id")
     suspend fun getActiveIdsByProjectId(projectId: String): List<Long>
 }

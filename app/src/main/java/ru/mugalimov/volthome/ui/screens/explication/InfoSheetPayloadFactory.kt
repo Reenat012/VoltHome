@@ -16,11 +16,12 @@ object InfoSheetPayloadFactory {
         field: IncomerField,
         incomer: IncomerSpec,
         phaseMode: PhaseMode,
-        hasGroupRcds: Boolean
+        hasGroupRcds: Boolean,
+        baseCurrentA: Double
     ): InfoSheetPayload = when (field) {
         IncomerField.SCHEME -> scheme(incomer, phaseMode, hasGroupRcds)
         IncomerField.POLES -> poles(incomer)
-        IncomerField.MCB -> mcb(incomer)
+        IncomerField.MCB -> mcb(incomer, baseCurrentA)
         IncomerField.RCD -> rcd(incomer, hasGroupRcds)
     }
 
@@ -73,8 +74,10 @@ object InfoSheetPayloadFactory {
         )
     }
 
-    private fun mcb(incomer: IncomerSpec): InfoSheetPayload {
+    private fun mcb(incomer: IncomerSpec, baseCurrentA: Double): InfoSheetPayload {
         val icnKa = (incomer.icn / 1000)
+        val requiredCurrentA = (baseCurrentA / 0.8).coerceAtLeast(6.0)
+        val roundedRequiredA = kotlin.math.ceil(requiredCurrentA).toInt()
         val polesShort = when (incomer.poles) {
             4 -> "3P+N"
             2 -> "1P+N"
@@ -84,6 +87,7 @@ object InfoSheetPayloadFactory {
 
         val bullets = buildList {
             add("Номинал (In): ${incomer.mcbRating} А")
+            add("Текущая расчётная загрузка: ${fmt(baseCurrentA)} А — ${fmt(baseCurrentA / incomer.mcbRating * 100.0)}% номинала")
             add("Кривая: ${incomer.mcbCurve} (пусковые токи учитываются выбором B/C/D)")
             add("Отключающая способность (Icn): ${icnKa} кА")
             add("Полюса: $polesShort")
@@ -94,6 +98,19 @@ object InfoSheetPayloadFactory {
             sheetType = InfoSheetType.REFERENCE,
             currentValueText = current,
             bullets = bullets,
+            formulaLines = listOf(
+                "Максимальный расчётный ток фазы: ${fmt(baseCurrentA)} А.",
+                "Запас 20%: ${fmt(baseCurrentA)} / 0,8 = ${fmt(requiredCurrentA)} А.",
+                "Округление вверх: ceil(${fmt(requiredCurrentA)}) = $roundedRequiredA А.",
+                "Из ряда 6, 10, 16, 20, 25, 32, 40, 50, 63, 80, 100, 125, 160 А выбран ${incomer.mcbRating} А."
+            ),
+            limitations = listOf(
+                "Расчёт не стремится загрузить автомат до 100%: рабочий запас снижает риск отключений при одновременной и кратковременной нагрузке.",
+                "Запас 20% — принятая в приложении предварительная эвристика, а не универсальная нормативная граница. Допустимая загрузка зависит от аппарата, температуры, монтажа и условий эксплуатации.",
+                "Отключающая способность 6 кА задана продуктовым правилом, ток короткого замыкания не рассчитывается.",
+                "Селективность с внешней защитой и допустимая мощность по договору электроснабжения требуют отдельной проверки."
+            ),
+            sourceText = "Автоматический расчёт вводного аппарата",
             calcDetailsState = CalcDetailsState.HIDDEN
         )
     }
@@ -102,7 +119,7 @@ object InfoSheetPayloadFactory {
         // Если схемы без УЗО на вводе — показываем “—”
         if (incomer.kind == IncomerKind.MCB_ONLY || incomer.rcdType == null || incomer.rcdSensitivityMa == null) {
             return InfoSheetPayload(
-                title = "УЗО (ввод)",
+                title = "Вводное УЗО",
                 sheetType = InfoSheetType.REFERENCE,
                 currentValueText = "—",
                 bullets = buildList {
@@ -133,11 +150,25 @@ object InfoSheetPayloadFactory {
         }
 
         return InfoSheetPayload(
-            title = "УЗО (ввод)",
+            title = "Вводное УЗО",
             sheetType = InfoSheetType.REFERENCE,
             currentValueText = current,
             bullets = bullets,
+            formulaLines = buildList {
+                if (hasGroupRcds) {
+                    add("При наличии групповых УЗО вводная дифзащита выбирается селективной, чтобы уменьшить риск отключения всего объекта.")
+                }
+                add("Чувствительность вводного УЗО определяется типом сети и ролью аппарата, а не суммой токов групп.")
+            },
+            limitations = listOf(
+                "Номинальный ток УЗО, тип тока утечки и координация конкретных серий аппаратов должны быть проверены специалистом.",
+                "УЗО не заменяет автоматическую защиту от перегрузки и короткого замыкания."
+            ),
+            sourceText = "Автоматический расчёт вводного аппарата",
             calcDetailsState = CalcDetailsState.HIDDEN
         )
     }
+
+    private fun fmt(value: Double): String =
+        String.format(java.util.Locale.US, "%.2f", value).replace('.', ',')
 }

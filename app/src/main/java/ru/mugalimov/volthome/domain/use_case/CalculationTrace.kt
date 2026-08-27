@@ -1,7 +1,7 @@
 package ru.mugalimov.volthome.domain.use_case
 
-import android.util.Log
 import java.util.Locale
+import java.util.logging.Logger
 
 /**
  * Единая техническая трассировка расчётного пайплайна.
@@ -20,10 +20,11 @@ import java.util.Locale
 object CalculationTrace {
 
     private const val TAG = "CALC_TRACE"
+    private val logger: Logger = Logger.getLogger(TAG)
 
     /** Общий логгер технических этапов расчёта. */
     fun log(stage: String, message: String) {
-        Log.d(TAG, "[$stage] $message")
+        logger.fine("[$stage] $message")
     }
 
     /** Форматтер чисел для стабильного читаемого trace. */

@@ -3,23 +3,21 @@ package ru.mugalimov.volthome.domain.use_case.manual
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.sqrt
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.PhaseMode
-import ru.mugalimov.volthome.domain.model.VoltageType
 import ru.mugalimov.volthome.domain.model.manual.ManualDeviceDraft
 import ru.mugalimov.volthome.domain.model.manual.ManualGroupDraft
 import ru.mugalimov.volthome.domain.model.manual.ProjectEditState
+import ru.mugalimov.volthome.domain.model.manual.toCompatibilityInput
+import ru.mugalimov.volthome.domain.policy.breaker.BreakerPolicyDefaults
+import ru.mugalimov.volthome.domain.policy.compatibility.CircuitCompatibilityPolicy
+import ru.mugalimov.volthome.domain.use_case.CurrentCalculator
 
 /**
  * Pure helpers/selectors for manual draft operations.
  * Keep them deterministic and unit-testable.
  */
 object ManualDraftSelectors {
-
-    private const val U_1P = 230.0
-    private const val U_3P = 400.0
-    private val SQRT3 = sqrt(3.0)
 
     fun devicesById(draft: ProjectEditState): Map<Long, ManualDeviceDraft> =
         draft.devices.associateBy { it.deviceId }
@@ -39,17 +37,38 @@ object ManualDraftSelectors {
     }
 
     fun calcDeviceCurrentA(d: ManualDeviceDraft): Double {
-        val p = (d.powerW ?: 0).toDouble().coerceAtLeast(0.0)
-        if (p <= 0.0) return 0.0
+        val voltage = d.voltageValue
+            ?.takeIf { it > 0 }
+            ?.toDouble()
+            ?: CurrentCalculator.defaultVoltageFor(d.voltageType)
 
-        val pf = (d.powerFactor ?: 1.0).coerceIn(0.1, 1.0)
-        val k = (d.demandRatio ?: 1.0).coerceIn(0.0, 1.0)
+        return CurrentCalculator.calculateCalculatedCurrent(
+            power = (d.powerW ?: 0).toDouble(),
+            voltage = voltage,
+            powerFactor = d.powerFactor,
+            demandRatio = d.demandRatio ?: 1.0,
+            voltageType = d.voltageType
+        )
+    }
 
-        return when (d.voltageType) {
-            VoltageType.AC_3PHASE -> (p / (SQRT3 * U_3P * pf)) * k
-            VoltageType.AC_1PHASE -> (p / (U_1P * pf)) * k
-            VoltageType.DC -> (p / (U_1P * pf)) * k // считаем как 1ф для оценки тока
-        }
+    fun calcDeviceInstalledCurrentA(d: ManualDeviceDraft): Double {
+        val voltage = d.voltageValue
+            ?.takeIf { it > 0 }
+            ?.toDouble()
+            ?: CurrentCalculator.defaultVoltageFor(d.voltageType)
+        return CurrentCalculator.calculateInstalledCurrent(
+            power = (d.powerW ?: 0).toDouble(),
+            voltage = voltage,
+            powerFactor = d.powerFactor,
+            voltageType = d.voltageType
+        )
+    }
+
+    fun calcGroupInstalledCurrentA(
+        group: ManualGroupDraft,
+        devices: Map<Long, ManualDeviceDraft>
+    ): Double = group.deviceIds.sumOf { id ->
+        devices[id]?.let(::calcDeviceInstalledCurrentA) ?: 0.0
     }
 
     fun calcGroupCurrentA(group: ManualGroupDraft, devices: Map<Long, ManualDeviceDraft>): Double {
@@ -128,7 +147,8 @@ object ManualDraftSelectors {
      * Standard breaker ladder for "upgrade" scenario.
      * Adjust if you have a canonical list elsewhere.
      */
-    private val breakerLadder = listOf(6, 10, 16, 20, 25, 32, 40, 50, 63)
+    private val breakerLadder =
+        (listOf(6) + BreakerPolicyDefaults.supportedNominalsA).distinct().sorted()
 
     fun upgradeTargetBreaker(currentBreakerA: Double, neededA: Double): Double? {
         val cur = currentBreakerA.toInt()
@@ -163,11 +183,44 @@ object ManualDraftSelectors {
         targetGroup: ManualGroupDraft
     ): AssignScore {
         val devices = devicesById(draft)
+        val compatibility = CircuitCompatibilityPolicy.evaluatePlacement(
+            device = device.toCompatibilityInput(),
+            target = CircuitCompatibilityPolicy.GroupInput(
+                phaseMode = draft.phaseMode,
+                phase = targetGroup.phase,
+                roomId = targetGroup.roomId,
+                devices = targetGroup.deviceIds.mapNotNull(devices::get)
+                    .map { it.toCompatibilityInput() }
+            )
+        )
+        if (!compatibility.allowed) {
+            return AssignScore(
+                capacityClass = 2,
+                upgradeDelta = Double.MAX_VALUE,
+                imbalanceAfter = Double.MAX_VALUE,
+                groupNumber = targetGroup.groupNumber
+            )
+        }
+        val targetVoltageTypes = targetGroup.deviceIds
+            .mapNotNull(devices::get)
+            .map { it.voltageType }
+            .distinct()
+        if (targetVoltageTypes.size > 1 ||
+            (targetVoltageTypes.isNotEmpty() && targetVoltageTypes.single() != device.voltageType)
+        ) {
+            return AssignScore(
+                capacityClass = 2,
+                upgradeDelta = Double.MAX_VALUE,
+                imbalanceAfter = Double.MAX_VALUE,
+                groupNumber = targetGroup.groupNumber
+            )
+        }
 
         val targetBreaker = breakerRatingA(targetGroup)
-        val groupCurrent = calcGroupCurrentA(targetGroup, devices)
-        val deviceCurrent = calcDeviceCurrentA(device)
-        val after = groupCurrent + deviceCurrent
+        val groupCurrent = calcGroupInstalledCurrentA(targetGroup, devices)
+        val installedDeviceCurrent = calcDeviceInstalledCurrentA(device)
+        val calculatedDeviceCurrent = calcDeviceCurrentA(device)
+        val after = groupCurrent + installedDeviceCurrent
 
         val (capClass, upgradeDelta) = when {
             after <= targetBreaker && targetBreaker > 0.0 -> 0 to 0.0
@@ -185,7 +238,7 @@ object ManualDraftSelectors {
         // compute imbalance after hypothetical placement (phase currents change only for target phase)
         val currents = phaseCurrentsA(draft, mode).toMutableMap()
         val ph = targetGroup.phase
-        currents[ph] = (currents[ph] ?: 0.0) + deviceCurrent
+        currents[ph] = (currents[ph] ?: 0.0) + calculatedDeviceCurrent
 
         val imbalanceAfter = imbalanceMetric(currents, mode)
 

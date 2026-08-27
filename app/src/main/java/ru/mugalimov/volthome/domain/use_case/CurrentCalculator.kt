@@ -28,19 +28,21 @@ data class LoadInput(
 
 data class DeviceLoad(
     val installedPowerW: Double,
+    val installedCurrentA: Double,
     val calculatedPowerW: Double,
     val calculatedCurrentA: Double
 )
 
 data class GroupLoad(
     val installedPowerW: Double,
+    val installedCurrentA: Double,
     val calculatedPowerW: Double,
     val calculatedCurrentA: Double
 )
 
 object CurrentCalculator {
 
-    private const val MIN_POWER_FACTOR = 0.2
+    private const val MIN_POWER_FACTOR = 0.1
     private const val DEFAULT_1PH_VOLTAGE = 230.0
     private const val DEFAULT_3PH_LINE_VOLTAGE = 400.0
 
@@ -53,12 +55,17 @@ object CurrentCalculator {
 
     /** Нормализация напряжения. */
     fun normalizeVoltage(voltage: Double, voltageType: VoltageType): Double {
+        require(voltage.isFinite()) { "Напряжение должно быть конечным числом" }
         return if (voltage > 0.0) voltage else defaultVoltageFor(voltageType)
     }
 
     /** Нормализация cos φ. */
     fun normalizePowerFactor(powerFactor: Double?): Double {
-        return (powerFactor ?: 1.0).coerceAtLeast(MIN_POWER_FACTOR)
+        val value = powerFactor ?: 1.0
+        require(value.isFinite() && value in MIN_POWER_FACTOR..1.0) {
+            "Коэффициент мощности должен быть в диапазоне $MIN_POWER_FACTOR..1.0"
+        }
+        return value
     }
 
     /** Canonical calculated power. */
@@ -66,6 +73,12 @@ object CurrentCalculator {
         power: Double,
         demandRatio: Double
     ): Double {
+        require(power.isFinite() && power >= 0.0) {
+            "Мощность должна быть конечным неотрицательным числом"
+        }
+        require(demandRatio.isFinite() && demandRatio in 0.0..1.0) {
+            "Коэффициент спроса должен быть в диапазоне 0.0..1.0"
+        }
         return power * demandRatio
     }
 
@@ -76,6 +89,9 @@ object CurrentCalculator {
         powerFactor: Double?,
         voltageType: VoltageType
     ): Double {
+        require(power.isFinite() && power >= 0.0) {
+            "Мощность должна быть конечным неотрицательным числом"
+        }
         val normalizedVoltage = normalizeVoltage(voltage, voltageType)
         val pf = normalizePowerFactor(powerFactor)
 
@@ -83,6 +99,25 @@ object CurrentCalculator {
             VoltageType.AC_1PHASE -> power / (normalizedVoltage * pf)
             VoltageType.AC_3PHASE -> power / (sqrt(3.0) * normalizedVoltage * pf)
             VoltageType.DC -> power / normalizedVoltage
+        }
+    }
+
+    /** Installed power, reconstructed from line current. */
+    fun calculateInstalledPower(
+        current: Double,
+        voltage: Double,
+        powerFactor: Double?,
+        voltageType: VoltageType
+    ): Double {
+        require(current.isFinite() && current >= 0.0) {
+            "Ток должен быть конечным неотрицательным числом"
+        }
+        val normalizedVoltage = normalizeVoltage(voltage, voltageType)
+        val pf = normalizePowerFactor(powerFactor)
+        return when (voltageType) {
+            VoltageType.AC_1PHASE -> current * normalizedVoltage * pf
+            VoltageType.AC_3PHASE -> current * sqrt(3.0) * normalizedVoltage * pf
+            VoltageType.DC -> current * normalizedVoltage
         }
     }
 
@@ -135,6 +170,12 @@ object CurrentCalculator {
     /** Canonical device load. */
     fun calculateDeviceLoad(input: LoadInput): DeviceLoad {
         val installedPower = input.powerW
+        val installedCurrent = calculateInstalledCurrent(
+            power = input.powerW,
+            voltage = input.voltage,
+            powerFactor = input.powerFactor,
+            voltageType = input.voltageType
+        )
         val calculatedPower = calculateCalculatedPower(
             power = input.powerW,
             demandRatio = input.demandRatio
@@ -149,6 +190,7 @@ object CurrentCalculator {
 
         return DeviceLoad(
             installedPowerW = installedPower,
+            installedCurrentA = installedCurrent,
             calculatedPowerW = calculatedPower,
             calculatedCurrentA = calculatedCurrent
         )
@@ -157,18 +199,21 @@ object CurrentCalculator {
     /** Canonical group load. */
     fun calculateGroupLoad(inputs: Iterable<LoadInput>): GroupLoad {
         var installedPower = 0.0
+        var installedCurrent = 0.0
         var calculatedPower = 0.0
         var calculatedCurrent = 0.0
 
         for (input in inputs) {
             val deviceLoad = calculateDeviceLoad(input)
             installedPower += deviceLoad.installedPowerW
+            installedCurrent += deviceLoad.installedCurrentA
             calculatedPower += deviceLoad.calculatedPowerW
             calculatedCurrent += deviceLoad.calculatedCurrentA
         }
 
         return GroupLoad(
             installedPowerW = installedPower,
+            installedCurrentA = installedCurrent,
             calculatedPowerW = calculatedPower,
             calculatedCurrentA = calculatedCurrent
         )

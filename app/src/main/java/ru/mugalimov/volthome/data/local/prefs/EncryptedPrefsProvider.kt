@@ -14,11 +14,13 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.security.GeneralSecurityException
-import java.security.KeyStore
 
 /**
  * Ленивая и потокобезопасная инициализация EncryptedSharedPreferences на IO.
- * С авто-восстановлением при битом ключе / keyset'е.
+ *
+ * ВАЖНО: ошибки AndroidKeyStore не должны приводить к удалению credential.
+ * Провайдер оставляет зашифрованные данные нетронутыми и позволяет повторить
+ * инициализацию после перезапуска процесса.
  */
 @Singleton
 class EncryptedPrefsProvider @Inject constructor(
@@ -28,7 +30,6 @@ class EncryptedPrefsProvider @Inject constructor(
         private const val TAG = "EncryptedPrefs"
         private const val AUTH_PREFS_NAME = "auth_prefs"
         private const val FALLBACK_PREFS_NAME = "auth_prefs_fallback"
-        private const val TINK_PREFS_NAME = "__androidx_security_crypto_encrypted_prefs__"
     }
     @Volatile
     private var cached: SharedPreferences? = null
@@ -41,48 +42,23 @@ class EncryptedPrefsProvider @Inject constructor(
             cached?.let { return it }
 
             val prefs = withContext(Dispatchers.IO) {
-                initEncryptedPrefsWithRecovery()
+                initEncryptedPrefs()
             }
             cached = prefs
             prefs
         }
     }
 
-    /**
-     * Делаем до двух попыток:
-     *  1. Обычная инициализация.
-     *  2. Если словили GeneralSecurityException / IOException — сбрасываем всё
-     *     и пробуем ещё раз.
-     */
-    private fun initEncryptedPrefsWithRecovery(): SharedPreferences {
-        var lastError: Throwable? = null
-
-        repeat(2) { attempt ->
-            try {
-                if (attempt > 0) {
-                    Log.w(TAG, "retry init after reset")
-                }
-                return createEncryptedPrefs()
-            } catch (e: GeneralSecurityException) {
-                Log.w("EncryptedPrefs", "init failed with security error, resetting", e)
-                lastError = e
-                resetEncryptedPrefs()
-            } catch (e: IOException) {
-                Log.w("EncryptedPrefs", "init failed with IO error, resetting", e)
-                lastError = e
-                resetEncryptedPrefs()
-            }
+    private fun initEncryptedPrefs(): SharedPreferences {
+        return try {
+            createEncryptedPrefs().also(::migrateFallbackIfPresent)
+        } catch (e: GeneralSecurityException) {
+            Log.e(TAG, "Encrypted preferences are temporarily unavailable; data was not deleted", e)
+            throw EncryptedPrefsUnavailableException(e)
+        } catch (e: IOException) {
+            Log.e(TAG, "Encrypted preferences are temporarily unavailable; data was not deleted", e)
+            throw EncryptedPrefsUnavailableException(e)
         }
-
-        // Если после сброса всё равно не взлетело — это уже системная беда,
-        // даём понятный крэш с оригинальной причиной.
-        Log.e(
-            "EncryptedPrefs",
-            "EncryptedSharedPreferences failed after reset. Falling back to plain private SharedPreferences.",
-            lastError
-        )
-
-        return createFallbackPrefs()
     }
 
     private fun createEncryptedPrefs(): SharedPreferences {
@@ -99,41 +75,41 @@ class EncryptedPrefsProvider @Inject constructor(
         )
     }
 
-    private fun createFallbackPrefs(): SharedPreferences {
-        return ctx.getSharedPreferences(FALLBACK_PREFS_NAME, Context.MODE_PRIVATE)
-    }
-
     /**
-     * Полный сброс:
-     *  1. Удаляем наш encrypted prefs ("auth_prefs").
-     *  2. Удаляем внутренний Tink-keyset, который использует EncryptedSharedPreferences.
-     *  3. Сносим мастер-ключ в AndroidKeyStore.
+     * Старые версии могли временно записать auth-данные в plain fallback.
+     * После восстановления KeyStore переносим их в encrypted prefs и очищаем
+     * fallback только после успешного commit.
      */
-    private fun resetEncryptedPrefs() {
-        // 1. Наш файл encrypted prefs
-        runCatching {
-            Log.w("EncryptedPrefs", "deleteSharedPreferences(\"auth_prefs\")")
-            ctx.deleteSharedPreferences(AUTH_PREFS_NAME)
-            ctx.deleteSharedPreferences(FALLBACK_PREFS_NAME)
-        }
+    private fun migrateFallbackIfPresent(encrypted: SharedPreferences) {
+        val fallback = fallbackPrefs()
+        val values = fallback.all
+        if (values.isEmpty()) return
 
-        // 2. Внутренний keyset EncryptedSharedPreferences (tink)
-        //   EncryptedSharedPreferences хранит keyset в отдельном SharedPreferences-файле,
-        //   который по умолчанию называется примерно так:
-        //   "__androidx_security_crypto_encrypted_prefs__"
-        runCatching {
-            Log.w("EncryptedPrefs", "deleteSharedPreferences(\"__androidx_security_crypto_encrypted_prefs__\")")
-            ctx.deleteSharedPreferences(TINK_PREFS_NAME)
-        }
-
-        // 3. Удаляем master key alias из AndroidKeyStore
-        runCatching {
-            val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-            val alias = MasterKey.DEFAULT_MASTER_KEY_ALIAS
-            if (ks.containsAlias(alias)) {
-                Log.w("EncryptedPrefs", "deleteEntry($alias) from AndroidKeyStore")
-                ks.deleteEntry(alias)
+        val editor = encrypted.edit()
+        values.forEach { (key, value) ->
+            when (value) {
+                is String -> editor.putString(key, value)
+                is Boolean -> editor.putBoolean(key, value)
+                is Int -> editor.putInt(key, value)
+                is Long -> editor.putLong(key, value)
+                is Float -> editor.putFloat(key, value)
+                is Set<*> -> {
+                    @Suppress("UNCHECKED_CAST")
+                    editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+                }
             }
         }
+        if (editor.commit()) {
+            fallback.edit().clear().commit()
+            Log.i(TAG, "Migrated legacy fallback preferences into encrypted storage")
+        } else {
+            Log.w(TAG, "Fallback migration was not committed; source data was preserved")
+        }
     }
+
+    internal fun fallbackPrefs(): SharedPreferences =
+        ctx.getSharedPreferences(FALLBACK_PREFS_NAME, Context.MODE_PRIVATE)
 }
+
+class EncryptedPrefsUnavailableException(cause: Throwable) :
+    IllegalStateException("Encrypted credential storage is unavailable", cause)

@@ -1,6 +1,7 @@
 package ru.mugalimov.volthome.data.local.entity
 
 import androidx.room.Entity
+import androidx.room.ForeignKey
 import androidx.room.PrimaryKey
 
 /**
@@ -13,13 +14,19 @@ import androidx.room.PrimaryKey
  * - persisted флаг manual_overrides_present: запрещает AUTO писать структуру групп
  * - persisted manual_lock_bootstrap_version: версия bootstrap/backfill (чтобы не считать каждый раз)
  */
-@Entity(tableName = "project_local_state")
+@Entity(
+    tableName = "project_local_state",
+    foreignKeys = [
+        ForeignKey(
+            entity = ProjectEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["project_id"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ]
+)
 data class ProjectLocalStateEntity(
     @PrimaryKey val project_id: String,
-    val remote_version: Int,       // версия сервера
-    val last_sync_at: String?,     // ISO8601 или null
-    val has_local_changes: Boolean,
-
     // Persisted marker: значение projectId активного manual (может быть null)
     val active_manual_project_id: String? = null,
 

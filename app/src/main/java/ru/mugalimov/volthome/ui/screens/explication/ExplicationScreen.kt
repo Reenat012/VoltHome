@@ -1,10 +1,8 @@
 package ru.mugalimov.volthome.ui.screens.explication
 
-import android.os.Build
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.annotation.RequiresApi
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -15,29 +13,20 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
-import androidx.compose.material.icons.rounded.AccountTree
-import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -66,9 +55,9 @@ import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Phase
+import ru.mugalimov.volthome.domain.model.cable.ProjectCableDefaults
 import ru.mugalimov.volthome.ui.manual.LocalManualModeGuard
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
-import ru.mugalimov.volthome.ui.navigation.Screens
 import ru.mugalimov.volthome.ui.onboarding.OnboardingRuntimeEntryPoint
 import ru.mugalimov.volthome.ui.onboarding.hints.ExplicationHints
 import ru.mugalimov.volthome.ui.onboarding.hints.ManualHints
@@ -85,12 +74,13 @@ import ru.mugalimov.volthome.ui.screens.explication.manual.MoveDeviceTargetsBar
 import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetContent
 import ru.mugalimov.volthome.ui.viewmodel.ExplicationViewModel
 import ru.mugalimov.volthome.ui.viewmodel.GroupScreenState
+import ru.mugalimov.volthome.ui.components.UnassignedDevicesWarningCard
 
-@RequiresApi(Build.VERSION_CODES.P)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExplicationScreen(
     navController: NavHostController,
+    projectName: String,
     viewModel: ExplicationViewModel = hiltViewModel()
 ) {
 
@@ -104,7 +94,49 @@ fun ExplicationScreen(
     val selectedBreakdown by viewModel.selectedDeviceBreakdown.collectAsState()
     val sheetPayload by viewModel.infoSheetPayload.collectAsState()
     val state by viewModel.uiState.collectAsState()
+    val projectCoverage by viewModel.projectCoverage.collectAsState()
+    val cableCalculations by viewModel.cableCalculations.collectAsState()
+    val cableDefaults by viewModel.cableDefaults.collectAsState()
+    val cableEditor by viewModel.cableEditor.collectAsState()
+    val cableWizard by viewModel.cableWizard.collectAsState()
     val ctx = LocalContext.current
+
+    cableEditor?.let { editor ->
+        CableLineEditorSheet(
+            editor = editor,
+            calculation = cableCalculations[editor.group.groupId],
+            onDismiss = viewModel::closeCableEditor,
+            onLengthChange = viewModel::setCableLength,
+            onManualSectionEnabled = viewModel::setCableManualSectionEnabled,
+            onManualSectionChange = viewModel::setCableManualSection,
+            onMaterialChange = viewModel::setCableMaterial,
+            onInsulationChange = viewModel::setCableInsulation,
+            onInstallationMethodChange = viewModel::setCableInstallationMethod,
+            onAmbientTemperatureChange = viewModel::setCableAmbientTemperature,
+            onGroupedCircuitsChange = viewModel::setCableGroupedCircuits,
+            onMaxVoltageDropChange = viewModel::setCableMaxVoltageDrop,
+            onSave = viewModel::saveCableCalculation
+        )
+    }
+
+    cableWizard?.let { wizard ->
+        CableProjectWizardSheet(
+            state = wizard,
+            onDismiss = viewModel::closeCableWizard,
+            onMaterialChange = viewModel::setCableWizardMaterial,
+            onInsulationChange = viewModel::setCableWizardInsulation,
+            onInstallationMethodChange = viewModel::setCableWizardInstallationMethod,
+            onAmbientTemperatureChange = viewModel::setCableWizardAmbientTemperature,
+            onGroupedCircuitsChange = viewModel::setCableWizardGroupedCircuits,
+            onMaxVoltageDropChange = viewModel::setCableWizardMaxVoltageDrop,
+            onLineLengthChange = viewModel::setCableWizardLineLength,
+            onManualSectionEnabled = viewModel::setCableWizardManualSectionEnabled,
+            onManualSectionChange = viewModel::setCableWizardManualSection,
+            onNext = viewModel::nextCableWizardStep,
+            onPrevious = viewModel::previousCableWizardStep,
+            onSave = viewModel::saveCableWizard
+        )
+    }
 
     // Runtime-доступ к onboarding coordinator.
     val onboardingCoordinator = remember {
@@ -170,6 +202,7 @@ fun ExplicationScreen(
                         activity = activity,
                         vm = viewModel,
                         caps = caps,
+                        projectName = projectName,
                         projectId = projectId,
                         manualGuard = manualGuard
                     )
@@ -251,6 +284,9 @@ fun ExplicationScreen(
         manualModeActive = onboardingFacts.manualModeActive,
         unassignedCount = onboardingFacts.unassignedCount,
         pdfAvailable = onboardingFacts.pdfAvailable,
+        overviewShown = onboardingFacts.overviewShown,
+        singleLineShown = onboardingFacts.singleLineShown,
+        pdfShown = onboardingFacts.pdfShown,
         dragInProgress = dragState.isActive,
         moveStateActive = moveUi != null,
         bottomSheetOpen = sheetPayload != null,
@@ -276,6 +312,7 @@ fun ExplicationScreen(
             buildList {
                 ExplicationHints.forUnassigned(advancedFacts)?.let { add(it) }
                 ExplicationHints.forOverview(advancedFacts)?.let { add(it) }
+                ExplicationHints.forSingleLine(advancedFacts)?.let { add(it) }
                 PdfHints.forExplication(advancedFacts)?.let { add(it) }
             }
         )
@@ -390,7 +427,6 @@ fun ExplicationScreen(
             val bg = MaterialTheme.colorScheme.background
             val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             val scope = rememberCoroutineScope()
-
             // Состояние раскрытия поясняющего блока ручного режима.
             var manualBannerExpanded by rememberSaveable { mutableStateOf(false) }
 
@@ -448,9 +484,20 @@ fun ExplicationScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp)
                 ) {
+                    if (!projectCoverage.isComplete) {
+                        item {
+                            UnassignedDevicesWarningCard(
+                                coverage = projectCoverage,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(Modifier.height(12.dp))
+                        }
+                    }
+
                     item {
                         ShieldOverviewCard(
                             incomer = s.incomer,
+                            incomerAssessment = s.incomerAssessment,
                             groups = displayGroups,
                             hasGroupRcds = s.hasGroupRcds,
                             modifier = Modifier
@@ -468,11 +515,39 @@ fun ExplicationScreen(
                                 viewModel.onIncomerFieldClick(
                                     field = field,
                                     incomer = s.incomer,
-                                    hasGroupRcds = s.hasGroupRcds
+                                    hasGroupRcds = s.hasGroupRcds,
+                                    baseCurrentA = s.totalCurrent
                                 )
                             },
                             onInstalledPowerClick = { viewModel.onInstalledPowerClick(it) },
                             onCalculatedPowerClick = { viewModel.onCalculatedPowerClick(it) }
+                        )
+                        Spacer(Modifier.height(12.dp))
+                    }
+
+                    item {
+                        val displayedDefaults = if (caps.cableLineCalculation) {
+                            cableDefaults ?: ProjectCableDefaults(projectId = "")
+                        } else {
+                            ProjectCableDefaults(projectId = "")
+                        }
+                        CableCalculationOverviewCard(
+                            groups = displayGroups,
+                            calculations = cableCalculations,
+                            defaults = displayedDefaults,
+                            isPro = caps.cableLineCalculation,
+                            onClick = { viewModel.onCableOverviewClick(displayGroups) },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(Modifier.height(12.dp))
+                    }
+
+                    item {
+                        ShieldProjectActions(
+                            enabled = !onboardingFacts.pdfExportFlowActive,
+                            onSingleLineClick = { viewModel.onSingleLineDiagramClick() },
+                            onPdfClick = { viewModel.onExportPdfClick() },
+                            modifier = Modifier.fillMaxWidth()
                         )
                         Spacer(Modifier.height(12.dp))
                     }
@@ -631,6 +706,8 @@ fun ExplicationScreen(
 
                                     onDeviceClick = { deviceId -> viewModel.onDeviceClick(deviceId) },
                                     selectedDeviceBreakdown = selectedBreakdown,
+                                    cableCalculation = cableCalculations[g.groupId],
+                                    onCableClick = viewModel::onCableLineClick,
                                     onGroupPowerClick = { viewModel.onGroupPowerClick(it) },
                                     onGroupCurrentClick = { viewModel.onGroupCurrentClick(it) },
                                     onOpenInfoSheet = { payload -> viewModel.openInfoSheet(payload) }
@@ -653,81 +730,6 @@ fun ExplicationScreen(
                             .align(Alignment.TopStart)
                             .zIndex(30f)
                     )
-                }
-
-                // Compact export actions: однолинейная схема + текущий PDF-отчёт.
-                // Обе кнопки сделаны в одном стиле, чтобы не спорили визуально.
-                Column(
-                    horizontalAlignment = Alignment.End,
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .windowInsetsPadding(WindowInsets.navigationBars)
-                        .padding(end = 16.dp, bottom = 16.dp)
-                ) {
-                    Button(
-                        onClick = {
-                            // Открываем MVP-экран визуализации щита из экспликации.
-                            navController.navigate(Screens.PanelVisualizationScreen.route) {
-                                launchSingleTop = true
-                            }
-                        },
-                        enabled = !onboardingFacts.pdfExportFlowActive
-                    ) {
-                        Text("Визуализация щита")
-                    }
-
-                    FilledTonalIconButton(
-                        onClick = { viewModel.onSingleLineDiagramClick() },
-                        enabled = !onboardingFacts.pdfExportFlowActive,
-                        modifier = Modifier
-                            .size(48.dp)
-                            .border(
-                                width = 1.dp,
-                                color = MaterialTheme.colorScheme.outlineVariant,
-                                shape = MaterialTheme.shapes.large
-                            ),
-                        colors = IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.AccountTree,
-                            contentDescription = "Однолинейная схема",
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-
-                    FilledTonalIconButton(
-                        onClick = { viewModel.onExportPdfClick() },
-                        enabled = !onboardingFacts.pdfExportFlowActive,
-                        modifier = Modifier
-                            .size(48.dp)
-                            .border(
-                                width = 1.dp,
-                                color = MaterialTheme.colorScheme.outlineVariant,
-                                shape = MaterialTheme.shapes.large
-                            )
-                            .onboardingAnchor(
-                                targetTag = OnboardingTargetTag.EXPLICATION_PDF_FAB,
-                                screenId = OnboardingScreen.EXPLICATION
-                            ),
-                        colors = IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.FileDownload,
-                            contentDescription = "Отчёт PDF",
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
                 }
 
                 // BottomSheet: Info
@@ -890,27 +892,27 @@ private fun ManualModeLegalBanner(
                 Column {
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        text = "Чтобы перенести устройство - зажми его (long-press) и перетяни в выпадающее меню сверху, выбрав нужное окно.",
+                        text = "Чтобы перенести устройство, нажмите и удерживайте его. Затем выберите целевую группу на панели переноса.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onTertiaryContainer
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        text = "Чтобы сохранить или отменить изменения - кликни на кнопку Ручной.",
+                        text = "Чтобы сохранить или отменить изменения, нажмите кнопку «Ручной».",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onTertiaryContainer
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
                         text = "После сохранения ручных изменений автоматическое распределение отключается.\n" +
-                                "Новые устройства больше не раскладываются по группам автоматически и попадают в “Нераспределённые”.\n" +
-                                "Дальше их нужно распределять вручную или сбросить ручные изменения, чтобы вернуть автоматический режим.",
+                                "Новые устройства больше не распределяются по группам автоматически и попадают в «Нераспределённые».\n" +
+                                "Распределите их вручную или сбросьте изменения, чтобы вернуть автоматический режим.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onTertiaryContainer
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        text = "Изменения в этой зоне ты задаёшь вручную. Результат требует инженерной проверки и не заменяет контроль проекта по месту.",
+                        text = "Здесь вы самостоятельно задаёте структуру. Результат требует инженерной проверки и не заменяет контроль проекта по месту.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onTertiaryContainer
                     )

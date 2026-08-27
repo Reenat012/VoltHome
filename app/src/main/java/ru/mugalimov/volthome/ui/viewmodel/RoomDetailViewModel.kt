@@ -295,5 +295,8 @@ fun DefaultDevice.toCreateRequest(qty: Int): DeviceCreateRequest =
         ratedPowerW = this.power,
         powerFactor = this.powerFactor,
         demandRatio = this.demandRatio,
-        voltage = this.voltage
+        voltage = this.voltage,
+        hasMotor = this.hasMotor,
+        requiresDedicatedCircuit = this.requiresDedicatedCircuit,
+        requiresSocketConnection = this.requiresSocketConnection
     )

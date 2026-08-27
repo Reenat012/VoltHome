@@ -3,10 +3,12 @@ package ru.mugalimov.volthome.data.local.entity
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
+import androidx.room.Index
 
 @Entity(
     tableName = "group_device_join",
     primaryKeys = ["group_id", "device_id"],
+    indices = [Index(name = "idx_group_device_join_device_id", value = ["device_id"])],
     foreignKeys = [
         ForeignKey(
             entity = CircuitGroupEntity::class,

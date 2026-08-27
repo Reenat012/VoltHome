@@ -10,11 +10,12 @@ package ru.mugalimov.volthome.ui.onboarding.model
 enum class OnboardingDismissReason(
     val persistShownFlag: Boolean
 ) {
-    // Пользователь осознанно закрыл подсказку.
-    USER_DISMISSED(true),
+    // Пользователь осознанно подтвердил, что понял подсказку.
+    USER_CONFIRMED(true),
 
-    // Пользователь пропустил подсказку.
-    USER_SKIPPED(true),
+    // Пользователь отложил подсказку. Она сможет появиться при следующем
+    // подходящем входе в контекст.
+    USER_DEFERRED(false),
 
     // Системная отмена: например, hint снят программно.
     SYSTEM_CANCELLED(false)

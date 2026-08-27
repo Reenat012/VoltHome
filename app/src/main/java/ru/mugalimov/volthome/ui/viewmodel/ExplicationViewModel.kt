@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -25,18 +26,31 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
 import ru.mugalimov.volthome.data.repository.DeviceRepository
+import ru.mugalimov.volthome.data.repository.CableCalculationRepository
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
 import ru.mugalimov.volthome.data.repository.OnboardingRepository
+import ru.mugalimov.volthome.data.repository.PanelEquipmentRepository
 import ru.mugalimov.volthome.data.repository.PreferencesRepository
 import ru.mugalimov.volthome.data.repository.ProjectOwnershipRepository
+import ru.mugalimov.volthome.data.repository.ProjectSetup
+import ru.mugalimov.volthome.data.repository.ProjectSetupRepository
+import ru.mugalimov.volthome.data.repository.observeResolved
+import ru.mugalimov.volthome.data.repository.resolve
 import ru.mugalimov.volthome.data.repository.UserPlanRepository
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.formatter.GroupMetaFormatter
 import ru.mugalimov.volthome.domain.model.CalcAssumption
 import ru.mugalimov.volthome.domain.model.CalcWarning
+import ru.mugalimov.volthome.domain.model.CalculationAlgorithm
+import ru.mugalimov.volthome.domain.model.CalculationSource
 import ru.mugalimov.volthome.domain.model.CalculatedValue
 import ru.mugalimov.volthome.domain.model.CircuitGroup
+import ru.mugalimov.volthome.domain.model.cable.CableLineCalculation
+import ru.mugalimov.volthome.domain.model.cable.CableInsulation
+import ru.mugalimov.volthome.domain.model.cable.CableInstallationMethod
+import ru.mugalimov.volthome.domain.model.cable.ConductorMaterial
+import ru.mugalimov.volthome.domain.model.cable.ProjectCableDefaults
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceCalcBreakdown
 import ru.mugalimov.volthome.domain.model.DeviceType
@@ -45,8 +59,10 @@ import ru.mugalimov.volthome.domain.model.GroupingResult
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.ProFeature
+import ru.mugalimov.volthome.core.analytics.PaywallSource
 import ru.mugalimov.volthome.domain.model.VoltageType
 import ru.mugalimov.volthome.domain.model.incomer.IncomerSpec
+import ru.mugalimov.volthome.domain.model.incomer.IncomerAssessment
 import ru.mugalimov.volthome.domain.model.manual.ManualEditAction
 import ru.mugalimov.volthome.domain.model.manual.ManualEditSession
 import ru.mugalimov.volthome.domain.model.report.DonutModel
@@ -61,6 +77,8 @@ import ru.mugalimov.volthome.domain.use_case.BootstrapManualLockUseCase
 import ru.mugalimov.volthome.domain.use_case.CalculateDeviceBreakdownUseCase
 import ru.mugalimov.volthome.domain.use_case.CalculateGroupBreakdownUseCase
 import ru.mugalimov.volthome.domain.use_case.CalculateShieldOverviewUseCase
+import ru.mugalimov.volthome.domain.use_case.CircuitLoadCalculator
+import ru.mugalimov.volthome.domain.use_case.cable.CalculateAndSaveCableLineUseCase
 import ru.mugalimov.volthome.domain.use_case.GenerateSingleLineDiagramUseCase
 import ru.mugalimov.volthome.domain.use_case.GroupCalculatorFactory
 import ru.mugalimov.volthome.domain.use_case.IncomerSelector
@@ -69,13 +87,17 @@ import ru.mugalimov.volthome.domain.use_case.getOrZero
 import ru.mugalimov.volthome.domain.use_case.manual.CommitManualDraftToLocalDbUseCase
 import ru.mugalimov.volthome.domain.use_case.manual.ResetManualOverridesAndAutoRecalcUseCase
 import ru.mugalimov.volthome.domain.use_case.phaseCurrents
+import ru.mugalimov.volthome.domain.use_case.phaseLoadVector
 import ru.mugalimov.volthome.domain.use_case.report.BuildProfessionalSectionsUseCase
 import ru.mugalimov.volthome.domain.util.PowerCurrentNormalizer
 import ru.mugalimov.volthome.ui.onboarding.model.ExplicationOnboardingFacts
 import ru.mugalimov.volthome.ui.onboarding.model.OnboardingHintId
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
+import ru.mugalimov.volthome.ui.model.toCalcWarning
 import ru.mugalimov.volthome.ui.screens.explication.sheets.CalcBlocksMapper
 import ru.mugalimov.volthome.ui.screens.explication.sheets.CalcDetailsState
+import ru.mugalimov.volthome.ui.screens.explication.sheets.CalculationStoryMapper
+import ru.mugalimov.volthome.ui.screens.explication.sheets.GroupCalculationKind
 import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetPayload
 import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetType
 import ru.mugalimov.volthome.ui.utilities.ManualDraftResetNotifier
@@ -83,18 +105,26 @@ import ru.mugalimov.volthome.ui.viewmodel.explication.InfoSheetPayloadFactory
 import java.text.SimpleDateFormat
 import java.util.Locale
 import javax.inject.Inject
+import ru.mugalimov.volthome.domain.use_case.EstimatePanelEquipmentCostUseCase
+import ru.mugalimov.volthome.data.repository.PanelLayoutRepository
+import ru.mugalimov.volthome.domain.model.pricing.ProtectionCostEstimate
+import ru.mugalimov.volthome.domain.model.ProjectCoverage
+import ru.mugalimov.volthome.domain.use_case.ObserveProjectCoverageUseCase
 import kotlin.collections.emptyList
 
 @HiltViewModel
+@OptIn(ExperimentalCoroutinesApi::class)
 class ExplicationViewModel @Inject constructor(
     private val repo: ExplicationRepository,
     private val groupCalculatorFactory: GroupCalculatorFactory,
     private val preferencesRepository: PreferencesRepository,
     private val deviceRepository: DeviceRepository,
+    private val cableCalculationRepository: CableCalculationRepository,
+    private val calculateAndSaveCableLineUseCase: CalculateAndSaveCableLineUseCase,
     private val calculateShieldOverviewUseCase: CalculateShieldOverviewUseCase,
     private val calculateDeviceBreakdownUseCase: CalculateDeviceBreakdownUseCase,
     private val calculateGroupBreakdownUseCase: CalculateGroupBreakdownUseCase,
-    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     val userPlanRepository: UserPlanRepository,
     private val paywallBus: PaywallBus,
     private val activeProjectDs: ActiveProjectDataStore,
@@ -107,8 +137,505 @@ class ExplicationViewModel @Inject constructor(
     private val createDeviceOpBus: CreateDeviceOpBus,
     private val projectOwnershipRepository: ProjectOwnershipRepository,
     private val resetManualOverridesAndAutoRecalcUseCase: ResetManualOverridesAndAutoRecalcUseCase,
-    private val generateSingleLineDiagramUseCase: GenerateSingleLineDiagramUseCase
+    private val generateSingleLineDiagramUseCase: GenerateSingleLineDiagramUseCase,
+    private val estimatePanelEquipmentCostUseCase: EstimatePanelEquipmentCostUseCase,
+    private val panelEquipmentRepository: PanelEquipmentRepository,
+    private val panelLayoutRepository: PanelLayoutRepository,
+    private val projectSetupRepository: ProjectSetupRepository,
+    private val incomerSelector: IncomerSelector,
+    observeProjectCoverageUseCase: ObserveProjectCoverageUseCase
 ) : ViewModel() {
+
+    data class CableEditorState(
+        val group: CircuitGroup,
+        val lengthText: String,
+        val manualSectionText: String,
+        val useManualSection: Boolean,
+        val defaults: ProjectCableDefaults,
+        val ambientTemperatureText: String,
+        val groupedCircuitsText: String,
+        val maxVoltageDropText: String,
+        val isSaving: Boolean = false,
+        val error: String? = null
+    )
+
+    data class CableWizardLineState(
+        val group: CircuitGroup,
+        val lengthText: String,
+        val useManualSection: Boolean,
+        val manualSectionText: String
+    )
+
+    data class CableWizardState(
+        val step: Int,
+        val defaults: ProjectCableDefaults,
+        val ambientTemperatureText: String,
+        val groupedCircuitsText: String,
+        val maxVoltageDropText: String,
+        val lines: List<CableWizardLineState>,
+        val isSaving: Boolean = false,
+        val error: String? = null
+    )
+
+    val cableCalculations: StateFlow<Map<Long, CableLineCalculation>> = activeProjectDs.activeProjectId
+        .filterNotNull()
+        .flatMapLatest { projectId -> cableCalculationRepository.observeCalculations(projectId) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    val cableDefaults: StateFlow<ProjectCableDefaults?> = activeProjectDs.activeProjectId
+        .filterNotNull()
+        .flatMapLatest { projectId ->
+            cableCalculationRepository.observeDefaults(projectId).map { it as ProjectCableDefaults? }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    private val _cableEditor = MutableStateFlow<CableEditorState?>(null)
+    val cableEditor: StateFlow<CableEditorState?> = _cableEditor.asStateFlow()
+
+    private val _cableWizard = MutableStateFlow<CableWizardState?>(null)
+    val cableWizard: StateFlow<CableWizardState?> = _cableWizard.asStateFlow()
+
+    fun onCableOverviewClick(groups: List<CircuitGroup>) {
+        if (!hasCableCalculationAccess()) {
+            requestCableCalculationPaywall()
+            return
+        }
+        openCableWizard(groups)
+    }
+
+    fun onCableLineClick(group: CircuitGroup) {
+        if (!hasCableCalculationAccess()) {
+            requestCableCalculationPaywall()
+            return
+        }
+        openCableEditor(group)
+    }
+
+    fun onCableCalculationLockedClick() {
+        requestCableCalculationPaywall()
+    }
+
+    fun openCableEditor(group: CircuitGroup) {
+        if (!hasCableCalculationAccess()) {
+            requestCableCalculationPaywall()
+            return
+        }
+        val existing = cableCalculations.value[group.groupId]
+        val projectId = currentProjectIdOrNull() ?: return
+        val initialDefaults = existing?.input?.defaults ?: ProjectCableDefaults(projectId)
+        _cableEditor.value = CableEditorState(
+            group = group,
+            lengthText = existing?.input?.lengthM?.let(::formatCableEditorNumber).orEmpty(),
+            manualSectionText = existing?.input?.manualSectionMm2?.let(::formatCableEditorNumber)
+                ?: formatCableEditorNumber(existing?.cable?.phaseSectionMm2 ?: group.cableSection),
+            useManualSection = existing?.input?.manualSectionMm2 != null,
+            defaults = initialDefaults,
+            ambientTemperatureText = initialDefaults.ambientTemperatureC.toString(),
+            groupedCircuitsText = initialDefaults.groupedCircuits.toString(),
+            maxVoltageDropText = formatCableEditorNumber(initialDefaults.maxVoltageDropPercent)
+        )
+        viewModelScope.launch(ioDispatcher) {
+            val persisted = cableCalculationRepository.getDefaults(projectId)
+            val current = _cableEditor.value
+            if (current?.group?.groupId == group.groupId && existing == null) {
+                _cableEditor.value = current.copy(
+                    defaults = persisted,
+                    ambientTemperatureText = persisted.ambientTemperatureC.toString(),
+                    groupedCircuitsText = persisted.groupedCircuits.toString(),
+                    maxVoltageDropText = formatCableEditorNumber(persisted.maxVoltageDropPercent)
+                )
+            }
+        }
+    }
+
+    fun closeCableEditor() {
+        _cableEditor.value = null
+    }
+
+    fun setCableLength(value: String) {
+        _cableEditor.value = _cableEditor.value?.copy(lengthText = filterCableDecimal(value), error = null)
+    }
+
+    fun setCableManualSectionEnabled(enabled: Boolean) {
+        _cableEditor.value = _cableEditor.value?.copy(useManualSection = enabled, error = null)
+    }
+
+    fun setCableManualSection(value: String) {
+        _cableEditor.value = _cableEditor.value?.copy(manualSectionText = filterCableDecimal(value), error = null)
+    }
+
+    fun setCableMaterial(value: ConductorMaterial) {
+        _cableEditor.value = _cableEditor.value?.let {
+            it.copy(defaults = it.defaults.copy(material = value), error = null)
+        }
+    }
+
+    fun setCableInsulation(value: CableInsulation) {
+        _cableEditor.value = _cableEditor.value?.let {
+            it.copy(defaults = it.defaults.copy(insulation = value), error = null)
+        }
+    }
+
+    fun setCableInstallationMethod(value: CableInstallationMethod) {
+        _cableEditor.value = _cableEditor.value?.let {
+            it.copy(defaults = it.defaults.copy(installationMethod = value), error = null)
+        }
+    }
+
+    fun setCableAmbientTemperature(value: String) {
+        _cableEditor.value = _cableEditor.value?.copy(
+            ambientTemperatureText = value.filter { it.isDigit() || it == '-' }.take(3),
+            error = null
+        )
+    }
+
+    fun setCableGroupedCircuits(value: String) {
+        _cableEditor.value = _cableEditor.value?.copy(
+            groupedCircuitsText = value.filter(Char::isDigit).take(2),
+            error = null
+        )
+    }
+
+    fun setCableMaxVoltageDrop(value: String) {
+        _cableEditor.value = _cableEditor.value?.copy(
+            maxVoltageDropText = filterCableDecimal(value),
+            error = null
+        )
+    }
+
+    fun saveCableCalculation() {
+        if (!hasCableCalculationAccess()) {
+            _cableEditor.value = null
+            requestCableCalculationPaywall()
+            return
+        }
+        val editor = _cableEditor.value ?: return
+        val projectId = currentProjectIdOrNull() ?: return
+        val length = editor.lengthText.replace(',', '.').toDoubleOrNull()
+        val manualSection = editor.manualSectionText.replace(',', '.').toDoubleOrNull()
+        val ambientTemperature = editor.ambientTemperatureText.toIntOrNull()
+        val groupedCircuits = editor.groupedCircuitsText.toIntOrNull()
+        val maxVoltageDrop = editor.maxVoltageDropText.replace(',', '.').toDoubleOrNull()
+        when {
+            length == null || length <= 0.0 -> {
+                _cableEditor.value = editor.copy(error = "Укажите длину линии больше 0 м")
+                return
+            }
+            editor.useManualSection && (manualSection == null || manualSection <= 0.0) -> {
+                _cableEditor.value = editor.copy(error = "Укажите сечение кабеля")
+                return
+            }
+            ambientTemperature == null || ambientTemperature !in -25..70 -> {
+                _cableEditor.value = editor.copy(error = "Температура должна быть от −25 до 70 °C")
+                return
+            }
+            groupedCircuits == null || groupedCircuits !in 1..20 -> {
+                _cableEditor.value = editor.copy(error = "Количество совместно проложенных цепей: от 1 до 20")
+                return
+            }
+            maxVoltageDrop == null || maxVoltageDrop !in 0.5..10.0 -> {
+                _cableEditor.value = editor.copy(error = "Допустимое падение напряжения: от 0,5 до 10%")
+                return
+            }
+        }
+        _cableEditor.value = editor.copy(isSaving = true, error = null)
+        viewModelScope.launch(ioDispatcher) {
+            runCatching {
+                cableCalculationRepository.saveDefaults(
+                    editor.defaults.copy(
+                        ambientTemperatureC = ambientTemperature,
+                        groupedCircuits = groupedCircuits,
+                        maxVoltageDropPercent = maxVoltageDrop
+                    )
+                )
+                calculateAndSaveCableLineUseCase(
+                    projectId = projectId,
+                    group = editor.group,
+                    phaseMode = phaseMode.value,
+                    lengthM = length,
+                    manualSectionMm2 = manualSection.takeIf { editor.useManualSection }
+                )
+            }.onSuccess {
+                _cableEditor.value = null
+                _events.value = UiEvent.ShowSnackbar("Кабельная линия рассчитана")
+            }.onFailure { error ->
+                _cableEditor.value = editor.copy(
+                    isSaving = false,
+                    error = error.message ?: "Не удалось рассчитать линию"
+                )
+            }
+        }
+    }
+
+    private fun filterCableDecimal(value: String): String {
+        val normalized = value.replace('.', ',')
+        var separatorSeen = false
+        return buildString {
+            normalized.forEach { char ->
+                when {
+                    char.isDigit() -> append(char)
+                    char == ',' && !separatorSeen -> {
+                        append(char)
+                        separatorSeen = true
+                    }
+                }
+            }
+        }.take(8)
+    }
+
+    private fun formatCableEditorNumber(value: Double): String =
+        if (value % 1.0 == 0.0) value.toInt().toString() else value.toString().replace('.', ',')
+
+    private fun openCableWizard(groups: List<CircuitGroup>) {
+        val projectId = currentProjectIdOrNull() ?: return
+        val existing = cableCalculations.value
+        val initialDefaults = cableDefaults.value ?: ProjectCableDefaults(projectId)
+        _cableWizard.value = CableWizardState(
+            step = 1,
+            defaults = initialDefaults,
+            ambientTemperatureText = initialDefaults.ambientTemperatureC.toString(),
+            groupedCircuitsText = initialDefaults.groupedCircuits.toString(),
+            maxVoltageDropText = formatCableEditorNumber(initialDefaults.maxVoltageDropPercent),
+            lines = groups
+                .sortedWith(compareBy<CircuitGroup>({ (it.phase ?: Phase.A).ordinal }, { it.groupNumber }))
+                .map { group ->
+                    val calculation = existing[group.groupId]
+                    CableWizardLineState(
+                        group = group,
+                        lengthText = calculation?.input?.lengthM?.let(::formatCableEditorNumber).orEmpty(),
+                        useManualSection = calculation?.input?.manualSectionMm2 != null,
+                        manualSectionText = calculation?.input?.manualSectionMm2?.let(::formatCableEditorNumber)
+                            ?: formatCableEditorNumber(calculation?.cable?.phaseSectionMm2 ?: group.cableSection)
+                    )
+                }
+        )
+        viewModelScope.launch(ioDispatcher) {
+            val persisted = cableCalculationRepository.getDefaults(projectId)
+            val current = _cableWizard.value
+            // Не перезаписываем выбор пользователя, если он уже успел изменить
+            // параметры, пока сохранённый профиль загружался из локальной БД.
+            if (
+                current != null &&
+                current.defaults == initialDefaults &&
+                current.ambientTemperatureText == initialDefaults.ambientTemperatureC.toString() &&
+                current.groupedCircuitsText == initialDefaults.groupedCircuits.toString() &&
+                current.maxVoltageDropText == formatCableEditorNumber(initialDefaults.maxVoltageDropPercent)
+            ) {
+                _cableWizard.value = current.copy(
+                    defaults = persisted,
+                    ambientTemperatureText = persisted.ambientTemperatureC.toString(),
+                    groupedCircuitsText = persisted.groupedCircuits.toString(),
+                    maxVoltageDropText = formatCableEditorNumber(persisted.maxVoltageDropPercent)
+                )
+            }
+        }
+    }
+
+    fun closeCableWizard() {
+        _cableWizard.value = null
+    }
+
+    fun setCableWizardMaterial(value: ConductorMaterial) {
+        _cableWizard.value = _cableWizard.value?.let {
+            it.copy(defaults = it.defaults.copy(material = value), error = null)
+        }
+    }
+
+    fun setCableWizardInsulation(value: CableInsulation) {
+        _cableWizard.value = _cableWizard.value?.let {
+            it.copy(defaults = it.defaults.copy(insulation = value), error = null)
+        }
+    }
+
+    fun setCableWizardInstallationMethod(value: CableInstallationMethod) {
+        _cableWizard.value = _cableWizard.value?.let {
+            it.copy(defaults = it.defaults.copy(installationMethod = value), error = null)
+        }
+    }
+
+    fun setCableWizardAmbientTemperature(value: String) {
+        _cableWizard.value = _cableWizard.value?.copy(
+            ambientTemperatureText = value.filter { it.isDigit() || it == '-' }.take(3),
+            error = null
+        )
+    }
+
+    fun setCableWizardGroupedCircuits(value: String) {
+        _cableWizard.value = _cableWizard.value?.copy(
+            groupedCircuitsText = value.filter(Char::isDigit).take(2),
+            error = null
+        )
+    }
+
+    fun setCableWizardMaxVoltageDrop(value: String) {
+        _cableWizard.value = _cableWizard.value?.copy(
+            maxVoltageDropText = filterCableDecimal(value),
+            error = null
+        )
+    }
+
+    fun setCableWizardLineLength(groupId: Long, value: String) {
+        updateCableWizardLine(groupId) { it.copy(lengthText = filterCableDecimal(value)) }
+    }
+
+    fun setCableWizardManualSectionEnabled(groupId: Long, enabled: Boolean) {
+        updateCableWizardLine(groupId) { it.copy(useManualSection = enabled) }
+    }
+
+    fun setCableWizardManualSection(groupId: Long, value: String) {
+        updateCableWizardLine(groupId) { it.copy(manualSectionText = filterCableDecimal(value)) }
+    }
+
+    fun nextCableWizardStep() {
+        val wizard = _cableWizard.value ?: return
+        val parsed = parseCableWizardDefaults(wizard) ?: return
+        _cableWizard.value = wizard.copy(
+            step = 2,
+            defaults = parsed,
+            error = null
+        )
+    }
+
+    fun previousCableWizardStep() {
+        _cableWizard.value = _cableWizard.value?.copy(step = 1, error = null)
+    }
+
+    fun saveCableWizard() {
+        if (!hasCableCalculationAccess()) {
+            _cableWizard.value = null
+            requestCableCalculationPaywall()
+            return
+        }
+        val wizard = _cableWizard.value ?: return
+        val projectId = currentProjectIdOrNull() ?: return
+        val defaults = parseCableWizardDefaults(wizard) ?: return
+        val invalidLength = wizard.lines.firstOrNull { line ->
+            line.lengthText.isNotBlank() &&
+                (line.lengthText.replace(',', '.').toDoubleOrNull()?.let { it <= 0.0 } != false)
+        }
+        if (invalidLength != null) {
+            _cableWizard.value = wizard.copy(
+                error = "Проверьте длину линии группы ${invalidLength.group.groupNumber}"
+            )
+            return
+        }
+        val invalidSection = wizard.lines.firstOrNull { line ->
+            line.useManualSection &&
+                (line.manualSectionText.replace(',', '.').toDoubleOrNull()?.let { it <= 0.0 } != false)
+        }
+        if (invalidSection != null) {
+            _cableWizard.value = wizard.copy(
+                error = "Проверьте сечение линии группы ${invalidSection.group.groupNumber}"
+            )
+            return
+        }
+        val configuredLines = wizard.lines.filter { it.lengthText.isNotBlank() }
+        if (configuredLines.isEmpty()) {
+            _cableWizard.value = wizard.copy(error = "Укажите длину хотя бы одной линии")
+            return
+        }
+        _cableWizard.value = wizard.copy(isSaving = true, error = null)
+        viewModelScope.launch(ioDispatcher) {
+            runCatching {
+                cableCalculationRepository.saveDefaults(defaults)
+                wizard.lines.forEach { line ->
+                    val length = line.lengthText.replace(',', '.').toDoubleOrNull()
+                    if (length == null) {
+                        cableCalculationRepository.deleteCalculation(line.group.groupId)
+                    } else {
+                        calculateAndSaveCableLineUseCase(
+                            projectId = projectId,
+                            group = line.group,
+                            phaseMode = phaseMode.value,
+                            lengthM = length,
+                            manualSectionMm2 = if (line.useManualSection) {
+                                line.manualSectionText.replace(',', '.').toDoubleOrNull()
+                            } else {
+                                null
+                            }
+                        )
+                    }
+                }
+            }.onSuccess {
+                _cableWizard.value = null
+                _events.value = UiEvent.ShowSnackbar("Рассчитано линий: ${configuredLines.size}")
+            }.onFailure { error ->
+                _cableWizard.value = wizard.copy(
+                    isSaving = false,
+                    error = error.message ?: "Не удалось рассчитать кабельные линии"
+                )
+            }
+        }
+    }
+
+    private fun updateCableWizardLine(
+        groupId: Long,
+        transform: (CableWizardLineState) -> CableWizardLineState
+    ) {
+        _cableWizard.value = _cableWizard.value?.let { wizard ->
+            wizard.copy(
+                lines = wizard.lines.map { if (it.group.groupId == groupId) transform(it) else it },
+                error = null
+            )
+        }
+    }
+
+    private fun parseCableWizardDefaults(wizard: CableWizardState): ProjectCableDefaults? {
+        val ambientTemperature = wizard.ambientTemperatureText.toIntOrNull()
+        val groupedCircuits = wizard.groupedCircuitsText.toIntOrNull()
+        val maxVoltageDrop = wizard.maxVoltageDropText.replace(',', '.').toDoubleOrNull()
+        val message = when {
+            ambientTemperature == null || ambientTemperature !in -25..70 ->
+                "Температура должна быть от −25 до 70 °C"
+            groupedCircuits == null || groupedCircuits !in 1..20 ->
+                "Количество совместно проложенных цепей: от 1 до 20"
+            maxVoltageDrop == null || maxVoltageDrop !in 0.5..10.0 ->
+                "Допустимое падение напряжения: от 0,5 до 10%"
+            else -> null
+        }
+        if (message != null) {
+            _cableWizard.value = wizard.copy(error = message)
+            return null
+        }
+        return wizard.defaults.copy(
+            ambientTemperatureC = ambientTemperature!!,
+            groupedCircuits = groupedCircuits!!,
+            maxVoltageDropPercent = maxVoltageDrop!!
+        )
+    }
+
+    private fun hasCableCalculationAccess(): Boolean =
+        userPlanRepository.planFlow.value.capabilities.cableLineCalculation
+
+    private fun requestCableCalculationPaywall() {
+        paywallBus.request(
+            feature = ProFeature.CABLE_LINE_CALCULATION,
+            source = PaywallSource.CABLE_CALCULATION
+        )
+    }
+
+    val apparatusSelections = activeProjectDs.activeProjectId
+        .filterNotNull()
+        .flatMapLatest { projectId -> panelEquipmentRepository.observeSelections(projectId) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    val panelLayoutSnapshot = activeProjectDs.activeProjectId
+        .filterNotNull()
+        .flatMapLatest { projectId -> panelLayoutRepository.observe(projectId) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val projectCoverage: StateFlow<ProjectCoverage> = observeProjectCoverageUseCase()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ProjectCoverage.Empty)
+
+    fun estimateProtectionCost(
+        incomer: IncomerSpec,
+        groups: List<CircuitGroup>
+    ): ProtectionCostEstimate = estimatePanelEquipmentCostUseCase(
+        incomer = incomer,
+        groups = groups,
+        selections = apparatusSelections.value,
+        customModules = panelLayoutSnapshot.value?.customModules.orEmpty()
+    ).unifiedProtectionView
 
     private val TAG_DND = "EXP_DND"
     private val TAG_MOVE = "EXP_MOVE"
@@ -238,12 +765,20 @@ class ExplicationViewModel @Inject constructor(
                     groupType = g.groupType,
                     devices = groupDevices,
                     nominalCurrent = g.nominalCurrent ?: 0.0,
-                    installedPowerW = groupDevices.sumOf { it.power },
+                    installedPowerW = CircuitLoadCalculator
+                        .calculate(groupDevices)
+                        .installedPowerW
+                        .toInt(),
                     circuitBreaker = resolvedBreaker,
                     cableSection = resolvedCable,
                     breakerType = resolvedBreakerType,
+                    whyBreakerSelected = g.whyBreakerSelected,
+                    whyCableSelected = g.whyCableSelected,
                     rcdRequired = g.rcdRequired ?: false,
                     rcdCurrent = g.rcdCurrent ?: 30,
+                    rcdReasonCodes = g.rcdReasons.map { it.name },
+                    calculationSource = CalculationSource.MANUAL,
+                    algorithmVersion = CalculationAlgorithm.VERSION,
                     phase = g.phase
                 )
             }
@@ -253,6 +788,40 @@ class ExplicationViewModel @Inject constructor(
     private val activeProjectIdState: StateFlow<String?> =
         activeProjectDs.activeProjectId
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    private val activeProjectSetup: StateFlow<ProjectSetup?> =
+        activeProjectIdState
+            .flatMapLatest { projectId ->
+                val pid = projectId.orEmpty().trim()
+                if (pid.isBlank()) {
+                    flowOf(null)
+                } else {
+                    val legacyFallbackMode = preferencesRepository.phaseMode.first()
+                    projectSetupRepository.observeResolved(pid, legacyFallbackMode)
+                }
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    private data class ExplicationElectricalContext(
+        val phaseMode: PhaseMode,
+        val availablePowerKw: Double?,
+        val unassignedDeviceCount: Int
+    )
+
+    private val electricalContext: StateFlow<ExplicationElectricalContext> = combine(
+        activeProjectSetup,
+        projectCoverage
+    ) { setup, coverage ->
+        ExplicationElectricalContext(
+            phaseMode = setup?.phaseMode ?: PhaseMode.THREE,
+            availablePowerKw = setup?.inputPowerKw,
+            unassignedDeviceCount = coverage.unassignedDevices.size
+        )
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000),
+        ExplicationElectricalContext(PhaseMode.THREE, null, 0)
+    )
 
 
     // =========================
@@ -510,6 +1079,18 @@ class ExplicationViewModel @Inject constructor(
     private val unassignedShownFlow =
         onboardingRepository.observeShown(OnboardingHintId.EXPLICATION_UNASSIGNED_DEVICES)
 
+    private val overviewShownFlow =
+        onboardingRepository.observeShown(OnboardingHintId.EXPLICATION_OVERVIEW)
+
+    private val pdfShownFlow =
+        onboardingRepository.observeShown(OnboardingHintId.PDF_EXPORT_INFO)
+
+    private val singleLineShownFlow =
+        onboardingRepository.observeShown(OnboardingHintId.EXPLICATION_SINGLE_LINE)
+
+    private val panelShownFlow =
+        onboardingRepository.observeShown(OnboardingHintId.EXPLICATION_OPEN_PANEL)
+
     private data class OnboardingFactsInputs(
         val state: GroupScreenState,
         val session: ManualEditSession?,
@@ -518,7 +1099,11 @@ class ExplicationViewModel @Inject constructor(
         val manualIntroShown: Boolean,
         val longPressShown: Boolean,
         val saveShown: Boolean,
-        val unassignedShown: Boolean
+        val unassignedShown: Boolean,
+        val overviewShown: Boolean,
+        val singleLineShown: Boolean,
+        val panelShown: Boolean,
+        val pdfShown: Boolean
     )
 
     val onboardingFacts: StateFlow<ExplicationOnboardingFacts> =
@@ -532,12 +1117,33 @@ class ExplicationViewModel @Inject constructor(
                 arrayOf(state, session, unassigned, pdfBusy)
             },
             combine(
-                manualIntroShownFlow,
-                longPressShownFlow,
-                saveShownFlow,
-                unassignedShownFlow
-            ) { manualIntroShown, longPressShown, saveShown, unassignedShown ->
-                arrayOf(manualIntroShown, longPressShown, saveShown, unassignedShown)
+                combine(
+                    manualIntroShownFlow,
+                    longPressShownFlow,
+                    saveShownFlow,
+                    unassignedShownFlow
+                ) { manualIntroShown, longPressShown, saveShown, unassignedShown ->
+                    arrayOf(manualIntroShown, longPressShown, saveShown, unassignedShown)
+                },
+                combine(
+                    overviewShownFlow,
+                    singleLineShownFlow,
+                    panelShownFlow
+                ) { overview, singleLine, panel ->
+                    arrayOf(overview, singleLine, panel)
+                },
+                pdfShownFlow
+            ) { progress, resultHints, pdfShown ->
+                arrayOf(
+                    progress[0],
+                    progress[1],
+                    progress[2],
+                    progress[3],
+                    resultHints[0],
+                    resultHints[1],
+                    resultHints[2],
+                    pdfShown
+                )
             }
         ) { left, right ->
             OnboardingFactsInputs(
@@ -548,7 +1154,11 @@ class ExplicationViewModel @Inject constructor(
                 manualIntroShown = right[0] as Boolean,
                 longPressShown = right[1] as Boolean,
                 saveShown = right[2] as Boolean,
-                unassignedShown = right[3] as Boolean
+                unassignedShown = right[3] as Boolean,
+                overviewShown = right[4] as Boolean,
+                singleLineShown = right[5] as Boolean,
+                panelShown = right[6] as Boolean,
+                pdfShown = right[7] as Boolean
             )
         }.map { input ->
             val success = input.state as? GroupScreenState.Success
@@ -564,6 +1174,10 @@ class ExplicationViewModel @Inject constructor(
                 longPressShown = input.longPressShown,
                 saveShown = input.saveShown,
                 unassignedShown = input.unassignedShown,
+                overviewShown = input.overviewShown,
+                singleLineShown = input.singleLineShown,
+                panelShown = input.panelShown,
+                pdfShown = input.pdfShown,
                 pdfExportFlowActive = input.pdfBusy
             )
         }.stateIn(
@@ -586,10 +1200,76 @@ class ExplicationViewModel @Inject constructor(
     // =========================
 
     init {
-        // 1) Следим за phaseMode из preferences
+        // Настройки активного проекта являются источником правды. Глобальная
+        // preference остаётся только fallback для старых проектов без ProjectSetup.
         viewModelScope.launch(ioDispatcher) {
-            preferencesRepository.phaseMode.collect { mode ->
-                _phaseMode.value = mode
+            electricalContext.collect { context ->
+                _phaseMode.value = context.phaseMode
+            }
+        }
+
+        // Полный кабельный расчёт хранит снимок токов, автомата, фазы и условий.
+        // После AUTO-перестройки или сохранения ручного draft эти значения могут
+        // измениться. Пересчитываем только уже настроенные пользователем линии:
+        // линии без введённой длины здесь не создаём и не выдаём за полные.
+        viewModelScope.launch(ioDispatcher) {
+            data class CableSyncSnapshot(
+                val projectId: String,
+                val groups: List<CircuitGroup>,
+                val calculations: Map<Long, CableLineCalculation>,
+                val projectPhaseMode: PhaseMode
+            )
+
+            combine(
+                activeProjectIdState,
+                dbGroupsFlow,
+                cableCalculations,
+                phaseMode
+            ) { projectId, groups, calculations, projectPhaseMode ->
+                CableSyncSnapshot(
+                    projectId = projectId.orEmpty().trim(),
+                    groups = groups,
+                    calculations = calculations,
+                    projectPhaseMode = projectPhaseMode
+                )
+            }.collect { snapshot ->
+                if (snapshot.projectId.isBlank() || snapshot.calculations.isEmpty()) {
+                    return@collect
+                }
+                val defaults = cableCalculationRepository.getDefaults(snapshot.projectId)
+                val groupsById = snapshot.groups.associateBy(CircuitGroup::groupId)
+
+                snapshot.calculations.values.forEach { existing ->
+                    val length = existing.input.lengthM?.takeIf { it > 0.0 }
+                        ?: return@forEach
+                    val group = groupsById[existing.groupId] ?: return@forEach
+                    val expectedLineMode = if (
+                        snapshot.projectPhaseMode == PhaseMode.THREE &&
+                        group.phase == Phase.THREE_PHASE
+                    ) {
+                        PhaseMode.THREE
+                    } else {
+                        PhaseMode.SINGLE
+                    }
+                    val expectedPowerFactor = (group.devices.minOfOrNull { it.powerFactor } ?: 1.0)
+                        .coerceIn(0.1, 1.0)
+                    val isStale = existing.input.phaseMode != expectedLineMode ||
+                        existing.input.loadCurrentA != group.nominalCurrent ||
+                        existing.input.breakerA != group.circuitBreaker ||
+                        existing.input.powerFactor != expectedPowerFactor ||
+                        existing.input.defaults != defaults
+
+                    if (isStale) {
+                        calculateAndSaveCableLineUseCase(
+                            projectId = snapshot.projectId,
+                            group = group,
+                            phaseMode = snapshot.projectPhaseMode,
+                            lengthM = length,
+                            powerFactor = expectedPowerFactor,
+                            manualSectionMm2 = existing.input.manualSectionMm2
+                        )
+                    }
+                }
             }
         }
 
@@ -734,6 +1414,8 @@ class ExplicationViewModel @Inject constructor(
             data class Snapshot(
                 val groups: List<CircuitGroup>,
                 val mode: PhaseMode,
+                val availablePowerKw: Double?,
+                val unassignedDeviceCount: Int,
                 val decisions: List<DistributionDecision>,
                 val session: ManualEditSession?,
                 val manualGroups: List<CircuitGroup>,
@@ -779,6 +1461,8 @@ class ExplicationViewModel @Inject constructor(
                                 Snapshot(
                                     groups = emptyList(),
                                     mode = phaseMode.value,
+                                    availablePowerKw = activeProjectSetup.value?.inputPowerKw,
+                                    unassignedDeviceCount = 0,
                                     decisions = emptyList(),
                                     session = null,
                                     manualGroups = emptyList(),
@@ -797,14 +1481,16 @@ class ExplicationViewModel @Inject constructor(
                             //    но теперь хотя бы projectId не склеится с чужими groups
                             combine(
                                 groupsFlow,
-                                phaseMode,
+                                electricalContext,
                                 decisionsFlow,
                                 manualSession,
                                 manualDisplayGroups
-                            ) { groups, mode, decisions, session, manualGroups ->
+                            ) { groups, context, decisions, session, manualGroups ->
                                 Snapshot(
                                     groups = groups,
-                                    mode = mode,
+                                    mode = context.phaseMode,
+                                    availablePowerKw = context.availablePowerKw,
+                                    unassignedDeviceCount = context.unassignedDeviceCount,
                                     decisions = decisions,
                                     session = session,
                                     manualGroups = manualGroups,
@@ -863,7 +1549,9 @@ class ExplicationViewModel @Inject constructor(
                             groups = manualGroups,
                             mode = mode,
                             isProReport = isProReport,
-                            decisions = decisions
+                            decisions = decisions,
+                            availablePowerKw = snap.availablePowerKw,
+                            unassignedDeviceCount = snap.unassignedDeviceCount
                         )
                     }
                     return@collect
@@ -875,7 +1563,9 @@ class ExplicationViewModel @Inject constructor(
                         groups = groups,
                         mode = mode,
                         isProReport = isProReport,
-                        decisions = decisions
+                        decisions = decisions,
+                        availablePowerKw = snap.availablePowerKw,
+                        unassignedDeviceCount = snap.unassignedDeviceCount
                     )
                     return@collect
                 }
@@ -924,31 +1614,49 @@ class ExplicationViewModel @Inject constructor(
         groups: List<CircuitGroup>,
         mode: PhaseMode,
         isProReport: Boolean,
-        decisions: List<DistributionDecision>
+        decisions: List<DistributionDecision>,
+        availablePowerKw: Double? = activeProjectSetup.value?.inputPowerKw,
+        unassignedDeviceCount: Int = projectCoverage.value.unassignedDevices.size
     ) {
         val totalGroups = groups.size
-        val totalCurrent = groups.sumOf { it.nominalCurrent }
         val hasGroupRcds = groups.any { it.rcdRequired }
 
-        val incomer = IncomerSelector().select(
-            IncomerSelector.Params(
-                groups = groups,
-                preferRcbo = false,
-                hasGroupRcds = hasGroupRcds,
-                voltageTypeOverride = when (mode) {
-                    PhaseMode.SINGLE -> VoltageType.AC_1PHASE
-                    PhaseMode.THREE -> VoltageType.AC_3PHASE
-                }
+        val electricalSummary = runCatching {
+            val phaseVector = phaseLoadVector(groups)
+            val totalCurrent = when (mode) {
+                PhaseMode.SINGLE -> phaseVector.a
+                PhaseMode.THREE -> phaseVector.max
+            }
+            val incomerAssessment = incomerSelector.assess(
+                IncomerSelector.Params(
+                    groups = groups,
+                    preferRcbo = false,
+                    hasGroupRcds = hasGroupRcds,
+                    availablePowerKw = availablePowerKw,
+                    unassignedDeviceCount = unassignedDeviceCount,
+                    voltageTypeOverride = when (mode) {
+                        PhaseMode.SINGLE -> VoltageType.AC_1PHASE
+                        PhaseMode.THREE -> VoltageType.AC_3PHASE
+                    }
+                )
             )
-        )
+            Triple(totalCurrent, incomerAssessment.spec, incomerAssessment)
+        }.getOrElse { failure ->
+            _uiState.value = GroupScreenState.Error(
+                failure.message ?: "Не удалось рассчитать параметры щита"
+            )
+            return
+        }
+        val (totalCurrent, incomer, incomerAssessment) = electricalSummary
 
         val totals = calculateShieldOverviewUseCase.execute(groups)
         val installedPower = totals.installedPowerW
         val calculatedPower = totals.calculatedPowerW
 
-        val calcWarningsFromGroups = if (isProReport) {
-            buildWarningsFromGroups(groups)
-        } else emptyList()
+        val calcWarningsFromGroups = buildList {
+            incomerAssessment.toCalcWarning()?.let(::add)
+            if (isProReport) addAll(buildWarningsFromGroups(groups))
+        }
 
         val shieldTotalsAssumptions: List<CalcAssumption> =
             if (isProReport) calculatedPower.assumptions else emptyList()
@@ -980,9 +1688,11 @@ class ExplicationViewModel @Inject constructor(
         val (meta, phases) = buildReportDataFromDeterministic(
             groups = groups,
             incomer = incomer,
+            incomerAssessment = incomerAssessment,
             totalGroups = totalGroups,
             mode = mode,
-            date = reportDate
+            date = reportDate,
+            cableCalculations = cableCalculations.value
         )
 
         val professionalSections: ProfessionalSections? =
@@ -1004,6 +1714,7 @@ class ExplicationViewModel @Inject constructor(
             totalGroups = totalGroups,
             totalCurrent = totalCurrent,
             incomer = incomer,
+            incomerAssessment = incomerAssessment,
             hasGroupRcds = hasGroupRcds,
             installedPowerW = installedPower,
             calculatedPowerW = calculatedPower,
@@ -1120,7 +1831,9 @@ class ExplicationViewModel @Inject constructor(
                 incomer = state.incomer,
                 totalInstalledPowerWatts = state.installedPowerW.value,
                 totalCalculatedPowerWatts = state.calculatedPowerW.value,
-                totalCurrentAmps = state.totalCurrent
+                totalCurrentAmps = state.totalCurrent,
+                cableCalculations = cableCalculations.value,
+                customModules = panelLayoutSnapshot.value?.customModules.orEmpty()
             )
             _events.value = UiEvent.SingleLineDiagramRequested(diagram)
         } catch (t: Throwable) {
@@ -1129,6 +1842,10 @@ class ExplicationViewModel @Inject constructor(
                 "Не удалось сформировать однолинейную схему. Проверьте данные проекта и попробуйте еще раз."
             )
         }
+    }
+
+    fun onPanelVisualizationLockedClick() {
+        paywallBus.request(ProFeature.PANEL_VISUALIZATION)
     }
 
     // =========================
@@ -1367,7 +2084,20 @@ class ExplicationViewModel @Inject constructor(
             }
 
             Log.d("DRAG_TRACE", "VM APPLY pid=$projectId action=$action")
-            manualRepo.apply(projectId = projectId, action = action)
+            try {
+                manualRepo.apply(projectId = projectId, action = action)
+            } catch (t: IllegalArgumentException) {
+                Log.w("DRAG_TRACE", "VM REJECTED pid=$projectId action=$action", t)
+                _events.value = UiEvent.ShowSnackbar(
+                    t.message
+                        ?.substringAfter(": ")
+                        ?.takeIf(String::isNotBlank)
+                        ?: "Такое объединение устройств недопустимо"
+                )
+            } catch (t: Throwable) {
+                Log.e("DRAG_TRACE", "VM FAILED pid=$projectId action=$action", t)
+                _events.value = UiEvent.ShowSnackbar("Не удалось переместить устройство")
+            }
         }
     }
 
@@ -1409,6 +2139,12 @@ class ExplicationViewModel @Inject constructor(
                 manualRepo.apply(
                     projectId = projectId,
                     action = ManualEditAction.CreateNewGroupAndMove(deviceId = deviceId)
+                )
+            } catch (t: IllegalArgumentException) {
+                Log.w(TAG_MOVE, "toNewGroup rejected deviceId=$deviceId pid=$projectId", t)
+                _events.value = UiEvent.ShowSnackbar(
+                    t.message?.substringAfter(": ")
+                        ?: "Для устройства нельзя создать такую группу"
                 )
             } catch (t: Throwable) {
                 Log.e(TAG_MOVE, "toNewGroup failed deviceId=$deviceId pid=$projectId", t)
@@ -1512,6 +2248,14 @@ class ExplicationViewModel @Inject constructor(
                 calcDetailsState = calcDetailsState,
                 currentValueText = "%.2f кВт".format(calculated.value / 1000.0),
                 calcBlocks = if (hasAccess) CalcBlocksMapper.mapSteps(steps) else emptyList(),
+                calculationStory = if (hasAccess) {
+                    CalculationStoryMapper.mapGroup(
+                        steps = steps,
+                        kind = GroupCalculationKind.POWER
+                    )
+                } else {
+                    null
+                },
                 normRefs = emptyList()
             )
         )
@@ -1537,6 +2281,14 @@ class ExplicationViewModel @Inject constructor(
                 calcDetailsState = calcDetailsState,
                 currentValueText = "%.2f А".format(calculated.value),
                 calcBlocks = if (hasAccess) CalcBlocksMapper.mapSteps(steps) else emptyList(),
+                calculationStory = if (hasAccess) {
+                    CalculationStoryMapper.mapGroup(
+                        steps = steps,
+                        kind = GroupCalculationKind.CURRENT
+                    )
+                } else {
+                    null
+                },
                 normRefs = emptyList()
             )
         )
@@ -1574,6 +2326,11 @@ class ExplicationViewModel @Inject constructor(
                 calcDetailsState = calcDetailsState,
                 currentValueText = "%.1f кВт".format(calculated.value / 1000.0),
                 calcBlocks = if (hasAccess) CalcBlocksMapper.mapSteps(steps) else emptyList(),
+                calculationStory = if (hasAccess) {
+                    CalculationStoryMapper.mapInstalledPower(steps)
+                } else {
+                    null
+                },
                 normRefs = if (hasAccess) calculated.normRefs.map { it.toString() } else emptyList()
             )
         )
@@ -1596,6 +2353,18 @@ class ExplicationViewModel @Inject constructor(
                 calcDetailsState = calcDetailsState,
                 currentValueText = "%.1f кВт".format(calculated.value / 1000.0),
                 calcBlocks = if (hasAccess) CalcBlocksMapper.mapSteps(steps) else emptyList(),
+                calculationStory = if (hasAccess) {
+                    CalculationStoryMapper.mapGroup(
+                        steps = steps,
+                        kind = GroupCalculationKind.POWER,
+                        resultLabelOverride = "Расчётная нагрузка щита",
+                        comparisonLabelOverride = "Установленная мощность щита",
+                        interpretationOverride =
+                            "Это значение используется для оценки нагрузки объекта, распределения по фазам и предварительного выбора вводного аппарата."
+                    )
+                } else {
+                    null
+                },
                 normRefs = if (hasAccess) calculated.normRefs.map { it.toString() } else emptyList()
             )
         )
@@ -1604,14 +2373,16 @@ class ExplicationViewModel @Inject constructor(
     fun onIncomerFieldClick(
         field: InfoSheetPayloadFactory.IncomerField,
         incomer: IncomerSpec,
-        hasGroupRcds: Boolean
+        hasGroupRcds: Boolean,
+        baseCurrentA: Double
     ) {
         openInfoSheet(
             InfoSheetPayloadFactory.incomerField(
                 field = field,
                 incomer = incomer,
                 phaseMode = phaseMode.value,
-                hasGroupRcds = hasGroupRcds
+                hasGroupRcds = hasGroupRcds,
+                baseCurrentA = baseCurrentA
             )
         )
     }
@@ -1760,7 +2531,10 @@ class ExplicationViewModel @Inject constructor(
         _uiState.value = GroupScreenState.Loading
 
         try {
-            val mode = preferencesRepository.phaseMode.first()
+            val mode = projectSetupRepository.resolve(
+                projectId = projectId,
+                legacyFallbackPhaseMode = preferencesRepository.phaseMode.first()
+            ).phaseMode
 
             Log.w("AUTO_TRIGGER", "AUTO_RECALC_START reason=$reason pid=$projectId mode=$mode")
 
@@ -1886,9 +2660,11 @@ class ExplicationViewModel @Inject constructor(
         val (meta, phases) = buildReportDataFromDeterministic(
             groups = s.groups,
             incomer = s.incomer,
+            incomerAssessment = s.incomerAssessment,
             totalGroups = s.totalGroups,
             mode = mode,
-            date = s.reportDate
+            date = s.reportDate,
+            cableCalculations = cableCalculations.value
         )
 
         return PdfReportSnapshot(
@@ -2005,6 +2781,7 @@ sealed class GroupScreenState {
         val totalGroups: Int,
         val totalCurrent: Double,
         val incomer: IncomerSpec,
+        val incomerAssessment: IncomerAssessment,
         val hasGroupRcds: Boolean,
         val installedPowerW: CalculatedValue,
         val calculatedPowerW: CalculatedValue,
@@ -2048,9 +2825,11 @@ private fun buildWarningsFromGroups(groups: List<CircuitGroup>): List<CalcWarnin
 private fun buildReportDataFromDeterministic(
     groups: List<CircuitGroup>,
     incomer: IncomerSpec,
+    incomerAssessment: IncomerAssessment,
     totalGroups: Int,
     mode: PhaseMode,
-    date: String
+    date: String,
+    cableCalculations: Map<Long, CableLineCalculation> = emptyMap()
 ): Pair<ReportMeta, List<ReportPhase>> {
 
     val perPhase = phaseCurrents(groups)
@@ -2083,8 +2862,18 @@ private fun buildReportDataFromDeterministic(
                 append(kind.name)
                 append(", ")
                 append("${poles}P, ")
-                append("${mcbRating}A ${mcbCurve}, Icn ${icn}")
-                rcdType?.let { append(", RCD $it ${rcdSensitivityMa ?: 30}mA") }
+                append("${mcbRating} А, характеристика ${mcbCurve}, Icn ${icn}")
+                rcdType?.let { append(", УЗО типа $it, ${rcdSensitivityMa ?: 30} мА") }
+                when (incomerAssessment.status) {
+                    ru.mugalimov.volthome.domain.model.incomer.IncomerAssessmentStatus.WITHIN_AVAILABLE_POWER -> Unit
+                    ru.mugalimov.volthome.domain.model.incomer.IncomerAssessmentStatus.PRELIMINARY ->
+                        append(" • предварительно: мощность ввода не указана")
+                    ru.mugalimov.volthome.domain.model.incomer.IncomerAssessmentStatus.LOAD_EXCEEDS_AVAILABLE_POWER ->
+                        append(" • нагрузка превышает доступную мощность")
+                    ru.mugalimov.volthome.domain.model.incomer.IncomerAssessmentStatus.INCOMPLETE_PROJECT,
+                    ru.mugalimov.volthome.domain.model.incomer.IncomerAssessmentStatus.REQUIRED_RATING_UNSUPPORTED ->
+                        append(" • номинал требует проверки")
+                }
             }
         },
         headlineCurrents = headlineCurrents,
@@ -2102,18 +2891,30 @@ private fun buildReportDataFromDeterministic(
     val groupedByPhase: Map<Phase, List<CircuitGroup>> =
         groups.groupBy { it.phase ?: Phase.A }
 
-    val phases = phaseKeys(mode).map { phase ->
+    val singlePhaseSections = phaseKeys(mode).map { phase ->
         val phaseGroups = groupedByPhase[phase].orEmpty()
 
         ReportPhase(
             name = "Фаза ${phase.name}",
+            totalCurrentA = phaseGroups.sumOf { it.nominalCurrent },
+            installedPowerW = phaseGroups.sumOf { it.installedPowerW },
             groups = phaseGroups
                 .sortedBy { it.groupNumber }
                 .map { g ->
                     ReportGroup(
-                        title = "Группа #${g.groupNumber} — ${g.roomName}",
+                        title = "Группа №${g.groupNumber} — ${g.roomName}",
+                        number = g.groupNumber,
+                        roomName = g.roomName,
+                        purpose = g.groupType.toReportPurpose(),
+                        phaseLabel = phase.name,
+                        installedPowerW = g.installedPowerW,
+                        installedCurrentA = CircuitLoadCalculator.calculate(g.devices).installedCurrentA,
+                        calculatedCurrentA = g.nominalCurrent,
+                        manualNotes = g.manualDeviationCodes.map(::manualDeviationNote),
                         switchLabel = GroupMetaFormatter.buildSwitchLabel(g),
-                        cableLabel = GroupMetaFormatter.buildCableLabel(g),
+                        rcdLabel = g.fullRcdLabel(),
+                        cableLabel = cableCalculations[g.groupId]?.reportCableLabel()
+                            ?: GroupMetaFormatter.buildCableLabel(g),
                         devices = g.devices
                             .sortedBy { deviceKey(it) }
                             .map { d ->
@@ -2134,7 +2935,111 @@ private fun buildReportDataFromDeterministic(
         )
     }
 
+    val threePhaseGroups = groupedByPhase[Phase.THREE_PHASE].orEmpty()
+    val threePhaseSection = if (mode == PhaseMode.THREE && threePhaseGroups.isNotEmpty()) {
+        listOf(
+            ReportPhase(
+                name = "Трёхфазные линии",
+                totalCurrentA = threePhaseGroups.sumOf { it.nominalCurrent },
+                installedPowerW = threePhaseGroups.sumOf { it.installedPowerW },
+                groups = threePhaseGroups
+                    .sortedBy { it.groupNumber }
+                    .map { g ->
+                        ReportGroup(
+                            title = "Группа №${g.groupNumber} — ${g.roomName}",
+                            number = g.groupNumber,
+                            roomName = g.roomName,
+                            purpose = g.groupType.toReportPurpose(),
+                            phaseLabel = "3Ф",
+                            installedPowerW = g.installedPowerW,
+                            installedCurrentA = CircuitLoadCalculator.calculate(g.devices).installedCurrentA,
+                            calculatedCurrentA = g.nominalCurrent,
+                            manualNotes = g.manualDeviationCodes.map(::manualDeviationNote),
+                            switchLabel = GroupMetaFormatter.buildSwitchLabel(g),
+                            rcdLabel = g.fullRcdLabel(),
+                            cableLabel = cableCalculations[g.groupId]?.reportCableLabel()
+                                ?: GroupMetaFormatter.buildCableLabel(g),
+                            devices = g.devices
+                                .sortedBy { deviceKey(it) }
+                                .map { d ->
+                                    val normalized = PowerCurrentNormalizer.ensurePAndI(
+                                        powerW = d.power.takeIf { it > 0 },
+                                        currentA = d.calculateCurrent().takeIf { it > 0.0 },
+                                        voltage = d.voltage,
+                                        powerFactor = d.powerFactor
+                                    )
+                                    ReportDevice(
+                                        name = d.name,
+                                        powerW = normalized.powerW,
+                                        currentA = normalized.currentA
+                                    )
+                                }
+                        )
+                    }
+            )
+        )
+    } else {
+        emptyList()
+    }
+
+    val phases = singlePhaseSections + threePhaseSection
+
     return meta to phases
+}
+
+private fun CableLineCalculation.reportCableLabel(): String = buildString {
+    append(cable.compactLabel)
+    input.lengthM?.let { append(" · ${formatCableNumber(it)} м") }
+    voltageDropPercent?.let { append(" · ΔU ${formatCableNumber(it)}%") }
+    when (status) {
+        ru.mugalimov.volthome.domain.model.cable.CableCalculationStatus.PRELIMINARY ->
+            append(" · предварительно")
+        ru.mugalimov.volthome.domain.model.cable.CableCalculationStatus.WARNING ->
+            append(" · с предупреждением")
+        ru.mugalimov.volthome.domain.model.cable.CableCalculationStatus.FAILED ->
+            append(" · проверка не пройдена")
+        ru.mugalimov.volthome.domain.model.cable.CableCalculationStatus.PASSED -> Unit
+    }
+}
+
+private fun formatCableNumber(value: Double): String =
+    String.format(Locale("ru", "RU"), "%.2f", value).trimEnd('0').trimEnd(',')
+
+private fun CircuitGroup.fullRcdLabel(): String? {
+    if (!rcdRequired) return null
+    val spec = rcdSpec
+    if (spec == null) return "УЗО $rcdCurrent мА"
+
+    return buildString {
+        append(if (spec.kind.name == "RCBO") "АВДТ" else "УЗО")
+        spec.ratedCurrentA?.let { append(" $it А") }
+        append(" / ${spec.leakageCurrentMa} мА")
+        append(" · тип ${spec.type.name}")
+        append(" · ${spec.poles}P")
+        if (spec.selectivity.name != "NONE") append(" · ${spec.selectivity.name}")
+    }
+}
+
+private fun manualDeviationNote(code: String): String = when (code) {
+    "MIXED_DEVICE_TYPES" ->
+        "Ручное решение: в одной группе объединены устройства разных назначений."
+    else ->
+        "Ручное решение: $code"
+}
+
+private fun DeviceType.toReportPurpose(): String {
+    return when (this) {
+        DeviceType.LIGHTING -> "Освещение"
+        DeviceType.SOCKET -> "Розеточная линия"
+        DeviceType.HEAVY_DUTY -> "Выделенная линия"
+        DeviceType.AIR_CONDITIONER -> "Кондиционер"
+        DeviceType.ELECTRIC_STOVE -> "Электроплита"
+        DeviceType.OVEN -> "Духовой шкаф"
+        DeviceType.WASHING_MACHINE -> "Стиральная машина"
+        DeviceType.DISHWASHER -> "Посудомоечная машина"
+        DeviceType.WATER_HEATER -> "Водонагреватель"
+        DeviceType.OTHER -> "Прочая нагрузка"
+    }
 }
 
 // =========================
@@ -2147,4 +3052,3 @@ data class PdfReportSnapshot(
     val installedPowerW: Double,
     val calculatedPowerW: Double
 )
-

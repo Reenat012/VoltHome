@@ -8,6 +8,7 @@ data class IncomerSpec(
     val mcbCurve: String,            // "B" / "C" / "D"
     val icn: Int,                    // пред. откл. способность, А (например 6000)
     val rcdType: RcdType? = null,    // тип УЗО/дифа
+    val rcdRatedCurrentA: Int? = null,
     val rcdSensitivityMa: Int? = null,  // 30/100/300 мА
     val rcdSelectivity: RcdSelectivity = RcdSelectivity.NONE
 )

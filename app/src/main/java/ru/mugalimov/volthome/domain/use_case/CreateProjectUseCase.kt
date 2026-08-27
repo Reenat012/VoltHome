@@ -25,6 +25,7 @@ class CreateProjectUseCase(
     suspend operator fun invoke(
         name: String,
         note: String? = null,
+        activate: Boolean = true,
     ): Outcome {
         val plan = planFlow.value
         val capabilities = plan.capabilities
@@ -43,7 +44,7 @@ class CreateProjectUseCase(
             }
         }
 
-        val id = projectsRepository.createProject(name = name, note = note)
+        val id = projectsRepository.createProject(name = name, note = note, activate = activate)
         return Outcome.Success(projectId = id)
     }
 }

@@ -3,6 +3,10 @@ package ru.mugalimov.volthome.data.billing
 import android.content.Intent
 import android.util.Log
 import javax.inject.Inject
+import ru.mugalimov.volthome.core.analytics.AnalyticsEvent
+import ru.mugalimov.volthome.core.analytics.AnalyticsTracker
+import ru.mugalimov.volthome.core.analytics.PaywallSource
+import ru.mugalimov.volthome.core.analytics.PurchaseAnalyticsContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -40,7 +44,10 @@ import kotlin.coroutines.resumeWithException
  * - пустой список продуктов не считаем ошибкой SDK: это normal success-case,
  *   а решение «product unavailable» принимает уже ViewModel.
  */
-class RustoreBillingManagerImpl @Inject constructor() : RustoreBillingManager {
+class RustoreBillingManagerImpl @Inject constructor(
+    private val analytics: AnalyticsTracker,
+    private val purchaseAnalyticsContext: PurchaseAnalyticsContext
+) : RustoreBillingManager {
 
     companion object {
         private const val TAG = "RustoreBillingManager"
@@ -247,6 +254,14 @@ class RustoreBillingManagerImpl @Inject constructor() : RustoreBillingManager {
                 // Эти параметры опциональны, null OK — дока это подтверждает.
                 appUserId = appUserId?.let { ru.rustore.sdk.pay.model.AppUserId(it) },
                 appUserEmail = appUserEmail?.let { ru.rustore.sdk.pay.model.AppUserEmail(it) },
+            )
+
+            analytics.track(
+                AnalyticsEvent.PurchaseStarted(
+                    source = purchaseAnalyticsContext.currentSource()
+                        ?: PaywallSource.PRO_SCREEN,
+                    productId = productId
+                )
             )
 
             val result: ProductPurchaseResult = purchaseInteractor

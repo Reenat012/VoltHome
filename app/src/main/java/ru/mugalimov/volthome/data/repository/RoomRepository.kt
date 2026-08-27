@@ -4,11 +4,12 @@ import kotlinx.coroutines.flow.Flow
 import ru.mugalimov.volthome.domain.model.DefaultRoom
 import ru.mugalimov.volthome.domain.model.Room
 import ru.mugalimov.volthome.domain.model.RoomWithDevice
-import ru.mugalimov.volthome.domain.model.RoomWithLoad
 import ru.mugalimov.volthome.domain.model.RoomWithDevicesPreview
 import ru.mugalimov.volthome.domain.model.create.CreatedRoomResult
+import ru.mugalimov.volthome.domain.model.create.BatchRoomCreationResult
 import ru.mugalimov.volthome.domain.model.create.DeviceCreateRequest
 import ru.mugalimov.volthome.domain.model.create.RoomCreateRequest
+import ru.mugalimov.volthome.domain.model.PhaseMode
 
 interface RoomRepository {
 
@@ -23,8 +24,6 @@ interface RoomRepository {
     suspend fun deleteRoom(roomId: Long)
 
     suspend fun getRoomById(roomId: Long): Room?
-
-    suspend fun getRoomsWithLoads(): Flow<List<RoomWithLoad>>
 
     /**
      * ⚠️ Legacy: завязан на activeProjectId внутри репозитория.
@@ -44,6 +43,13 @@ interface RoomRepository {
     suspend fun addRoomWithDevices(req: RoomCreateRequest): CreatedRoomResult
 
     suspend fun addRoomWithDevices(req: RoomCreateRequest, opId: String): CreatedRoomResult
+
+    suspend fun addRoomsWithDevicesBatch(
+        projectId: String,
+        requests: List<RoomCreateRequest>,
+        phaseMode: PhaseMode,
+        opId: String
+    ): BatchRoomCreationResult
 
     suspend fun addDevicesToRoom(roomId: Long, devices: List<DeviceCreateRequest>): List<Long>
 

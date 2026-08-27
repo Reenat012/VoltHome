@@ -24,7 +24,6 @@ import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -55,13 +54,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import ru.mugalimov.volthome.domain.model.DistributionDecision
 import ru.mugalimov.volthome.domain.model.Phase
-import ru.mugalimov.volthome.domain.model.PhaseMode
-import ru.mugalimov.volthome.domain.model.phase_load.LoadThresholds
+import ru.mugalimov.volthome.domain.model.incomer.IncomerAssessment
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadMode
 import ru.mugalimov.volthome.ui.onboarding.model.OnboardingScreen
 import ru.mugalimov.volthome.ui.onboarding.model.OnboardingTargetTag
 import ru.mugalimov.volthome.ui.onboarding.modifier.onboardingAnchor
+import ru.mugalimov.volthome.ui.components.IncomerAssessmentStatusCard
 import kotlin.math.roundToInt
 
 /**
@@ -78,15 +77,13 @@ fun PhaseLoadContent(
     decisions: List<DistributionDecision> = emptyList(),
     phaseLoads: List<PhaseLoadItem>,
     phaseLoadMode: PhaseLoadMode = PhaseLoadMode.AUTO,
-    incomerRating: Int? = null,
-    thresholds: LoadThresholds = LoadThresholds(),
+    incomerAssessment: IncomerAssessment? = null,
     modifier: Modifier = Modifier,
     showManualBanner: Boolean = false,
     canDrag: Boolean,
     onPaywall: () -> Unit,
     onGroupDropped: (groupId: Long, target: Phase) -> Unit,
     onDecisionDetailsClick: (groupNumber: Int) -> Unit,
-    onReset: () -> Unit,
     onDropMissed: () -> Unit,
 ) {
     // Drop-зоны в координатах ROOT — только для фаз A/B/C.
@@ -210,42 +207,34 @@ fun PhaseLoadContent(
                 .fillMaxSize()
                 // Во время drag добавляем верхний отступ, чтобы overlay-панель
                 // не перекрывала верхнюю часть контента.
-                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .padding(horizontal = 20.dp, vertical = 8.dp)
                 .padding(top = if (showDropTargetsPanel) 56.dp else 0.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item { Spacer(Modifier.height(8.dp)) }
 
-            // Donut / индикатор вводного аппарата.
+            // Главная сравнительная сводка фаз.
             item {
-                Box(Modifier.fillMaxWidth()) {
-                    PhaseLoadDonutChart(
-                        perPhase = perPhase,
-                        mode = PhaseMode.THREE,
-                        incomerRating = incomerRating,
-                        warnPct = thresholds.warnPct,
-                        alertPct = thresholds.alertPct,
-                        modifier = Modifier
-                            .testTag(OnboardingTargetTag.LOADS_DONUT_CHART.rawTag)
-                            .onboardingAnchor(
-                                targetTag = OnboardingTargetTag.LOADS_DONUT_CHART,
-                                screenId = OnboardingScreen.LOADS
-                            )
-                    )
+                ThreePhaseBalanceOverview(
+                    perPhase = perPhase,
+                    modifier = Modifier
+                        .testTag(OnboardingTargetTag.LOADS_DONUT_CHART.rawTag)
+                        .onboardingAnchor(
+                            targetTag = OnboardingTargetTag.LOADS_DONUT_CHART,
+                            screenId = OnboardingScreen.LOADS
+                        )
+                )
+            }
 
-                    if (!canDrag) {
-                        IconButton(
-                            onClick = onPaywall,
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(6.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Lock,
-                                contentDescription = "PRO"
-                            )
-                        }
-                    }
+            incomerAssessment?.let { assessment ->
+                item {
+                    IncomerAssessmentStatusCard(assessment = assessment)
+                }
+            }
+
+            if (!canDrag) {
+                item {
+                    ManualDistributionProCard(onClick = onPaywall)
                 }
             }
 
@@ -263,18 +252,6 @@ fun PhaseLoadContent(
                 }
             }
 
-            // Блок reset / paywall оставлен как место под будущее,
-            // но UI сейчас не рисуем.
-//            item {
-//                val resetEnabled = (phaseLoadMode == PhaseLoadMode.MANUAL) && canDrag
-//
-//                // Намеренно пусто.
-//                // Сохраняем item, чтобы не ломать структуру ленты и будущее место под action.
-//                if (resetEnabled || !canDrag) {
-//                    Spacer(modifier = Modifier.height(0.dp))
-//                }
-//            }
-
             val canStartDnD = (phaseLoadMode == PhaseLoadMode.MANUAL) && canDrag
 
             items(phaseItems, key = { it.phase }) { item ->
@@ -284,6 +261,7 @@ fun PhaseLoadContent(
                     item = item,
                     decisionsByGroupNumber = decisionsByGroupNumber,
                     expanded = isExpanded(item.phase),
+                    dragEnabled = canStartDnD,
                     onToggle = { togglePhase(item.phase) },
                     onDecisionDetailsClick = onDecisionDetailsClick,
                     isDropTargetHighlighted = (dragging != null && hoveredPhase == item.phase),
@@ -532,7 +510,7 @@ fun LoadsManualModeLegalBanner(
                 color = MaterialTheme.colorScheme.outlineVariant,
                 shape = MaterialTheme.shapes.large
             )
-            .padding(14.dp)
+            .padding(horizontal = 16.dp, vertical = 14.dp)
     ) {
         Column {
             Row(
@@ -542,11 +520,22 @@ fun LoadsManualModeLegalBanner(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(
-                    text = "Пояснения по работе ручного режима",
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Lock,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                    Text(
+                    text = "Ручное распределение включено",
                     style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer
-                )
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    fontWeight = FontWeight.SemiBold
+                    )
+                }
 
                 Icon(
                     imageVector = if (expanded) {
@@ -567,27 +556,13 @@ fun LoadsManualModeLegalBanner(
                 Column {
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        text = "Здесь ты задаёшь распределение групп по фазам вручную. Перетаскивай группу на нужную фазу сверху, чтобы изменить итоговый баланс.",
+                        text = "Перетаскивайте группы за маркер на нужную фазу. Автоматическое распределение временно отключено.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onTertiaryContainer
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        text = "Пока ручной режим активен, автоматическое перераспределение больше не вмешивается в результат.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = "После сохранения ручных изменений автоматическое распределение отключается.\n" +
-                                "Новые устройства больше не раскладываются по группам автоматически и попадают в “Нераспределённые”.\n" +
-                                "Дальше их нужно распределять вручную или сбросить ручные изменения, чтобы вернуть автоматический режим.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = "Если нужно вернуться к автоматике, сбрось ручные изменения.",
+                        text = "Чтобы вернуть автоматический расчёт, сбросьте ручные изменения.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onTertiaryContainer
                     )
@@ -597,5 +572,41 @@ fun LoadsManualModeLegalBanner(
     }
 }
 
-private fun fmt1(v: Double): String = String.format("%.1f", v)
-private fun fmt0(v: Double): String = String.format("%.0f", v)
+@Composable
+private fun ManualDistributionProCard(onClick: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        shape = MaterialTheme.shapes.large
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Lock,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Ручное распределение",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "Перенос групп между фазами · PRO",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(
+                text = "Открыть",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+    }
+}

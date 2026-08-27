@@ -18,7 +18,10 @@ import ru.mugalimov.volthome.domain.model.DeviceType
 object BreakerPolicyDefaults {
 
     // Поддерживаемый набор номиналов автомата
-    val supportedNominalsA: List<Int> = listOf(10, 16, 20, 25, 32, 40, 50, 63)
+    val supportedNominalsA: List<Int> = listOf(10, 16, 20, 25, 32, 40, 50, 63, 80, 100, 125, 160)
+
+    val maxSupportedNominalA: Int
+        get() = supportedNominalsA.last()
 
     /**
      * Floor по типу группы.

@@ -15,14 +15,24 @@ import java.util.Date
         Index(name = "idx_devices_room_id", value = ["room_id"]),
         Index(name = "idx_devices_project_id", value = ["project_id"]),
         // ⬇️ НОВОЕ: индекс по name, чтобы совпасть с миграцией MIGRATION_21_22
-        Index(name = "idx_devices_name", value = ["name"])
+        Index(name = "idx_devices_name", value = ["name"]),
+        Index(
+            name = "idx_devices_project_room_created_id",
+            value = ["project_id", "room_id", "created_at", "device_id"]
+        )
     ],
     foreignKeys = [
         ForeignKey(
             entity = RoomEntity::class,
             parentColumns = ["id"],
             childColumns = ["room_id"],
-            onDelete = ForeignKey.SET_NULL
+            onDelete = ForeignKey.CASCADE
+        ),
+        ForeignKey(
+            entity = ProjectEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["project_id"],
+            onDelete = ForeignKey.CASCADE
         )
     ]
 )
@@ -65,5 +75,5 @@ data class DeviceEntity(
     val requiresSocketConnection: Boolean = true,
 
     @ColumnInfo(name = "project_id")
-    val projectId: String? = null
+    val projectId: String
 )

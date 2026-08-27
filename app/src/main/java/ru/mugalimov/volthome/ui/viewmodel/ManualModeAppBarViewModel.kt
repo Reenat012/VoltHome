@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
 import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
+import ru.mugalimov.volthome.data.repository.ProjectOwnershipRepository
 import ru.mugalimov.volthome.data.repository.UserPlanRepository
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.model.ProFeature
@@ -27,7 +29,8 @@ import ru.mugalimov.volthome.ui.utilities.ManualDraftResetNotifier
 
 /**
  * Глобальная VM для AppBar:
- * - кнопка "Ручной режим" должна работать на любой вкладке
+ * - состояние ручной структуры едино для всего проекта;
+ * - запуск редактора разрешает маршрутная UI-политика только на поддерживаемых экранах;
  * - состояние manual должно быть единым на проект
  *
  * ВАЖНО:
@@ -35,9 +38,11 @@ import ru.mugalimov.volthome.ui.utilities.ManualDraftResetNotifier
  * - Вся логика входа в manual находится тут (paywall + baseState + маркер kill-process UX).
  */
 @HiltViewModel
+@OptIn(ExperimentalCoroutinesApi::class)
 class ManualModeAppBarViewModel @Inject constructor(
     private val activeProjectDs: ActiveProjectDataStore,
     private val manualRepo: ManualEditSessionRepository,
+    private val projectOwnershipRepository: ProjectOwnershipRepository,
     private val userPlanRepository: UserPlanRepository,
     private val paywallBus: PaywallBus,
     private val projectBaseStateBuilder: ProjectBaseStateBuilder,
@@ -60,6 +65,14 @@ class ManualModeAppBarViewModel @Inject constructor(
             .filterNotNull()
             .flatMapLatest { projectId -> manualRepo.observeSession(projectId) }
             .map { session -> session?.manualModeActive == true }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** Сохранённая вручную структура продолжает отличаться от чистого AUTO и после закрытия редактора. */
+    val hasManualOverrides: StateFlow<Boolean> =
+        activeProjectDs.activeProjectId
+            .distinctUntilChanged()
+            .filterNotNull()
+            .flatMapLatest(projectOwnershipRepository::observeManualLock)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /**

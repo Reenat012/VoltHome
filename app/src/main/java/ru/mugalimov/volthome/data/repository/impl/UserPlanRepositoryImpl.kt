@@ -2,60 +2,64 @@ package ru.mugalimov.volthome.data.repository.impl
 
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.BuildConfig
+import ru.mugalimov.volthome.data.local.datastore.AppPreferences
 import ru.mugalimov.volthome.data.repository.UserPlanRepository
 import ru.mugalimov.volthome.domain.model.UserPlan
 
 @Singleton
-class UserPlanRepositoryImpl @Inject constructor() : UserPlanRepository {
+class UserPlanRepositoryImpl @Inject constructor(
+    private val preferences: AppPreferences
+) : UserPlanRepository {
 
-    // План, пришедший с сервера. Это единственный источник entitlement в проде.
-    private val _serverPlan = MutableStateFlow(UserPlan.FREE)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val storedPlan = MutableStateFlow(UserPlan.FREE)
+    private val debugForcePro = MutableStateFlow(false)
+    private val mutablePlanFlow = MutableStateFlow(UserPlan.FREE)
 
-    // Debug-only runtime override.
-    private val _debugForcePro = MutableStateFlow(false)
+    override val planFlow: StateFlow<UserPlan> = mutablePlanFlow
 
-    // Итоговый план, который читает UI.
-    private val _planFlow = MutableStateFlow(UserPlan.FREE)
-    override val planFlow: StateFlow<UserPlan> = _planFlow
+    init {
+        scope.launch {
+            preferences.userPlan.collect { plan ->
+                storedPlan.value = if (plan.isPro) plan else UserPlan.FREE
+                recompute()
+            }
+        }
+    }
 
     override suspend fun setPlan(plan: UserPlan) {
-        _serverPlan.value = plan
+        val normalized = if (plan.isPro) plan else UserPlan.FREE
+        storedPlan.value = normalized
+        preferences.setUserPlan(normalized)
         recompute()
     }
 
-    /**
-     * ✅ Debug-only переключатель PRO.
-     * В release BuildConfig.DEBUG=false, поэтому даже если кто-то вызовет — эффекта не будет.
-     */
     override fun setDebugForcePro(enabled: Boolean) {
-        _debugForcePro.value = enabled
+        debugForcePro.value = enabled
         recompute()
     }
 
-    override fun isDebugForceProEnabled(): Boolean = _debugForcePro.value
+    override fun isDebugForceProEnabled(): Boolean = debugForcePro.value
 
     override suspend fun resetToFree(clearDebugOverride: Boolean) {
-        // Сбрасываем серверный план в free, чтобы следующий пользователь
-        // не увидел entitlement прошлого пользователя.
-        _serverPlan.value = UserPlan.FREE
-
-        // Сбрасываем runtime debug override.
-        if (clearDebugOverride) {
-            _debugForcePro.value = false
-        }
-
+        storedPlan.value = UserPlan.FREE
+        preferences.setUserPlan(UserPlan.FREE)
+        if (clearDebugOverride) debugForcePro.value = false
         recompute()
     }
 
     private fun recompute() {
-        _planFlow.value =
-            if (BuildConfig.DEBUG && _debugForcePro.value) {
-                UserPlan(plan = "pro", planUntilEpochSeconds = null)
-            } else {
-                _serverPlan.value
-            }
+        mutablePlanFlow.value = if (BuildConfig.DEBUG && debugForcePro.value) {
+            UserPlan(plan = "pro", planUntilEpochSeconds = null)
+        } else {
+            storedPlan.value
+        }
     }
 }

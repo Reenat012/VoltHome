@@ -2,11 +2,14 @@ package ru.mugalimov.volthome.domain.use_case.manual
 
 import android.util.Log
 import javax.inject.Inject
+import ru.mugalimov.volthome.core.analytics.AnalyticsEvent
+import ru.mugalimov.volthome.core.analytics.AnalyticsTracker
 import ru.mugalimov.volthome.data.ownership.OwnershipOverridesCleaner
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.data.repository.ProjectOwnershipRepository
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.manual.ProjectEditState
+import ru.mugalimov.volthome.domain.model.PhaseMode
 
 /**
  * Commit manual draft -> локальная БД.
@@ -24,6 +27,8 @@ class CommitManualDraftToLocalDbUseCase @Inject constructor(
     private val projectOwnershipRepository: ProjectOwnershipRepository,
     private val ownershipOverridesCleaner: OwnershipOverridesCleaner,
     private val recalculateGroupLineUseCase: RecalculateGroupLineUseCase,
+    private val validateManualDraftUseCase: ValidateManualDraftUseCase,
+    private val analytics: AnalyticsTracker,
 ) {
 
     data class Params(
@@ -41,6 +46,9 @@ class CommitManualDraftToLocalDbUseCase @Inject constructor(
         require(projectId.isNotBlank()) { "projectId must be non-blank" }
 
         val draft = params.draft
+        validateManualDraftUseCase
+            .execute(draft, requireCalculatedLines = false)
+            .requireValid("MANUAL_SAVE structure")
 
         // =========================
         // 0) FINAL RECOMPUTE BARRIER
@@ -64,6 +72,9 @@ class CommitManualDraftToLocalDbUseCase @Inject constructor(
         }
 
         val recomputedDraft = draft.copy(groups = recomputedGroups)
+        validateManualDraftUseCase
+            .execute(recomputedDraft, requireCalculatedLines = true)
+            .requireValid("MANUAL_SAVE final")
 
         // =========================
         // MANUAL_SAVE: входные данные
@@ -137,6 +148,16 @@ class CommitManualDraftToLocalDbUseCase @Inject constructor(
             "MANUAL_SAVE",
             "MANUAL_SAVE DONE pid=$projectId manualLock=true " +
                     "clearedOverrides=${clearStats.totalDeleted} groups=${after.size}"
+        )
+
+        analytics.track(
+            AnalyticsEvent.CalculationCompleted(
+                linesCount = after.size,
+                phaseCount = when (recomputedDraft.phaseMode) {
+                    PhaseMode.SINGLE -> 1
+                    PhaseMode.THREE -> 3
+                }
+            )
         )
 
         return after

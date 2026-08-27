@@ -14,6 +14,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
+import ru.mugalimov.volthome.ui.components.VhTopBar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -22,15 +23,10 @@ fun AlgorithmExplanationScreen(
 ) {
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Как работает алгоритм") },
-                navigationIcon = {
-                    if (navController != null) {
-                        IconButton(onClick = { navController.popBackStack() }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
-                        }
-                    }
-                }
+            VhTopBar(
+                title = "Методика расчёта",
+                subtitle = "Как ВольтХом формирует проект",
+                onBack = navController?.let { controller -> { controller.popBackStack() } }
             )
         }
     ) { innerPadding ->

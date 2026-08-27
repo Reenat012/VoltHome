@@ -2,9 +2,8 @@ package ru.mugalimov.volthome.ui.screens.explication.export_pdf
 
 import android.app.Activity
 import android.content.pm.PackageManager
-import android.os.Build
 import androidx.activity.ComponentActivity
-import androidx.annotation.RequiresApi
+import androidx.core.content.pm.PackageInfoCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.domain.model.CalcAssumption
@@ -22,11 +21,11 @@ import ru.mugalimov.volthome.ui.utilities.PdfPrinter
 import ru.mugalimov.volthome.ui.viewmodel.ExplicationViewModel
 import ru.mugalimov.volthome.ui.viewmodel.GroupScreenState
 
-@RequiresApi(Build.VERSION_CODES.P)
 fun buildExplicationReportHtml(
     activity: Activity,
     vm: ExplicationViewModel,
-    caps: PlanCapabilities
+    caps: PlanCapabilities,
+    projectName: String
 ): String? {
     val profile: ReportProfile = caps.reportProfile()
 
@@ -50,7 +49,8 @@ fun buildExplicationReportHtml(
         phases = phases,
         profile = profile,
         phaseMode = phaseMode,
-        appVersion = appVersion
+        appVersion = appVersion,
+        projectName = projectName
     )
 
     val s = vm.uiState.value as? GroupScreenState.Success
@@ -123,14 +123,13 @@ fun buildExplicationReportHtml(
     )
 }
 
-@RequiresApi(Build.VERSION_CODES.P)
 private fun resolveAppVersion(activity: Activity): String {
     return try {
         val pm: PackageManager = activity.packageManager
         val pkg = activity.packageName
         val pi = pm.getPackageInfo(pkg, 0)
         val name = pi.versionName ?: ""
-        val code = runCatching { pi.longVersionCode.toString() }.getOrElse { "" }
+        val code = runCatching { PackageInfoCompat.getLongVersionCode(pi).toString() }.getOrElse { "" }
         when {
             name.isNotBlank() && code.isNotBlank() -> "$name ($code)"
             name.isNotBlank() -> name
@@ -141,11 +140,11 @@ private fun resolveAppVersion(activity: Activity): String {
     }
 }
 
-@RequiresApi(Build.VERSION_CODES.P)
 fun exportExplicationPdf(
     activity: Activity,
     vm: ExplicationViewModel,
     caps: PlanCapabilities,
+    projectName: String,
     projectId: String,
     manualGuard: ManualModeGuard? = null
 ) {
@@ -155,7 +154,7 @@ fun exportExplicationPdf(
             projectId = projectId,
             action = ForbiddenAction.EXPORT_PDF,
             onProceed = {
-                val html = buildExplicationReportHtml(activity, vm, caps) ?: return@request
+                val html = buildExplicationReportHtml(activity, vm, caps, projectName) ?: return@request
                 when (activity) {
                     is ComponentActivity -> activity.lifecycleScope.launch {
                         PdfPrinter(activity).printHtml(html)
@@ -170,7 +169,7 @@ fun exportExplicationPdf(
     }
 
     // fallback (если guard не передали)
-    val html = buildExplicationReportHtml(activity, vm, caps) ?: return
+    val html = buildExplicationReportHtml(activity, vm, caps, projectName) ?: return
     when (activity) {
         is ComponentActivity -> activity.lifecycleScope.launch {
             PdfPrinter(activity).printHtml(html)

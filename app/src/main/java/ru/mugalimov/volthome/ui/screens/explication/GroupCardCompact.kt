@@ -1,26 +1,23 @@
 package ru.mugalimov.volthome.ui.screens.explication
 
 import android.util.Log
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Bolt
-import androidx.compose.material.icons.outlined.ElectricBolt
-import androidx.compose.material.icons.outlined.ElectricalServices
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -33,23 +30,23 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.DeviceCalcBreakdown
 import ru.mugalimov.volthome.domain.model.DeviceSpecUi
+import ru.mugalimov.volthome.domain.model.cable.CableLineCalculation
+import ru.mugalimov.volthome.domain.model.cable.CableCalculationStatus
 import ru.mugalimov.volthome.ui.format.ExplicationNumberFormat as F
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
-import ru.mugalimov.volthome.ui.screens.explication.sheets.CalcDetailsState
 import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetPayload
-import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetType
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -74,14 +71,12 @@ fun GroupCardCompact(
     onEdit: (() -> Unit)? = null,
     onDeviceClick: (Long) -> Unit,
     selectedDeviceBreakdown: DeviceCalcBreakdown?,
+    cableCalculation: CableLineCalculation? = null,
+    onCableClick: (CircuitGroup) -> Unit,
     onGroupPowerClick: (CircuitGroup) -> Unit,
     onGroupCurrentClick: (CircuitGroup) -> Unit,
     onOpenInfoSheet: (InfoSheetPayload) -> Unit
 ) {
-    // ✅ Коммит 6:
-// expanded должен жить по стабильному идентификатору группы.
-// groupId — единственный корректный ключ для сохранения состояния карточки.
-    val expanded = rememberSaveable(group.groupId) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -89,7 +84,6 @@ fun GroupCardCompact(
     val caps = LocalUserPlan.current.capabilities
 
     val cs = MaterialTheme.colorScheme
-    val divider = cs.outlineVariant.copy(alpha = 0.45f)
     val bgTrack = cs.surfaceContainer
     val textSecondary = cs.onSurfaceVariant
 
@@ -102,12 +96,8 @@ fun GroupCardCompact(
     Surface(shape = MaterialTheme.shapes.large, tonalElevation = 3.dp) {
         Column(
             modifier = Modifier
-                .clickable {
-                    val newValue = !expanded.value
-                    Log.d(TAG_GROUP, "toggleExpand groupId=${group.groupId} num=${group.groupNumber} new=$newValue")
-                    expanded.value = newValue
-                }
-                .padding(16.dp)
+                .clickable { onOpenInfoSheet(buildGroupHeaderPayload(group)) }
+                .padding(horizontal = 14.dp, vertical = 12.dp)
         ) {
             // ── Header
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -131,32 +121,56 @@ fun GroupCardCompact(
                 }
             }
 
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
 
-            // ── Badges
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                ParamBadge(
-                    icon = Icons.Outlined.ElectricalServices,
-                    text = "${group.breakerType}${group.circuitBreaker}"
+            if (group.manualDeviationCodes.isNotEmpty()) {
+                Text(
+                    text = "Ручная настройка · ${group.manualDeviationCodes.size} ${deviationWord(group.manualDeviationCodes.size)}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = cs.tertiary
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+
+            // Четыре основных параметра образуют одну компактную строку.
+            // Подробности и вторичные характеристики доступны по нажатию.
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                GroupMetricCell(
+                    label = "Автомат",
+                    value = "${group.breakerType}${group.circuitBreaker}",
+                    modifier = Modifier.weight(1f)
                 ) {
-                    onOpenInfoSheet(buildBreakerPayload(group))
+                    onOpenInfoSheet(GroupDecisionPayloadFactory.breaker(group))
                 }
-
-                ParamBadge(
-                    icon = Icons.Outlined.Bolt,
-                    text = "${F.kwFromW(calculatedPowerW, decimals = 2)} кВт"
-                ) {
-                    onGroupPowerClick(group)
-                }
-
-                ParamBadge(
-                    icon = Icons.Outlined.ElectricBolt,
-                    text = "${F.a(group.nominalCurrent, decimals = 2)} А"
+                GroupMetricCell(
+                    label = "Ток расч.",
+                    value = "${F.a(group.nominalCurrent, decimals = 2)}\u00A0А",
+                    modifier = Modifier.weight(1f)
                 ) {
                     onGroupCurrentClick(group)
+                }
+                GroupMetricCell(
+                    label = when (cableCalculation?.status) {
+                        CableCalculationStatus.PASSED -> "Кабель ✓"
+                        CableCalculationStatus.WARNING,
+                        CableCalculationStatus.FAILED -> "Кабель !"
+                        CableCalculationStatus.PRELIMINARY,
+                        null -> "Кабель"
+                    },
+                    value = cableCalculation?.cable?.compactLabel
+                        ?: "${group.cableSection}\u00A0мм²",
+                    modifier = Modifier.weight(1f),
+                    emphasized = true,
+                    locked = !caps.cableLineCalculation
+                ) {
+                    onCableClick(group)
+                }
+                GroupMetricCell(
+                    label = "УЗО",
+                    value = if (group.rcdRequired) "${group.rcdSpec?.leakageCurrentMa ?: group.rcdCurrent}\u00A0мА" else "—",
+                    modifier = Modifier.weight(1f)
+                ) {
+                    onOpenInfoSheet(GroupDecisionPayloadFactory.rcd(group))
                 }
             }
 
@@ -241,9 +255,10 @@ fun GroupCardCompact(
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "Загрузка",
+                    text = "${F.kwFromW(calculatedPowerW, decimals = 2)}\u00A0кВт",
                     style = MaterialTheme.typography.labelSmall,
-                    color = textSecondary
+                    color = textSecondary,
+                    modifier = Modifier.clickable { onGroupPowerClick(group) }
                 )
                 Spacer(Modifier.width(8.dp))
                 LinearProgressIndicator(
@@ -263,21 +278,6 @@ fun GroupCardCompact(
                 )
             }
 
-            // ── Expanded details
-            AnimatedVisibility(visible = expanded.value) {
-                Column {
-                    Spacer(Modifier.height(12.dp))
-                    HorizontalDivider(color = divider, thickness = 1.dp)
-                    Spacer(Modifier.height(12.dp))
-
-                    GroupParameterRow("Тип группы", group.groupType.toString())
-                    GroupParameterRow("Сечение кабеля", "${group.cableSection} мм²")
-                    GroupParameterRow("Фаза", "${group.phase}")
-                    if (group.rcdRequired) {
-                        GroupParameterRow("УЗО", "${group.rcdCurrent} мА")
-                    }
-                }
-            }
         }
     }
 
@@ -305,31 +305,76 @@ fun GroupCardCompact(
     }
 }
 
+private fun deviationWord(value: Int): String {
+    val mod100 = value % 100
+    val mod10 = value % 10
+    return when {
+        mod100 in 11..14 -> "отклонений"
+        mod10 == 1 -> "отклонение"
+        mod10 in 2..4 -> "отклонения"
+        else -> "отклонений"
+    }
+}
+
 @Composable
-private fun ParamBadge(icon: ImageVector, text: String, onClick: () -> Unit) {
+private fun GroupMetricCell(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    emphasized: Boolean = false,
+    locked: Boolean = false,
+    onClick: () -> Unit
+) {
     val cs = MaterialTheme.colorScheme
-    val bg = cs.surfaceContainerHigh
-    val outline = cs.outlineVariant.copy(alpha = 0.60f)
-    val iconTint = cs.onSurfaceVariant
-    val textPrimary = cs.onSurface
+    val bg = if (emphasized) cs.primaryContainer.copy(alpha = 0.48f) else cs.surfaceContainerHigh
+    val outline = if (emphasized) cs.primary.copy(alpha = 0.72f) else cs.outlineVariant.copy(alpha = 0.60f)
+    val iconTint = if (emphasized) cs.primary else cs.onSurfaceVariant
+    val textPrimary = if (emphasized) cs.primary else cs.onSurface
 
     Surface(
+        modifier = modifier,
         shape = MaterialTheme.shapes.large,
         color = bg,
         border = BorderStroke(1.dp, outline)
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
+        Column(
             modifier = Modifier
                 .clickable(onClick = onClick)
-                .padding(horizontal = 10.dp, vertical = 6.dp)
+                .fillMaxWidth()
+                .padding(horizontal = 5.dp, vertical = 7.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Icon(icon, contentDescription = null, tint = iconTint)
-            Spacer(Modifier.width(6.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = iconTint,
+                    maxLines = 1,
+                    textAlign = TextAlign.Center
+                )
+                if (emphasized) {
+                    Spacer(Modifier.width(3.dp))
+                    Icon(
+                        imageVector = if (locked) Icons.Outlined.Lock else Icons.Outlined.Edit,
+                        contentDescription = if (locked) "Доступно в PRO" else "Редактировать кабель",
+                        tint = iconTint,
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
+            }
             Text(
-                text = text,
-                style = MaterialTheme.typography.labelLarge,
-                color = textPrimary
+                text = value,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = textPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
             )
         }
     }
@@ -340,32 +385,4 @@ private fun ParamBadge(icon: ImageVector, text: String, onClick: () -> Unit) {
 // ──────────────────────────────────────────────────────────────────────────────
 
 private fun buildGroupHeaderPayload(group: CircuitGroup): InfoSheetPayload =
-    InfoSheetPayload(
-        title = "Карточка группы",
-        sheetType = InfoSheetType.REFERENCE,
-        bullets = listOf(
-            "Здесь параметры группы: автомат, мощность, ток и состав устройств.",
-            "Блок помогает быстро оценить загрузку и необходимость перераспределения."
-        ),
-        calcDetailsState = CalcDetailsState.HIDDEN
-    )
-
-private fun buildBreakerPayload(group: CircuitGroup): InfoSheetPayload {
-    val curveChar = group.breakerType.firstOrNull()?.uppercaseChar() ?: 'C'
-    val title = "Тип автомата: $curveChar${group.circuitBreaker}"
-    val common =
-        "Формат «$curveChar${group.circuitBreaker}»: буква — кривая мгновенного отключения, число — номинал, А."
-    val body = when (curveChar) {
-        'B' -> "Кривая B ≈ 3–5×In. Для активных нагрузок и длинных линий."
-        'C' -> "Кривая C ≈ 5–10×In. Дефолт для розеточных/смешанных групп."
-        'D' -> "Кривая D ≈ 10–20×In. Для больших пусков (двигатели, насосы, сварка)."
-        else -> "Обычно используют B, C или D."
-    }
-
-    return InfoSheetPayload(
-        title = title,
-        sheetType = InfoSheetType.REFERENCE,
-        interpretation = "$common\n\n$body",
-        calcDetailsState = CalcDetailsState.HIDDEN
-    )
-}
+    GroupDecisionPayloadFactory.group(group)

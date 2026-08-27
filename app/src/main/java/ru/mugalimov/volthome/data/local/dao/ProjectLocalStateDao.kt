@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 import ru.mugalimov.volthome.data.local.entity.ProjectLocalStateEntity
 
@@ -30,7 +31,7 @@ abstract class ProjectLocalStateDao {
      * - INSERT если нет
      * - REPLACE если есть (по PK project_id)
      */
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     abstract suspend fun upsert(state: ProjectLocalStateEntity)
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
@@ -50,9 +51,6 @@ abstract class ProjectLocalStateDao {
         insertIgnore(
             ProjectLocalStateEntity(
                 project_id = pid,
-                remote_version = 0,
-                last_sync_at = null,
-                has_local_changes = false,
                 active_manual_project_id = null,
                 manual_overrides_present = false,
                 manual_lock_bootstrap_version = 0
@@ -187,19 +185,6 @@ abstract class ProjectLocalStateDao {
         """
     )
     abstract suspend fun setManualLockBootstrapVersion(projectId: String, version: Int): Int
-
-    // -------------------------
-    // Existing fields updates
-    // -------------------------
-
-    @Query("UPDATE project_local_state SET remote_version=:remoteVersion WHERE project_id=:projectId")
-    abstract suspend fun updateRemoteVersion(projectId: String, remoteVersion: Int)
-
-    @Query("UPDATE project_local_state SET last_sync_at=:ts WHERE project_id=:projectId")
-    abstract suspend fun updateLastSyncAt(projectId: String, ts: String?)
-
-    @Query("UPDATE project_local_state SET has_local_changes=:flag WHERE project_id=:projectId")
-    abstract suspend fun setHasLocalChanges(projectId: String, flag: Boolean)
 
     @Query("SELECT * FROM project_local_state")
     abstract fun observeAll(): Flow<List<ProjectLocalStateEntity>>

@@ -1,6 +1,5 @@
 package ru.mugalimov.volthome.data.repository.impl
 
-// outbox / tombstones
 import android.content.Context
 import android.util.Log
 import dagger.Lazy
@@ -17,32 +16,16 @@ import kotlinx.coroutines.withContext
 import ru.mugalimov.volthome.core.error.RoomAlreadyExistsException
 import ru.mugalimov.volthome.core.error.RoomNotFoundException
 import ru.mugalimov.volthome.data.local.dao.DeviceDao
-import ru.mugalimov.volthome.data.local.dao.LoadDao
-import ru.mugalimov.volthome.data.local.dao.OutboxDao
 import ru.mugalimov.volthome.data.local.dao.RoomDao
 import ru.mugalimov.volthome.data.local.dao.RoomsTxDao
-import ru.mugalimov.volthome.data.local.dao.TombstoneDao
+import ru.mugalimov.volthome.data.local.dao.RoomInsertBundle
 import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
-import ru.mugalimov.volthome.data.local.entity.LoadEntity
-import ru.mugalimov.volthome.data.local.entity.OutboxEntity
-import ru.mugalimov.volthome.data.local.entity.OutboxOpType
 import ru.mugalimov.volthome.data.local.entity.RoomEntity
-import ru.mugalimov.volthome.data.local.entity.TombstoneEntity
-import ru.mugalimov.volthome.data.local.entity.TombstoneEntityType
-import ru.mugalimov.volthome.data.repository.ExplicationRepository
 import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
 import ru.mugalimov.volthome.data.repository.ProjectOwnershipRepository
 import ru.mugalimov.volthome.data.repository.ProjectsRepository
 import ru.mugalimov.volthome.data.repository.RoomRepository
-import ru.mugalimov.volthome.data.sync.outbox.DeviceCreatePayload
-import ru.mugalimov.volthome.data.sync.outbox.DeviceDeletePayload
-import ru.mugalimov.volthome.data.sync.outbox.OutboxPushWorker
-import ru.mugalimov.volthome.data.sync.outbox.RoomCreatePayload
-import ru.mugalimov.volthome.data.sync.outbox.RoomDeletePayload
-import ru.mugalimov.volthome.data.sync.outbox.RoomUpdatePayload
-import ru.mugalimov.volthome.data.sync.outbox.toJson
-import ru.mugalimov.volthome.di.database.AppDatabase
 import ru.mugalimov.volthome.di.database.IoDispatcher
 import ru.mugalimov.volthome.domain.mapper.mapToDomainRooms
 import ru.mugalimov.volthome.domain.mapper.toEntityRoom
@@ -51,7 +34,9 @@ import ru.mugalimov.volthome.domain.model.DevicePreview
 import ru.mugalimov.volthome.domain.model.Room
 import ru.mugalimov.volthome.domain.model.RoomWithDevice
 import ru.mugalimov.volthome.domain.model.RoomWithDevicesPreview
-import ru.mugalimov.volthome.domain.model.RoomWithLoad
+import ru.mugalimov.volthome.domain.model.PhaseMode
+import ru.mugalimov.volthome.domain.model.create.AutoCalculationResult
+import ru.mugalimov.volthome.domain.model.create.BatchRoomCreationResult
 import ru.mugalimov.volthome.domain.model.create.CreatedRoomResult
 import ru.mugalimov.volthome.domain.model.create.DeviceCreateRequest
 import ru.mugalimov.volthome.domain.model.create.RoomCreateRequest
@@ -59,7 +44,6 @@ import ru.mugalimov.volthome.domain.model.provider.DeviceDefaultsProvider
 import ru.mugalimov.volthome.domain.telemetry.CreateDeviceOpBus
 import ru.mugalimov.volthome.domain.telemetry.CreateDeviceOpEvent
 import ru.mugalimov.volthome.domain.use_case.AutoRebuildGroupsAfterDeviceInsertUseCase
-import ru.mugalimov.volthome.domain.use_case.BootstrapManualLockUseCase
 import ru.mugalimov.volthome.ui.components.JsonParser
 import java.util.Date
 import java.util.UUID
@@ -68,25 +52,18 @@ import javax.inject.Inject
 class RoomRepositoryImpl @Inject constructor(
     private val roomDao: RoomDao,
     private val deviceDao: DeviceDao,
-    private val loadDao: LoadDao,
-    private val explicationRepository: ExplicationRepository,
     private val roomsTxDao: RoomsTxDao,
     private val deviceDefaults: DeviceDefaultsProvider,
     private val activeProjectDs: ActiveProjectDataStore,
     private val projectsRepo: ProjectsRepository,
-    @IoDispatcher private val dispatchers: CoroutineDispatcher,
     @ApplicationContext private val context: Context,
-    private val appDb: AppDatabase,
-    private val outboxDao: OutboxDao,
-    private val tombstoneDao: TombstoneDao,
+    @IoDispatcher private val dispatchers: CoroutineDispatcher,
     // ✅ Commit 1: bus корреляции add-devices
     private val createDeviceOpBus: CreateDeviceOpBus,
     private val autoRebuildAfterInsertUseCase: Lazy<AutoRebuildGroupsAfterDeviceInsertUseCase>,
     private val manualRepo: ManualEditSessionRepository,
     private val ownershipRepo: ProjectOwnershipRepository
 ) : RoomRepository {
-
-    private val uuidDao get() = appDb.uuidMapDao()
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     override fun observeRooms(): Flow<List<Room>> {
@@ -138,7 +115,7 @@ class RoomRepositoryImpl @Inject constructor(
             if (exists) throw RoomAlreadyExistsException("Комната '${room.name}' уже существует")
 
             val createdAt = Date()
-            val newRoomId = roomDao.addRoom(
+            roomDao.addRoom(
                 RoomEntity(
                     name = room.name,
                     createdAt = createdAt,
@@ -147,132 +124,30 @@ class RoomRepositoryImpl @Inject constructor(
                 )
             )
 
-            loadDao.addLoad(
-                LoadEntity(
-                    name = room.name,
-                    currentRoom = 0.0,
-                    powerRoom = 0,
-                    countDevices = 0,
-                    createdAt = createdAt,
-                    roomId = newRoomId,
-                    projectId = projectId
-                )
-            )
-
-            // outbox ROOM_CREATE
-            outboxDao.insert(
-                OutboxEntity(
-                    project_id = projectId,
-                    op_type = OutboxOpType.ROOM_CREATE,
-                    payload_json = RoomCreatePayload(
-                        projectId = projectId,
-                        localId = newRoomId,
-                        name = room.name,
-                        roomType = room.roomType,
-                        createdAt = createdAt.time
-                    ).toJson(),
-                    group_key = "room:create:$projectId:$newRoomId"
-                )
-            )
-
-            OutboxPushWorker.enqueueProject(context, projectId)
         }
     }
 
     override suspend fun updateRoom(room: Room) {
         withContext(dispatchers) {
             val current = roomDao.getRoomById(room.id) ?: throw RoomNotFoundException()
-            val roomEntity = room.toEntityRoom().copy(projectId = current.projectId)
+            val roomEntity = room.toEntityRoom(current.projectId)
             roomDao.updateRoom(roomEntity)
 
-            current.projectId?.let { pid ->
-                outboxDao.insert(
-                    OutboxEntity(
-                        project_id = pid,
-                        op_type = OutboxOpType.ROOM_UPDATE,
-                        payload_json = RoomUpdatePayload(
-                            projectId = pid,
-                            localId = room.id,
-                            name = room.name,
-                            roomType = room.roomType
-                        ).toJson(),
-                        group_key = "room:update:$pid:${room.id}"
-                    )
-                )
-                OutboxPushWorker.enqueueProject(context, pid)
-            }
         }
     }
 
-    /**
-     * ФАЗА 3: мягкое каскадное удаление комнаты без изменения схемы Room.
-     * Порядок:
-     *  1) Удаляем устройства комнаты через существующий deleteDevices(...) — это ставит tombstones и DEVICE_DELETE в outbox.
-     *  2) Чистим группы/связи комнаты (ExplicationRepository.handleRoomDeletion).
-     *  3) Ставим tombstone на комнату и пишем ROOM_DELETE в outbox.
-     *  4) Физически удаляем комнату локально.
-     *  5) Тригерим OutboxPush.
-     *
-     * Такой порядок гарантирует, что сначала в outbox уйдут device.delete, затем room.delete.
-     */
+    /** Локальное каскадное удаление комнаты. */
     override suspend fun deleteRoom(roomId: Long) {
         withContext(dispatchers) {
-            val current = roomDao.getRoomById(roomId)
-                ?: throw RoomNotFoundException("Комната $roomId не найдена")
-            val projectId = current.projectId
-                ?: throw RoomNotFoundException("У комнаты нет projectId")
-
-            // 1) Собираем устройства комнаты и удаляем их через уже существующую реализацию
-            val devicesInRoom: List<DeviceEntity> = deviceDao.getAllDevicesByRoomId(roomId)
-            if (devicesInRoom.isNotEmpty()) {
-                val deviceIds = devicesInRoom.map { it.deviceId }
-                // reuse готовую логику: она ставит tombstones + outbox DEVICE_DELETE и удаляет локально
-                deleteDevices(deviceIds)
-            }
-
-            // 2) Чистим группы и зависимости комнаты (локально). Сервер удалит каскадно при ROOM_DELETE.
-            explicationRepository.handleRoomDeletion(roomId)
-
-            // 3) Tombstone + outbox для комнаты (после девайсов)
-            tombstoneDao.insert(
-                TombstoneEntity(
-                    project_id = projectId,
-                    entity_type = TombstoneEntityType.ROOM,
-                    local_id = roomId,
-                    server_uuid = uuidDao.getRoomUuidByLocal(roomId)
-                )
-            )
-            outboxDao.insert(
-                OutboxEntity(
-                    project_id = projectId,
-                    op_type = OutboxOpType.ROOM_DELETE,
-                    payload_json = RoomDeletePayload(
-                        projectId = projectId,
-                        localId = roomId,
-                        serverUuid = uuidDao.getRoomUuidByLocal(roomId)
-                    ).toJson(),
-                    group_key = "room:delete:$projectId:$roomId"
-                )
-            )
-
-            // 4) Физически удаляем комнату
+            // v29: дочерние сущности удаляются одной транзакционной FK-каскадой.
             val rowsDeleted = roomDao.deleteRoomById(roomId)
             if (rowsDeleted == 0) throw RoomNotFoundException("Комната $roomId не найдена")
-
-            // 5) Пуш
-            OutboxPushWorker.enqueueProject(context, projectId)
         }
     }
 
     override suspend fun getRoomById(roomId: Long): Room? = withContext(dispatchers) {
         val entity = roomDao.getRoomById(roomId) ?: return@withContext null
         listOf(entity).mapToDomainRooms().firstOrNull()
-    }
-
-    override suspend fun getRoomsWithLoads(): Flow<List<RoomWithLoad>> {
-        return loadDao.getRoomsWithLoads()
-            .map { list -> list.map { RoomWithLoad(room = it.room, load = it.load) } }
-            .flowOn(dispatchers)
     }
 
     override suspend fun getRoomsWithDevices(): List<RoomWithDevice> =
@@ -287,13 +162,9 @@ class RoomRepositoryImpl @Inject constructor(
             val pid = projectId.trim()
             if (pid.isBlank()) return@withContext emptyList()
 
-            val result = mutableListOf<RoomWithDevice>()
-            val roomEntities = roomDao.getAllRoomsByProject(pid)
-            for (roomEntity in roomEntities) {
-                val devEntities = deviceDao.getAllDevicesByRoomId(roomEntity.id)
-                result += RoomWithDevice(room = roomEntity, devices = devEntities)
+            roomDao.getRoomsWithDevicesByProject(pid).map { relation ->
+                RoomWithDevice(room = relation.room, devices = relation.devices)
             }
-            result
         }
 
     override suspend fun getDefaultRooms(): Flow<List<DefaultRoom>> =
@@ -425,65 +296,84 @@ class RoomRepositoryImpl @Inject constructor(
             }
         }
 
-        loadDao.addLoad(
-            LoadEntity(
-                name = req.name,
-                currentRoom = 0.0,
-                powerRoom = 0,
-                countDevices = 0,
-                createdAt = createdAt,
-                roomId = roomId,
-                projectId = projectId
-            )
-        )
+        // ✅ Возвращаем результат как и раньше
+        CreatedRoomResult(roomId = roomId, deviceIds = deviceIds)
+    }
 
-        // outbox ROOM_CREATE
-        outboxDao.insert(
-            OutboxEntity(
-                project_id = projectId,
-                op_type = OutboxOpType.ROOM_CREATE,
-                payload_json = RoomCreatePayload(
-                    projectId = projectId,
-                    localId = roomId,
-                    name = req.name,
-                    roomType = req.roomType,
-                    createdAt = createdAt.time
-                ).toJson(),
-                group_key = "room:create:$projectId:$roomId"
+    override suspend fun addRoomsWithDevicesBatch(
+        projectId: String,
+        requests: List<RoomCreateRequest>,
+        phaseMode: PhaseMode,
+        opId: String
+    ): BatchRoomCreationResult = withContext(dispatchers) {
+        val pid = projectId.trim()
+        require(pid.isNotBlank()) { "projectId is blank" }
+        if (requests.isEmpty()) {
+            return@withContext BatchRoomCreationResult(
+                rooms = emptyList(),
+                calculation = AutoCalculationResult.Skipped("Пустой проект")
             )
-        )
+        }
 
-        // outbox DEVICE_CREATE для каждого устройства (сопоставляем ids с исходными entities)
-        deviceIds.forEachIndexed { index, devId ->
-            val dev = devices[index]
-            outboxDao.insert(
-                OutboxEntity(
-                    project_id = projectId,
-                    op_type = OutboxOpType.DEVICE_CREATE,
-                    payload_json = DeviceCreatePayload(
-                        projectId = projectId,
-                        localId = devId,
-                        roomLocalId = roomId,
-                        name = dev.name,
-                        power = dev.power,
-                        voltage = dev.voltage,
-                        demandRatio = dev.demandRatio,
-                        createdAt = dev.createdAt.time,
-                        deviceType = dev.deviceType,
-                        powerFactor = dev.powerFactor,
-                        hasMotor = dev.hasMotor,
-                        requiresDedicatedCircuit = dev.requiresDedicatedCircuit,
-                        requiresSocketConnection = dev.requiresSocketConnection
-                    ).toJson(),
-                    group_key = "device:create:$projectId:$devId"
+        val normalizedNames = requests.map { it.name.trim() }
+        require(normalizedNames.all { it.isNotBlank() }) { "Название помещения не задано" }
+        require(normalizedNames.distinctBy(String::lowercase).size == normalizedNames.size) {
+            "Названия помещений в проекте должны отличаться"
+        }
+        normalizedNames.forEach { name ->
+            if (roomDao.existsByNameInProject(name, pid)) {
+                throw RoomAlreadyExistsException("Комната '$name' уже существует")
+            }
+        }
+
+        val createdAt = Date()
+        val bundles = requests.mapIndexed { index, request ->
+            RoomInsertBundle(
+                room = RoomEntity(
+                    id = 0L,
+                    name = normalizedNames[index],
+                    roomType = request.roomType,
+                    createdAt = createdAt,
+                    projectId = pid
+                ),
+                devices = expand(request.devices, roomId = null, projectId = pid)
+            )
+        }
+
+        val inserted = roomsTxDao.insertRoomsWithDevices(bundles)
+        val results = inserted.map { (roomId, deviceIds) ->
+            CreatedRoomResult(roomId = roomId, deviceIds = deviceIds)
+        }
+        val allDeviceIds = results.flatMap(CreatedRoomResult::deviceIds)
+
+        results.forEachIndexed { index, result ->
+            createDeviceOpBus.publish(
+                CreateDeviceOpEvent(
+                    opId = "$opId-${index + 1}",
+                    projectIdRecorded = pid,
+                    roomId = result.roomId,
+                    insertedIds = result.deviceIds
                 )
             )
         }
 
-        OutboxPushWorker.enqueueProject(context, projectId)
+        val calculation = if (allDeviceIds.isNotEmpty()) {
+            autoRebuildAfterInsertUseCase.get().execute(
+                AutoRebuildGroupsAfterDeviceInsertUseCase.Params(
+                    projectIdRecorded = pid,
+                    insertedIds = allDeviceIds,
+                    opId = opId,
+                    phaseModeOverride = phaseMode,
+                    manageActiveProjectContext = false
+                )
+            )
+        } else AutoCalculationResult.Skipped("В помещениях нет нагрузок")
 
-        // ✅ Возвращаем результат как и раньше
-        CreatedRoomResult(roomId = roomId, deviceIds = deviceIds)
+        Log.i(
+            "PROJECT_WIZARD",
+            "BATCH_CREATED pid=$pid rooms=${results.size} devices=${allDeviceIds.size} opId=$opId"
+        )
+        BatchRoomCreationResult(rooms = results, calculation = calculation)
     }
 
     override suspend fun addDevicesToRoom(
@@ -506,7 +396,6 @@ class RoomRepositoryImpl @Inject constructor(
         val room = roomDao.getRoomById(roomId)
             ?: throw RoomNotFoundException("Комната $roomId не найдена")
         val projectId = room.projectId
-            ?: throw RoomNotFoundException("У комнаты нет projectId")
 
         // ✅ Commit 1: tombstone-consistent count ДО
         val countBefore = deviceDao.countActiveByProjectId(projectId)
@@ -578,76 +467,19 @@ class RoomRepositoryImpl @Inject constructor(
             }
         }
 
-        // outbox DEVICE_CREATE для каждого добавленного устройства
-        ids.forEachIndexed { index, devId ->
-            val dev = entities[index]
-            outboxDao.insert(
-                OutboxEntity(
-                    project_id = projectId,
-                    op_type = OutboxOpType.DEVICE_CREATE,
-                    payload_json = DeviceCreatePayload(
-                        projectId = projectId,
-                        localId = devId,
-                        roomLocalId = roomId,
-                        name = dev.name,
-                        power = dev.power,
-                        voltage = dev.voltage,
-                        demandRatio = dev.demandRatio,
-                        createdAt = dev.createdAt.time,
-                        deviceType = dev.deviceType,
-                        powerFactor = dev.powerFactor,
-                        hasMotor = dev.hasMotor,
-                        requiresDedicatedCircuit = dev.requiresDedicatedCircuit,
-                        requiresSocketConnection = dev.requiresSocketConnection
-                    ).toJson(),
-                    group_key = "device:create:$projectId:$devId"
-                )
-            )
-        }
-
-        OutboxPushWorker.enqueueProject(context, projectId)
         ids
     }
 
     override suspend fun deleteDevices(deviceIds: List<Long>) = withContext(dispatchers) {
         if (deviceIds.isEmpty()) return@withContext
 
-        val anyDevice = deviceDao.getDeviceById(deviceIds.first().toInt()) ?: return@withContext
-        val projectId = anyDevice.projectId ?: return@withContext
-
-        // tombstones + outbox DEVICE_DELETE для каждого
-        deviceIds.forEach { id ->
-            val entity = deviceDao.getDeviceById(id.toInt()) ?: return@forEach
-            tombstoneDao.insert(
-                TombstoneEntity(
-                    project_id = projectId,
-                    entity_type = TombstoneEntityType.DEVICE,
-                    local_id = id,
-                    server_uuid = uuidDao.getDeviceUuidByLocal(id)
-                )
-            )
-            outboxDao.insert(
-                OutboxEntity(
-                    project_id = projectId,
-                    op_type = OutboxOpType.DEVICE_DELETE,
-                    payload_json = DeviceDeletePayload(
-                        projectId = projectId,
-                        localId = id,
-                        serverUuid = uuidDao.getDeviceUuidByLocal(id)
-                    ).toJson(),
-                    group_key = "device:delete:$projectId:$id"
-                )
-            )
-        }
-
         roomsTxDao.deleteDevicesByIds(deviceIds)
-        OutboxPushWorker.enqueueProject(context, projectId)
     }
 
     private fun expand(
         reqs: List<DeviceCreateRequest>,
         roomId: Long? = null,
-        projectId: String?
+        projectId: String
     ): List<DeviceEntity> = reqs.flatMap { r ->
         val def = deviceDefaults[r.type]
         val qty = r.count.coerceAtLeast(0)

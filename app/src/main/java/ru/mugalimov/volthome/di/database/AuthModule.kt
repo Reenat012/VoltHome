@@ -4,6 +4,8 @@ import android.content.Context
 import android.util.Log
 import com.yandex.authsdk.YandexAuthOptions
 import com.yandex.authsdk.YandexAuthSdk
+import com.google.gson.Gson
+import com.google.gson.GsonBuilder
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -13,12 +15,25 @@ import ru.mugalimov.volthome.BuildConfig
 import ru.mugalimov.volthome.data.local.prefs.EncryptedPrefsProvider
 import java.lang.reflect.Method
 import javax.inject.Singleton
+import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 
 @Module
 @InstallIn(SingletonComponent::class)
 object AuthModule {
 
     private const val TAG = "AuthModule"
+
+    @Provides
+    @Singleton
+    fun provideGson(): Gson = GsonBuilder().create()
+
+    @Provides
+    @Singleton
+    fun provideOkHttpClient(): OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .build()
 
     @Provides
     @Singleton

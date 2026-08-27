@@ -3,7 +3,12 @@ package ru.mugalimov.volthome.ui.navigation
 import AboutScreen
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -14,7 +19,11 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.yield
 import ru.mugalimov.volthome.ui.screens.MainApp
 import ru.mugalimov.volthome.ui.screens.auth.AuthScreen
+import ru.mugalimov.volthome.ui.screens.onboarding.OnboardingScreen
+import ru.mugalimov.volthome.ui.components.FullScreenLoader
 import ru.mugalimov.volthome.ui.viewmodel.AuthViewModel
+import ru.mugalimov.volthome.ui.viewmodel.OnboardingViewModel
+import ru.mugalimov.volthome.ui.viewmodel.OnboardingViewModelFactory
 
 /**
  * Корневой NavHost. Drawer здесь больше НЕ рендерится, чтобы
@@ -25,6 +34,24 @@ fun RootNavGraph(
     sdk: YandexAuthSdk,
     onLogout: () -> Unit = {},
 ) {
+    val context = LocalContext.current
+    val onboardingVm: OnboardingViewModel = viewModel(
+        factory = remember(context) { OnboardingViewModelFactory(context.applicationContext) }
+    )
+    val onboardingState by onboardingVm.uiState.collectAsState()
+
+    when {
+        onboardingState.isLoading -> {
+            FullScreenLoader()
+            return
+        }
+
+        onboardingState.showOnboarding -> {
+            OnboardingScreen(onComplete = onboardingVm::completeOnboarding)
+            return
+        }
+    }
+
     val rootNavController = rememberNavController()
     val authVm: AuthViewModel = hiltViewModel()
 
@@ -46,8 +73,7 @@ fun RootNavGraph(
                         launchSingleTop = true
                     }
                 }
-                is AuthViewModel.State.Idle,
-                is AuthViewModel.State.Error -> {
+                is AuthViewModel.State.Idle -> {
                     // Возвращаемся на welcome.
                     rootNavController.navigate(Screens.WelcomeScreen.route) {
                         popUpTo(rootNavController.graph.findStartDestination().id) {
@@ -56,7 +82,10 @@ fun RootNavGraph(
                         launchSingleTop = true
                     }
                 }
-                is AuthViewModel.State.Loading -> Unit
+                // Ошибка восстановления не равна logout.
+                is AuthViewModel.State.Error,
+                is AuthViewModel.State.Loading,
+                is AuthViewModel.State.Restoring -> Unit
             }
         }
     }
@@ -76,7 +105,10 @@ private fun androidx.navigation.NavGraphBuilder.authGraph(
     authVm: AuthViewModel
 ) {
     composable(Screens.WelcomeScreen.route) {
-        AuthScreen(sdk = sdk) { authVm.bootstrap() }
+        AuthScreen(
+            sdk = sdk,
+            vm = authVm
+        )
     }
 }
 

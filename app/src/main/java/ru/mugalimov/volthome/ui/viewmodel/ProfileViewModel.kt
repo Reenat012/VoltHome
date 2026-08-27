@@ -7,54 +7,56 @@ import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import ru.mugalimov.volthome.data.remote.api.ProfileMeDto
-import ru.mugalimov.volthome.data.repository.UserRepository
+import ru.mugalimov.volthome.data.repository.AuthRepository
 import ru.mugalimov.volthome.data.repository.UserPlanRepository
-import ru.mugalimov.volthome.domain.model.UserPlan
+import ru.mugalimov.volthome.domain.model.UserProfile
 
 @HiltViewModel
 class ProfileViewModel @Inject constructor(
-    private val repo: UserRepository,
+    private val authRepository: AuthRepository,
     private val userPlanRepository: UserPlanRepository
 ) : ViewModel() {
 
     sealed interface UiState {
-        object Loading : UiState
-        data class Data(val me: ProfileMeDto) : UiState
+        data object Loading : UiState
+        data class Data(val me: UserProfile) : UiState
         data class Error(val message: String) : UiState
     }
 
     private val _state = MutableStateFlow<UiState>(UiState.Loading)
     val state: StateFlow<UiState> = _state
 
+    init {
+        viewModelScope.launch {
+            userPlanRepository.planFlow.collect { plan ->
+                loadProfile(plan.plan, plan.planUntilEpochSeconds)
+            }
+        }
+    }
+
     fun refresh() {
         viewModelScope.launch {
             _state.value = UiState.Loading
-            val res = repo.loadMe()
-            _state.value = res.fold(
-                onSuccess = { profile ->
-                    // --- БЕЗОПАСНЫЙ Fallback для плана ---
-                    val rawPlan: String? = profile.plan
-                    val safePlan: String =
-                        rawPlan?.takeIf { it.isNotBlank() } ?: "free"
-
-                    val userPlan = UserPlan(
-                        plan = safePlan,
-                        planUntilEpochSeconds = profile.planUntilEpochSeconds
-                    )
-                    userPlanRepository.setPlan(userPlan)
-
-                    UiState.Data(profile)
-                },
-                onFailure = {
-                    val msg = when (it.message) {
-                        "no_token" -> "Не выполнен вход."
-                        "invalid_refresh" -> "Сессия истекла. Войдите снова."
-                        else -> it.message ?: "Ошибка загрузки профиля."
-                    }
-                    UiState.Error(msg)
-                }
-            )
+            val plan = userPlanRepository.planFlow.value
+            loadProfile(plan.plan, plan.planUntilEpochSeconds)
         }
+    }
+
+    private suspend fun loadProfile(plan: String, planUntilEpochSeconds: Long?) {
+        val session = authRepository.currentSession()
+        if (session == null) {
+            _state.value = UiState.Error("Локальная сессия не найдена.")
+            return
+        }
+
+        _state.value = UiState.Data(
+            UserProfile(
+                displayName = session.displayName,
+                email = session.email,
+                avatarUrl = session.avatarUrl,
+                plan = plan,
+                planUntilEpochSeconds = planUntilEpochSeconds
+            )
+        )
     }
 }

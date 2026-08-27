@@ -38,6 +38,7 @@ import ru.mugalimov.volthome.ui.onboarding.model.LoadsOnboardingFacts
 import ru.mugalimov.volthome.ui.paywall.PaywallEntryPoint
 import ru.mugalimov.volthome.ui.screens.loads.single.PhaseLoadSingleReportContent
 import ru.mugalimov.volthome.ui.viewmodel.PhaseLoadViewModel
+import ru.mugalimov.volthome.ui.components.UnassignedDevicesWarningCard
 
 @Composable
 fun PhaseLoadScreen(
@@ -64,6 +65,7 @@ fun PhaseLoadScreen(
     val canDrag = LocalUserPlan.current.capabilities.phaseDragAndDrop
     val uiState = viewModel.uiState.collectAsStateWithLifecycle().value
     val groupsCount = viewModel.groupsCount.collectAsStateWithLifecycle().value
+    val projectCoverage = viewModel.projectCoverage.collectAsStateWithLifecycle().value
     val onboardingFacts = viewModel.onboardingFacts.collectAsStateWithLifecycle(
         initialValue = LoadsOnboardingFacts()
     ).value
@@ -71,11 +73,8 @@ fun PhaseLoadScreen(
     // Режим ручного управления нужен для UI-веток и сообщений.
     val isManual = uiState.phaseLoadMode == PhaseLoadMode.MANUAL
 
-    // Заголовок экрана.
-    val title = when (uiState.mode) {
-        PhaseMode.SINGLE -> "Состояние вводного аппарата"
-        PhaseMode.THREE -> "Распределение по фазам"
-    }
+    // Детали режима раскрываются в первой сводной карточке.
+    val title = "Нагрузки"
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -147,8 +146,16 @@ fun PhaseLoadScreen(
             Text(
                 text = title,
                 style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp)
             )
+
+            if (!projectCoverage.isComplete) {
+                UnassignedDevicesWarningCard(
+                    coverage = projectCoverage,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+                )
+                Spacer(Modifier.height(8.dp))
+            }
 
             // Основной контент занимает всё оставшееся место.
             Box(
@@ -205,10 +212,9 @@ fun PhaseLoadScreen(
                                 PhaseMode.THREE -> {
                                     PhaseLoadContent(
                                         phaseLoads = uiState.data,
+                                        incomerAssessment = uiState.incomerAssessment,
                                         decisions = uiState.decisions,
                                         phaseLoadMode = uiState.phaseLoadMode,
-                                        incomerRating = uiState.incomer?.mcbRating,
-                                        thresholds = uiState.thresholds,
                                         modifier = Modifier.fillMaxSize(),
                                         canDrag = canDrag,
                                         showManualBanner = isManual,
@@ -220,7 +226,6 @@ fun PhaseLoadScreen(
                                         onGroupDropped = { groupId, phase ->
                                             viewModel.onGroupDragged(groupId, phase)
                                         },
-                                        onReset = { viewModel.onResetOverrides() },
                                         onDecisionDetailsClick = { _ -> Unit },
                                         onDropMissed = {
                                             coroutineScope.launch {

@@ -5,13 +5,13 @@ import java.text.DecimalFormatSymbols
 import java.util.Locale
 
 /**
- * Единый формат чисел для Explication UI.
- * Принцип: всегда точка как разделитель (Locale.US), без replace(',', '.').
+ * Единый формат отображаемых чисел в русскоязычном интерфейсе.
+ * Десятичная запятая и неразрывный пробел перед единицей не зависят от локали устройства.
  */
 object ExplicationNumberFormat {
 
-    private val sym = DecimalFormatSymbols(Locale.US).apply {
-        decimalSeparator = '.'
+    private val sym = DecimalFormatSymbols(Locale("ru", "RU")).apply {
+        decimalSeparator = ','
         groupingSeparator = ' ' // если захочешь группировку; сейчас шаблоны без группировки
     }
 

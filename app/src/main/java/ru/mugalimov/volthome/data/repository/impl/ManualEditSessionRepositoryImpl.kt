@@ -14,17 +14,22 @@ import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
 import ru.mugalimov.volthome.domain.mapper.toDomainDevice
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
+import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.PhaseMode
+import ru.mugalimov.volthome.domain.model.VoltageType
 import ru.mugalimov.volthome.domain.model.manual.ManualDeviceDraft
 import ru.mugalimov.volthome.domain.model.manual.ManualEditAction
 import ru.mugalimov.volthome.domain.model.manual.ManualEditSession
 import ru.mugalimov.volthome.domain.model.manual.ManualGroupComposition
 import ru.mugalimov.volthome.domain.model.manual.ManualGroupDraft
 import ru.mugalimov.volthome.domain.model.manual.ProjectEditState
+import ru.mugalimov.volthome.domain.model.manual.toCompatibilityInput
+import ru.mugalimov.volthome.domain.policy.compatibility.CircuitCompatibilityPolicy
 import ru.mugalimov.volthome.domain.use_case.StructuralWriteCoordinator
 import ru.mugalimov.volthome.domain.use_case.manual.DeleteGroupCascadeUseCase
 import ru.mugalimov.volthome.domain.use_case.manual.ManualDraftSelectors
 import ru.mugalimov.volthome.domain.use_case.manual.RecalculateGroupLineUseCase
+import ru.mugalimov.volthome.domain.use_case.manual.ValidateManualDraftUseCase
 import ru.mugalimov.volthome.ui.utilities.ManualDraftResetNotifier
 
 @Singleton
@@ -35,6 +40,7 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
     private val projectLocalStateDao: ProjectLocalStateDao,
     private val structuralWriteCoordinator: StructuralWriteCoordinator,
     private val deviceDao: DeviceDao,
+    private val validateManualDraftUseCase: ValidateManualDraftUseCase,
 ) : ManualEditSessionRepository {
 
     companion object {
@@ -147,6 +153,7 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
             deviceId = id,
             roomId = nonNullRoomId,
             roomName = fallbackRoomName(nonNullRoomId),
+            roomType = ru.mugalimov.volthome.domain.model.RoomType.STANDARD,
             deviceType = deviceType,
             powerW = power,
             voltageType = voltage.type,
@@ -154,7 +161,8 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
             demandRatio = demandRatio,
             powerFactor = powerFactor,
             hasMotor = hasMotor,
-            requiresDedicatedCircuit = requiresDedicatedCircuit
+            requiresDedicatedCircuit = requiresDedicatedCircuit,
+            requiresSocketConnection = requiresSocketConnection
         )
     }
 
@@ -363,8 +371,10 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
             )
         }
 
-        // ⚠️ НЕ МЕНЯЕМ фазность в Commit 2: оставляем как было у тебя до этого.
-        val newDraft = reduceDraft(before, action, mode = PhaseMode.THREE)
+        val newDraft = reduceDraft(before, action, mode = before.phaseMode)
+        validateManualDraftUseCase
+            .execute(newDraft, requireCalculatedLines = false)
+            .requireValid("MANUAL_ACTION ${action::class.simpleName}")
 
         val changed = before != newDraft
         Log.d(
@@ -415,7 +425,13 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
 
         val before = current.draftState
 
-        val updatedManualDevice = device.toManualDeviceDraft()
+        val existingDraftDevice = before.devices.firstOrNull { it.deviceId == device.id }
+        val updatedManualDevice = device.toManualDeviceDraft().copy(
+            roomName = existingDraftDevice?.roomName ?: fallbackRoomName(requireNotNull(device.roomId)),
+            roomType = existingDraftDevice?.roomType
+                ?: before.roomTypesById[device.roomId]
+                ?: ru.mugalimov.volthome.domain.model.RoomType.STANDARD
+        )
 
         val updatedDevices = before.devices.map { draftDevice ->
             if (draftDevice.deviceId == updatedManualDevice.deviceId) {
@@ -437,9 +453,16 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
                     group
                 } else {
                     val devicesInGroup = group.deviceIds.mapNotNull { id -> devicesById[id] }
-
-                    val hasForeignType = devicesInGroup.any { it.deviceType != group.groupType }
-                    val newComposition = if (hasForeignType) {
+                    val compatibility = CircuitCompatibilityPolicy.evaluateGroup(
+                        CircuitCompatibilityPolicy.GroupInput(
+                            phaseMode = before.phaseMode,
+                            phase = group.phase,
+                            roomId = group.roomId,
+                            devices = devicesInGroup.map { it.toCompatibilityInput() }
+                        )
+                    )
+                    val deviationCodes = compatibility.reasons.map { it.name }.distinct()
+                    val newComposition = if (deviationCodes.isNotEmpty()) {
                         ManualGroupComposition.MIXED_MANUAL
                     } else {
                         ManualGroupComposition.NORMAL
@@ -450,7 +473,10 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
                             group = group,
                             devicesInGroup = devicesInGroup
                         )
-                    ).copy(composition = newComposition)
+                    ).copy(
+                        composition = newComposition,
+                        deviationCodes = deviationCodes
+                    )
                 }
             }
         } else {
@@ -594,10 +620,15 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
             is ManualEditAction.ReplaceDraft -> action.newDraft.deepCopy()
 
             is ManualEditAction.SetGroupPhase -> {
+                val target = draft.groups.firstOrNull { it.groupId == action.groupId }
+                    ?: return draft
                 val updatedGroups = draft.groups.map { g ->
                     if (g.groupId == action.groupId) g.copy(phase = action.phase) else g
                 }
-                draft.copy(groups = updatedGroups)
+                finalizeAfterCompositionChange(
+                    draft = draft.copy(groups = updatedGroups),
+                    touchedGroupIds = setOf(action.groupId)
+                )
             }
 
             is ManualEditAction.MoveDevice -> {
@@ -663,15 +694,19 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
 
             val devsInGroup = g.deviceIds.mapNotNull { id -> devicesById[id] }
 
-            // ✅ composition: если в группе есть устройства другого типа — помечаем MIXED_MANUAL
-            val newComposition = run {
-                if (devsInGroup.isEmpty()) {
-                    // Пустые группы мы уже удалили, но на всякий случай — NORMAL.
-                    ManualGroupComposition.NORMAL
-                } else {
-                    val hasForeignType = devsInGroup.any { it.deviceType != g.groupType }
-                    if (hasForeignType) ManualGroupComposition.MIXED_MANUAL else ManualGroupComposition.NORMAL
-                }
+            val compatibility = CircuitCompatibilityPolicy.evaluateGroup(
+                CircuitCompatibilityPolicy.GroupInput(
+                    phaseMode = cur.phaseMode,
+                    phase = g.phase,
+                    roomId = g.roomId,
+                    devices = devsInGroup.map { it.toCompatibilityInput() }
+                )
+            )
+            val deviationCodes = compatibility.reasons.map { it.name }.distinct()
+            val newComposition = if (deviationCodes.isEmpty()) {
+                ManualGroupComposition.NORMAL
+            } else {
+                ManualGroupComposition.MIXED_MANUAL
             }
 
             // ✅ пересчёт линии (как у тебя было)
@@ -683,7 +718,10 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
             )
 
             // ✅ возвращаем группу с обновлённой composition
-            recalculated.copy(composition = newComposition)
+            recalculated.copy(
+                composition = newComposition,
+                deviationCodes = deviationCodes
+            )
         }
 
         return cur.copy(groups = newGroups)
@@ -785,7 +823,11 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
             currentGroupId = currentGroupId
         )
 
-        val phase = ManualDraftSelectors.choosePhaseForNewGroup(intermediate, mode)
+        val phase = if (device.voltageType == VoltageType.AC_3PHASE && mode == PhaseMode.THREE) {
+            Phase.THREE_PHASE
+        } else {
+            ManualDraftSelectors.choosePhaseForNewGroup(intermediate, mode)
+        }
         val newGroupId = ManualDraftSelectors.nextTempGroupId(intermediate)
         val newGroupNumber = intermediate.nextGroupNumber
 
@@ -802,6 +844,7 @@ class ManualEditSessionRepositoryImpl @Inject constructor(
             groupNumber = newGroupNumber,
             roomId = newRoomId,
             roomName = newRoomName,
+            roomType = device.roomType,
             groupType = newGroupType,
             composition = ManualGroupComposition.NORMAL,
             phase = phase,

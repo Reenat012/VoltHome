@@ -1,0 +1,658 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 29,
+    "identityHash": "a44886123c1567d720f56827f7182f43",
+    "entities": [
+      {
+        "tableName": "rooms",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `created_at` INTEGER NOT NULL, `room_type` TEXT NOT NULL, `project_id` TEXT NOT NULL, FOREIGN KEY(`project_id`) REFERENCES `projects`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "roomType",
+            "columnName": "room_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "projectId",
+            "columnName": "project_id",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "uq_rooms_name_project",
+            "unique": true,
+            "columnNames": [
+              "name",
+              "project_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `uq_rooms_name_project` ON `${TABLE_NAME}` (`name`, `project_id`)"
+          },
+          {
+            "name": "idx_rooms_project_id",
+            "unique": false,
+            "columnNames": [
+              "project_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_rooms_project_id` ON `${TABLE_NAME}` (`project_id`)"
+          },
+          {
+            "name": "idx_rooms_project_created_id",
+            "unique": false,
+            "columnNames": [
+              "project_id",
+              "created_at",
+              "id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_rooms_project_created_id` ON `${TABLE_NAME}` (`project_id`, `created_at`, `id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "projects",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "project_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "devices",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`device_id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `power` INTEGER NOT NULL, `voltage` TEXT NOT NULL, `demand_ratio` REAL NOT NULL, `created_at` INTEGER NOT NULL, `room_id` INTEGER, `device_type` TEXT NOT NULL, `power_factor` REAL NOT NULL, `has_motor` INTEGER NOT NULL DEFAULT 0, `requires_dedicated` INTEGER NOT NULL DEFAULT 0, `requires_socket` INTEGER NOT NULL DEFAULT 1, `project_id` TEXT NOT NULL, FOREIGN KEY(`room_id`) REFERENCES `rooms`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`project_id`) REFERENCES `projects`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "deviceId",
+            "columnName": "device_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "power",
+            "columnName": "power",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "voltage",
+            "columnName": "voltage",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "demandRatio",
+            "columnName": "demand_ratio",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "roomId",
+            "columnName": "room_id",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "deviceType",
+            "columnName": "device_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "powerFactor",
+            "columnName": "power_factor",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hasMotor",
+            "columnName": "has_motor",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "requiresDedicatedCircuit",
+            "columnName": "requires_dedicated",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "requiresSocketConnection",
+            "columnName": "requires_socket",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          },
+          {
+            "fieldPath": "projectId",
+            "columnName": "project_id",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "device_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "idx_devices_room_id",
+            "unique": false,
+            "columnNames": [
+              "room_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_devices_room_id` ON `${TABLE_NAME}` (`room_id`)"
+          },
+          {
+            "name": "idx_devices_project_id",
+            "unique": false,
+            "columnNames": [
+              "project_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_devices_project_id` ON `${TABLE_NAME}` (`project_id`)"
+          },
+          {
+            "name": "idx_devices_name",
+            "unique": false,
+            "columnNames": [
+              "name"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_devices_name` ON `${TABLE_NAME}` (`name`)"
+          },
+          {
+            "name": "idx_devices_project_room_created_id",
+            "unique": false,
+            "columnNames": [
+              "project_id",
+              "room_id",
+              "created_at",
+              "device_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_devices_project_room_created_id` ON `${TABLE_NAME}` (`project_id`, `room_id`, `created_at`, `device_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "rooms",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "room_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "projects",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "project_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "group_device_join",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`group_id` INTEGER NOT NULL, `device_id` INTEGER NOT NULL, PRIMARY KEY(`group_id`, `device_id`), FOREIGN KEY(`group_id`) REFERENCES `groups`(`group_id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`device_id`) REFERENCES `devices`(`device_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "groupId",
+            "columnName": "group_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceId",
+            "columnName": "device_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "group_id",
+            "device_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "idx_group_device_join_device_id",
+            "unique": false,
+            "columnNames": [
+              "device_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_group_device_join_device_id` ON `${TABLE_NAME}` (`device_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "groups",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "group_id"
+            ],
+            "referencedColumns": [
+              "group_id"
+            ]
+          },
+          {
+            "table": "devices",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "device_id"
+            ],
+            "referencedColumns": [
+              "device_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "groups",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`group_id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `group_number` INTEGER NOT NULL, `room_id` INTEGER NOT NULL, `room_name` TEXT NOT NULL, `group_type` TEXT NOT NULL, `nominal_current` REAL NOT NULL, `circuit_breaker` INTEGER NOT NULL, `cable_section` REAL NOT NULL, `breaker_type` TEXT NOT NULL, `rcd_required` INTEGER NOT NULL, `rcd_current` INTEGER NOT NULL, `created_at` INTEGER NOT NULL, `phase` TEXT NOT NULL, `project_id` TEXT NOT NULL, FOREIGN KEY(`room_id`) REFERENCES `rooms`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`project_id`) REFERENCES `projects`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "groupId",
+            "columnName": "group_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupNumber",
+            "columnName": "group_number",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "roomId",
+            "columnName": "room_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "roomName",
+            "columnName": "room_name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupType",
+            "columnName": "group_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nominalCurrent",
+            "columnName": "nominal_current",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "circuitBreaker",
+            "columnName": "circuit_breaker",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cableSection",
+            "columnName": "cable_section",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "breakerType",
+            "columnName": "breaker_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rcdRequired",
+            "columnName": "rcd_required",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rcdCurrent",
+            "columnName": "rcd_current",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "phase",
+            "columnName": "phase",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "projectId",
+            "columnName": "project_id",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "group_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "idx_groups_room_id",
+            "unique": false,
+            "columnNames": [
+              "room_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_groups_room_id` ON `${TABLE_NAME}` (`room_id`)"
+          },
+          {
+            "name": "idx_groups_project_id",
+            "unique": false,
+            "columnNames": [
+              "project_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_groups_project_id` ON `${TABLE_NAME}` (`project_id`)"
+          },
+          {
+            "name": "idx_groups_project_room_id",
+            "unique": false,
+            "columnNames": [
+              "project_id",
+              "room_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_groups_project_room_id` ON `${TABLE_NAME}` (`project_id`, `room_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "rooms",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "room_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "projects",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "project_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "projects",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `note` TEXT, `version` INTEGER NOT NULL, `updated_at` TEXT NOT NULL, `is_deleted` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "note",
+            "columnName": "note",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "version",
+            "columnName": "version",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updated_at",
+            "columnName": "updated_at",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "is_deleted",
+            "columnName": "is_deleted",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "project_local_state",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`project_id` TEXT NOT NULL, `active_manual_project_id` TEXT, `manual_overrides_present` INTEGER NOT NULL, `manual_lock_bootstrap_version` INTEGER NOT NULL, PRIMARY KEY(`project_id`), FOREIGN KEY(`project_id`) REFERENCES `projects`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "project_id",
+            "columnName": "project_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "active_manual_project_id",
+            "columnName": "active_manual_project_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "manual_overrides_present",
+            "columnName": "manual_overrides_present",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "manual_lock_bootstrap_version",
+            "columnName": "manual_lock_bootstrap_version",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "project_id"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "projects",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "project_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "group_phase_overrides",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `project_id` TEXT NOT NULL, `group_id` INTEGER NOT NULL, `phase` TEXT NOT NULL, `updated_at` INTEGER NOT NULL, FOREIGN KEY(`group_id`) REFERENCES `groups`(`group_id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`project_id`) REFERENCES `projects`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "projectId",
+            "columnName": "project_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupId",
+            "columnName": "group_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "phase",
+            "columnName": "phase",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_group_phase_overrides_group_id",
+            "unique": false,
+            "columnNames": [
+              "group_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_group_phase_overrides_group_id` ON `${TABLE_NAME}` (`group_id`)"
+          },
+          {
+            "name": "index_group_phase_overrides_project_id",
+            "unique": false,
+            "columnNames": [
+              "project_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_group_phase_overrides_project_id` ON `${TABLE_NAME}` (`project_id`)"
+          },
+          {
+            "name": "index_group_phase_overrides_project_id_group_id",
+            "unique": true,
+            "columnNames": [
+              "project_id",
+              "group_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_group_phase_overrides_project_id_group_id` ON `${TABLE_NAME}` (`project_id`, `group_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "groups",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "group_id"
+            ],
+            "referencedColumns": [
+              "group_id"
+            ]
+          },
+          {
+            "table": "projects",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "project_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'a44886123c1567d720f56827f7182f43')"
+    ]
+  }
+}

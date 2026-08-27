@@ -35,13 +35,11 @@ data class Device(
      * В этом коммите формулу НЕ меняем.
      */
     fun calculateCurrent(): Double {
-        return when (voltage.type) {
-            VoltageType.AC_1PHASE ->
-                power.toDouble() / (voltage.value * powerFactor)
-            VoltageType.AC_3PHASE ->
-                power.toDouble() / (1.732 * voltage.value * powerFactor)
-            else ->
-                power.toDouble() / voltage.value // Для DC
-        }
+        return ru.mugalimov.volthome.domain.use_case.CurrentCalculator.calculateInstalledCurrent(
+            power = power.toDouble(),
+            voltage = voltage.value.toDouble(),
+            powerFactor = powerFactor,
+            voltageType = voltage.type
+        )
     }
 }

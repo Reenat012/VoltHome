@@ -28,6 +28,7 @@ enum class OnboardingTargetTag(
 
     // Loads
     LOADS_DONUT_CHART("loads_donut_chart"),
+    LOADS_SINGLE_OVERVIEW("loads_single_overview"),
     LOADS_FIRST_GROUP("loads_first_group"),
 
     // Explication
@@ -36,5 +37,10 @@ enum class OnboardingTargetTag(
     EXPLICATION_FIRST_DEVICE_CHIP("explication_first_device_chip"),
     EXPLICATION_MANUAL_MODE_CHIP("explication_manual_mode_chip"),
     EXPLICATION_UNASSIGNED_BLOCK("explication_unassigned_block"),
-    EXPLICATION_PDF_FAB("explication_pdf_fab")
+    EXPLICATION_SINGLE_LINE_BUTTON("explication_single_line_button"),
+    EXPLICATION_PDF_FAB("explication_pdf_fab"),
+    EXPLICATION_PANEL_CARD("explication_panel_card"),
+
+    // Panel visualization
+    PANEL_SUMMARY("panel_summary")
 }

@@ -3,6 +3,7 @@ package ru.mugalimov.volthome.domain.use_case
 import android.util.Log
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -21,6 +22,7 @@ import ru.mugalimov.volthome.domain.model.VoltageType
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseDeviceItem
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseGroupItem
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
+import ru.mugalimov.volthome.domain.use_case.phase_load.PhaseLoadItemsBuilder
 
 /**
  * Источник PhaseLoadItem для AUTO режима.
@@ -33,11 +35,12 @@ import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
  * - UI path больше не держит собственную формулу;
  * - он использует тот же canonical calculation core, что и остальные пути.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class GetPhaseLoadUiUseCase @Inject constructor(
     private val groupDao: GroupDao,
     private val overrideDao: GroupPhaseOverrideDao,
     private val activeDs: ActiveProjectDataStore,
-    @IoDispatcher private val dispatcher: CoroutineDispatcher
+    @param:IoDispatcher private val dispatcher: CoroutineDispatcher
 ) {
 
     operator fun invoke(): Flow<List<PhaseLoadItem>> {
@@ -70,7 +73,7 @@ class GetPhaseLoadUiUseCase @Inject constructor(
                         if (forced != null && forced != g.phase) g.copy(phase = forced) else g
                     }
                 }.map { groupsWithOverrides ->
-                    buildPhaseItems(groupsWithOverrides)
+                    PhaseLoadItemsBuilder.build(groupsWithOverrides)
                 }
             }
             .flowOn(dispatcher)
@@ -108,18 +111,7 @@ class GetPhaseLoadUiUseCase @Inject constructor(
                         )
                     }
 
-                    val groupLoad = CurrentCalculator.calculateGroupLoad(
-                        devices.map { d ->
-                            LoadInput(
-                                powerW = d.power.toDouble(),
-                                voltage = d.voltage.value.toDouble(),
-                                powerFactor = d.powerFactor,
-                                demandRatio = d.demandRatio,
-                                voltageType = d.voltage.type,
-                                label = d.name
-                            )
-                        }
-                    )
+                    val groupLoad = CircuitLoadCalculator.calculate(devices)
 
                     CalculationTrace.log(
                         stage = "PHASE_LOAD_AUTO_GROUP_UI_TOTAL",
@@ -136,7 +128,7 @@ class GetPhaseLoadUiUseCase @Inject constructor(
                         roomName = g.roomName,
                         devices = deviceRows,
                         roomId = g.roomId,
-                        totalPower = deviceRows.sumOf { it.power },
+                        totalPower = groupLoad.installedPowerW,
                         totalCurrent = groupLoad.calculatedCurrentA
                     )
                 }
@@ -145,7 +137,8 @@ class GetPhaseLoadUiUseCase @Inject constructor(
         val i3Total = threePhaseGroups.sumOf { it.totalCurrent }
 
         val p3PerPhase = p3Total / 3.0
-        val i3PerPhase = i3Total / 3.0
+        // calculatedCurrentA для 3ф уже является линейным током каждой фазы.
+        val i3PerPhase = i3Total
 
         // 2) Секции A/B/C
         val phaseItems = listOf(Phase.A, Phase.B, Phase.C).map { phase ->
@@ -163,18 +156,7 @@ class GetPhaseLoadUiUseCase @Inject constructor(
                     )
                 }
 
-                val groupLoad = CurrentCalculator.calculateGroupLoad(
-                    onePhaseDevices.map { d ->
-                        LoadInput(
-                            powerW = d.power.toDouble(),
-                            voltage = d.voltage.value.toDouble(),
-                            powerFactor = d.powerFactor,
-                            demandRatio = d.demandRatio,
-                            voltageType = d.voltage.type,
-                            label = d.name
-                        )
-                    }
-                )
+                val groupLoad = CircuitLoadCalculator.calculate(onePhaseDevices)
 
                 CalculationTrace.log(
                     stage = "PHASE_LOAD_AUTO_GROUP_UI_TOTAL",
@@ -191,7 +173,7 @@ class GetPhaseLoadUiUseCase @Inject constructor(
                     roomName = g.roomName,
                     devices = deviceRows,
                     roomId = g.roomId,
-                    totalPower = deviceRows.sumOf { it.power },
+                    totalPower = groupLoad.installedPowerW,
                     totalCurrent = groupLoad.calculatedCurrentA
                 )
             }

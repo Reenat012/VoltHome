@@ -5,32 +5,30 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import ru.mugalimov.volthome.data.local.dao.ApparatusSelectionDao
+import ru.mugalimov.volthome.data.local.dao.CableCalculationDao
 import ru.mugalimov.volthome.data.local.dao.DeviceDao
 import ru.mugalimov.volthome.data.local.dao.GroupDao
 import ru.mugalimov.volthome.data.local.dao.GroupDeviceJoinDao
 import ru.mugalimov.volthome.data.local.dao.GroupPhaseOverrideDao
-import ru.mugalimov.volthome.data.local.dao.LoadDao
-import ru.mugalimov.volthome.data.local.dao.OutboxDao
 import ru.mugalimov.volthome.data.local.dao.ProjectDao
 import ru.mugalimov.volthome.data.local.dao.ProjectLocalStateDao
+import ru.mugalimov.volthome.data.local.dao.ProjectSetupDao
+import ru.mugalimov.volthome.data.local.dao.PanelLayoutDao
 import ru.mugalimov.volthome.data.local.dao.RoomDao
 import ru.mugalimov.volthome.data.local.dao.RoomsTxDao
-import ru.mugalimov.volthome.data.local.dao.TombstoneDao
-import ru.mugalimov.volthome.data.local.dao.UuidMapDao
+import ru.mugalimov.volthome.data.local.entity.ApparatusSelectionEntity
+import ru.mugalimov.volthome.data.local.entity.CableLineCalculationEntity
 import ru.mugalimov.volthome.data.local.entity.CircuitGroupEntity
 import ru.mugalimov.volthome.data.local.entity.DeviceEntity
 import ru.mugalimov.volthome.data.local.entity.GroupDeviceJoin
 import ru.mugalimov.volthome.data.local.entity.GroupPhaseOverrideEntity
-import ru.mugalimov.volthome.data.local.entity.LoadEntity
-import ru.mugalimov.volthome.data.local.entity.OutboxEntity
 import ru.mugalimov.volthome.data.local.entity.ProjectEntity
 import ru.mugalimov.volthome.data.local.entity.ProjectLocalStateEntity
+import ru.mugalimov.volthome.data.local.entity.ProjectSetupEntity
+import ru.mugalimov.volthome.data.local.entity.ProjectCableDefaultsEntity
+import ru.mugalimov.volthome.data.local.entity.PanelLayoutEntity
 import ru.mugalimov.volthome.data.local.entity.RoomEntity
-import ru.mugalimov.volthome.data.local.entity.SyncConflictEntity
-import ru.mugalimov.volthome.data.local.entity.TombstoneEntity
-import ru.mugalimov.volthome.data.local.entity.UuidMapDevice
-import ru.mugalimov.volthome.data.local.entity.UuidMapGroup
-import ru.mugalimov.volthome.data.local.entity.UuidMapRoom
 import ru.netology.nework.converters.Converters
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -43,32 +41,26 @@ import java.util.UUID
         // существующие сущности:
         RoomEntity::class,
         DeviceEntity::class,
-        LoadEntity::class,
         GroupDeviceJoin::class,
         CircuitGroupEntity::class,
 
         // под проекты и синк:
         ProjectEntity::class,
         ProjectLocalStateEntity::class,
-        SyncConflictEntity::class,
-
-        UuidMapRoom::class,
-        UuidMapGroup::class,
-        UuidMapDevice::class,
-
-        // новые:
-        OutboxEntity::class,
-        TombstoneEntity::class,
-        GroupPhaseOverrideEntity::class
+        GroupPhaseOverrideEntity::class,
+        ApparatusSelectionEntity::class,
+        PanelLayoutEntity::class,
+        ProjectSetupEntity::class,
+        ProjectCableDefaultsEntity::class,
+        CableLineCalculationEntity::class
     ],
-    version = 28,
+    version = 36,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun roomDao(): RoomDao
     abstract fun deviceDao(): DeviceDao
-    abstract fun loadDao(): LoadDao
     abstract fun groupDao(): GroupDao
     abstract fun groupDeviceJoinDao(): GroupDeviceJoinDao
     abstract fun roomsTxDao(): RoomsTxDao
@@ -76,16 +68,24 @@ abstract class AppDatabase : RoomDatabase() {
     // проекты / синк
     abstract fun projectDao(): ProjectDao
     abstract fun projectLocalStateDao(): ProjectLocalStateDao
-
-    abstract fun uuidMapDao(): UuidMapDao
-
-    // outbox / tombstones
-    abstract fun outboxDao(): OutboxDao
-    abstract fun tombstoneDao(): TombstoneDao
+    abstract fun projectSetupDao(): ProjectSetupDao
+    abstract fun cableCalculationDao(): CableCalculationDao
 
     abstract fun groupPhaseOverrideDao(): GroupPhaseOverrideDao
+    abstract fun apparatusSelectionDao(): ApparatusSelectionDao
+    abstract fun panelLayoutDao(): PanelLayoutDao
 
     companion object {
+
+        /**
+         * Самая ранняя схема, с которой приложение публиковалось в магазине.
+         *
+         * Версия 1.2 (versionCode 3) уже использовала схему Room 13. Более ранние
+         * схемы не должны молча уничтожаться: если в разработческой или сторонней
+         * сборке встретится неизвестная версия, Room остановит открытие базы вместо
+         * потери пользовательских данных.
+         */
+        const val MIN_SUPPORTED_DATABASE_VERSION = 13
 
         // ======== существующие миграции ========
 
@@ -94,8 +94,12 @@ abstract class AppDatabase : RoomDatabase() {
         // 13 → 14
         val MIGRATION_13_14 = object : Migration(13, 14) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // no-op
-                // версия 14 не меняла схему, только версию БД
+                // В опубликованной схеме 14 у группы впервые появилась фаза.
+                // Старые проекты были однофазными по умолчанию, поэтому A —
+                // единственное значение, которое сохраняет прежний смысл данных.
+                db.execSQL(
+                    "ALTER TABLE groups ADD COLUMN phase TEXT NOT NULL DEFAULT 'A'"
+                )
             }
         }
 
@@ -953,5 +957,539 @@ abstract class AppDatabase : RoomDatabase() {
                 }
             }
         }
+
+        /**
+         * 28 -> 29: окончательный переход на полностью локальную модель данных.
+         *
+         * Сохраняем пользовательские проекты и рабочую структуру, физически исключаем
+         * ранее удалённые tombstone-записи и удаляем серверные очереди/UUID-карты.
+         */
+        val MIGRATION_28_29 = object : Migration(28, 29) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // SQLite должен переписать ссылки дочерних таблиц при RENAME родителя.
+                // На части устройств legacy_alter_table может быть включён глобально.
+                db.execSQL("PRAGMA legacy_alter_table=OFF")
+                val fallbackProjectId = UUID.randomUUID().toString()
+                val nowIso = SimpleDateFormat(
+                    "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+                    Locale.US
+                ).format(Date())
+
+                db.execSQL(
+                    """
+                    INSERT INTO projects(id, name, note, version, updated_at, is_deleted)
+                    SELECT ?, 'Проект №1', NULL, 0, ?, 0
+                    WHERE NOT EXISTS (SELECT 1 FROM projects)
+                    """.trimIndent(),
+                    arrayOf(fallbackProjectId, nowIso)
+                )
+
+                db.execSQL(
+                    """
+                    CREATE TABLE rooms_v29 (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        name TEXT NOT NULL,
+                        created_at INTEGER NOT NULL,
+                        room_type TEXT NOT NULL,
+                        project_id TEXT NOT NULL,
+                        FOREIGN KEY(project_id) REFERENCES projects(id) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO rooms_v29(id,name,created_at,room_type,project_id)
+                    SELECT r.id,r.name,r.created_at,r.room_type,
+                           COALESCE((SELECT p.id FROM projects p WHERE p.id=r.project_id LIMIT 1),
+                                    (SELECT id FROM projects ORDER BY rowid LIMIT 1))
+                    FROM rooms r
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM tombstones t
+                        WHERE t.entity_type='ROOM' AND t.local_id=r.id
+                    )
+                    """.trimIndent()
+                )
+
+                db.execSQL(
+                    """
+                    CREATE TABLE devices_v29 (
+                        device_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        name TEXT NOT NULL,
+                        power INTEGER NOT NULL,
+                        voltage TEXT NOT NULL,
+                        demand_ratio REAL NOT NULL,
+                        created_at INTEGER NOT NULL,
+                        room_id INTEGER,
+                        device_type TEXT NOT NULL,
+                        power_factor REAL NOT NULL,
+                        has_motor INTEGER NOT NULL DEFAULT 0,
+                        requires_dedicated INTEGER NOT NULL DEFAULT 0,
+                        requires_socket INTEGER NOT NULL DEFAULT 1,
+                        project_id TEXT NOT NULL,
+                        FOREIGN KEY(room_id) REFERENCES rooms_v29(id) ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(project_id) REFERENCES projects(id) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO devices_v29(
+                        device_id,name,power,voltage,demand_ratio,created_at,room_id,device_type,
+                        power_factor,has_motor,requires_dedicated,requires_socket,project_id
+                    )
+                    SELECT d.device_id,d.name,d.power,d.voltage,d.demand_ratio,d.created_at,
+                           CASE WHEN r.id IS NULL THEN NULL ELSE d.room_id END,
+                           d.device_type,d.power_factor,d.has_motor,d.requires_dedicated,d.requires_socket,
+                           COALESCE(r.project_id,
+                                    (SELECT p.id FROM projects p WHERE p.id=d.project_id LIMIT 1),
+                                    (SELECT id FROM projects ORDER BY rowid LIMIT 1))
+                    FROM devices d
+                    LEFT JOIN rooms_v29 r ON r.id=d.room_id
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM tombstones t
+                        WHERE t.entity_type='DEVICE' AND t.local_id=d.device_id
+                    )
+                    """.trimIndent()
+                )
+
+                db.execSQL(
+                    """
+                    CREATE TABLE groups_v29 (
+                        group_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        group_number INTEGER NOT NULL,
+                        room_id INTEGER NOT NULL,
+                        room_name TEXT NOT NULL,
+                        group_type TEXT NOT NULL,
+                        nominal_current REAL NOT NULL,
+                        circuit_breaker INTEGER NOT NULL,
+                        cable_section REAL NOT NULL,
+                        breaker_type TEXT NOT NULL,
+                        rcd_required INTEGER NOT NULL,
+                        rcd_current INTEGER NOT NULL,
+                        created_at INTEGER NOT NULL,
+                        phase TEXT NOT NULL,
+                        project_id TEXT NOT NULL,
+                        FOREIGN KEY(room_id) REFERENCES rooms_v29(id) ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(project_id) REFERENCES projects(id) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO groups_v29(
+                        group_id,group_number,room_id,room_name,group_type,nominal_current,
+                        circuit_breaker,cable_section,breaker_type,rcd_required,rcd_current,
+                        created_at,phase,project_id
+                    )
+                    SELECT g.group_id,g.group_number,g.room_id,g.room_name,g.group_type,g.nominal_current,
+                           g.circuit_breaker,g.cable_section,g.breaker_type,g.rcd_required,g.rcd_current,
+                           g.created_at,g.phase,r.project_id
+                    FROM groups g
+                    JOIN rooms_v29 r ON r.id=g.room_id
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM tombstones t
+                        WHERE t.entity_type='GROUP' AND t.local_id=g.group_id
+                    )
+                    """.trimIndent()
+                )
+
+                db.execSQL(
+                    """
+                    CREATE TABLE project_local_state_v29 (
+                        project_id TEXT NOT NULL,
+                        active_manual_project_id TEXT,
+                        manual_overrides_present INTEGER NOT NULL,
+                        manual_lock_bootstrap_version INTEGER NOT NULL,
+                        PRIMARY KEY(project_id),
+                        FOREIGN KEY(project_id) REFERENCES projects(id) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO project_local_state_v29(
+                        project_id,active_manual_project_id,manual_overrides_present,manual_lock_bootstrap_version
+                    )
+                    SELECT p.id,s.active_manual_project_id,
+                           COALESCE(s.manual_overrides_present,0),
+                           COALESCE(s.manual_lock_bootstrap_version,0)
+                    FROM projects p
+                    LEFT JOIN project_local_state s ON s.project_id=p.id
+                    """.trimIndent()
+                )
+
+                db.execSQL(
+                    """
+                    CREATE TABLE group_device_join_v29 (
+                        group_id INTEGER NOT NULL,
+                        device_id INTEGER NOT NULL,
+                        PRIMARY KEY(group_id,device_id),
+                        FOREIGN KEY(group_id) REFERENCES groups_v29(group_id) ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(device_id) REFERENCES devices_v29(device_id) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO group_device_join_v29(group_id,device_id)
+                    SELECT j.group_id,j.device_id
+                    FROM group_device_join j
+                    JOIN groups_v29 g ON g.group_id=j.group_id
+                    JOIN devices_v29 d ON d.device_id=j.device_id AND d.project_id=g.project_id
+                    """.trimIndent()
+                )
+
+                db.execSQL(
+                    """
+                    CREATE TABLE group_phase_overrides_v29 (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        project_id TEXT NOT NULL,
+                        group_id INTEGER NOT NULL,
+                        phase TEXT NOT NULL,
+                        updated_at INTEGER NOT NULL,
+                        FOREIGN KEY(group_id) REFERENCES groups_v29(group_id) ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(project_id) REFERENCES projects(id) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO group_phase_overrides_v29(id,project_id,group_id,phase,updated_at)
+                    SELECT o.id,g.project_id,o.group_id,o.phase,o.updated_at
+                    FROM group_phase_overrides o JOIN groups_v29 g ON g.group_id=o.group_id
+                    """.trimIndent()
+                )
+
+                listOf(
+                    "group_device_join", "group_phase_overrides", "loads", "devices", "groups", "rooms",
+                    "project_local_state", "outbox", "tombstones", "sync_conflicts",
+                    "uuid_map_rooms", "uuid_map_groups", "uuid_map_devices"
+                ).forEach { table -> db.execSQL("DROP TABLE IF EXISTS `$table`") }
+
+                db.execSQL("ALTER TABLE rooms_v29 RENAME TO rooms")
+                db.execSQL("ALTER TABLE devices_v29 RENAME TO devices")
+                db.execSQL("ALTER TABLE groups_v29 RENAME TO groups")
+                db.execSQL("ALTER TABLE project_local_state_v29 RENAME TO project_local_state")
+                db.execSQL("ALTER TABLE group_device_join_v29 RENAME TO group_device_join")
+                db.execSQL("ALTER TABLE group_phase_overrides_v29 RENAME TO group_phase_overrides")
+
+                db.execSQL("CREATE UNIQUE INDEX uq_rooms_name_project ON rooms(name,project_id)")
+                db.execSQL("CREATE INDEX idx_rooms_project_id ON rooms(project_id)")
+                db.execSQL("CREATE INDEX idx_rooms_project_created_id ON rooms(project_id,created_at,id)")
+                db.execSQL("CREATE INDEX idx_devices_room_id ON devices(room_id)")
+                db.execSQL("CREATE INDEX idx_devices_project_id ON devices(project_id)")
+                db.execSQL("CREATE INDEX idx_devices_name ON devices(name)")
+                db.execSQL("CREATE INDEX idx_devices_project_room_created_id ON devices(project_id,room_id,created_at,device_id)")
+                db.execSQL("CREATE INDEX idx_groups_room_id ON groups(room_id)")
+                db.execSQL("CREATE INDEX idx_groups_project_id ON groups(project_id)")
+                db.execSQL("CREATE INDEX idx_groups_project_room_id ON groups(project_id,room_id)")
+                db.execSQL("CREATE INDEX idx_group_device_join_device_id ON group_device_join(device_id)")
+                db.execSQL("CREATE INDEX index_group_phase_overrides_group_id ON group_phase_overrides(group_id)")
+                db.execSQL("CREATE INDEX index_group_phase_overrides_project_id ON group_phase_overrides(project_id)")
+                db.execSQL("CREATE UNIQUE INDEX index_group_phase_overrides_project_id_group_id ON group_phase_overrides(project_id,group_id)")
+            }
+        }
+
+        /**
+         * 29 -> 30: метаданные прозрачности расчёта.
+         * Результаты и пользовательская структура групп не изменяются.
+         */
+        val MIGRATION_29_30 = object : Migration(29, 30) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE groups ADD COLUMN rcd_reason_codes TEXT NOT NULL DEFAULT ''"
+                )
+                db.execSQL(
+                    "ALTER TABLE groups ADD COLUMN calculation_source TEXT NOT NULL DEFAULT 'LEGACY'"
+                )
+                db.execSQL(
+                    "ALTER TABLE groups ADD COLUMN algorithm_version INTEGER NOT NULL DEFAULT 0"
+                )
+            }
+        }
+
+        /**
+         * 30 -> 31: исправление правила дифференциальной защиты.
+         *
+         * Существующие группы не пересобираются и устройства между ними не перемещаются.
+         * Если группа содержит бытовую розетку либо нагрузку, подключаемую через розетку,
+         * этой фактической групповой линии назначается УЗО 30 мА.
+         */
+        val MIGRATION_30_31 = object : Migration(30, 31) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    UPDATE groups
+                    SET rcd_required = 1,
+                        rcd_current = 30,
+                        rcd_reason_codes = CASE
+                            WHEN rcd_reason_codes = '' THEN 'GENERAL_PURPOSE_SOCKET'
+                            WHEN instr(
+                                ',' || rcd_reason_codes || ',',
+                                ',GENERAL_PURPOSE_SOCKET,'
+                            ) = 0
+                                THEN rcd_reason_codes || ',GENERAL_PURPOSE_SOCKET'
+                            ELSE rcd_reason_codes
+                        END,
+                        algorithm_version = 3
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM group_device_join AS link
+                        JOIN devices AS device ON device.device_id = link.device_id
+                        WHERE link.group_id = groups.group_id
+                          AND device.device_type = 'SOCKET'
+                          AND device.requires_socket = 0
+                    )
+                    """.trimIndent()
+                )
+
+                db.execSQL(
+                    """
+                    UPDATE groups
+                    SET rcd_required = 1,
+                        rcd_current = 30,
+                        rcd_reason_codes = CASE
+                            WHEN rcd_reason_codes = '' THEN 'SOCKET_CONNECTED_LOAD'
+                            WHEN instr(
+                                ',' || rcd_reason_codes || ',',
+                                ',SOCKET_CONNECTED_LOAD,'
+                            ) = 0
+                                THEN rcd_reason_codes || ',SOCKET_CONNECTED_LOAD'
+                            ELSE rcd_reason_codes
+                        END,
+                        algorithm_version = 3
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM group_device_join AS link
+                        JOIN devices AS device ON device.device_id = link.device_id
+                        WHERE link.group_id = groups.group_id
+                          AND device.requires_socket = 1
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
+        /**
+         * 31 -> 32: полная спецификация групповой дифференциальной защиты.
+         *
+         * Старые решения не переоцениваются: чувствительность сохраняется,
+         * недостающий номинальный ток остаётся NULL, источник помечается LEGACY.
+         */
+        val MIGRATION_31_32 = object : Migration(31, 32) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE groups ADD COLUMN rcd_nominal_current INTEGER")
+                db.execSQL("ALTER TABLE groups ADD COLUMN rcd_type TEXT")
+                db.execSQL("ALTER TABLE groups ADD COLUMN rcd_poles INTEGER")
+                db.execSQL(
+                    "ALTER TABLE groups ADD COLUMN rcd_selectivity TEXT NOT NULL DEFAULT 'NONE'"
+                )
+                db.execSQL("ALTER TABLE groups ADD COLUMN rcd_kind TEXT")
+                db.execSQL(
+                    "ALTER TABLE groups ADD COLUMN rcd_source TEXT NOT NULL DEFAULT 'LEGACY'"
+                )
+                db.execSQL(
+                    "ALTER TABLE groups ADD COLUMN manual_deviation_codes TEXT NOT NULL DEFAULT ''"
+                )
+                db.execSQL(
+                    """
+                    UPDATE groups
+                    SET rcd_type = CASE WHEN rcd_required = 1 THEN 'A' ELSE NULL END,
+                        rcd_poles = CASE
+                            WHEN rcd_required = 0 THEN NULL
+                            WHEN phase = 'THREE_PHASE' THEN 4
+                            ELSE 2
+                        END,
+                        rcd_kind = CASE WHEN rcd_required = 1 THEN 'RCD' ELSE NULL END,
+                        rcd_source = 'LEGACY'
+                    """.trimIndent()
+                )
+            }
+        }
+
+        /** 32 -> 33: локальные проектные снимки выбранных моделей аппаратов. */
+        val MIGRATION_32_33 = object : Migration(32, 33) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `apparatus_selections` (
+                        `project_id` TEXT NOT NULL,
+                        `slot_id` TEXT NOT NULL,
+                        `snapshot_json` TEXT NOT NULL,
+                        `catalog_version` TEXT NOT NULL,
+                        `updated_at_epoch_ms` INTEGER NOT NULL,
+                        PRIMARY KEY(`project_id`, `slot_id`),
+                        FOREIGN KEY(`project_id`) REFERENCES `projects`(`id`)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_apparatus_selections_project_id` " +
+                        "ON `apparatus_selections`(`project_id`)"
+                )
+            }
+        }
+
+        /** 33 -> 34: сохранённая пользовательская DIN-компоновка проекта. */
+        val MIGRATION_33_34 = object : Migration(33, 34) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `panel_layouts` (
+                        `project_id` TEXT NOT NULL,
+                        `snapshot_json` TEXT NOT NULL,
+                        `schema_version` INTEGER NOT NULL,
+                        `updated_at_epoch_ms` INTEGER NOT NULL,
+                        PRIMARY KEY(`project_id`),
+                        FOREIGN KEY(`project_id`) REFERENCES `projects`(`id`)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_panel_layouts_project_id` " +
+                        "ON `panel_layouts`(`project_id`)"
+                )
+            }
+        }
+
+        /** 34 -> 35: параметры проекта, выбранные в мастере создания. */
+        val MIGRATION_34_35 = object : Migration(34, 35) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `project_setup` (
+                        `project_id` TEXT NOT NULL,
+                        `object_type` TEXT NOT NULL,
+                        `phase_mode` TEXT NOT NULL,
+                        `input_power_kw` REAL,
+                        `source_template_id` TEXT,
+                        `source_template_version` INTEGER NOT NULL,
+                        `wizard_completed` INTEGER NOT NULL,
+                        PRIMARY KEY(`project_id`),
+                        FOREIGN KEY(`project_id`) REFERENCES `projects`(`id`)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_project_setup_project_id` " +
+                        "ON `project_setup`(`project_id`)"
+                )
+            }
+        }
+
+        /** 35 -> 36: условия и воспроизводимые результаты расчёта кабельных линий. */
+        val MIGRATION_35_36 = object : Migration(35, 36) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `project_cable_defaults` (
+                        `project_id` TEXT NOT NULL,
+                        `material` TEXT NOT NULL,
+                        `insulation` TEXT NOT NULL,
+                        `installation_method` TEXT NOT NULL,
+                        `ambient_temperature_c` INTEGER NOT NULL,
+                        `grouped_circuits` INTEGER NOT NULL,
+                        `max_voltage_drop_percent` REAL NOT NULL,
+                        PRIMARY KEY(`project_id`),
+                        FOREIGN KEY(`project_id`) REFERENCES `projects`(`id`)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_project_cable_defaults_project_id` " +
+                        "ON `project_cable_defaults`(`project_id`)"
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `cable_line_calculations` (
+                        `group_id` INTEGER NOT NULL,
+                        `project_id` TEXT NOT NULL,
+                        `phase_mode` TEXT NOT NULL,
+                        `load_current_a` REAL NOT NULL,
+                        `breaker_a` INTEGER NOT NULL,
+                        `length_m` REAL,
+                        `power_factor` REAL NOT NULL,
+                        `material` TEXT NOT NULL,
+                        `insulation` TEXT NOT NULL,
+                        `installation_method` TEXT NOT NULL,
+                        `ambient_temperature_c` INTEGER NOT NULL,
+                        `grouped_circuits` INTEGER NOT NULL,
+                        `max_voltage_drop_percent` REAL NOT NULL,
+                        `manual_section_mm2` REAL,
+                        `phase_section_mm2` REAL NOT NULL,
+                        `neutral_section_mm2` REAL NOT NULL,
+                        `pe_section_mm2` REAL NOT NULL,
+                        `cores` INTEGER NOT NULL,
+                        `base_ampacity_a` REAL NOT NULL,
+                        `installation_factor` REAL NOT NULL,
+                        `temperature_factor` REAL NOT NULL,
+                        `grouping_factor` REAL NOT NULL,
+                        `corrected_ampacity_a` REAL NOT NULL,
+                        `voltage_drop_v` REAL,
+                        `voltage_drop_percent` REAL,
+                        `status` TEXT NOT NULL,
+                        `source` TEXT NOT NULL,
+                        `checks` TEXT NOT NULL,
+                        `algorithm_version` INTEGER NOT NULL,
+                        `dataset_version` TEXT NOT NULL,
+                        `updated_at_epoch_ms` INTEGER NOT NULL,
+                        PRIMARY KEY(`group_id`),
+                        FOREIGN KEY(`project_id`) REFERENCES `projects`(`id`)
+                            ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(`group_id`) REFERENCES `groups`(`group_id`)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_cable_line_calculations_project_id` " +
+                        "ON `cable_line_calculations`(`project_id`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_cable_line_calculations_group_id` " +
+                        "ON `cable_line_calculations`(`group_id`)"
+                )
+            }
+        }
+
+        /**
+         * Единый реестр миграций. И production-конфигурация, и тесты используют
+         * один и тот же список, поэтому новую миграцию нельзя случайно добавить
+         * только в одно из этих мест.
+         */
+        val ALL_MIGRATIONS: Array<Migration> = arrayOf(
+            MIGRATION_13_14,
+            MIGRATION_14_15,
+            MIGRATION_15_16,
+            MIGRATION_16_17,
+            MIGRATION_17_18,
+            MIGRATION_18_19,
+            MIGRATION_19_20,
+            MIGRATION_20_21,
+            MIGRATION_21_22,
+            MIGRATION_22_23,
+            MIGRATION_23_24,
+            MIGRATION_24_25,
+            MIGRATION_25_26,
+            MIGRATION_26_27,
+            MIGRATION_27_28,
+            MIGRATION_28_29,
+            MIGRATION_29_30,
+            MIGRATION_30_31,
+            MIGRATION_31_32,
+            MIGRATION_32_33,
+            MIGRATION_33_34,
+            MIGRATION_34_35,
+            MIGRATION_35_36
+        )
+
+        fun migrationsFrom(version: Int): Array<Migration> =
+            ALL_MIGRATIONS
+                .filter { migration -> migration.startVersion >= version }
+                .toTypedArray()
     }
 }

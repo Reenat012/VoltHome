@@ -31,10 +31,10 @@ interface GroupDeviceJoinDao {
 
     // -------------------- INSERT --------------------
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertJoin(join: GroupDeviceJoin)
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertAll(joins: List<GroupDeviceJoin>)
 
     // -------------------- READ helpers --------------------

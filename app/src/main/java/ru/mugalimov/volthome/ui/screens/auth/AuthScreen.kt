@@ -30,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -56,7 +57,6 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.hilt.navigation.compose.hiltViewModel
 import com.yandex.authsdk.YandexAuthResult
 import com.yandex.authsdk.YandexAuthSdk
 import kotlin.math.floor
@@ -114,10 +114,8 @@ private object AuthUiDimens {
 @Composable
 fun AuthScreen(
     sdk: YandexAuthSdk,
-    onSuccess: () -> Unit
+    vm: AuthViewModel
 ) {
-    val vm: AuthViewModel = hiltViewModel()
-
     val state by vm.state.collectAsState()
     val consentState by vm.consentState.collectAsState()
     val context = LocalContext.current
@@ -136,9 +134,6 @@ fun AuthScreen(
             }
             vm.handleResult(result)
         }
-
-    LaunchedEffect(Unit) { vm.bootstrap() }
-    LaunchedEffect(state) { if (state is AuthViewModel.State.Success) onSuccess() }
 
     val loginOptions = remember { vm.loginOptions() }
 
@@ -206,7 +201,11 @@ fun AuthScreen(
                             Spacer(Modifier.height(AuthUiDimens.TitleSubtitleGap))
 
                             Text(
-                                text = "Расчёт электрики",
+                                text = if (consentState.isReconsent) {
+                                    "Документы обновлены — подтвердите выбор"
+                                } else {
+                                    "Расчёт электрики"
+                                },
                                 style = MaterialTheme.typography.labelMedium.copy(
                                     letterSpacing = 0.sp,
                                     lineHeight = 16.sp
@@ -243,10 +242,20 @@ fun AuthScreen(
                                 onToggle = { vm.onTermsAcceptanceChanged(!consentState.termsAccepted) }
                             )
 
+                            if (consentState.requiresPdConsent) {
+                                ConsentRow(
+                                    checked = consentState.pdConsentAccepted,
+                                    text = "Для входа через Яндекс ID я даю отдельное согласие на обработку данных",
+                                    onToggle = { vm.onPdConsentAcceptanceChanged(!consentState.pdConsentAccepted) }
+                                )
+                            }
+
                             ConsentRow(
-                                checked = consentState.pdConsentAccepted,
-                                text = "Я даю согласие на обработку персональных данных",
-                                onToggle = { vm.onPdConsentAcceptanceChanged(!consentState.pdConsentAccepted) }
+                                checked = consentState.analyticsEnabled,
+                                text = "Разрешить анонимную диагностику и аналитику (необязательно)",
+                                onToggle = {
+                                    vm.onAnalyticsAcceptanceChanged(!consentState.analyticsEnabled)
+                                }
                             )
 
                             Spacer(Modifier.height(AuthUiDimens.AfterConsentsToLinks))
@@ -282,13 +291,33 @@ fun AuthScreen(
 
                         Spacer(Modifier.height(AuthUiDimens.SectionGap))
 
-                        // Provider section (внутри панели, как "шлюз")
-                        YandexSignInButton(
-                            enabled = consentState.canContinue,
-                            loading = consentState.isLoading
-                        ) {
-                            vm.startLogin()
-                            launcher.launch(loginOptions)
+                        if (consentState.isReconsent) {
+                            Button(
+                                onClick = vm::confirmExistingSession,
+                                enabled = consentState.canConfirmExistingSession,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Подтвердить и продолжить")
+                            }
+                        } else {
+                            Button(
+                                onClick = vm::continueAsGuest,
+                                enabled = consentState.canContinueAsGuest,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Продолжить без входа")
+                            }
+
+                            Spacer(Modifier.height(10.dp))
+
+                            // Необязательный провайдер профиля. Собственный сервер не используется.
+                            YandexSignInButton(
+                                enabled = consentState.canContinue,
+                                loading = consentState.isLoading
+                            ) {
+                                vm.startLogin()
+                                launcher.launch(loginOptions)
+                            }
                         }
 
                         (state as? AuthViewModel.State.Error)?.let { err ->

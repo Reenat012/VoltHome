@@ -62,6 +62,7 @@ import ru.mugalimov.volthome.ui.components.device.DeviceParamsEditor
 import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsDraft
 import ru.mugalimov.volthome.ui.components.device.adapter.DeviceParamsEditorState
 import ru.mugalimov.volthome.ui.components.device.adapter.InMemoryDeviceParamsAdapter
+import ru.mugalimov.volthome.ui.format.UiTextFormat
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
 import ru.mugalimov.volthome.ui.paywall.PaywallBus
 import ru.mugalimov.volthome.ui.utilities.bringIntoViewOnFocus
@@ -308,7 +309,7 @@ private fun DevicePickerDeviceCard(
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(def.name)
-                    Text("${def.power} Вт")
+                    Text(UiTextFormat.power(def.power.toDouble()))
                 }
 
                 Row(
@@ -445,8 +446,8 @@ private fun buildRequestsForPicker(
 
         val volt = if (canUseExtendedEditor) {
             when (nd.voltageType) {
-                VoltageType.AC_1PHASE -> Voltage(220, VoltageType.AC_1PHASE)
-                VoltageType.AC_3PHASE -> Voltage(380, VoltageType.AC_3PHASE)
+                VoltageType.AC_1PHASE -> Voltage(230, VoltageType.AC_1PHASE)
+                VoltageType.AC_3PHASE -> Voltage(400, VoltageType.AC_3PHASE)
                 VoltageType.DC -> def.voltage
             }
         } else def.voltage

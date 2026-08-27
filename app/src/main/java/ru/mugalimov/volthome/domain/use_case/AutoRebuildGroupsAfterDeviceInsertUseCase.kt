@@ -7,7 +7,11 @@ import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
 import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
 import ru.mugalimov.volthome.data.repository.PreferencesRepository
 import ru.mugalimov.volthome.data.repository.ProjectOwnershipRepository
+import ru.mugalimov.volthome.data.repository.ProjectSetupRepository
+import ru.mugalimov.volthome.data.repository.resolve
 import ru.mugalimov.volthome.domain.model.GroupingResult
+import ru.mugalimov.volthome.domain.model.PhaseMode
+import ru.mugalimov.volthome.domain.model.create.AutoCalculationResult
 
 /**
  * Commit 5:
@@ -31,6 +35,7 @@ class AutoRebuildGroupsAfterDeviceInsertUseCase @Inject constructor(
     private val manualRepo: ManualEditSessionRepository,
     private val ownershipRepo: ProjectOwnershipRepository,
     private val preferencesRepository: PreferencesRepository,
+    private val projectSetupRepository: ProjectSetupRepository,
     private val calculatorFactory: GroupCalculatorFactory,
     private val saveAutoUseCase: SaveAutoCalculatedGroupsToLocalDbUseCase,
     private val coordinator: StructuralWriteCoordinator
@@ -47,17 +52,21 @@ class AutoRebuildGroupsAfterDeviceInsertUseCase @Inject constructor(
     data class Params(
         val projectIdRecorded: String,
         val insertedIds: List<Long>,
-        val opId: String
+        val opId: String,
+        val phaseModeOverride: PhaseMode? = null,
+        val manageActiveProjectContext: Boolean = true,
+        /** Явное обновление AUTO-расчёта после смены версии ядра. */
+        val forceRecalculation: Boolean = false
     )
 
-    suspend fun execute(params: Params) {
+    suspend fun execute(params: Params): AutoCalculationResult {
         val pid = params.projectIdRecorded.trim()
-        if (pid.isBlank()) return
+        if (pid.isBlank()) return AutoCalculationResult.Failure("projectId не задан")
 
         // 1) Guard: пустой список -> нечего делать.
-        if (params.insertedIds.isEmpty()) {
+        if (params.insertedIds.isEmpty() && !params.forceRecalculation) {
             Log.i(TAG, "SKIP emptyIds pid=$pid opId=${params.opId}")
-            return
+            return AutoCalculationResult.Skipped("Нет устройств для расчёта")
         }
 
         // 2) Suppress по persisted lock: ручные overrides уже есть, AUTO не должен трогать структуру.
@@ -67,7 +76,7 @@ class AutoRebuildGroupsAfterDeviceInsertUseCase @Inject constructor(
                 TAG,
                 "SUPPRESS manualLock=true pid=$pid opId=${params.opId} inserted=${params.insertedIds.size}"
             )
-            return
+            return AutoCalculationResult.Skipped("Проект зафиксирован в ручном режиме")
         }
 
         // 3) Suppress по текущей ручной сессии (in-memory): пользователь прямо сейчас редактирует.
@@ -76,15 +85,18 @@ class AutoRebuildGroupsAfterDeviceInsertUseCase @Inject constructor(
                 TAG,
                 "SUPPRESS manualActive=true pid=$pid opId=${params.opId} inserted=${params.insertedIds.size}"
             )
-            return
+            return AutoCalculationResult.Skipped("Открыта ручная сессия редактирования")
         }
 
         // Фаза/режим считаем один раз, снаружи writer-блока.
-        val mode = preferencesRepository.phaseMode.first()
+        val mode = params.phaseModeOverride ?: projectSetupRepository.resolve(
+            projectId = pid,
+            legacyFallbackPhaseMode = preferencesRepository.phaseMode.first()
+        ).phaseMode
 
         // ВАЖНО: rebuild делаем в контексте projectIdRecorded, а не активного проекта UI.
         val previousActivePid = activeProjectDs.activeProjectId.first().orEmpty().trim()
-        val needSwitch = previousActivePid != pid
+        val needSwitch = params.manageActiveProjectContext && previousActivePid != pid
 
         if (needSwitch) {
             Log.w(
@@ -94,7 +106,7 @@ class AutoRebuildGroupsAfterDeviceInsertUseCase @Inject constructor(
             activeProjectDs.setActiveProjectId(pid)
         }
 
-        try {
+        return try {
             val out = coordinator.execute(
                 projectId = pid,
                 opName = OP_NAME,
@@ -121,22 +133,38 @@ class AutoRebuildGroupsAfterDeviceInsertUseCase @Inject constructor(
                             )
                         )
                         Log.i(TAG, "DONE pid=$pid opId=${params.opId} groups=${result.system.groups.size}")
+                        AutoCalculationResult.Success(
+                            linesCount = result.system.groups.size,
+                            installedPowerW = result.system.groups.sumOf { it.installedPowerW.toDouble() },
+                            calculatedPowerW = result.system.groups.sumOf { group ->
+                                CircuitLoadCalculator.calculate(group.devices).calculatedPowerW
+                            }
+                        )
                     }
 
                     is GroupingResult.Error -> {
                         Log.e(TAG, "FAILED_CALC pid=$pid opId=${params.opId} msg=${result.message}")
+                        AutoCalculationResult.Failure(result.message)
                     }
                 }
             }
 
             when (out) {
-                is StructuralWriteCoordinator.Outcome.Success -> Unit
-                StructuralWriteCoordinator.Outcome.Busy ->
+                is StructuralWriteCoordinator.Outcome.Success -> out.value
+                StructuralWriteCoordinator.Outcome.Busy -> {
                     Log.w(TAG, "BUSY pid=$pid opId=${params.opId}")
-                StructuralWriteCoordinator.Outcome.Panic ->
+                    AutoCalculationResult.Failure("Расчёт уже выполняется. Повторите попытку")
+                }
+                StructuralWriteCoordinator.Outcome.Panic -> {
                     Log.e(TAG, "PANIC pid=$pid opId=${params.opId}")
-                is StructuralWriteCoordinator.Outcome.Error ->
+                    AutoCalculationResult.Failure("Расчёт прерван по тайм-ауту")
+                }
+                is StructuralWriteCoordinator.Outcome.Error -> {
                     Log.e(TAG, "ERROR pid=$pid opId=${params.opId}", out.throwable)
+                    AutoCalculationResult.Failure(
+                        out.throwable.message ?: "Не удалось сохранить рассчитанные линии"
+                    )
+                }
             }
         } finally {
             // Возвращаем activeProjectId назад (если переключали), чтобы не ломать UI-контекст.

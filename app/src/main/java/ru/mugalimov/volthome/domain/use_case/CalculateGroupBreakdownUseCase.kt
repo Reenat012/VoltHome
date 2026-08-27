@@ -34,17 +34,26 @@ class CalculateGroupBreakdownUseCase @Inject constructor() {
                         "path=CalculateGroupBreakdownUseCase.execute()"
         )
 
-        val inputs = group.devices.map { it.toLoadInput() }
-        val groupLoad = CurrentCalculator.calculateGroupLoad(inputs)
+        val groupLoad = CircuitLoadCalculator.calculate(group.devices)
+        val effectiveDevices = CircuitLoadCalculator.effectiveDevices(group.devices)
+        val socketAllowanceApplied = effectiveDevices.size < group.devices.size
 
         // 1) Installed power
         val installedPW = groupLoad.installedPowerW
 
         val installedPowerSteps = listOf(
             CalcStep(
-                name = "Сумма паспортных мощностей группы",
-                formula = "Pгр(уст) = Σ Pуст,i",
-                inputs = group.devices.map { d ->
+                name = if (socketAllowanceApplied) {
+                    "Расчётная нагрузка общей розеточной линии"
+                } else {
+                    "Сумма паспортных мощностей группы"
+                },
+                formula = if (socketAllowanceApplied) {
+                    "Pгр(уст) = Σ Pприборов + max(Pрозеточной точки)"
+                } else {
+                    "Pгр(уст) = Σ Pуст,i"
+                },
+                inputs = effectiveDevices.map { d ->
                     CalcInput(
                         name = d.name,
                         value = d.power.toDouble(),
@@ -64,7 +73,7 @@ class CalculateGroupBreakdownUseCase @Inject constructor() {
 
         // 2) Calculated power
         val calculatedPowerInputs = buildList {
-            group.devices.forEach { d ->
+            effectiveDevices.forEach { d ->
                 val deviceLoad = CurrentCalculator.calculateDeviceLoad(d.toLoadInput())
 
                 add(CalcInput(name = "${d.name} / base", value = d.power.toDouble(), unit = "Вт"))
@@ -76,7 +85,11 @@ class CalculateGroupBreakdownUseCase @Inject constructor() {
         val calculatedPowerSteps = listOf(
             CalcStep(
                 name = "Расчётная мощность группы по спросу",
-                formula = "Pгр(расч) = Σ (Pуст,i × kспроса,i)",
+                formula = if (socketAllowanceApplied) {
+                    "Pгр(расч) = Σ Pприборов,расч + max(Pрозетки × kспроса)"
+                } else {
+                    "Pгр(расч) = Σ (Pуст,i × kспроса,i)"
+                },
                 inputs = calculatedPowerInputs,
                 output = CalcOutput(groupLoad.calculatedPowerW, "Вт")
             )
@@ -91,7 +104,7 @@ class CalculateGroupBreakdownUseCase @Inject constructor() {
 
         // 3) Calculated current
         val calculatedCurrentInputs = buildList {
-            group.devices.forEach { d ->
+            effectiveDevices.forEach { d ->
                 val baseInstalledCurrent = CurrentCalculator.calculateInstalledCurrent(
                     power = d.power.toDouble(),
                     voltage = d.voltage.value.toDouble(),
@@ -109,7 +122,11 @@ class CalculateGroupBreakdownUseCase @Inject constructor() {
         val currentSteps = listOf(
             CalcStep(
                 name = "Сумма расчётных токов устройств с учётом спроса",
-                formula = "Iгр(расч) = Σ Iрасч,i",
+                formula = if (socketAllowanceApplied) {
+                    "Iгр(расч) = Σ Iприборов,расч + max(Iрозеточной точки,расч)"
+                } else {
+                    "Iгр(расч) = Σ Iрасч,i"
+                },
                 inputs = calculatedCurrentInputs,
                 output = CalcOutput(groupLoad.calculatedCurrentA, "А"),
                 assumptions = listOf(
@@ -120,7 +137,21 @@ class CalculateGroupBreakdownUseCase @Inject constructor() {
                         message = "Расчётные токи устройств получены из canonical calculation core.",
                         original = null,
                         applied = null
-                    )
+                    ),
+                    *if (socketAllowanceApplied) {
+                        arrayOf(
+                            CalcAssumption(
+                                kind = CalcAssumption.Kind.OTHER,
+                                source = CoefficientSource.DEFAULT,
+                                subject = "domainCalc.generalSocketAllowance",
+                                message = "Несколько точек общей розеточной сети одного помещения учтены как одна расчётная линия, а не как одновременно работающие приборы.",
+                                original = group.devices.size.toDouble(),
+                                applied = effectiveDevices.size.toDouble()
+                            )
+                        )
+                    } else {
+                        emptyArray()
+                    }
                 )
             )
         )

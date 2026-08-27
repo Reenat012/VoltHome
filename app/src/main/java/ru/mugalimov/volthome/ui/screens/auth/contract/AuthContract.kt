@@ -10,11 +10,22 @@ package ru.mugalimov.volthome.ui.screens.auth.contract
 data class AuthState(
     val termsAccepted: Boolean = false,
     val pdConsentAccepted: Boolean = false,
+    val analyticsEnabled: Boolean = false,
+    val isReconsent: Boolean = false,
+    val requiresPdConsent: Boolean = true,
     val isLoading: Boolean = false,
     val configError: ConfigError? = null
 ) {
+    val canContinueAsGuest: Boolean
+        get() = termsAccepted && !isLoading
+
     val canContinue: Boolean
-        get() = termsAccepted && pdConsentAccepted && !isLoading && configError == null
+        get() = termsAccepted && (!requiresPdConsent || pdConsentAccepted) &&
+            !isLoading && configError == null
+
+    val canConfirmExistingSession: Boolean
+        get() = isReconsent && termsAccepted &&
+            (!requiresPdConsent || pdConsentAccepted) && !isLoading
 }
 
 /**

@@ -4,19 +4,26 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.data.repository.PreferencesRepository
+import ru.mugalimov.volthome.data.repository.ProjectSetupRepository
+import ru.mugalimov.volthome.data.repository.observeResolved
 import ru.mugalimov.volthome.data.repository.RoomRepository
+import ru.mugalimov.volthome.data.local.datastore.ActiveProjectDataStore
 import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.RoomWithDevicesPreview
 import ru.mugalimov.volthome.domain.use_case.DeleteRoomUseCase
@@ -25,10 +32,13 @@ import ru.mugalimov.volthome.ui.screens.rooms.RoomUiState
 import ru.mugalimov.volthome.ui.screens.rooms.RoomWithDevicesPreviewUi
 
 @HiltViewModel
+@OptIn(ExperimentalCoroutinesApi::class)
 class RoomViewModel @Inject constructor(
     private val roomRepository: RoomRepository,
     private val deleteRoomUseCase: DeleteRoomUseCase,
-    private val preferencesRepository: PreferencesRepository
+    private val preferencesRepository: PreferencesRepository,
+    activeProjectDataStore: ActiveProjectDataStore,
+    projectSetupRepository: ProjectSetupRepository
 ) : ViewModel() {
 
     private val _actions = MutableSharedFlow<RoomsAction>(
@@ -39,7 +49,17 @@ class RoomViewModel @Inject constructor(
     val actions: SharedFlow<RoomsAction> = _actions
 
     val phaseMode: StateFlow<PhaseMode> =
-        preferencesRepository.phaseMode
+        activeProjectDataStore.activeProjectId
+            .flatMapLatest { projectId ->
+                if (projectId.isNullOrBlank()) {
+                    preferencesRepository.phaseMode
+                } else {
+                    val legacyFallbackMode = preferencesRepository.phaseMode.first()
+                    projectSetupRepository.observeResolved(projectId, legacyFallbackMode)
+                        .map { setup -> setup.phaseMode }
+                }
+            }
+            .distinctUntilChanged()
             .stateIn(viewModelScope, SharingStarted.Lazily, PhaseMode.THREE)
 
     val uiState: StateFlow<RoomUiState> =
@@ -74,10 +94,6 @@ class RoomViewModel @Inject constructor(
                 SharingStarted.WhileSubscribed(5_000),
                 RoomsOnboardingFacts()
             )
-
-    fun setPhaseMode(mode: PhaseMode) {
-        viewModelScope.launch { preferencesRepository.setPhaseMode(mode) }
-    }
 
     fun deleteRoom(roomId: Long) {
         viewModelScope.launch {

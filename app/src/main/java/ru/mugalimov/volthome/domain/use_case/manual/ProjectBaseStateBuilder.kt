@@ -2,13 +2,19 @@ package ru.mugalimov.volthome.domain.use_case.manual
 
 import android.content.ContentValues.TAG
 import android.util.Log
+import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import ru.mugalimov.volthome.data.repository.ExplicationRepository
+import ru.mugalimov.volthome.data.repository.PreferencesRepository
+import ru.mugalimov.volthome.data.repository.RoomRepository
+import ru.mugalimov.volthome.data.repository.ProjectSetupRepository
+import ru.mugalimov.volthome.data.repository.resolve
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.manual.ManualDeviceDraft
 import ru.mugalimov.volthome.domain.model.manual.ManualGroupComposition
 import ru.mugalimov.volthome.domain.model.manual.ManualGroupDraft
 import ru.mugalimov.volthome.domain.model.manual.ProjectEditState
+import ru.mugalimov.volthome.domain.policy.protection.RcdSelectionReason
 
 /**
  * Экран-независимая сборка baseState для ManualEditSession.
@@ -21,7 +27,10 @@ import ru.mugalimov.volthome.domain.model.manual.ProjectEditState
  * - ✅ после MANUAL_SAVE устройства без join обязаны появляться в "Нераспределённые".
  */
 class ProjectBaseStateBuilder @Inject constructor(
-    private val explicationRepository: ExplicationRepository
+    private val explicationRepository: ExplicationRepository,
+    private val roomRepository: RoomRepository,
+    private val preferencesRepository: PreferencesRepository,
+    private val projectSetupRepository: ProjectSetupRepository
 ) {
 
     /**
@@ -45,6 +54,13 @@ class ProjectBaseStateBuilder @Inject constructor(
         // 2) ВСЕ устройства проекта (не через join!)
         val allDevicesInProject = explicationRepository.getAllDevicesByProject(projectId)
         Log.d(TAG, "db snapshot: allDevices=${allDevicesInProject.size}")
+        val rooms = roomRepository.getRoomsWithDevicesByProject(projectId)
+        val roomTypesById = rooms.associate { it.room.id to it.room.roomType }
+        val roomNamesFromRooms = rooms.associate { it.room.id to it.room.name }
+        val phaseMode = projectSetupRepository.resolve(
+            projectId = projectId,
+            legacyFallbackPhaseMode = preferencesRepository.phaseMode.first()
+        ).phaseMode
 
         // 3) Детерминированный порядок групп:
         val sortedGroups = groupsWithDevices
@@ -72,7 +88,7 @@ class ProjectBaseStateBuilder @Inject constructor(
         // ✅ НОВОЕ:
         // Делаем карту roomId -> roomName из уже известных групп.
         // Это основной способ нормализовать устройства в manual draft.
-        val roomNamesById: Map<Long, String> = sortedGroups
+        val roomNamesById: Map<Long, String> = roomNamesFromRooms + sortedGroups
             .map { it.group }
             .filter { it.roomId > 0L && it.roomName.isNotBlank() }
             .associate { it.roomId to it.roomName }
@@ -98,6 +114,7 @@ class ProjectBaseStateBuilder @Inject constructor(
                     deviceId = d.id,
                     roomId = roomId,
                     roomName = roomName,
+                    roomType = roomTypesById[roomId] ?: ru.mugalimov.volthome.domain.model.RoomType.STANDARD,
                     deviceType = d.deviceType,
                     powerW = d.power,
                     voltageType = d.voltage.type,
@@ -105,7 +122,8 @@ class ProjectBaseStateBuilder @Inject constructor(
                     demandRatio = d.demandRatio,
                     powerFactor = d.powerFactor,
                     hasMotor = d.hasMotor,
-                    requiresDedicatedCircuit = d.requiresDedicatedCircuit
+                    requiresDedicatedCircuit = d.requiresDedicatedCircuit,
+                    requiresSocketConnection = d.requiresSocketConnection
                 )
             }
 
@@ -118,6 +136,7 @@ class ProjectBaseStateBuilder @Inject constructor(
                 groupNumber = g.groupNumber,
                 roomId = g.roomId,
                 roomName = g.roomName,
+                roomType = roomTypesById[g.roomId] ?: ru.mugalimov.volthome.domain.model.RoomType.STANDARD,
                 groupType = g.groupType,
 
                 composition = ManualGroupComposition.NORMAL,
@@ -131,7 +150,12 @@ class ProjectBaseStateBuilder @Inject constructor(
                 cableSection = g.cableSection,
                 breakerType = g.breakerType,
                 rcdRequired = g.rcdRequired,
-                rcdCurrent = g.rcdCurrent
+                rcdCurrent = g.rcdCurrent,
+                rcdSpec = g.rcdSpec,
+                deviationCodes = g.manualDeviationCodes,
+                rcdReasons = g.rcdReasonCodes.mapNotNull { code ->
+                    runCatching { RcdSelectionReason.valueOf(code) }.getOrNull()
+                }
             )
         }
 
@@ -143,7 +167,9 @@ class ProjectBaseStateBuilder @Inject constructor(
             devices = manualDevices,
             // ✅ ключевой фикс: на входе в manual unassigned вычисляются из БД
             unassignedDeviceIds = unassignedDeviceIds,
-            nextGroupNumber = nextGroupNumber
+            nextGroupNumber = nextGroupNumber,
+            phaseMode = phaseMode,
+            roomTypesById = roomTypesById
         )
 
         Log.d(

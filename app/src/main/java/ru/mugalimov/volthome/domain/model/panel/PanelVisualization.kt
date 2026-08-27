@@ -3,12 +3,20 @@ package ru.mugalimov.volthome.domain.model.panel
 /**
  * Доменная модель визуализации щита
  *
- * Важно:
- * эта модель описывает только логическую структуру визуализации,
- * без координат, размеров, реек и UI-позиционирования
+ * Результат локальной эскизной компоновки: каждый физический аппарат занимает
+ * самостоятельную позицию, а электрические связи сохраняются в метаданных группы.
  */
 
 data class PanelVisualization(
-    val incomer: PanelModule?,
-    val modules: List<PanelModule>
-)
+    val rails: List<PanelRail>,
+    val groupsCount: Int
+) {
+    val occupiedModuleUnits: Int
+        get() = rails.sumOf { it.occupiedModuleUnits }
+
+    val totalModuleUnits: Int
+        get() = rails.sumOf { it.capacityModuleUnits }
+
+    val freeModuleUnits: Int
+        get() = totalModuleUnits - occupiedModuleUnits
+}

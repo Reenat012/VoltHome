@@ -15,13 +15,14 @@ object PdfHints {
         screen = OnboardingScreen.EXPLICATION,
         targetTag = OnboardingTargetTag.EXPLICATION_PDF_FAB,
         priority = 100,
-        title = "PDF — это отчёт, а не акт допуска",
-        body = "Экспорт сохраняет расчётную сводку проекта. Документ не заменяет проверку инженером и не подтверждает соответствие монтажа на объекте."
+        title = "Сохраните профессиональный PDF-отчёт",
+        body = "В отчёт войдут сводка, группы, защита и расчётные допущения. Его можно передать клиенту; перед монтажом результаты должен проверить специалист."
     )
 
     fun forExplication(facts: ExplicationOnboardingFacts): AdvancedHintSpec? {
         if (!facts.isSuccess) return null
         if (!facts.pdfAvailable) return null
+        if (facts.pdfShown) return null
         if (facts.hasBlockingState) return null
         return PDF_EXPORT_INFO
     }

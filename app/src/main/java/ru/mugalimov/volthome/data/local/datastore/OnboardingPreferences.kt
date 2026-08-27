@@ -35,6 +35,7 @@ class OnboardingPreferences @Inject constructor(
 
     private companion object {
         val LAST_ANY_HINT_SHOWN_AT = longPreferencesKey("last_any_hint_shown_at")
+        val HINTS_DISABLED = booleanPreferencesKey("hints_disabled")
     }
 
     suspend fun isShown(hintId: OnboardingHintId): Boolean {
@@ -66,6 +67,28 @@ class OnboardingPreferences @Inject constructor(
     suspend fun setLastAnyHintShownAt(value: Long) {
         dataStore.edit { prefs ->
             prefs[LAST_ANY_HINT_SHOWN_AT] = value
+        }
+    }
+
+    suspend fun areHintsEnabled(): Boolean {
+        return dataStore.data
+            .map { prefs -> !(prefs[HINTS_DISABLED] ?: false) }
+            .first()
+    }
+
+    suspend fun disableHints() {
+        dataStore.edit { prefs ->
+            prefs[HINTS_DISABLED] = true
+        }
+    }
+
+    suspend fun resetAll() {
+        dataStore.edit { prefs ->
+            OnboardingHintId.entries.forEach { hintId ->
+                prefs.remove(booleanPreferencesKey("hint_shown_${hintId.storageKey}"))
+            }
+            prefs.remove(LAST_ANY_HINT_SHOWN_AT)
+            prefs.remove(HINTS_DISABLED)
         }
     }
 }

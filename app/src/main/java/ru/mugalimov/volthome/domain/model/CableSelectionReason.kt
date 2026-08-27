@@ -12,8 +12,8 @@ data class CableSelectionReason(
     val breakerA: Int,
     val deviceType: DeviceType,
 
-    // Нормативный минимум по автомату
-    val normativeFloorSectionMm2: Double,
+    // Минимум текущей продуктовой матрицы (не нормативный расчёт)
+    val minimumProductSectionMm2: Double,
 
     // Product-default, который продукт выбирает для данного автомата
     val productDefaultSectionMm2: Double,

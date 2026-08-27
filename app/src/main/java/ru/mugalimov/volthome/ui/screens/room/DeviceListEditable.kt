@@ -33,6 +33,7 @@ fun DeviceListEditable(
     onDelete: (Long) -> Unit
 ) {
     val editingId = remember { mutableStateOf<Long?>(null) }
+    val totalCalculatedPowerW = devices.sumOf { it.power * it.demandRatio }
 
     LazyColumn(
         modifier = modifier,
@@ -42,6 +43,7 @@ fun DeviceListEditable(
         items(devices, key = { it.id }) { device ->
             CardDevice(
                 device = device,
+                roomCalculatedPowerW = totalCalculatedPowerW,
                 onEditClick = { editingId.value = it },  // меню → Редактировать
                 onDeleteClick = onDelete                 // меню → Удалить
             )

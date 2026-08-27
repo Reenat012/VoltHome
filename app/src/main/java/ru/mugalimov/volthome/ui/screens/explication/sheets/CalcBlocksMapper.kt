@@ -1,6 +1,8 @@
 package ru.mugalimov.volthome.ui.screens.explication.sheets
 
 import ru.mugalimov.volthome.domain.model.CalcStep
+import java.text.DecimalFormat
+import java.text.DecimalFormatSymbols
 import java.util.Locale
 import kotlin.math.abs
 
@@ -241,7 +243,11 @@ object CalcBlocksMapper {
     }
 
     internal fun fmtNumber(v: Double): String {
-        val s = String.format(Locale.US, "%.2f", v)
-        return s.trimEnd('0').trimEnd('.')
+        if (!v.isFinite()) return "—"
+        val symbols = DecimalFormatSymbols(Locale("ru", "RU")).apply {
+            decimalSeparator = ','
+            groupingSeparator = ' '
+        }
+        return DecimalFormat("#,##0.##", symbols).format(v)
     }
 }

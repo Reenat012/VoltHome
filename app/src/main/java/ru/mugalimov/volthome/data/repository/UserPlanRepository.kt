@@ -4,8 +4,8 @@ import kotlinx.coroutines.flow.StateFlow
 import ru.mugalimov.volthome.domain.model.UserPlan
 
 /**
- * Хранит текущий тариф пользователя (free/pro) на клиенте.
- * Источник истины — серверный профиль, здесь только производный стейт.
+ * Постоянно хранит текущий тариф (free/pro) на устройстве.
+ * RuStore используется для покупки и восстановления, собственного backend нет.
  */
 interface UserPlanRepository {
 
@@ -13,7 +13,7 @@ interface UserPlanRepository {
     val planFlow: StateFlow<UserPlan>
 
     /**
-     * Обновить план (например, после загрузки профиля).
+     * Обновить и сохранить локальный план.
      */
     suspend fun setPlan(plan: UserPlan)
 
@@ -30,15 +30,8 @@ interface UserPlanRepository {
     fun isDebugForceProEnabled(): Boolean
 
     /**
-     * Полный сброс клиентского entitlement-состояния.
-     *
-     * Нужен на logout, чтобы новый пользователь не унаследовал:
-     * - серверный plan прошлого пользователя;
-     * - runtime debug-force состояние.
-     *
-     * Важно:
-     * persisted debug override в SharedPreferences этим методом НЕ чистится,
-     * если она хранится вне репозитория.
+     * Сбросить локальное entitlement-состояние. Выход из профиля этот метод не вызывает,
+     * потому что покупка относится к устройству/RuStore, а не к Яндекс ID.
      */
     suspend fun resetToFree(clearDebugOverride: Boolean = true)
 }

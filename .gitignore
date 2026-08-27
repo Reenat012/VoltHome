@@ -14,6 +14,10 @@
 .cxx
 local.properties
 keystore.properties
+secrets.properties
+*.jks
+*.keystore
+*.apk
+*.aab
 app/release/
-
 

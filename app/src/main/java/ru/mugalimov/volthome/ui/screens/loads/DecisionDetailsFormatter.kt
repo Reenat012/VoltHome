@@ -6,6 +6,7 @@ import kotlin.math.min
 import kotlin.math.round
 import ru.mugalimov.volthome.domain.model.DistributionDecision
 import ru.mugalimov.volthome.domain.model.Phase
+import ru.mugalimov.volthome.ui.format.UiTextFormat
 
 /**
  * Форматтер уровня A/B.
@@ -55,7 +56,7 @@ object DecisionExplanationFormatter {
         } else {
             val status = if (deltaI < 0.0) "лучше" else "хуже"
             val signed = formatSigned(deltaI)
-            "Баланс: $status (ΔI $signed A)"
+            "Баланс: $status (разница $signed${UiTextFormat.NBSP}А)"
         }
     }
 
@@ -93,14 +94,14 @@ object DecisionExplanationFormatter {
     private fun formatTriplet(m: Map<Phase, Double>): String {
         fun fmt(v: Double): String {
             val rounded = roundToStep(v, CURRENT_ROUND_STEP_A)
-            val s = String.format("%.1f", rounded)
-            return if (s == "0.0") "0" else s
+            val s = UiTextFormat.decimal(rounded)
+            return if (s == "0,0") "0" else s
         }
         return "A ${fmt(m[Phase.A] ?: 0.0)}  B ${fmt(m[Phase.B] ?: 0.0)}  C ${fmt(m[Phase.C] ?: 0.0)}"
     }
 
     private fun formatSigned(v: Double): String {
-        val absStr = String.format("%.1f", abs(v)).let { if (it == "0.0") "0" else it }
+        val absStr = UiTextFormat.decimal(abs(v)).let { if (it == "0,0") "0" else it }
         return if (v >= 0.0) "+$absStr" else "-$absStr"
     }
 

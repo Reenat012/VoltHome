@@ -21,6 +21,10 @@ data class ExplicationOnboardingFacts(
     val longPressShown: Boolean = false,
     val saveShown: Boolean = false,
     val unassignedShown: Boolean = false,
+    val overviewShown: Boolean = false,
+    val singleLineShown: Boolean = false,
+    val panelShown: Boolean = false,
+    val pdfShown: Boolean = false,
 
     // Блокирующие состояния.
     val dragInProgress: Boolean = false,

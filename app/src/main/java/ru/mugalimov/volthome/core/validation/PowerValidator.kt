@@ -9,7 +9,7 @@ object PowerValidator {
             value < InputConstraints.MIN_POWER_W ->
                 "Минимум ${InputConstraints.MIN_POWER_W} Вт"
             value > InputConstraints.MAX_POWER_W ->
-                "Максимум ${InputConstraints.MAX_POWER_W} Вт"
+                "Технический предел — 1 000 000 Вт"
             else -> null
         }
     }

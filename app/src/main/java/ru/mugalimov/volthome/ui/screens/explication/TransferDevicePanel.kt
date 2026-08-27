@@ -42,7 +42,7 @@ fun TransferDevicePanel(
             .forEach { g ->
                 val mixedBadge = if (g.composition == ManualGroupComposition.MIXED_MANUAL) " • MIXED" else ""
                 Text(
-                    text = "Группа #${g.groupNumber}${mixedBadge}",
+                    text = "Группа №${g.groupNumber}${mixedBadge}",
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { onMoveToGroup(g.groupId) }

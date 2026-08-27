@@ -22,6 +22,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.PrivacyTip
+import androidx.compose.material.icons.filled.Replay
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -32,10 +34,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -51,6 +55,11 @@ import ru.mugalimov.volthome.core.theme.VhColors
 import ru.mugalimov.volthome.legal.LegalUrls
 import ru.mugalimov.volthome.ui.screens.algoritm_about.AlgorithmExplanationContent
 import ru.mugalimov.volthome.ui.screens.welcome.openDocument
+import ru.mugalimov.volthome.ui.components.VhSectionHeader
+import ru.mugalimov.volthome.ui.components.VhTopBar
+import ru.mugalimov.volthome.ui.components.VhListRow
+import androidx.hilt.navigation.compose.hiltViewModel
+import ru.mugalimov.volthome.ui.viewmodel.PrivacySettingsViewModel
 
 /* ───────────── Константы ───────────── */
 private const val TELEGRAM_URL = "https://t.me/volthomeapp"
@@ -61,43 +70,23 @@ private const val TELEGRAM_URL = "https://t.me/volthomeapp"
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
-    onShowOnboarding: () -> Unit
+    onShowOnboarding: () -> Unit,
+    onOpenAlgorithm: () -> Unit,
+    privacyViewModel: PrivacySettingsViewModel = hiltViewModel()
 ) {
     val t = VhColors.tokens
+    val analyticsEnabled by privacyViewModel.analyticsEnabled.collectAsState()
 
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        "Информация",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = t.textPrimary
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Назад",
-                            tint = t.textSecondary
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = t.bg,
-                    titleContentColor = t.textPrimary,
-                    navigationIconContentColor = t.textSecondary,
-                    actionIconContentColor = t.textSecondary
-                )
-            )
-        },
+        topBar = { VhTopBar(title = "Справка и документы", onBack = onBack) },
         containerColor = t.bg
     ) { innerPadding ->
         SettingsContent(
             modifier = Modifier.padding(innerPadding),
-            onShowOnboarding = onShowOnboarding
+            onShowOnboarding = onShowOnboarding,
+            onOpenAlgorithm = onOpenAlgorithm,
+            analyticsEnabled = analyticsEnabled,
+            onAnalyticsChanged = privacyViewModel::setAnalyticsEnabled
         )
     }
 }
@@ -106,9 +95,11 @@ fun SettingsScreen(
 @Composable
 private fun SettingsContent(
     modifier: Modifier = Modifier,
-    onShowOnboarding: () -> Unit
+    onShowOnboarding: () -> Unit,
+    onOpenAlgorithm: () -> Unit,
+    analyticsEnabled: Boolean,
+    onAnalyticsChanged: (Boolean) -> Unit
 ) {
-    var showAlgoSheet by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val t = VhColors.tokens
 
@@ -124,6 +115,12 @@ private fun SettingsContent(
             title = "Политика конфиденциальности",
             subtitle = "Как мы обрабатываем ваши данные",
             url = LegalUrls.PRIVACY
+        ),
+        LegalItem(
+            icon = Icons.Filled.PrivacyTip,
+            title = "Согласие для Яндекс ID",
+            subtitle = "Действует только при добровольном входе",
+            url = LegalUrls.PD_CONSENT
         )
     )
 
@@ -135,8 +132,63 @@ private fun SettingsContent(
     ) {
         item { Spacer(modifier = Modifier.height(16.dp)) }
 
-        /* ── Правовая информация ── */
-        item { SectionHeader("Правовая информация") }
+        item { SectionHeader("Методика и помощь") }
+
+        item {
+            SettingsTile(
+                icon = Icons.Filled.AutoStories,
+                title = "Методика расчёта",
+                subtitle = "Этапы расчёта, группировки и балансировки фаз",
+                onClick = onOpenAlgorithm,
+                prominent = true
+            )
+        }
+
+        item {
+            SettingsTile(
+                icon = Icons.Filled.Replay,
+                title = "Повторить знакомство",
+                subtitle = "Снова показать основные возможности приложения",
+                onClick = onShowOnboarding
+            )
+        }
+
+        item { Spacer(modifier = Modifier.height(20.dp)) }
+
+        item { SectionHeader("Документы и данные") }
+
+        item {
+            Surface(
+                color = t.surface,
+                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onAnalyticsChanged(!analyticsEnabled) }
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Анонимная аналитика",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Диагностика стабильности без данных проектов",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = t.textSecondary
+                        )
+                    }
+                    Switch(
+                        checked = analyticsEnabled,
+                        onCheckedChange = onAnalyticsChanged
+                    )
+                }
+            }
+        }
 
         item {
             SettingsTile(
@@ -164,18 +216,30 @@ private fun SettingsContent(
                 }
             )
         }
+        item {
+            SettingsTile(
+                icon = legalItems[2].icon,
+                title = legalItems[2].title,
+                subtitle = legalItems[2].subtitle,
+                onClick = {
+                    context.openDocument(
+                        webUrl = legalItems[2].url,
+                        localAssetPath = "documents/pd_consent.html"
+                    )
+                }
+            )
+        }
 
         item { Spacer(modifier = Modifier.height(20.dp)) }
 
-        /* ── Информация о приложении ── */
-        item { SectionHeader("Информация о приложении") }
+        item { SectionHeader("Помощь") }
 
         item {
             SettingsTile(
-                icon = Icons.Filled.AutoStories,
-                title = "Как работает алгоритм",
-                subtitle = "Пояснение шагов расчёта и балансировки фаз",
-                onClick = { showAlgoSheet = true }
+                icon = Icons.AutoMirrored.Filled.Send,
+                title = "Канал ВольтХом",
+                subtitle = "Новости, алгоритмы и обратная связь",
+                onClick = { context.openExternalUrl(TELEGRAM_URL) }
             )
         }
 
@@ -188,138 +252,30 @@ private fun SettingsContent(
         }
     }
 
-    /* ── BottomSheet: «Как работает алгоритм» ── */
-    if (showAlgoSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showAlgoSheet = false },
-            dragHandle = { BottomSheetDefaults.DragHandle() },
-            containerColor = t.surface,
-            contentColor = t.textPrimary
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                AlgorithmExplanationContent()
-
-                Spacer(Modifier.height(12.dp))
-
-                FilledTonalButton(
-                    onClick = { showAlgoSheet = false },
-                    modifier = Modifier.align(Alignment.End),
-                    colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(
-                        containerColor = t.surfaceAlt,
-                        contentColor = t.textPrimary,
-                        disabledContainerColor = t.surface,
-                        disabledContentColor = t.textDisabled
-                    )
-                ) { Text("Понятно") }
-
-                Spacer(Modifier.height(8.dp))
-            }
-        }
-    }
 }
 
 /* ───────────────────── UI-компоненты ───────────────────── */
 
 @Composable
 private fun SectionHeader(title: String) {
-    val t = VhColors.tokens
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Medium,
-            color = t.primary
-        )
-        Spacer(Modifier.height(8.dp))
-        Divider(
-            color = t.divider,
-            thickness = 1.dp
-        )
-        Spacer(Modifier.height(8.dp))
-    }
+    VhSectionHeader(title = title)
 }
 
 /** Универсальная плитка настроек. Для CTA используйте prominent = true. */
 @Composable
 private fun SettingsTile(
     icon: ImageVector? = null,
-    iconPainter: androidx.compose.ui.graphics.painter.Painter? = null,
     title: String,
     subtitle: String,
     onClick: () -> Unit,
     prominent: Boolean = false
 ) {
-    val t = VhColors.tokens
-
-    // В Settings не должно быть “фиолетовой CTA” — только один акцент (primary) и спокойные поверхности.
-    val bg = if (prominent) t.primarySurface else t.surfaceAlt
-    val border = if (prominent) t.primary else t.divider
-
-    val titleColor = t.textPrimary
-    val subtitleColor = t.textSecondary
-    val iconTint = if (prominent) t.primary else t.textSecondary
-
-    val shape = if (prominent) RoundedCornerShape(20.dp) else RoundedCornerShape(16.dp)
-
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        color = bg,
-        shape = shape,
-        tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
-        border = androidx.compose.foundation.BorderStroke(1.dp, border)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = if (prominent) 16.dp else 14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            when {
-                iconPainter != null -> {
-                    Icon(
-                        painter = iconPainter,
-                        contentDescription = null,
-                        modifier = Modifier.size(if (prominent) 28.dp else 40.dp),
-                        tint = iconTint
-                    )
-                }
-                icon != null -> {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        modifier = Modifier.size(if (prominent) 28.dp else 40.dp),
-                        tint = iconTint
-                    )
-                }
-            }
-
-            Column(
-                modifier = Modifier
-                    .padding(start = 16.dp)
-                    .weight(1f)
-            ) {
-                Text(
-                    text = title,
-                    style = if (prominent) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyLarge,
-                    fontWeight = if (prominent) FontWeight.SemiBold else FontWeight.Medium,
-                    color = titleColor
-                )
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = subtitleColor
-                )
-            }
-        }
-    }
+    VhListRow(
+        title = title,
+        subtitle = subtitle,
+        icon = icon,
+        onClick = onClick
+    )
 }
 
 @Composable

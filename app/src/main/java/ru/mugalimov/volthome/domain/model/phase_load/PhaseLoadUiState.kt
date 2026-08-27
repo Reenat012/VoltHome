@@ -3,6 +3,7 @@ package ru.mugalimov.volthome.domain.model.phase_load
 import ru.mugalimov.volthome.domain.model.DistributionDecision
 import ru.mugalimov.volthome.domain.model.PhaseMode
 import ru.mugalimov.volthome.domain.model.incomer.IncomerSpec
+import ru.mugalimov.volthome.domain.model.incomer.IncomerAssessment
 
 enum class PhaseLoadMode {
     AUTO,
@@ -16,6 +17,7 @@ data class PhaseLoadUiState(
     val mode: PhaseMode = PhaseMode.THREE,
     val phaseLoadMode: PhaseLoadMode = PhaseLoadMode.AUTO,
     val incomer: IncomerSpec? = null,
+    val incomerAssessment: IncomerAssessment? = null,
     val thresholds: LoadThresholds = LoadThresholds(),
     val decisions: List<DistributionDecision> = emptyList()
 )

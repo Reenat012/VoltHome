@@ -144,7 +144,7 @@ fun UnassignedDevicesBlock(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                     ) {
                         Text(
-                            text = "Кол-во: ${devices.size}",
+                            text = "${devices.size} ${deviceWord(devices.size)}",
                             style = MaterialTheme.typography.labelLarge,
                             color = cs.onSurface
                         )
@@ -157,7 +157,7 @@ fun UnassignedDevicesBlock(
             // ── Подсказка (деловая, не простыня)
             Text(
                 text = if (hasUnassigned) {
-                    "Эти устройства не относятся ни к одной группе. Перенеси их вручную (long-press) или восстанови автоматически."
+                    "Эти устройства не входят ни в одну группу. Нажмите и удерживайте устройство для переноса или восстановите автоматическое распределение."
                 } else {
                     "Если устройство не относится ни к одной группе, оно появится здесь."
                 },
@@ -219,5 +219,16 @@ fun UnassignedDevicesBlock(
                 Text("Распределить автоматически")
             }
         }
+    }
+}
+
+private fun deviceWord(value: Int): String {
+    val mod100 = value % 100
+    val mod10 = value % 10
+    return when {
+        mod100 in 11..14 -> "устройств"
+        mod10 == 1 -> "устройство"
+        mod10 in 2..4 -> "устройства"
+        else -> "устройств"
     }
 }

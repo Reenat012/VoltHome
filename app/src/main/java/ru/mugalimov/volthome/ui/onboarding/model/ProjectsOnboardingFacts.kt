@@ -7,5 +7,6 @@ package ru.mugalimov.volthome.ui.onboarding.model
  * - только ProjectsViewModel
  */
 data class ProjectsOnboardingFacts(
-    val projectsCount: Int = 0
+    val projectsCount: Int = 0,
+    val isLoading: Boolean = true
 )

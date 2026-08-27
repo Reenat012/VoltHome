@@ -1,9 +1,7 @@
 package ru.mugalimov.volthome.ui.screens.explication.export_pdf
 
 import android.app.Activity
-import android.os.Build
 import androidx.activity.ComponentActivity
-import androidx.annotation.RequiresApi
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.domain.model.singleline.SingleLineDiagram
@@ -20,7 +18,6 @@ import ru.mugalimov.volthome.ui.utilities.PdfPrinter
  * - использует существующий PdfPrinter;
  * - не обещает URI/файл, потому что текущий pipeline работает через Android print flow.
  */
-@RequiresApi(Build.VERSION_CODES.P)
 fun exportSingleLineDiagramPdf(
     activity: Activity,
     diagram: SingleLineDiagram,

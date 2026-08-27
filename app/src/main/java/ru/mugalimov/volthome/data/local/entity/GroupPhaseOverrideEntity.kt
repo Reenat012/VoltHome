@@ -15,6 +15,12 @@ import ru.mugalimov.volthome.domain.model.Phase
             parentColumns = ["group_id"],
             childColumns = ["group_id"],
             onDelete = ForeignKey.CASCADE
+        ),
+        ForeignKey(
+            entity = ProjectEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["project_id"],
+            onDelete = ForeignKey.CASCADE
         )
     ],
     indices = [

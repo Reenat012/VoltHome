@@ -38,6 +38,8 @@ import ru.mugalimov.volthome.domain.mapper.toDomainGroup
 import ru.mugalimov.volthome.domain.mapper.toDomainGroupFromRelation
 import ru.mugalimov.volthome.domain.mapper.toEntityGroup
 import ru.mugalimov.volthome.domain.model.CircuitGroup
+import ru.mugalimov.volthome.domain.model.CalculationAlgorithm
+import ru.mugalimov.volthome.domain.model.CalculationSource
 import ru.mugalimov.volthome.domain.model.Device
 import ru.mugalimov.volthome.domain.model.DeviceType
 import ru.mugalimov.volthome.domain.model.DistributionDecision
@@ -357,7 +359,17 @@ class ExplicationRepositoryImpl @Inject constructor(
                                     cableSection = resolvedCable,
                                     breakerType = resolvedBreakerType,
                                     rcdRequired = gDraft.rcdRequired ?: false,
-                                    rcdCurrent = gDraft.rcdCurrent ?: 30
+                                    rcdCurrent = gDraft.rcdCurrent ?: 30,
+                                    rcdReasonCodes = gDraft.rcdReasons.joinToString(",") { it.name },
+                                    rcdNominalCurrent = gDraft.rcdSpec?.ratedCurrentA,
+                                    rcdType = gDraft.rcdSpec?.type?.name,
+                                    rcdPoles = gDraft.rcdSpec?.poles,
+                                    rcdSelectivity = gDraft.rcdSpec?.selectivity?.name ?: "NONE",
+                                    rcdKind = gDraft.rcdSpec?.kind?.name,
+                                    rcdSource = gDraft.rcdSpec?.source?.name ?: CalculationSource.MANUAL.name,
+                                    manualDeviationCodes = gDraft.deviationCodes.joinToString(","),
+                                    calculationSource = CalculationSource.MANUAL.name,
+                                    algorithmVersion = CalculationAlgorithm.VERSION
                                 )
                             }
 
@@ -391,6 +403,16 @@ class ExplicationRepositoryImpl @Inject constructor(
                                     breakerType = resolvedBreakerType,
                                     rcdRequired = gDraft.rcdRequired ?: false,
                                     rcdCurrent = gDraft.rcdCurrent ?: 30,
+                                    rcdReasonCodes = gDraft.rcdReasons.joinToString(",") { it.name },
+                                    rcdNominalCurrent = gDraft.rcdSpec?.ratedCurrentA,
+                                    rcdType = gDraft.rcdSpec?.type?.name,
+                                    rcdPoles = gDraft.rcdSpec?.poles,
+                                    rcdSelectivity = gDraft.rcdSpec?.selectivity?.name ?: "NONE",
+                                    rcdKind = gDraft.rcdSpec?.kind?.name,
+                                    rcdSource = gDraft.rcdSpec?.source?.name ?: CalculationSource.MANUAL.name,
+                                    manualDeviationCodes = gDraft.deviationCodes.joinToString(","),
+                                    calculationSource = CalculationSource.MANUAL.name,
+                                    algorithmVersion = CalculationAlgorithm.VERSION,
                                     phase = gDraft.phase.name,
                                     projectId = projectId
                                 )
@@ -867,6 +889,16 @@ class ExplicationRepositoryImpl @Inject constructor(
             deviceDao.getAllDevicesByProject(pid)
                 .map { it.toDomainDevice() }
         }
+
+    override fun observeAllDevicesByProject(projectId: String): Flow<List<Device>> {
+        val pid = projectId.trim()
+        return if (pid.isBlank()) {
+            flowOf(emptyList())
+        } else {
+            deviceDao.observeAllDevicesByProject(pid)
+                .map { entities -> entities.map { it.toDomainDevice() } }
+        }
+    }
 
     override suspend fun addGroup(circuitGroups: List<CircuitGroup>) {
         withContext(dispatchers) {

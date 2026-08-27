@@ -13,5 +13,6 @@ enum class OnboardingScreen {
     ADD_ROOM_SHEET,
     ROOM_DETAILS,
     LOADS,
-    EXPLICATION
+    EXPLICATION,
+    PANEL_VISUALIZATION
 }

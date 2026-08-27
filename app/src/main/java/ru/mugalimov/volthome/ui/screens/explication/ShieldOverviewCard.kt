@@ -49,21 +49,24 @@ import ru.mugalimov.volthome.domain.model.CircuitGroup
 import ru.mugalimov.volthome.domain.model.Phase
 import ru.mugalimov.volthome.domain.model.VoltageType
 import ru.mugalimov.volthome.domain.model.incomer.IncomerKind
+import ru.mugalimov.volthome.domain.model.incomer.IncomerAssessment
 import ru.mugalimov.volthome.domain.model.incomer.IncomerSpec
+import ru.mugalimov.volthome.domain.policy.protection.RcdSelectionReason
 import ru.mugalimov.volthome.domain.report.InlineNormatives
 import ru.mugalimov.volthome.domain.use_case.getOrZero
-import ru.mugalimov.volthome.domain.use_case.inferVoltageType
 import ru.mugalimov.volthome.domain.use_case.phaseCurrents
 import ru.mugalimov.volthome.ui.screens.explication.sheets.CalcDetailsState
 import ru.mugalimov.volthome.ui.format.ExplicationNumberFormat as F
 import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetPayload
 import ru.mugalimov.volthome.ui.screens.explication.sheets.InfoSheetType
 import ru.mugalimov.volthome.ui.viewmodel.explication.InfoSheetPayloadFactory
+import ru.mugalimov.volthome.ui.components.IncomerAssessmentStatusCard
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ShieldOverviewCard(
     incomer: IncomerSpec,
+    incomerAssessment: IncomerAssessment,
     groups: List<CircuitGroup>,
     hasGroupRcds: Boolean,
     installedPowerW: CalculatedValue,
@@ -77,8 +80,7 @@ fun ShieldOverviewCard(
     modifier: Modifier = Modifier,
 ) {
     // ---------- данные ----------
-    val vType: VoltageType = inferVoltageType(groups)
-    val is3 = vType == VoltageType.AC_3PHASE
+    val is3 = incomer.poles == 4
     val perPhase = phaseCurrents(groups)
     val aI = perPhase.getOrZero(Phase.A)
     val bI = perPhase.getOrZero(Phase.B)
@@ -86,7 +88,9 @@ fun ShieldOverviewCard(
     val maxPhase =
         if (is3) listOf("A" to aI, "B" to bI, "C" to cI).maxBy { it.second }.first else null
 
-    val hasWetZones = remember(groups) { groups.any { it.rcdRequired } }
+    val hasSpecialZones = remember(groups) {
+        groups.any { RcdSelectionReason.SPECIAL_ROOM.name in it.rcdReasonCodes }
+    }
 
     // ---------- roles ----------
     val cs = MaterialTheme.colorScheme
@@ -140,12 +144,12 @@ fun ShieldOverviewCard(
 
             ClickableSummaryRow(
                 label = "Установленная мощность",
-                value = "${F.kwFromW(installedPowerW.value.toInt(), decimals = 1)} кВт"
+                value = "${F.kwFromW(installedPowerW.value.toInt(), decimals = 1)}\u00A0кВт"
             ) { onInstalledPowerClick(installedPowerW) }
 
             ClickableSummaryRow(
                 label = "Расчётная нагрузка",
-                value = "${F.kwFromW(calculatedPowerW.value.toInt(), decimals = 1)} кВт"
+                value = "${F.kwFromW(calculatedPowerW.value.toInt(), decimals = 1)}\u00A0кВт"
             ) { onCalculatedPowerClick(calculatedPowerW) }
 
             Spacer(Modifier.height(12.dp))
@@ -154,10 +158,10 @@ fun ShieldOverviewCard(
             InfoBadges(
                 is3 = is3,
                 hasGroupRcds = hasGroupRcds,
-                hasWetZones = hasWetZones,
+                hasSpecialZones = hasSpecialZones,
                 onNetworkClick = { onOpenInfoSheet(buildNetworkPayload(is3)) },
                 onGroupRcdsClick = { onOpenInfoSheet(buildGroupRcdsPayload()) },
-                onWetZonesClick = { onOpenInfoSheet(buildWetZonesPayload()) }
+                onSpecialZonesClick = { onOpenInfoSheet(buildSpecialZonesPayload()) }
             )
 
             if (is3) {
@@ -176,6 +180,12 @@ fun ShieldOverviewCard(
                 hasGroupRcds = hasGroupRcds,
                 onHeaderInfoClick = { onOpenInfoSheet(buildIncomerPayload()) },
                 onTileClick = onIncomerFieldClick
+            )
+
+            IncomerAssessmentStatusCard(
+                assessment = incomerAssessment,
+                compact = true,
+                modifier = Modifier.padding(top = 12.dp)
             )
         }
     }
@@ -213,10 +223,10 @@ private fun ClickableSummaryRow(label: String, value: String, onClick: () -> Uni
 private fun InfoBadges(
     is3: Boolean,
     hasGroupRcds: Boolean,
-    hasWetZones: Boolean,
+    hasSpecialZones: Boolean,
     onNetworkClick: () -> Unit,
     onGroupRcdsClick: () -> Unit,
-    onWetZonesClick: () -> Unit
+    onSpecialZonesClick: () -> Unit
 ) {
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -234,8 +244,8 @@ private fun InfoBadges(
         )
         Badge(
             icon = Icons.Outlined.WaterDrop,
-            text = "Влажные зоны: " + if (hasWetZones) "есть" else "нет",
-            onClick = onWetZonesClick
+            text = "Особые помещения: " + if (hasSpecialZones) "есть" else "нет",
+            onClick = onSpecialZonesClick
         )
     }
 }
@@ -378,11 +388,11 @@ private fun IncomerGrid(
 
         GridCell(
             label = "Автомат",
-            value = "${incomer.mcbRating} A • кривая ${incomer.mcbCurve} • Icn ${incomer.icn / 1000} кА"
+            value = "${incomer.mcbRating} А • характеристика ${incomer.mcbCurve} • Icn ${incomer.icn / 1000} кА"
         ) { onTileClick(InfoSheetPayloadFactory.IncomerField.MCB) }
 
         GridCell(
-            label = "УЗО (ввод)",
+            label = "Вводное УЗО",
             value = if (incomer.kind != IncomerKind.MCB_ONLY)
                 "тип ${incomer.rcdType} • ${incomer.rcdSensitivityMa} мА" +
                         if (incomer.rcdSelectivity.name == "S") " • селективное" else ""
@@ -486,21 +496,29 @@ private fun buildGroupRcdsPayload(): InfoSheetPayload =
         title = "Групповые УЗО",
         sheetType = InfoSheetType.REFERENCE,
         interpretation = withNorm(
-            text = "УЗО ставят на отдельные линии (розетки, влажные помещения и т. п.). При утечке отключается только эта линия, " +
-                    "а остальная часть щита остаётся под напряжением — это удобнее и безопаснее.",
+            text = "Алгоритм назначает групповое УЗО 30 мА линиям особых помещений, группам с элементом " +
+                    "«Розетка бытовая» и каждой группе, в которой есть устройство с признаком " +
+                    "«Подключение через розетку». Поэтому отдельная линия микроволновой печи или другого " +
+                    "штепсельного прибора получает собственную дифференциальную защиту.",
             key = InlineNormatives.FactKey.GROUP_RCDS
+        ),
+        limitations = listOf(
+            "Признак розеточного подключения берётся из параметров устройства; фактическую схему и требования объекта должен проверить специалист."
         ),
         calcDetailsState = CalcDetailsState.HIDDEN
     )
 
-private fun buildWetZonesPayload(): InfoSheetPayload =
+private fun buildSpecialZonesPayload(): InfoSheetPayload =
     InfoSheetPayload(
-        title = "Влажные зоны",
+        title = "Особые помещения",
         sheetType = InfoSheetType.REFERENCE,
         interpretation = withNorm(
-            text = "Ванные, санузлы и зоны у мойки. Для таких линий обычно применяют УЗО чувствительностью 30 мА. " +
-                    "Следуйте проекту/ПУЭ и проверяйте степень защиты оборудования.",
+            text = "В текущей модели особыми считаются ванная, кухня и улица. Для сформированных в них линий " +
+                    "алгоритм назначает групповое УЗО 30 мА. Это правило определяется типом комнаты, а не названием прибора.",
             key = InlineNormatives.FactKey.WET_ZONES_30MA
+        ),
+        limitations = listOf(
+            "Границы зон, степень защиты оборудования и дополнительные требования объекта приложение не определяет."
         ),
         calcDetailsState = CalcDetailsState.HIDDEN
     )

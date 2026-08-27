@@ -16,7 +16,8 @@ data class SingleLineProtectionBlock(
     val phase: Phase?,
     val nominalCurrentAmps: Double?,
     val leakageCurrentMilliAmps: Int?,
-    val description: String?
+    val description: String?,
+    val warning: String? = null
 )
 
 /**
@@ -25,6 +26,9 @@ data class SingleLineProtectionBlock(
 enum class SingleLineProtectionType {
     INPUT_BREAKER,
     VOLTAGE_RELAY,
+    PHASE_CONTROL_RELAY,
+    CURRENT_RELAY,
+    MODULAR_CONTACTOR,
     SURGE_PROTECTION,
     RCD,
     DIFF_BREAKER,

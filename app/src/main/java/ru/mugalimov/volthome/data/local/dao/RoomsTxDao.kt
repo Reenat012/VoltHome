@@ -53,6 +53,18 @@ interface RoomsTxDao {
         return roomId to ids
     }
 
+    /**
+     * Мастер проекта создаёт несколько помещений одной транзакцией. Если любой
+     * insert не прошёл, Room откатывает весь набор и пользователь не получает
+     * наполовину созданный объект.
+     */
+    @Transaction
+    suspend fun insertRoomsWithDevices(
+        bundles: List<RoomInsertBundle>
+    ): List<Pair<Long, List<Long>>> = bundles.map { bundle ->
+        insertRoomWithDevices(bundle.room, bundle.devices)
+    }
+
     // insertDevices тут @Transaction не нужен — это один вызов insert’а:
     suspend fun insertDevices(entities: List<DeviceEntity>): List<Long> {
         android.util.Log.i("RoomsTxDao", "insertDevices start size=${entities.size}")
@@ -70,3 +82,8 @@ interface RoomsTxDao {
 
     }
 }
+
+data class RoomInsertBundle(
+    val room: RoomEntity,
+    val devices: List<DeviceEntity>
+)

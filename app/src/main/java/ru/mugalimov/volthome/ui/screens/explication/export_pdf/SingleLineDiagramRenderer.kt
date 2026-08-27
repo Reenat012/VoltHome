@@ -5,6 +5,7 @@ import ru.mugalimov.volthome.domain.model.singleline.SingleLineDiagram
 import ru.mugalimov.volthome.domain.model.singleline.SingleLineGroupBlock
 import ru.mugalimov.volthome.domain.model.singleline.SingleLinePhaseSection
 import ru.mugalimov.volthome.domain.model.singleline.SingleLineProtectionBlock
+import ru.mugalimov.volthome.domain.model.singleline.SingleLineProtectionType
 import java.util.Locale
 
 /**
@@ -28,7 +29,7 @@ object SingleLineDiagramRenderer {
      *
      * Это только ограничение PDF-layout, не инженерный расчёт.
      */
-    private const val GROUPS_PER_PAGE = 12
+    private const val GROUPS_PER_PAGE = 6
 
     fun render(diagram: SingleLineDiagram): String {
         return """
@@ -93,204 +94,269 @@ object SingleLineDiagramRenderer {
                         display: flex;
                         flex-direction: column;
                         align-items: center;
-                        margin-bottom: 14px;
+                        margin: 0 0 12px;
                         page-break-inside: avoid;
                         break-inside: avoid;
                     }
 
-                    .chain-node {
-                        min-width: 120px;
-                        border: 1px solid #9ca3af;
-                        border-radius: 8px;
-                        padding: 6px 10px;
-                        background: #ffffff;
-                        text-align: center;
-                        font-size: 10px;
+                    .supply-label {
+                        font-size: 8px;
                         font-weight: 800;
-                    }
-
-                    .chain-node-muted {
+                        letter-spacing: .08em;
+                        text-transform: uppercase;
                         color: #4b5563;
-                        font-weight: 700;
-                        background: #f9fafb;
                     }
 
-                    .chain-caption {
+                    .supply-arrow {
+                        width: 0;
+                        height: 0;
+                        border-left: 4px solid transparent;
+                        border-right: 4px solid transparent;
+                        border-top: 7px solid #111827;
+                        margin-top: 3px;
+                    }
+
+                    .vertical-conductor {
+                        width: 2px;
+                        height: 9px;
+                        background: #111827;
+                    }
+
+                    .incomer-device {
+                        display: grid;
+                        grid-template-columns: 52px 118px;
+                        align-items: center;
+                        column-gap: 9px;
+                    }
+
+                    .incomer-device-copy {
+                        text-align: left;
+                        line-height: 1.25;
+                    }
+
+                    .apparatus-ref {
+                        font-size: 8px;
+                        font-weight: 900;
+                        color: #111827;
+                    }
+
+                    .apparatus-value {
+                        margin-top: 1px;
+                        font-size: 8px;
+                        color: #374151;
+                    }
+
+                    .device-symbol {
                         display: block;
-                        margin-top: 2px;
-                        font-size: 8px;
-                        font-weight: 400;
-                        color: #6b7280;
+                        width: 52px;
+                        height: 38px;
                     }
 
-                    .v-line {
-                        width: 1px;
-                        height: 12px;
-                        background: #6b7280;
+                    .distribution-trunk {
+                        width: 2px;
+                        height: 10px;
+                        background: #111827;
                     }
 
-                    .split-label {
-                        margin-top: 2px;
-                        font-size: 8px;
+                    .distribution-bar {
+                        position: relative;
+                        width: 68%;
+                        height: 2px;
+                        background: #111827;
+                    }
+
+                    .distribution-bar::before {
+                        content: "";
+                        position: absolute;
+                        left: 50%;
+                        top: -3px;
+                        width: 7px;
+                        height: 7px;
+                        margin-left: -3px;
+                        border-radius: 50%;
+                        background: #111827;
+                    }
+
+                    .distribution-caption {
+                        margin-top: 4px;
+                        font-size: 7px;
+                        letter-spacing: .04em;
+                        text-transform: uppercase;
                         color: #6b7280;
                     }
 
                     .phase-section {
-                        position: relative;
-                        display: grid;
-                        grid-template-columns: 34px 1fr;
-                        column-gap: 10px;
-                        margin-bottom: 12px;
+                        margin-bottom: 13px;
                         page-break-inside: avoid;
                         break-inside: avoid;
                     }
 
-                    .phase-marker {
-                        position: relative;
+                    .phase-heading {
                         display: flex;
-                        flex-direction: column;
+                        align-items: baseline;
+                        justify-content: space-between;
+                        margin-bottom: 4px;
+                    }
+
+                    .phase-name {
+                        display: flex;
                         align-items: center;
+                        gap: 6px;
+                        font-size: 9px;
+                        font-weight: 900;
                     }
 
                     .phase-badge {
-                        width: 26px;
-                        height: 26px;
-                        border-radius: 6px;
-                        display: flex;
+                        display: inline-flex;
+                        width: 22px;
+                        height: 18px;
+                        border: 1px solid #9ca3af;
+                        border-radius: 4px;
                         align-items: center;
                         justify-content: center;
-                        font-size: 11px;
+                        font-size: 9px;
                         font-weight: 900;
-                        border: 1px solid #9ca3af;
-                        background: #ffffff;
-                        z-index: 2;
-                    }
-
-                    .phase-bus {
-                        width: 3px;
-                        flex: 1;
-                        min-height: 36px;
-                        border-radius: 99px;
-                        margin-top: 4px;
-                    }
-
-                    .phase-a .phase-badge { background: #fff7cc; }
-                    .phase-a .phase-bus { background: #f4c542; }
-
-                    .phase-b .phase-badge { background: #dcfce7; }
-                    .phase-b .phase-bus { background: #22c55e; }
-
-                    .phase-c .phase-badge { background: #ffe4e6; }
-                    .phase-c .phase-bus { background: #fb7185; }
-
-                    .phase-3p .phase-badge { background: #f3f4f6; }
-                    .phase-3p .phase-bus { background: #6b7280; }
-
-                    .phase-content {
-                        padding-top: 1px;
                     }
 
                     .phase-summary {
-                        font-size: 8px;
+                        font-size: 7px;
                         color: #6b7280;
-                        margin-bottom: 5px;
                     }
 
-                    .branch {
+                    .phase-bus-track {
+                        position: relative;
+                        height: 6px;
+                    }
+
+                    .phase-bus-line {
+                        position: absolute;
+                        left: 11px;
+                        right: 11px;
+                        top: 2px;
+                        height: 3px;
+                    }
+
+                    .phase-a .phase-badge { background: #fff7cc; }
+                    .phase-a .phase-bus-line { background: #eab308; }
+
+                    .phase-b .phase-badge { background: #dcfce7; }
+                    .phase-b .phase-bus-line { background: #16a34a; }
+
+                    .phase-c .phase-badge { background: #ffe4e6; }
+                    .phase-c .phase-bus-line { background: #e11d48; }
+
+                    .phase-3p .phase-badge { background: #f3f4f6; }
+                    .phase-3p .phase-bus-line { background: #6b7280; }
+
+                    .feeders {
                         display: grid;
-                        grid-template-columns: 16px 42px 48px 56px 52px 1fr;
-                        align-items: start;
-                        gap: 5px;
-                        min-height: 28px;
-                        margin-bottom: 5px;
+                        grid-template-columns: repeat(3, minmax(0, 1fr));
+                        column-gap: 9px;
+                        row-gap: 10px;
+                    }
+
+                    .feeder-row + .feeder-row {
+                        margin-top: 8px;
+                    }
+
+                    .feeder {
+                        position: relative;
+                        min-width: 0;
+                        text-align: center;
                         page-break-inside: avoid;
                         break-inside: avoid;
                     }
 
-                    .tee {
+                    .feeder-drop {
                         position: relative;
-                        height: 1px;
-                        background: #6b7280;
+                        width: 2px;
+                        height: 10px;
+                        margin: 0 auto;
+                        background: #111827;
                     }
 
-                    .tee::before {
+                    .feeder-drop::before {
                         content: "";
                         position: absolute;
-                        left: -10px;
-                        top: -8px;
-                        width: 1px;
-                        height: 17px;
-                        background: #6b7280;
+                        left: -3px;
+                        top: -5px;
+                        width: 8px;
+                        height: 8px;
+                        border-radius: 50%;
+                        background: #111827;
                     }
 
-                    .device-node {
-                        border: 1px solid #d1d5db;
-                        border-radius: 6px;
-                        padding: 4px 5px;
-                        background: #ffffff;
-                        font-size: 8px;
-                        font-weight: 800;
-                        text-align: center;
-                        white-space: nowrap;
+                    .feeder-device {
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        min-height: 38px;
                     }
 
-                    .small-node {
-                        border: 1px solid #e5e7eb;
-                        border-radius: 6px;
-                        padding: 4px 5px;
-                        background: #ffffff;
-                        font-size: 8px;
+                    .feeder-device-copy {
+                        width: 58px;
+                        margin-left: 3px;
+                        text-align: left;
+                        line-height: 1.15;
+                    }
+
+                    .device-connector {
+                        width: 2px;
+                        height: 5px;
+                        margin: 0 auto;
+                        background: #111827;
+                    }
+
+                    .cable-mark {
+                        display: inline-block;
+                        padding: 2px 4px;
+                        border-top: 1px solid #9ca3af;
+                        border-bottom: 1px solid #9ca3af;
+                        font-size: 7px;
                         color: #374151;
                         white-space: nowrap;
-                        text-align: center;
                     }
 
-                    .load-node {
-                        border: 1px solid #e5e7eb;
-                        border-radius: 7px;
-                        padding: 4px 6px;
-                        background: #f9fafb;
-                        font-size: 8px;
+                    .load-arrow {
+                        width: 0;
+                        height: 0;
+                        margin: 2px auto 3px;
+                        border-left: 4px solid transparent;
+                        border-right: 4px solid transparent;
+                        border-top: 7px solid #111827;
+                    }
+
+                    .load-terminal {
+                        padding-top: 3px;
+                        border-top: 1px solid #d1d5db;
+                        font-size: 7px;
                         color: #374151;
                         overflow: hidden;
                     }
 
                     .load-title {
-                        font-weight: 700;
+                        font-size: 8px;
+                        font-weight: 800;
                         color: #111827;
-                        overflow: hidden;
-                        text-overflow: ellipsis;
-                        white-space: nowrap;
+                        line-height: 1.2;
                     }
 
-                   .load-subtitle {
+                    .load-subtitle {
                         margin-top: 2px;
                         color: #6b7280;
-                        line-height: 1.35;
-                        white-space: normal;
+                        line-height: 1.25;
                     }
 
-                    .badges {
+                    .load-meta {
                         margin-top: 2px;
-                        display: flex;
-                        gap: 3px;
-                        flex-wrap: wrap;
-                    }
-
-                    .badge {
-                        display: inline-block;
-                        border-radius: 99px;
-                        padding: 1px 4px;
                         font-size: 7px;
-                        background: #eef2ff;
-                        color: #3730a3;
-                        border: 1px solid #c7d2fe;
+                        color: #4b5563;
                     }
 
                     .warning {
                         color: #92400e;
-                        font-size: 7px;
-                        margin-top: 1px;
+                        font-size: 6px;
+                        margin-top: 2px;
                     }
 
                     .bottom-buses {
@@ -422,7 +488,7 @@ object SingleLineDiagramRenderer {
 
                 ${
             if (includeIncomerChain) {
-                renderIncomerChain(diagram)
+                renderIncomerChain(diagram) + renderUnassignedApparatus(diagram)
             } else {
                 renderContinuationChain()
             }
@@ -459,7 +525,7 @@ object SingleLineDiagramRenderer {
                     <div class="subtitle">${diagram.projectName.escapeHtml()}</div>
                 </div>
                 <div class="source">
-                    Экспликация → SingleLineDiagram → PDF<br/>
+                    ВольтХом · автоматическая схема<br/>
                     Страница $pageNumber из $totalPages
                 </div>
             </header>
@@ -468,28 +534,42 @@ object SingleLineDiagramRenderer {
 
     private fun renderIncomerChain(diagram: SingleLineDiagram): String {
         val input = diagram.input
-        val protection = diagram.protectionBlocks
-            .joinToString(separator = " · ") { it.toCompactLabel() }
-            .ifBlank { "общая защита не указана" }
+        val protection = if (diagram.protectionBlocks.isEmpty()) {
+            renderIncomerDevice(
+                reference = "QF0",
+                title = "Вводной аппарат",
+                value = input.incomerLabel.orDash(),
+                isRcd = false
+            )
+        } else {
+            diagram.protectionBlocks.joinToString(separator = "\n") { block ->
+                renderIncomerDevice(
+                    reference = block.referenceLabel(),
+                    title = block.title,
+                    value = block.toCompactLabel(),
+                    isRcd = block.type == SingleLineProtectionType.RCD ||
+                            block.type == SingleLineProtectionType.DIFF_BREAKER ||
+                            block.leakageCurrentMilliAmps != null
+                )
+            }
+        }
+
+        val totals = listOfNotNull(
+            input.totalCalculatedPowerWatts?.formatKw(),
+            input.totalCurrentAmps?.formatAmps()
+        ).joinToString(separator = " · ")
 
         return """
             <section class="incomer-chain">
-                <div class="chain-node">
-                    ${input.title.escapeHtml()}
-                    <span class="chain-caption">ввод</span>
+                <div class="supply-label">Сеть · ${input.title.escapeHtml()}</div>
+                <div class="supply-arrow"></div>
+                <div class="vertical-conductor"></div>
+                $protection
+                <div class="distribution-trunk"></div>
+                <div class="distribution-bar"></div>
+                <div class="distribution-caption">
+                    Распределительная шина${if (totals.isBlank()) "" else " · ${totals.escapeHtml()}"}
                 </div>
-                <div class="v-line"></div>
-                <div class="chain-node">
-                    ${input.incomerLabel.orDash().escapeHtml()}
-                    <span class="chain-caption">вводной аппарат</span>
-                </div>
-                <div class="v-line"></div>
-                <div class="chain-node chain-node-muted">
-                    ${protection.escapeHtml()}
-                    <span class="chain-caption">защита</span>
-                </div>
-                <div class="v-line"></div>
-                <div class="split-label">распределение по фазным шинам</div>
             </section>
         """.trimIndent()
     }
@@ -497,30 +577,42 @@ object SingleLineDiagramRenderer {
     private fun renderContinuationChain(): String {
         return """
             <section class="incomer-chain">
-                <div class="chain-node chain-node-muted">
-                    Продолжение схемы
-                    <span class="chain-caption">группы нагрузок</span>
-                </div>
-                <div class="v-line"></div>
+                <div class="supply-label">Продолжение распределительной схемы</div>
+                <div class="supply-arrow"></div>
+                <div class="distribution-trunk"></div>
+                <div class="distribution-bar"></div>
             </section>
         """.trimIndent()
     }
 
     private fun renderPhaseSection(section: SingleLinePhaseSection): String {
+        val feederRows = section.groups
+            .chunked(3)
+            .joinToString(separator = "\n") { groups ->
+                """
+                    <div class="feeder-row">
+                        <div class="phase-bus-track">
+                            <div class="phase-bus-line"></div>
+                        </div>
+                        <div class="feeders">
+                            ${groups.joinToString(separator = "\n") { renderBranch(it) }}
+                        </div>
+                    </div>
+                """.trimIndent()
+            }
+
         return """
             <section class="phase-section ${section.phase.cssClass()}">
-                <div class="phase-marker">
-                    <div class="phase-badge">${section.phase.displayLabel()}</div>
-                    <div class="phase-bus"></div>
-                </div>
-
-                <div class="phase-content">
-                    <div class="phase-summary">
-                        ${section.phaseBus.label.escapeHtml()} · ${section.totalCurrentAmps.formatAmps()} · ${section.totalInstalledPowerWatts.formatKw()}
+                <div class="phase-heading">
+                    <div class="phase-name">
+                        <span class="phase-badge">${section.phase.displayLabel()}</span>
+                        ${section.phaseBus.label.escapeHtml()}
                     </div>
-
-                    ${section.groups.joinToString(separator = "\n") { renderBranch(it) }}
+                    <div class="phase-summary">
+                        ${section.totalCurrentAmps.formatAmps()} · ${section.totalInstalledPowerWatts.formatKw()}
+                    </div>
                 </div>
+                $feederRows
             </section>
         """.trimIndent()
     }
@@ -536,35 +628,123 @@ object SingleLineDiagramRenderer {
 
         val roomText = group.roomNames.joinToString().ifBlank { "помещение не указано" }
 
-        val badges = buildList {
-            group.rcdLabel?.takeIf { it.isNotBlank() }?.let { add(it) }
-            group.leakageCurrentMilliAmps?.let { add("${it} мА") }
+        val auxiliaryDevices = group.auxiliaryProtectionBlocks.joinToString(separator = "\n") { block ->
+            """
+                ${renderFeederDevice(
+                    reference = block.referenceLabel(),
+                    value = block.toCompactLabel(),
+                    isRcd = false
+                )}
+                <div class="device-connector"></div>
+            """.trimIndent()
         }
 
+        val rcdDevice = group.rcdLabel
+            ?.takeIf { it.isNotBlank() }
+            ?.let { label ->
+                """
+                    ${renderFeederDevice(
+                    reference = "QD${group.groupNumber}",
+                    value = label,
+                    isRcd = true
+                )}
+                    <div class="device-connector"></div>
+                """.trimIndent()
+            }
+            .orEmpty()
+
         return """
-            <article class="branch">
-                <div class="tee"></div>
-                <div class="device-node">QF${group.groupNumber}</div>
-                <div class="small-node">${group.breakerLabel.orDash().escapeHtml()}</div>
-                <div class="small-node">${group.cableLabel.orDash().escapeHtml()}</div>
-                <div class="small-node">${group.calculatedCurrentAmps.formatAmps()}</div>
-                <div class="load-node">
-                    <div class="load-title">${group.groupName.escapeHtml()} · ${roomText.escapeHtml()}</div>
+            <article class="feeder">
+                <div class="feeder-drop"></div>
+                $auxiliaryDevices
+                $rcdDevice
+                ${renderFeederDevice(
+            reference = "QF${group.groupNumber}",
+            value = group.breakerLabel.orDash(),
+            isRcd = false
+        )}
+                <div class="device-connector"></div>
+                <div class="cable-mark">${group.cableLabel.orDash().escapeHtml()}</div>
+                <div class="device-connector"></div>
+                <div class="load-arrow"></div>
+                <div class="load-terminal">
+                    <div class="load-title">Гр. ${group.groupNumber} · ${group.groupName.toDisplayGroupName().escapeHtml()}</div>
+                    <div class="load-meta">${roomText.escapeHtml()} · ${group.calculatedCurrentAmps.formatAmps()}</div>
                     <div class="load-subtitle">${deviceText.escapeHtml()}</div>
-                    ${renderBadges(badges)}
                     ${renderWarnings(group)}
                 </div>
             </article>
         """.trimIndent()
     }
 
-    private fun renderBadges(badges: List<String>): String {
-        if (badges.isEmpty()) return ""
+    private fun renderUnassignedApparatus(diagram: SingleLineDiagram): String {
+        if (diagram.unassignedProtectionBlocks.isEmpty()) return ""
+        val lines = diagram.unassignedProtectionBlocks.joinToString("<br/>") { block ->
+            "• ${block.referenceLabel().escapeHtml()} · ${block.title.escapeHtml()} — " +
+                "${block.warning.orDash().escapeHtml()}"
+        }
+        return """
+            <section class="legend" style="color:#92400e;border:1px solid #f59e0b;padding:7px;">
+                <b>Ручные аппараты без подключения</b><br/>
+                $lines<br/>
+                Аппараты сохранены в компоновке и смете, но не включены в электрическую цепь.
+            </section>
+        """.trimIndent()
+    }
+
+    private fun renderIncomerDevice(
+        reference: String,
+        title: String,
+        value: String,
+        isRcd: Boolean
+    ): String {
+        return """
+            <div class="incomer-device">
+                ${renderApparatusSymbol(isRcd)}
+                <div class="incomer-device-copy">
+                    <div class="apparatus-ref">${reference.escapeHtml()} · ${title.escapeHtml()}</div>
+                    <div class="apparatus-value">${value.escapeHtml()}</div>
+                </div>
+            </div>
+        """.trimIndent()
+    }
+
+    private fun renderFeederDevice(
+        reference: String,
+        value: String,
+        isRcd: Boolean
+    ): String {
+        return """
+            <div class="feeder-device">
+                ${renderApparatusSymbol(isRcd)}
+                <div class="feeder-device-copy">
+                    <div class="apparatus-ref">${reference.escapeHtml()}</div>
+                    <div class="apparatus-value">${value.escapeHtml()}</div>
+                </div>
+            </div>
+        """.trimIndent()
+    }
+
+    private fun renderApparatusSymbol(isRcd: Boolean): String {
+        val rcdMark = if (isRcd) {
+            """
+                <path d="M14 29 L18 22 L22 29 Z" fill="none" stroke="#111827" stroke-width="1.2"/>
+                <text x="30" y="31" font-size="7" font-family="sans-serif" fill="#111827">Δ</text>
+            """.trimIndent()
+        } else {
+            ""
+        }
 
         return """
-            <div class="badges">
-                ${badges.joinToString(separator = "\n") { "<span class=\"badge\">${it.escapeHtml()}</span>" }}
-            </div>
+            <svg class="device-symbol" viewBox="0 0 52 38" aria-hidden="true">
+                <line x1="26" y1="0" x2="26" y2="5" stroke="#111827" stroke-width="1.6"/>
+                <rect x="10" y="5" width="32" height="28" rx="1" fill="white" stroke="#111827" stroke-width="1.4"/>
+                <circle cx="26" cy="11" r="1.8" fill="#111827"/>
+                <circle cx="26" cy="27" r="1.8" fill="#111827"/>
+                <line x1="24" y1="25" x2="32" y2="13" stroke="#111827" stroke-width="1.6" stroke-linecap="round"/>
+                $rcdMark
+                <line x1="26" y1="33" x2="26" y2="38" stroke="#111827" stroke-width="1.6"/>
+            </svg>
         """.trimIndent()
     }
 
@@ -599,7 +779,8 @@ object SingleLineDiagramRenderer {
         return """
             <section class="legend">
                 <b>Легенда:</b>
-                QF — групповой автомат; A/B/C — фазные шины; 3P — трёхфазная линия;
+                QF — автоматический выключатель; QD — устройство дифференциальной защиты;
+                A/B/C — фазные шины; 3P — трёхфазная линия;
                 N — нейтральная шина; PE — защитная шина.
                 Подключения групп к N/PE показаны условно, без перегруза схемы линиями.
             </section>
@@ -625,14 +806,28 @@ object SingleLineDiagramRenderer {
 
     private fun SingleLineProtectionBlock.toCompactLabel(): String {
         val current = nominalCurrentAmps.formatAmps()
-        val leakage = leakageCurrentMilliAmps?.let { " / $it мА" }.orEmpty()
         val descriptionPart = description?.takeIf { it.isNotBlank() }
+        val baseLabel = descriptionPart ?: current
+        val leakage = leakageCurrentMilliAmps
+            ?.takeUnless { baseLabel.contains("мА", ignoreCase = true) }
+            ?.let { " / $it мА" }
+            .orEmpty()
 
-        return buildString {
-            append(title)
-            append(": ")
-            append(descriptionPart ?: current)
-            append(leakage)
+        return "$baseLabel$leakage"
+    }
+
+    private fun SingleLineProtectionBlock.referenceLabel(): String {
+        return when (type) {
+            SingleLineProtectionType.INPUT_BREAKER -> "QF0"
+            SingleLineProtectionType.VOLTAGE_RELAY -> id.ifBlank { "KV0" }
+            SingleLineProtectionType.PHASE_CONTROL_RELAY -> id.ifBlank { "KF0" }
+            SingleLineProtectionType.CURRENT_RELAY -> id.ifBlank { "KA0" }
+            SingleLineProtectionType.MODULAR_CONTACTOR -> id.ifBlank { "KM0" }
+            SingleLineProtectionType.SURGE_PROTECTION -> id.ifBlank { "FV0" }
+            SingleLineProtectionType.RCD -> "QD0"
+            SingleLineProtectionType.DIFF_BREAKER -> "QFD0"
+            SingleLineProtectionType.GROUP_BREAKER -> "QF"
+            SingleLineProtectionType.UNKNOWN -> "Q0"
         }
     }
 
@@ -656,6 +851,15 @@ object SingleLineDiagramRenderer {
 
     private fun String?.orDash(): String {
         return this?.takeIf { it.isNotBlank() } ?: "—"
+    }
+
+    private fun String.toDisplayGroupName(): String {
+        return when (uppercase(Locale.ROOT)) {
+            "LIGHTING" -> "Освещение"
+            "SOCKET" -> "Розеточная линия"
+            "HEAVY_DUTY" -> "Выделенная линия"
+            else -> replace('_', ' ')
+        }
     }
 
     private fun Double?.formatKw(): String {

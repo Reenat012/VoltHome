@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -27,6 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -48,6 +50,12 @@ import java.time.ZoneId
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.ui.viewmodel.AuthViewModel
 import ru.mugalimov.volthome.ui.viewmodel.ProfileViewModel
+import ru.mugalimov.volthome.ui.components.VhErrorState
+import ru.mugalimov.volthome.ui.components.VhLoadingState
+import ru.mugalimov.volthome.ui.components.VhTopBar
+import ru.mugalimov.volthome.ui.components.VhSecondaryButton
+import ru.mugalimov.volthome.ui.components.VhStatusBadge
+import ru.mugalimov.volthome.ui.components.VhInlineNotice
 
 private const val DEFAULT_AVATAR_ASSET = "file:///android_asset/report_pdf/img/logo.png"
 private const val DEFAULT_DISPLAY_NAME = "Пользователь"
@@ -64,60 +72,26 @@ fun ProfileScreen(
     val profileState by profileVm.state.collectAsState()
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(Unit) {
-        profileVm.refresh()
-    }
-
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Профиль") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.Default.ArrowBack,
-                            contentDescription = "Назад"
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onBackground
-                )
-            )
-        }
+        topBar = { VhTopBar(title = "Профиль", onBack = onBack) }
     ) { inner ->
         when (val state = profileState) {
             is ProfileViewModel.UiState.Loading -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(inner),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator()
-                }
+                VhLoadingState(modifier = Modifier.padding(inner), message = "Загружаем профиль…")
             }
 
             is ProfileViewModel.UiState.Error -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(inner)
-                        .padding(20.dp)
-                ) {
-                    Text(
-                        text = state.message,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
+                VhErrorState(
+                    modifier = Modifier.padding(inner),
+                    message = state.message,
+                    onRetry = profileVm::refresh
+                )
             }
 
             is ProfileViewModel.UiState.Data -> {
                 val me = state.me
 
-                // Защищаем UI от null/blank значений, которые могут прийти с сервера.
+                // Защищаем UI от пустых значений локального профиля.
                 val safeDisplayName = me.displayName
                     ?.takeIf { it.isNotBlank() }
                     ?: DEFAULT_DISPLAY_NAME
@@ -132,6 +106,7 @@ fun ProfileScreen(
                 val safePlan = me.plan
                     ?.takeIf { it.isNotBlank() }
                     ?: DEFAULT_PLAN
+                val isGuest = safeEmail == DEFAULT_EMAIL_PLACEHOLDER
 
                 LazyColumn(
                     modifier = Modifier
@@ -168,13 +143,17 @@ fun ProfileScreen(
 
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = safeDisplayName,
+                                        text = if (isGuest) "Гостевой режим" else safeDisplayName,
                                         style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.SemiBold
                                     )
 
                                     Text(
-                                        text = safeEmail,
+                                        text = if (isGuest) {
+                                            "Работа без обязательной авторизации"
+                                        } else {
+                                            safeEmail
+                                        },
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -191,22 +170,21 @@ fun ProfileScreen(
                     }
 
                     item {
-                        Row(modifier = Modifier.fillMaxWidth()) {
-                            Button(
-                                onClick = {
-                                    scope.launch {
-                                        authVm.signOut()
-                                    }
-                                }
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.ExitToApp,
-                                    contentDescription = null
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text("Выйти")
-                            }
-                        }
+                        VhInlineNotice(
+                            title = "Данные хранятся на устройстве",
+                            description = "Проекты и расчёты доступны без собственного сервера ВольтХом.",
+                            icon = Icons.Rounded.Storage
+                        )
+                    }
+
+                    item {
+                        VhSecondaryButton(
+                            text = if (isGuest) "Войти через Яндекс ID" else "Выйти из аккаунта",
+                            onClick = {
+                                scope.launch { authVm.signOut() }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
             }
@@ -249,15 +227,8 @@ private fun PlanChip(
         }
     }
 
-    AssistChip(
-        onClick = {},
-        label = { Text(label) },
-        leadingIcon = {
-            Icon(
-                imageVector = Icons.Default.Person,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp)
-            )
-        }
+    VhStatusBadge(
+        text = label.uppercase(),
+        emphasized = normalizedPlan.equals("pro", ignoreCase = true)
     )
 }

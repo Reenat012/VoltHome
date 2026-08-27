@@ -34,4 +34,14 @@ class OnboardingRepositoryImpl @Inject constructor(
     override suspend fun setLastAnyHintShownAt(value: Long) {
         preferences.setLastAnyHintShownAt(value)
     }
+
+    override suspend fun areHintsEnabled(): Boolean = preferences.areHintsEnabled()
+
+    override suspend fun disableHints() {
+        preferences.disableHints()
+    }
+
+    override suspend fun resetAll() {
+        preferences.resetAll()
+    }
 }

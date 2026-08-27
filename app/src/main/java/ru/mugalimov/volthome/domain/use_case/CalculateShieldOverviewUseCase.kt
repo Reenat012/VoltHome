@@ -21,12 +21,14 @@ class CalculateShieldOverviewUseCase @Inject constructor() {
         // Installed power (паспортная)
         // -----------------------------
         // Важно: Device.power в домене = Int (non-null)
-        val installedPowerW: Int = groups.sumOf { g ->
-            g.devices.sumOf { d -> d.power }
+        val effectiveDevices = groups.flatMap { group ->
+            CircuitLoadCalculator.effectiveDevices(group.devices)
+        }
+        val installedPowerW: Int = groups.sumOf { group ->
+            CircuitLoadCalculator.calculate(group.devices).installedPowerW.toInt()
         }
 
-        val installedInputs: List<CalcInput> = groups
-            .flatMap { it.devices }
+        val installedInputs: List<CalcInput> = effectiveDevices
             .map { d ->
                 val key = "deviceId=${d.id};label=${d.name}"
                 CalcInput(
@@ -52,14 +54,10 @@ class CalculateShieldOverviewUseCase @Inject constructor() {
         // -----------------------------
         // Важно: demandRatio в доменной модели Device = Double (non-null),
         // поэтому ветки "k == null" здесь быть не должно.
-        val totalDevices = groups.sumOf { it.devices.size }
+        val totalDevices = effectiveDevices.size
 
-        val calculatedPowerW: Int = groups.sumOf { g ->
-            g.devices.sumOf { d ->
-                val p = d.power
-                val k = d.demandRatio
-                (p * k).toInt()
-            }
+        val calculatedPowerW: Double = groups.sumOf { group ->
+            CircuitLoadCalculator.calculate(group.devices).calculatedPowerW
         }
 
         val calculatedAssumptions: List<CalcAssumption> = buildList {
@@ -77,12 +75,14 @@ class CalculateShieldOverviewUseCase @Inject constructor() {
             }
         }
 
-        val calculatedInputs: List<CalcInput> = groups
-            .flatMap { it.devices }
+        val calculatedInputs: List<CalcInput> = effectiveDevices
             .flatMap { d ->
                 val p = d.power
                 val k = d.demandRatio
-                val result = (p * k).toInt()
+                val result = CurrentCalculator.calculateCalculatedPower(
+                    power = p.toDouble(),
+                    demandRatio = k
+                )
 
                 val key = "deviceId=${d.id};label=${d.name}"
 
@@ -99,7 +99,7 @@ class CalculateShieldOverviewUseCase @Inject constructor() {
                     ),
                     CalcInput(
                         name = "$key / result",
-                        value = result.toDouble(),
+                        value = result,
                         unit = "Вт"
                     )
                 )
@@ -110,7 +110,7 @@ class CalculateShieldOverviewUseCase @Inject constructor() {
                 name = "Расчётная нагрузка",
                 formula = "Pрасч(щит) = Σ (Pуст,i × kспроса,i)",
                 inputs = calculatedInputs,
-                output = CalcOutput(value = calculatedPowerW.toDouble(), unit = "Вт"),
+                output = CalcOutput(value = calculatedPowerW, unit = "Вт"),
                 assumptions = calculatedAssumptions + CalcAssumption(
                     kind = CalcAssumption.Kind.OTHER,
                     source = CoefficientSource.DEFAULT,
@@ -133,7 +133,7 @@ class CalculateShieldOverviewUseCase @Inject constructor() {
                 normRefs = emptyList()
             ),
             calculatedPowerW = CalculatedValue(
-                value = calculatedPowerW.toDouble(),
+                value = calculatedPowerW,
                 unit = "Вт",
                 label = "Расчётная нагрузка",
                 steps = calculatedSteps,

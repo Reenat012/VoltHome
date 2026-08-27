@@ -189,6 +189,7 @@ fun VoltHomeTheme(
     MaterialTheme(
         colorScheme = colorScheme,
         typography = Typography,
+        shapes = VhShapes,
         content = content
     )
 }

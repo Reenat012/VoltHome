@@ -1,139 +1,90 @@
 package ru.mugalimov.volthome.data.repository.impl
 
 import android.util.Log
-import com.yandex.authsdk.YandexAuthException
 import com.yandex.authsdk.YandexAuthLoginOptions
 import com.yandex.authsdk.YandexAuthResult
-import com.yandex.authsdk.YandexAuthSdk
-import com.yandex.authsdk.YandexAuthToken
+import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import ru.mugalimov.volthome.data.remote.api.AuthApi
-import ru.mugalimov.volthome.data.remote.api.ExchangeRequest
-import ru.mugalimov.volthome.data.remote.api.LogoutRequest
-import ru.mugalimov.volthome.data.remote.auth.AuthError
-import ru.mugalimov.volthome.data.remote.auth.AuthSession
-import ru.mugalimov.volthome.data.remote.auth.SessionManager
-import ru.mugalimov.volthome.data.remote.auth.toAuthSession
+import ru.mugalimov.volthome.data.local.auth.LocalAuthProvider
+import ru.mugalimov.volthome.data.local.auth.LocalAuthSession
+import ru.mugalimov.volthome.data.local.auth.LocalAuthSessionStore
+import ru.mugalimov.volthome.data.local.auth.YandexCredentialStore
+import ru.mugalimov.volthome.data.remote.yandex.YandexUserRemoteDataSource
 import ru.mugalimov.volthome.data.repository.AuthRepository
-import ru.mugalimov.volthome.data.sync.work.TokenRefreshScheduler
 
-/**
- * Реализация репозитория авторизации на основе рекомендаций Яндекс ID SDK 3.1.x.
- */
+/** Локальная авторизация. Яндекс ID используется только как необязательный провайдер профиля. */
 @Singleton
 class AuthRepositoryImpl @Inject constructor(
-    private val sdk: YandexAuthSdk,
-    private val authApi: AuthApi,
-    private val session: SessionManager,
-    private val tokenRefreshScheduler: TokenRefreshScheduler
+    private val sessionStore: LocalAuthSessionStore,
+    private val credentialStore: YandexCredentialStore,
+    private val yandexUserDataSource: YandexUserRemoteDataSource
 ) : AuthRepository {
-
-    companion object {
-        private const val TAG = "AuthRepositoryImpl"
+    private companion object {
+        const val TAG = "AuthRepository"
     }
 
-    override fun loginOptions(): YandexAuthLoginOptions {
-        // Централизованное создание options.
-        // На текущем этапе — без параметров, но НЕ в UI.
-        // Если SDK поддерживает Builder — сюда же переносим builder-конфиг без касаний UI.
-        return YandexAuthLoginOptions()
-    }
+    override fun loginOptions(): YandexAuthLoginOptions = YandexAuthLoginOptions()
 
-    override suspend fun handleAuthResult(result: YandexAuthResult): Result<AuthSession> =
+    override suspend fun continueAsGuest(): LocalAuthSession = sessionStore.createGuest()
+
+    override suspend fun handleAuthResult(result: YandexAuthResult): Result<LocalAuthSession> =
         withContext(Dispatchers.IO) {
             when (result) {
-                is YandexAuthResult.Success -> {
-                    val ya: YandexAuthToken = result.token
+                is YandexAuthResult.Success -> runCatching {
+                    val accessToken = result.token.value
 
-                    return@withContext try {
-                        // Важно:
-                        // 1) code оставляем для совместимости со старой серверной логикой;
-                        // 2) yaAccessToken передаём отдельно, чтобы новый сервер мог
-                        //    сходить в Яндекс /info и получить стабильный id пользователя.
-                        val resp = authApi.exchange(
-                            ExchangeRequest(
-                                code = ya.value,
-                                yaAccessToken = ya.value
-                            )
-                        )
-
-                        // Временный диагностический лог:
-                        // подтверждаем, что uid реально пришёл с сервера.
-                        Log.d(
-                            TAG,
-                            "AUTH_EXCHANGE_OK uid=${resp.uid} refreshIdPresent=${!resp.refreshId.isNullOrBlank()}"
-                        )
-
-                        // Сохраняем uid в локальную сессию.
-                        session.save(
-                            sessionJwt = resp.sessionJwt,
-                            expiresAtEpochSeconds = resp.expiresAtEpochSeconds,
-                            refreshId = resp.refreshId,
-                            uid = resp.uid
-                        )
-
-                        // Единое планирование без expedited.
-                        tokenRefreshScheduler.schedule(resp.expiresAtEpochSeconds * 1000L)
-
-                        Result.success(
-                            AuthSession(
-                                accessToken = resp.sessionJwt,
-                                expiresAtMillis = resp.expiresAtEpochSeconds * 1000L,
-                                uid = resp.uid,
-                                tokenType = "Bearer",
-                                refreshId = resp.refreshId
-                            )
-                        )
-                    } catch (_: Throwable) {
-                        Result.failure(RuntimeException("jwt_auth"))
+                    val info = yandexUserDataSource.getUserInfo(accessToken).getOrNull()
+                    val session = LocalAuthSession(
+                        provider = LocalAuthProvider.YANDEX,
+                        uid = info?.id?.takeIf { it.isNotBlank() }
+                            ?: stableUidFromToken(accessToken),
+                        displayName = info?.bestName?.takeIf { it.isNotBlank() }
+                            ?: "Пользователь Яндекс ID",
+                        email = info?.email,
+                        avatarUrl = info?.avatarUrl()
+                    )
+                    // Сначала фиксируем долговечную локальную сессию. Недоступность
+                    // KeyStore не должна выкидывать пользователя из приложения.
+                    sessionStore.save(session)
+                    credentialStore.save(
+                        token = accessToken,
+                        expiresInSeconds = result.token.expiresIn
+                    ).onFailure {
+                        Log.w(TAG, "Yandex credential was not persisted; local session is preserved", it)
                     }
+                    session
                 }
 
-                is YandexAuthResult.Failure -> {
-                    Result.failure(RuntimeException("oauth_invalid"))
-                }
-
-                is YandexAuthResult.Cancelled -> {
-                    Result.failure(RuntimeException("cancelled"))
-                }
+                is YandexAuthResult.Failure -> Result.failure(RuntimeException("oauth_invalid"))
+                is YandexAuthResult.Cancelled -> Result.failure(RuntimeException("cancelled"))
             }
         }
 
-    override suspend fun currentSession(): AuthSession? = session.load()?.toAuthSession()
+    override suspend fun currentSession(): LocalAuthSession? {
+        val session = sessionStore.load()
+        if (session?.provider == LocalAuthProvider.YANDEX) {
+            credentialStore.load().onFailure {
+                Log.w(TAG, "Yandex credential is unavailable during bootstrap", it)
+            }
+        }
+        return session
+    }
 
     override suspend fun signOut() {
-        val s = session.load()
-        try {
-            authApi.logout(LogoutRequest(refreshId = s?.refreshId))
-        } catch (_: Throwable) {
-            // Server logout best-effort.
-        } finally {
-            session.clear()
-            // Ничего отдельно отменять не требуется: при новом логине будет REPLACE.
+        sessionStore.clear()
+        credentialStore.clear().onFailure {
+            Log.w(TAG, "Credential cleanup deferred because secure storage is unavailable", it)
         }
     }
 
-    private fun mapException(e: YandexAuthException): AuthError {
-        val msg = (e.message ?: "").lowercase()
-        return when {
-            "cancel" in msg -> AuthError.Cancelled
-            "security" in msg -> AuthError.Security
-            "network" in msg || "connect" in msg -> AuthError.Connection
-            "jwt" in msg -> AuthError.JwtAuthorization
-            "oauth" in msg && "token" in msg -> AuthError.OAuthTokenInvalid
-            else -> AuthError.Other(e.message)
-        }
-    }
-
-    private fun mapError(err: AuthError): Throwable = when (err) {
-        AuthError.Cancelled -> RuntimeException("cancelled")
-        AuthError.Connection -> RuntimeException("connection")
-        AuthError.Security -> RuntimeException("security")
-        AuthError.OAuthTokenInvalid -> RuntimeException("oauth_invalid")
-        AuthError.JwtAuthorization -> RuntimeException("jwt_auth")
-        is AuthError.Other -> RuntimeException(err.message ?: "other")
+    private fun stableUidFromToken(token: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(token.toByteArray(Charsets.UTF_8))
+            .take(12)
+            .joinToString(separator = "") { "%02x".format(it) }
+        return "yandex-$digest"
     }
 }

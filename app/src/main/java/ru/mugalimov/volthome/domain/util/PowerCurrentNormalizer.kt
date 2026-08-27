@@ -1,12 +1,11 @@
 package ru.mugalimov.volthome.domain.util
 
 
-import android.util.Log
 import ru.mugalimov.volthome.domain.model.Voltage
-import ru.mugalimov.volthome.domain.model.VoltageType
 import kotlin.math.roundToInt
-import kotlin.math.sqrt
 import ru.mugalimov.volthome.domain.model.CalcAssumption
+import ru.mugalimov.volthome.domain.use_case.CurrentCalculator
+import java.util.logging.Logger
 
 /**
 + * Заполняет недостающее поле мощности (Вт) или тока (А) по известному второму.
@@ -15,7 +14,7 @@ import ru.mugalimov.volthome.domain.model.CalcAssumption
 object PowerCurrentNormalizer {
 
     private const val TAG = "PowerCurrentNormalizer"
-    private val SQRT3 = sqrt(3.0)
+    private val logger: Logger = Logger.getLogger(TAG)
 
     data class NormalizedPowerCurrent(
         val powerW: Int?,
@@ -46,29 +45,32 @@ object PowerCurrentNormalizer {
 
         when {
             p != null && i == null -> {
-                i = when (voltage.type) {
-                    VoltageType.AC_3PHASE -> p.toDouble() / (SQRT3 * voltage.value * pf)
-                    else -> p.toDouble() / (voltage.value * pf)
-                }
+                i = CurrentCalculator.calculateInstalledCurrent(
+                    power = p.toDouble(),
+                    voltage = voltage.value.toDouble(),
+                    powerFactor = pf,
+                    voltageType = voltage.type
+                )
             }
 
             i != null && p == null -> {
-                val calc = when (voltage.type) {
-                    VoltageType.AC_3PHASE -> i * SQRT3 * voltage.value * pf
-                    else -> i * voltage.value * pf
-                }
+                val calc = CurrentCalculator.calculateInstalledPower(
+                    current = i,
+                    voltage = voltage.value.toDouble(),
+                    powerFactor = pf,
+                    voltageType = voltage.type
+                )
                 p = calc.roundToInt()
             }
         }
 
         if ((p ?: 0) == 0 && (i ?: 0.0) > 0.0) {
-            Log.w(
-                TAG,
+            logger.warning(
                 "Inconsistent device numbers: power=0W while current=${i}A (voltage=${voltage.value}, pf=$pf)"
             )
         }
         if ((p ?: 0) > 100000 || (i ?: 0.0) > 1000) {
-            Log.w(TAG, "Suspicious device numbers: power=${p}W, current=${i}A")
+            logger.warning("Suspicious device numbers: power=${p}W, current=${i}A")
         }
 
         return NormalizedPowerCurrent(

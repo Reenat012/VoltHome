@@ -1,10 +1,8 @@
 package ru.mugalimov.volthome.ui.viewmodel
 
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.delay
 import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -12,39 +10,30 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.BuildConfig
+import ru.mugalimov.volthome.core.analytics.AnalyticsEvent
+import ru.mugalimov.volthome.core.analytics.AnalyticsTracker
+import ru.mugalimov.volthome.core.analytics.PaywallSource
+import ru.mugalimov.volthome.core.analytics.PurchaseAnalyticsContext
 import ru.mugalimov.volthome.data.billing.BillingAvailability
 import ru.mugalimov.volthome.data.billing.BillingErrorCode
 import ru.mugalimov.volthome.data.billing.BillingException
-import ru.mugalimov.volthome.data.billing.BillingRecoveryCoordinator
 import ru.mugalimov.volthome.data.billing.RustoreBillingManager
-import ru.mugalimov.volthome.data.remote.auth.RefreshGate
 import ru.mugalimov.volthome.data.repository.SubscriptionRepository
-import ru.mugalimov.volthome.data.billing.pending.PendingConfirmCoordinator
+import ru.rustore.sdk.pay.model.SubscriptionPurchase
 
 @HiltViewModel
 class SubscriptionViewModel @Inject constructor(
     private val subscriptionRepository: SubscriptionRepository,
     private val billingManager: RustoreBillingManager,
-    private val refreshGate: RefreshGate,
-    private val pendingCoordinator: PendingConfirmCoordinator,
-    private val billingRecoveryCoordinator: BillingRecoveryCoordinator
+    private val analytics: AnalyticsTracker,
+    private val purchaseAnalyticsContext: PurchaseAnalyticsContext
 ) : ViewModel() {
 
-    companion object {
-        private const val TAG = "SubscriptionVM"
-    }
-
-    /**
-     * Базовая stage model для instrumentation baseline.
-     * Здесь это именно модель наблюдаемости, а не полноценная state machine orchestration.
-     */
     enum class BillingStage {
         IDLE,
         LOADING_PRODUCT,
         READY_TO_PURCHASE,
         PURCHASING,
-        PENDING_CONFIRM,
-        CONFIRMING,
         RESTORING,
         ENTITLED,
         FAILED
@@ -52,116 +41,55 @@ class SubscriptionViewModel @Inject constructor(
 
     data class UiState(
         val isLoading: Boolean = false,
-
-        // Состояние загрузки продукта из SDK.
         val isProductLoading: Boolean = false,
         val isProductLoaded: Boolean = false,
         val isProductUnavailable: Boolean = false,
-
-        // Состояние manual restore.
         val isRestoreAvailable: Boolean = BuildConfig.BILLING_RESTORE_ENABLED,
         val isRestoring: Boolean = false,
-
         val errorMessage: String? = null,
         val infoMessage: String? = null,
-
         val stage: BillingStage = BillingStage.IDLE,
-        val purchaseFlowId: String? = null
+        val purchaseFlowId: String? = null,
+        val productPriceLabel: String? = null,
     )
 
-    private val _state = MutableStateFlow(UiState())
-    val state: StateFlow<UiState> = _state.asStateFlow()
+    private val mutableState = MutableStateFlow(UiState())
+    val state: StateFlow<UiState> = mutableState.asStateFlow()
 
-    private val proProduct by lazy {
-        subscriptionRepository.getProProducts().first()
-    }
+    private val proProduct by lazy { subscriptionRepository.getProProducts().first() }
 
     fun loadProProductIfNeeded() {
         viewModelScope.launch {
-            // 🔒 idempotent guard
-            val current = _state.value
+            val current = mutableState.value
+            if (current.isProductLoaded || current.isProductLoading) return@launch
 
-            // 🔒 idempotent guard + защита от бесполезных повторов
-            if (current.isProductLoaded || current.isProductLoading) {
-                return@launch
-            }
-
-            // В release не долбим SDK повторно, если уже знаем, что продукта нет.
-            // В debug разрешаем повторную попытку, чтобы можно было тестировать сценарии.
-            if (current.isProductUnavailable && !BuildConfig.DEBUG) {
-                Log.d(TAG, "LOAD_PRODUCTS_SKIPPED_ALREADY_UNAVAILABLE")
-                return@launch
-            }
-
-            if (current.isProductUnavailable && BuildConfig.DEBUG) {
-                Log.d(TAG, "LOAD_PRODUCTS_RETRY_DEBUG")
-            }
-
-            val flowId = newFlowId("product")
-
-            logBegin(
-                operation = "loadProducts",
-                flowId = flowId,
-                stage = BillingStage.LOADING_PRODUCT
-            )
-
-            _state.value = current.copy(
+            mutableState.value = current.copy(
                 isProductLoading = true,
                 isProductUnavailable = false,
                 errorMessage = null,
                 stage = BillingStage.LOADING_PRODUCT
             )
 
-            val result = billingManager.loadProducts(
+            billingManager.loadProducts(
                 productIds = listOf(proProduct.productId),
-                flowId = flowId
-            )
-
-            result.fold(
+                flowId = newFlowId("product")
+            ).fold(
                 onSuccess = { products ->
-                    if (products.isEmpty()) {
-                        logEnd(
-                            operation = "loadProducts",
-                            flowId = flowId,
-                            stage = BillingStage.FAILED,
-                            outcome = "PRODUCT_UNAVAILABLE"
-                        )
-
-                        _state.value = _state.value.copy(
-                            isProductLoading = false,
-                            isProductUnavailable = true,
-                            isProductLoaded = false,
-                            stage = BillingStage.FAILED
-                        )
-                    } else {
-                        logEnd(
-                            operation = "loadProducts",
-                            flowId = flowId,
-                            stage = BillingStage.READY_TO_PURCHASE,
-                            outcome = "PRODUCT_LOADED"
-                        )
-
-                        _state.value = _state.value.copy(
-                            isProductLoading = false,
-                            isProductLoaded = true,
-                            isProductUnavailable = false,
-                            stage = BillingStage.READY_TO_PURCHASE
-                        )
-                    }
-                },
-                onFailure = { e ->
-                    logEnd(
-                        operation = "loadProducts",
-                        flowId = flowId,
-                        stage = BillingStage.FAILED,
-                        outcome = "PRODUCT_LOAD_FAILED",
-                        extra = e.message
+                    val loadedProduct = products.firstOrNull { it.id == proProduct.productId }
+                    val loaded = loadedProduct != null
+                    mutableState.value = mutableState.value.copy(
+                        isProductLoading = false,
+                        isProductLoaded = loaded,
+                        isProductUnavailable = !loaded,
+                        productPriceLabel = loadedProduct?.priceLabel,
+                        stage = if (loaded) BillingStage.READY_TO_PURCHASE else BillingStage.FAILED
                     )
-
-                    _state.value = _state.value.copy(
+                },
+                onFailure = { error ->
+                    mutableState.value = mutableState.value.copy(
                         isProductLoading = false,
                         isProductLoaded = false,
-                        errorMessage = e.message ?: "Ошибка загрузки продукта",
+                        errorMessage = billingMessage(error),
                         stage = BillingStage.FAILED
                     )
                 }
@@ -169,159 +97,46 @@ class SubscriptionViewModel @Inject constructor(
         }
     }
 
+    /** Сверяет локальное право с активными подписками RuStore. */
     fun refreshStatus() {
         viewModelScope.launch {
-            // Это не purchaseFlowId покупки, а отдельный id для refresh-операции.
-            val flowId = newFlowId(prefix = "status")
-
-            // Грубая отсечка: если уже идёт recovery, даже не пытаемся входить в refresh-контур.
-            if (billingRecoveryCoordinator.hasActiveRecovery()) {
-                Log.w(TAG, "REFRESH_STATUS_SKIPPED_ACTIVE_RECOVERY flowId=$flowId")
-
-                logEnd(
-                    operation = "refreshStatus",
-                    flowId = flowId,
-                    stage = BillingStage.IDLE,
-                    outcome = "SYNC_STATUS_SKIPPED_ACTIVE_RECOVERY"
-                )
-                return@launch
-            }
-
-            // Захватываем refresh-контур через coordinator.
-            // Это защищает от гонок с restore / replay / login recovery.
-            val refreshStarted = billingRecoveryCoordinator.beginStatusRefresh(
-                flowId = flowId,
-                reason = "manual_status_refresh"
-            )
-
-            if (!refreshStarted) {
-                Log.w(TAG, "REFRESH_STATUS_BLOCKED_BY_COORDINATOR flowId=$flowId")
-
-                logEnd(
-                    operation = "refreshStatus",
-                    flowId = flowId,
-                    stage = BillingStage.IDLE,
-                    outcome = "SYNC_STATUS_BLOCKED_BY_COORDINATOR"
-                )
-                return@launch
-            }
-
-            logBegin(
-                operation = "refreshStatus",
-                flowId = flowId,
-                stage = BillingStage.IDLE,
-                extra = "action=sync_status"
-            )
-
-            _state.value = _state.value.copy(
+            val flowId = newFlowId("status")
+            mutableState.value = mutableState.value.copy(
                 isLoading = true,
                 errorMessage = null,
                 infoMessage = null
             )
 
-            try {
-                val result = subscriptionRepository.syncStatus(
-                    flowId = flowId,
-                    source = "manual_status_refresh"
-                )
+            billingManager.getActiveSubscriptions(flowId).fold(
+                onSuccess = { subscriptions ->
+                    val active = subscriptions.hasVoltHomePro()
+                    if (active) subscriptionRepository.activatePro()
+                    else subscriptionRepository.deactivatePro()
 
-                _state.value = result.fold(
-                    onSuccess = { plan ->
-                        logEnd(
-                            operation = "refreshStatus",
-                            flowId = flowId,
-                            stage = BillingStage.IDLE,
-                            outcome = "SYNC_STATUS_OK",
-                            extra = "plan=${plan.plan}, planUntil=${plan.planUntilEpochSeconds}"
-                        )
-
-                        _state.value.copy(
-                            isLoading = false,
-                            infoMessage = null,
-                            errorMessage = null,
-                            stage = BillingStage.IDLE
-                        )
-                    },
-                    onFailure = { e ->
-                        logEnd(
-                            operation = "refreshStatus",
-                            flowId = flowId,
-                            stage = BillingStage.FAILED,
-                            outcome = "SYNC_STATUS_FAILED",
-                            extra = "errorClass=${e.javaClass.simpleName}, errorMessage=${e.message}"
-                        )
-
-                        _state.value.copy(
-                            isLoading = false,
-                            errorMessage = e.message ?: "Не удалось обновить статус подписки",
-                            stage = BillingStage.FAILED
-                        )
-                    }
-                )
-            } catch (t: Throwable) {
-                logEnd(
-                    operation = "refreshStatus",
-                    flowId = flowId,
-                    stage = BillingStage.FAILED,
-                    outcome = "SYNC_STATUS_EXCEPTION",
-                    extra = "errorClass=${t.javaClass.simpleName}, errorMessage=${t.message}"
-                )
-
-                _state.value = _state.value.copy(
-                    isLoading = false,
-                    errorMessage = t.message ?: "Не удалось обновить статус подписки",
-                    stage = BillingStage.FAILED
-                )
-            } finally {
-                // Критично: всегда освобождаем refresh-контур.
-                billingRecoveryCoordinator.endStatusRefresh(
-                    flowId = flowId,
-                    reason = "manual_status_refresh"
-                )
-            }
+                    mutableState.value = mutableState.value.copy(
+                        isLoading = false,
+                        infoMessage = if (active) "Подписка ВольтХом PRO активна" else null,
+                        stage = if (active) BillingStage.ENTITLED else BillingStage.IDLE
+                    )
+                },
+                onFailure = { error ->
+                    // При временной ошибке RuStore локальный PRO не сбрасываем.
+                    mutableState.value = mutableState.value.copy(
+                        isLoading = false,
+                        errorMessage = billingMessage(error),
+                        stage = BillingStage.FAILED
+                    )
+                }
+            )
         }
     }
 
-    /**
-     * Ручное восстановление покупок через RuStore SDK.
-     *
-     * Правила:
-     * - restore доступен только если включён флаг;
-     * - restore не стартует, если активен pending replay;
-     * - status refresh не должен пересекаться с restore;
-     * - найденные покупки подтверждаем через backend confirm path.
-     */
     fun restorePurchases() {
         viewModelScope.launch {
-            if (!BuildConfig.BILLING_RESTORE_ENABLED) {
-                Log.w(TAG, "RESTORE_SKIPPED_FEATURE_FLAG_DISABLED")
-                return@launch
-            }
-
-            val current = _state.value
-            if (current.isRestoring || current.stage == BillingStage.RESTORING) {
-                Log.w(TAG, "RESTORE_SKIPPED_ALREADY_RUNNING")
-                return@launch
-            }
-
-            if (billingRecoveryCoordinator.hasActiveRecovery()) {
-                Log.w(TAG, "RESTORE_SKIPPED_ACTIVE_RECOVERY")
-                _state.value = current.copy(
-                    errorMessage = "Сейчас выполняется другая операция восстановления. Повторите чуть позже."
-                )
-                return@launch
-            }
+            if (!BuildConfig.BILLING_RESTORE_ENABLED || mutableState.value.isRestoring) return@launch
 
             val flowId = newFlowId("restore")
-
-            logBegin(
-                operation = "restorePurchases",
-                flowId = flowId,
-                stage = BillingStage.RESTORING,
-                extra = "manual=true"
-            )
-
-            _state.value = current.copy(
+            mutableState.value = mutableState.value.copy(
                 isLoading = true,
                 isRestoring = true,
                 errorMessage = null,
@@ -330,695 +145,111 @@ class SubscriptionViewModel @Inject constructor(
                 purchaseFlowId = flowId
             )
 
-            // Старт restore через coordinator.
-            val restoreStarted = billingRecoveryCoordinator.beginRestore(
-                flowId = flowId,
-                reason = "manual_restore"
-            )
+            billingManager.getActiveSubscriptions(flowId).fold(
+                onSuccess = { subscriptions ->
+                    val active = subscriptions.hasVoltHomePro()
 
-            if (!restoreStarted) {
-                logEnd(
-                    operation = "restorePurchases",
-                    flowId = flowId,
-                    stage = BillingStage.FAILED,
-                    outcome = "RESTORE_BLOCKED_BY_COORDINATOR"
-                )
+                    if (active) subscriptionRepository.activatePro()
+                    else subscriptionRepository.deactivatePro()
 
-                _state.value = _state.value.copy(
-                    isLoading = false,
-                    isRestoring = false,
-                    errorMessage = "Восстановление сейчас недоступно. Повторите позже.",
-                    stage = BillingStage.FAILED
-                )
-                return@launch
-            }
-
-            try {
-                // 1. Просим SDK вернуть покупки.
-                val restoreResult = billingManager.restorePurchases(flowId = flowId)
-
-                restoreResult.fold(
-                    onSuccess = { purchases ->
-                        if (purchases.isEmpty()) {
-                            logEnd(
-                                operation = "restorePurchases",
-                                flowId = flowId,
-                                stage = BillingStage.IDLE,
-                                outcome = "RESTORE_EMPTY"
-                            )
-
-                            _state.value = _state.value.copy(
-                                isLoading = false,
-                                isRestoring = false,
-                                infoMessage = "Покупки для восстановления не найдены.",
-                                errorMessage = null,
-                                stage = BillingStage.IDLE
-                            )
-                            return@fold
-                        }
-
-                        // 2. Берём только подписки.
-                        val subscriptions = purchases
-                            .filterIsInstance<ru.rustore.sdk.pay.model.SubscriptionPurchase>()
-
-                        if (subscriptions.isEmpty()) {
-                            logEnd(
-                                operation = "restorePurchases",
-                                flowId = flowId,
-                                stage = BillingStage.IDLE,
-                                outcome = "RESTORE_NO_SUBSCRIPTIONS"
-                            )
-
-                            _state.value = _state.value.copy(
-                                isLoading = false,
-                                isRestoring = false,
-                                infoMessage = "Подписок для восстановления не найдено.",
-                                errorMessage = null,
-                                stage = BillingStage.IDLE
-                            )
-                            return@fold
-                        }
-
-                        // 3. Подтверждаем найденные покупки через backend confirm path.
-                        var restoredCount = 0
-                        var lastError: Throwable? = null
-
-                        subscriptions.forEach { purchase ->
-                            val productId = purchase.productId.value
-                            val orderId = purchase.invoiceId.value
-                            val purchaseToken = purchase.purchaseId.value
-                            val owner = "restore:$flowId"
-
-                            val identityAcquired = billingRecoveryCoordinator.tryAcquireIdentity(
-                                productId = productId,
-                                orderId = orderId,
-                                purchaseToken = purchaseToken,
-                                owner = owner
-                            )
-
-                            if (!identityAcquired) {
-                                Log.w(
-                                    TAG,
-                                    "RESTORE_IDENTITY_SKIPPED flowId=$flowId productId=${maskValue(productId)} orderId=${maskValue(orderId)}"
-                                )
-                                return@forEach
-                            }
-
-                            try {
-                                val confirmResult = subscriptionRepository.confirmRustorePurchase(
-                                    productId = productId,
-                                    orderId = orderId,
-                                    purchaseToken = purchaseToken,
-                                    flowId = flowId,
-                                    source = "manual_restore"
-                                )
-
-                                confirmResult.fold(
-                                    onSuccess = {
-                                        restoredCount += 1
-                                    },
-                                    onFailure = { error ->
-                                        lastError = error
-                                        Log.w(
-                                            TAG,
-                                            "RESTORE_CONFIRM_FAILED flowId=$flowId productId=${maskValue(productId)} orderId=${maskValue(orderId)} errorClass=${error.javaClass.simpleName}"
-                                        )
-                                    }
-                                )
-                            } finally {
-                                billingRecoveryCoordinator.releaseIdentity(
-                                    productId = productId,
-                                    orderId = orderId,
-                                    purchaseToken = purchaseToken,
-                                    owner = owner
-                                )
-                            }
-                        }
-
-                        if (restoredCount > 0) {
-                            logEnd(
-                                operation = "restorePurchases",
-                                flowId = flowId,
-                                stage = BillingStage.ENTITLED,
-                                outcome = "RESTORE_OK",
-                                extra = "restoredCount=$restoredCount"
-                            )
-
-                            _state.value = _state.value.copy(
-                                isLoading = false,
-                                isRestoring = false,
-                                infoMessage = "Покупки восстановлены: $restoredCount",
-                                errorMessage = null,
-                                stage = BillingStage.ENTITLED
-                            )
+                    mutableState.value = mutableState.value.copy(
+                        isLoading = false,
+                        isRestoring = false,
+                        infoMessage = if (active) {
+                            "Подписка ВольтХом PRO восстановлена"
                         } else {
-                            logEnd(
-                                operation = "restorePurchases",
-                                flowId = flowId,
-                                stage = BillingStage.FAILED,
-                                outcome = "RESTORE_CONFIRM_FAILED",
-                                extra = "errorClass=${lastError?.javaClass?.simpleName}, errorMessage=${lastError?.message}"
-                            )
-
-                            _state.value = _state.value.copy(
-                                isLoading = false,
-                                isRestoring = false,
-                                errorMessage = lastError?.message ?: "Не удалось восстановить покупки",
-                                stage = BillingStage.FAILED
-                            )
-                        }
-                    },
-                    onFailure = { error ->
-                        logEnd(
-                            operation = "restorePurchases",
-                            flowId = flowId,
-                            stage = BillingStage.FAILED,
-                            outcome = "RESTORE_SDK_FAILED",
-                            extra = "errorClass=${error.javaClass.simpleName}, errorMessage=${error.message}"
-                        )
-
-                        _state.value = _state.value.copy(
-                            isLoading = false,
-                            isRestoring = false,
-                            errorMessage = error.message ?: "Не удалось восстановить покупки",
-                            stage = BillingStage.FAILED
-                        )
-                    }
-                )
-            } finally {
-                billingRecoveryCoordinator.endRestore(
-                    flowId = flowId,
-                    reason = "manual_restore"
-                )
-            }
+                            "Активная подписка ВольтХом PRO не найдена"
+                        },
+                        stage = if (active) BillingStage.ENTITLED else BillingStage.IDLE
+                    )
+                },
+                onFailure = { error ->
+                    mutableState.value = mutableState.value.copy(
+                        isLoading = false,
+                        isRestoring = false,
+                        errorMessage = billingMessage(error),
+                        stage = BillingStage.FAILED
+                    )
+                }
+            )
         }
     }
 
-    private fun isPurchaseAllowed(): Boolean {
-        val s = _state.value
-
-        return s.isProductLoaded &&
-                !s.isProductLoading &&
-                s.stage != BillingStage.PURCHASING &&
-                s.stage != BillingStage.CONFIRMING
-    }
-
-    /**
-     * Покупка VoltHome PRO через RuStore Pay.
-     *
-     * Commit 1:
-     * - SDK success не даёт PRO напрямую
-     * - purchaseFlowId один на весь клиентский путь
-     * - confirm идёт только после SDK success
-     */
     fun buyPro() {
         viewModelScope.launch {
-            if (!isPurchaseAllowed()) {
-                Log.w(TAG, "BUY_PRO_REJECTED_NOT_ALLOWED")
-                return@launch
-            }
+            val current = mutableState.value
+            if (!current.isProductLoaded || current.isLoading) return@launch
 
-            val purchaseFlowId = newFlowId(prefix = "purchase")
-
-            logBegin(
-                operation = "buyPro",
-                flowId = purchaseFlowId,
-                stage = BillingStage.PURCHASING,
-                extra = "productId=${maskValue(proProduct.productId)}"
-            )
-
-            _state.value = _state.value.copy(
+            val flowId = newFlowId("purchase")
+            mutableState.value = current.copy(
                 isLoading = true,
                 errorMessage = null,
                 infoMessage = null,
                 stage = BillingStage.PURCHASING,
-                purchaseFlowId = purchaseFlowId
+                purchaseFlowId = flowId
             )
 
-            // Шаг 1. Проверка доступности.
-            logBegin(
-                operation = "checkAvailability",
-                flowId = purchaseFlowId,
-                stage = BillingStage.PURCHASING
-            )
-
-            val availability = try {
-                billingManager.checkAvailability(flowId = purchaseFlowId)
-            } catch (t: Throwable) {
-                logEnd(
-                    operation = "checkAvailability",
-                    flowId = purchaseFlowId,
-                    stage = BillingStage.FAILED,
-                    outcome = "CHECK_AVAILABILITY_EXCEPTION",
-                    extra = "errorClass=${t.javaClass.simpleName}, errorMessage=${t.message}"
-                )
-
-                logEnd(
-                    operation = "buyPro",
-                    flowId = purchaseFlowId,
-                    stage = BillingStage.FAILED,
-                    outcome = "PURCHASE_FLOW_FAILED",
-                    extra = "reason=check_availability_exception"
-                )
-
-                _state.value = UiState(
-                    isLoading = false,
-                    errorMessage = t.message ?: "Ошибка проверки доступности платежей",
-                    stage = BillingStage.FAILED,
-                    purchaseFlowId = purchaseFlowId
-                )
-                return@launch
-            }
-
-            when (availability) {
+            when (val availability = billingManager.checkAvailability(flowId)) {
                 is BillingAvailability.Unavailable -> {
-                    val msg = availability.message ?: "Платежи недоступны. Попробуйте позже."
-
-                    logEnd(
-                        operation = "checkAvailability",
-                        flowId = purchaseFlowId,
-                        stage = BillingStage.FAILED,
-                        outcome = "BILLING_UNAVAILABLE",
-                        extra = "code=${availability.code}, message=${availability.message}"
-                    )
-
-                    logEnd(
-                        operation = "buyPro",
-                        flowId = purchaseFlowId,
-                        stage = BillingStage.FAILED,
-                        outcome = "PURCHASE_FLOW_FAILED",
-                        extra = "reason=billing_unavailable"
-                    )
-
-                    _state.value = UiState(
+                    mutableState.value = mutableState.value.copy(
                         isLoading = false,
-                        errorMessage = msg,
-                        stage = BillingStage.FAILED,
-                        purchaseFlowId = purchaseFlowId
+                        errorMessage = availability.message ?: "Платежи недоступны",
+                        stage = BillingStage.FAILED
                     )
                     return@launch
                 }
-
-                BillingAvailability.Available -> {
-                    logEnd(
-                        operation = "checkAvailability",
-                        flowId = purchaseFlowId,
-                        stage = BillingStage.PURCHASING,
-                        outcome = "BILLING_AVAILABLE"
-                    )
-                }
+                BillingAvailability.Available -> Unit
             }
 
-            // Шаг 2. SDK purchase.
-            logBegin(
-                operation = "purchaseSubscription",
-                flowId = purchaseFlowId,
-                stage = BillingStage.PURCHASING,
-                extra = "productId=${maskValue(proProduct.productId)}"
-            )
-
-            val payResult = try {
-                billingManager.purchaseSubscription(
-                    productId = proProduct.productId,
-                    flowId = purchaseFlowId
-                )
-            } catch (t: Throwable) {
-                logEnd(
-                    operation = "purchaseSubscription",
-                    flowId = purchaseFlowId,
-                    stage = BillingStage.FAILED,
-                    outcome = "PURCHASE_EXCEPTION",
-                    extra = "errorClass=${t.javaClass.simpleName}, errorMessage=${t.message}"
-                )
-
-                logEnd(
-                    operation = "buyPro",
-                    flowId = purchaseFlowId,
-                    stage = BillingStage.FAILED,
-                    outcome = "PURCHASE_FLOW_FAILED",
-                    extra = "reason=purchase_exception"
-                )
-
-                _state.value = UiState(
-                    isLoading = false,
-                    errorMessage = t.message ?: "Не удалось запустить оплату",
-                    stage = BillingStage.FAILED,
-                    purchaseFlowId = purchaseFlowId
-                )
-                return@launch
-            }
-
-            payResult.fold(
+            billingManager.purchaseSubscription(
+                productId = proProduct.productId,
+                flowId = flowId
+            ).fold(
                 onSuccess = { purchase ->
-                    logEnd(
-                        operation = "purchaseSubscription",
-                        flowId = purchaseFlowId,
-                        stage = BillingStage.PENDING_CONFIRM,
-                        outcome = "PURCHASE_SDK_SUCCESS",
-                        extra = buildString {
-                            append("productId=").append(maskValue(purchase.productId))
-                            append(", orderId=").append(maskValue(purchase.invoiceId))
-                            append(", purchaseToken=").append(maskValue(purchase.purchaseId))
-                        }
+                    subscriptionRepository.activatePro()
+                    analytics.track(
+                        AnalyticsEvent.PurchaseSuccess(
+                            source = purchaseAnalyticsContext.currentSource()
+                                ?: PaywallSource.PRO_SCREEN,
+                            productId = purchase.productId
+                        )
                     )
-
-                    // 🔥 СНАЧАЛА сохраняем pending (КРИТИЧНО)
-                    pendingCoordinator.onSdkSuccess(
-                        flowId = purchaseFlowId,
-                        productId = purchase.productId,
-                        orderId = purchase.invoiceId,
-                        purchaseToken = purchase.purchaseId
-                    )
-
-                    // SDK success — это только переход в ожидание server confirm.
-                    _state.value = _state.value.copy(
-                        isLoading = true,
-                        stage = BillingStage.PENDING_CONFIRM,
-                        purchaseFlowId = purchaseFlowId
-                    )
-
-                    // ✅ ТЕСТ Commit 3:
-// даём окно, чтобы успеть убить приложение после SDK success,
-// но до backend confirm.
-                    Log.d(
-                        TAG,
-                        "TEST_PENDING_WINDOW flowId=$purchaseFlowId delayBeforeConfirmMs=10000"
-                    )
-                    delay(10_000)
-
-                    // Шаг 3. Backend confirm.
-                    logBegin(
-                        operation = "confirmRustorePurchase",
-                        flowId = purchaseFlowId,
-                        stage = BillingStage.CONFIRMING,
-                        extra = buildString {
-                            append("productId=").append(maskValue(purchase.productId))
-                            append(", orderId=").append(maskValue(purchase.invoiceId))
-                            append(", purchaseToken=").append(maskValue(purchase.purchaseId))
-                        }
-                    )
-
-                    _state.value = _state.value.copy(
-                        isLoading = true,
-                        stage = BillingStage.CONFIRMING,
-                        purchaseFlowId = purchaseFlowId
-                    )
-
-                    val confirmResult = subscriptionRepository.confirmRustorePurchase(
-                        productId = purchase.productId,
-                        orderId = purchase.invoiceId,
-                        purchaseToken = purchase.purchaseId,
-                        flowId = purchaseFlowId
-                    )
-
-                    _state.value = confirmResult.fold(
-                        onSuccess = { plan ->
-                            logEnd(
-                                operation = "confirmRustorePurchase",
-                                flowId = purchaseFlowId,
-                                stage = BillingStage.ENTITLED,
-                                outcome = "CONFIRM_OK",
-                                extra = "plan=${plan.plan}, planUntil=${plan.planUntilEpochSeconds}"
-                            )
-
-                            logEnd(
-                                operation = "buyPro",
-                                flowId = purchaseFlowId,
-                                stage = BillingStage.ENTITLED,
-                                outcome = "PURCHASE_FLOW_OK",
-                                extra = "finalPlan=${plan.plan}"
-                            )
-
-                            // 🔥 очистка pending после server-consistent результата
-                            pendingCoordinator.onConfirmSuccess(purchaseFlowId)
-
-                            UiState(
-                                isLoading = false,
-                                infoMessage = "Подписка ВольтХом PRO активирована",
-                                stage = BillingStage.ENTITLED,
-                                purchaseFlowId = purchaseFlowId
-                            )
-                        },
-                        onFailure = { e ->
-                            logEnd(
-                                operation = "confirmRustorePurchase",
-                                flowId = purchaseFlowId,
-                                stage = BillingStage.FAILED,
-                                outcome = "CONFIRM_FAILED",
-                                extra = "errorClass=${e.javaClass.simpleName}, errorMessage=${e.message}"
-                            )
-
-                            logEnd(
-                                operation = "buyPro",
-                                flowId = purchaseFlowId,
-                                stage = BillingStage.FAILED,
-                                outcome = "PURCHASE_FLOW_FAILED_AFTER_SDK_SUCCESS",
-                                extra = "errorClass=${e.javaClass.simpleName}, errorMessage=${e.message}"
-                            )
-
-                            // 🔥 фиксируем неудачную попытку (retry потом)
-                            pendingCoordinator.onConfirmFailed(
-                                flowId = purchaseFlowId,
-                                error = e
-                            )
-
-                            UiState(
-                                isLoading = false,
-                                errorMessage = e.message ?: "Ошибка подтверждения покупки",
-                                stage = BillingStage.FAILED,
-                                purchaseFlowId = purchaseFlowId
-                            )
-                        }
+                    purchaseAnalyticsContext.clear()
+                    mutableState.value = mutableState.value.copy(
+                        isLoading = false,
+                        infoMessage = "Подписка ВольтХом PRO активирована",
+                        stage = BillingStage.ENTITLED
                     )
                 },
-                onFailure = { throwable ->
-                    val msg = when (throwable) {
-                        is BillingException -> mapBillingErrorToMessage(throwable)
-                        else -> throwable.message ?: "Не удалось запустить оплату"
-                    }
-
-                    val outcome = when ((throwable as? BillingException)?.code) {
-                        BillingErrorCode.USER_CANCELLED -> "PURCHASE_CANCELLED"
-                        else -> "PURCHASE_FAILED"
-                    }
-
-                    logEnd(
-                        operation = "purchaseSubscription",
-                        flowId = purchaseFlowId,
-                        stage = BillingStage.FAILED,
-                        outcome = outcome,
-                        extra = "errorClass=${throwable.javaClass.simpleName}, errorMessage=${throwable.message}"
-                    )
-
-                    logEnd(
-                        operation = "buyPro",
-                        flowId = purchaseFlowId,
-                        stage = BillingStage.FAILED,
-                        outcome = outcome,
-                        extra = "errorClass=${throwable.javaClass.simpleName}, errorMessage=${throwable.message}"
-                    )
-
-                    _state.value = UiState(
+                onFailure = { error ->
+                    mutableState.value = mutableState.value.copy(
                         isLoading = false,
-                        errorMessage = msg,
-                        stage = BillingStage.FAILED,
-                        purchaseFlowId = purchaseFlowId
+                        errorMessage = billingMessage(error),
+                        stage = BillingStage.FAILED
                     )
                 }
             )
         }
     }
 
-    private fun mapBillingErrorToMessage(e: BillingException): String =
-        when (e.code) {
-            BillingErrorCode.USER_CANCELLED ->
-                "Покупка отменена"
+    private fun List<SubscriptionPurchase>.hasVoltHomePro(): Boolean =
+        any { it.productId.value == proProduct.productId }
 
-            BillingErrorCode.RUSTORE_NOT_INSTALLED ->
-                "На устройстве не установлен RuStore. Установите магазин и попробуйте снова."
-
-            BillingErrorCode.RUSTORE_OUTDATED ->
-                "RuStore устарел. Обновите магазин и попробуйте снова."
-
+    private fun billingMessage(error: Throwable): String {
+        val billingError = error as? BillingException ?: return error.message ?: "Ошибка RuStore"
+        return when (billingError.code) {
+            BillingErrorCode.USER_CANCELLED -> "Покупка отменена"
+            BillingErrorCode.RUSTORE_NOT_INSTALLED -> "На устройстве не установлен RuStore"
+            BillingErrorCode.RUSTORE_OUTDATED -> "Обновите приложение RuStore"
+            BillingErrorCode.NETWORK_ERROR -> "Не удалось связаться с RuStore"
+            BillingErrorCode.BILLING_NOT_AVAILABLE -> "Платежи недоступны на этом устройстве"
             BillingErrorCode.APPLICATION_BANNED,
             BillingErrorCode.USER_BANNED,
-            BillingErrorCode.MONETIZATION_DISABLED_OR_COMPANY_PROBLEM ->
-                "Платежи временно недоступны. Попробуйте позже."
-
-            BillingErrorCode.NETWORK_ERROR ->
-                "Ошибка сети при обращении к RuStore. Проверьте интернет и попробуйте снова."
-
-            BillingErrorCode.BILLING_NOT_AVAILABLE ->
-                "Платежи недоступны на этом устройстве."
-
-            BillingErrorCode.UNKNOWN ->
-                e.message ?: "Не удалось выполнить покупку"
-        }
-
-    /**
-     * Генерация короткого flow id для трассировки.
-     */
-    private fun newFlowId(prefix: String): String {
-        val tail = UUID.randomUUID().toString().replace("-", "").take(12)
-        return "$prefix-$tail"
-    }
-
-    /**
-     * Маскирование чувствительных значений для логов.
-     */
-    private fun maskValue(value: String?): String {
-        if (value.isNullOrBlank()) return "null"
-        return when {
-            value.length <= 4 -> "***$value"
-            value.length <= 8 -> "${value.take(1)}***${value.takeLast(2)}"
-            else -> "${value.take(3)}***${value.takeLast(4)}"
+            BillingErrorCode.MONETIZATION_DISABLED_OR_COMPANY_PROBLEM -> "Платежи временно недоступны"
+            BillingErrorCode.UNKNOWN -> billingError.message ?: "Ошибка RuStore"
         }
     }
 
-    /**
-     * Лог начала шага.
-     */
-    private fun logBegin(
-        operation: String,
-        flowId: String,
-        stage: BillingStage,
-        extra: String? = null
-    ) {
-        val message = buildString {
-            append("BEGIN")
-            append(" op=").append(operation)
-            append(" flowId=").append(flowId)
-            append(" stage=").append(stage.name)
-            if (!extra.isNullOrBlank()) {
-                append(" ").append(extra)
-            }
-        }
-        Log.d(TAG, message)
-    }
-
-    /**
-     * Лог завершения шага.
-     */
-    private fun logEnd(
-        operation: String,
-        flowId: String,
-        stage: BillingStage,
-        outcome: String,
-        extra: String? = null
-    ) {
-        val message = buildString {
-            append("END")
-            append(" op=").append(operation)
-            append(" flowId=").append(flowId)
-            append(" stage=").append(stage.name)
-            append(" outcome=").append(outcome)
-            if (!extra.isNullOrBlank()) {
-                append(" ").append(extra)
-            }
-        }
-        Log.d(TAG, message)
-    }
-
-    fun debugCheckAvailability() {
-        viewModelScope.launch {
-            val flowId = newFlowId("availability")
-
-            logBegin(
-                operation = "debugCheckAvailability",
-                flowId = flowId,
-                stage = BillingStage.IDLE
-            )
-
-            val result = try {
-                billingManager.checkAvailability(flowId = flowId)
-            } catch (t: Throwable) {
-                logEnd(
-                    operation = "debugCheckAvailability",
-                    flowId = flowId,
-                    stage = BillingStage.FAILED,
-                    outcome = "EXCEPTION",
-                    extra = "errorClass=${t.javaClass.simpleName}, message=${t.message}"
-                )
-                return@launch
-            }
-
-            when (result) {
-                is BillingAvailability.Available -> {
-                    logEnd(
-                        operation = "debugCheckAvailability",
-                        flowId = flowId,
-                        stage = BillingStage.IDLE,
-                        outcome = "AVAILABLE"
-                    )
-                }
-
-                is BillingAvailability.Unavailable -> {
-                    logEnd(
-                        operation = "debugCheckAvailability",
-                        flowId = flowId,
-                        stage = BillingStage.FAILED,
-                        outcome = "UNAVAILABLE",
-                        extra = "code=${result.code}, message=${result.message}"
-                    )
-                }
-            }
-        }
-    }
-
-    fun debugForceRefreshSession() {
-        viewModelScope.launch {
-            val flowId = newFlowId("force-refresh")
-
-            logBegin(
-                operation = "debugForceRefreshSession",
-                flowId = flowId,
-                stage = BillingStage.IDLE
-            )
-
-            try {
-                // Если RefreshGate у тебя ещё не внедрён в этот VM,
-                // его надо добавить в конструктор.
-                val result = refreshGate.forceRefresh()
-
-                when (result) {
-                    is RefreshGate.Result.Succeeded -> {
-                        logEnd(
-                            operation = "debugForceRefreshSession",
-                            flowId = flowId,
-                            stage = BillingStage.IDLE,
-                            outcome = "REFRESH_OK",
-                            extra = "newExpSeconds=${result.newExpSeconds}"
-                        )
-                    }
-
-                    is RefreshGate.Result.Idle -> {
-                        logEnd(
-                            operation = "debugForceRefreshSession",
-                            flowId = flowId,
-                            stage = BillingStage.IDLE,
-                            outcome = "REFRESH_IDLE"
-                        )
-                    }
-
-                    is RefreshGate.Result.Failed -> {
-                        logEnd(
-                            operation = "debugForceRefreshSession",
-                            flowId = flowId,
-                            stage = BillingStage.FAILED,
-                            outcome = "REFRESH_FAILED",
-                            extra = "kind=${result.kind}"
-                        )
-                    }
-                }
-            } catch (t: Throwable) {
-                logEnd(
-                    operation = "debugForceRefreshSession",
-                    flowId = flowId,
-                    stage = BillingStage.FAILED,
-                    outcome = "EXCEPTION",
-                    extra = "errorClass=${t.javaClass.simpleName}, message=${t.message}"
-                )
-            }
-        }
-    }
+    private fun newFlowId(prefix: String): String =
+        "$prefix-${UUID.randomUUID().toString().replace("-", "").take(12)}"
 }

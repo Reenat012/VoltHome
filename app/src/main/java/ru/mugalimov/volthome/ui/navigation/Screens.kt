@@ -11,12 +11,13 @@ sealed class Screens(val route: String) {
     data object ExplicationScreen : Screens("explication")
     data object ReportPreview : Screens("report_preview")
 
-    // Экран MVP-визуализации щита.
-    // Важно: это отдельный экран, не пункт нижней навигации.
+    // Основной раздел компоновки и комплектации щита.
     data object PanelVisualizationScreen : Screens("panel_visualization")
 
     // Вложенные экраны.
     data object AddRoom : Screens("add_room")
+    data object ProjectWizard : Screens("project_wizard")
+    data object ProjectReconfiguration : Screens("project_reconfiguration")
 
     data object RoomDetailScreen : Screens("room_detail/{roomId}") {
         // Функция для генерации пути с roomId.

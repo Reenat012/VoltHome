@@ -30,6 +30,7 @@ import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
@@ -63,56 +64,49 @@ private enum class InfoTopic { POWER, POWER_FACTOR, DEMAND_RATIO, VOLTAGE }
 @Composable
 fun CardDevice(
     device: Device,
+    roomCalculatedPowerW: Double = 0.0,
     modifier: Modifier = Modifier,
     onEditClick: (Long) -> Unit = {},
     onDeleteClick: (Long) -> Unit = {}
 ) {
     var info by remember { mutableStateOf<InfoTopic?>(null) }
+    var showDetails by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
 
     val t = VhColors.tokens
+    val calculatedPowerW = device.power * device.demandRatio
+    val calculatedCurrentA = device.current * device.demandRatio
+    val contribution = if (roomCalculatedPowerW > 0.0) {
+        (calculatedPowerW / roomCalculatedPowerW).coerceIn(0.0, 1.0)
+    } else 0.0
 
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
+    ElevatedCard(
+        shape = RoundedCornerShape(18.dp),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
+        colors = CardDefaults.elevatedCardColors(containerColor = t.surfaceAlt),
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable { showDetails = true }
     ) {
-        DeviceAvatar(
-            type = device.deviceType,
-            modifier = Modifier
-                .size(36.dp)
-                .padding(end = 12.dp)
-        )
-
-        // Нейтральная индустриальная карточка без “раскраски по типам”
-        val cardBg = t.surfaceAlt
-
-        ElevatedCard(
-            shape = RoundedCornerShape(16.dp),
-            elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
-            colors = CardDefaults.elevatedCardColors(containerColor = cardBg),
-            modifier = Modifier.fillMaxWidth()
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(12.dp)
-            ) {
-
-                // основной контент карточки
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                DeviceAvatar(type = device.deviceType, modifier = Modifier.size(42.dp))
                 Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(end = 40.dp) // запас справа под меню
+                        .weight(1f)
+                        .padding(horizontal = 12.dp)
                 ) {
                     Text(
                         text = device.name,
                         style = MaterialTheme.typography.titleMedium,
                         color = t.textPrimary,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
-
                     Text(
                         text = device.deviceType.label(context),
                         style = MaterialTheme.typography.bodySmall,
@@ -120,51 +114,12 @@ fun CardDevice(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-
-                    Spacer(Modifier.height(10.dp))
-
-                    // параметры
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Pill(
-                            text = "Мощность: ${device.power} Вт",
-                            onClick = { info = InfoTopic.POWER }
-                        )
-                        Pill(
-                            text = device.voltage.toReadableLabel(),
-                            onClick = { info = InfoTopic.VOLTAGE }
-                        )
-                    }
-
-                    Spacer(Modifier.height(8.dp))
-
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Pill(
-                            text = "cos φ = ${device.powerFactor.format(2)}",
-                            onClick = { info = InfoTopic.POWER_FACTOR }
-                        )
-                        Pill(
-                            text = "Коэф. спроса = ${device.demandRatio.format(2)}",
-                            onClick = { info = InfoTopic.DEMAND_RATIO }
-                        )
-                    }
                 }
-
-                // меню действий (Редактировать / Удалить) в правом верхнем углу
                 var menuExpanded by remember { mutableStateOf(false) }
-
-                Box(
-                    modifier = Modifier.align(Alignment.TopEnd)
-                ) {
+                Box {
                     IconButton(
                         onClick = { menuExpanded = true },
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(36.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.MoreVert,
@@ -208,7 +163,65 @@ fun CardDevice(
                     }
                 }
             }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                DeviceMetric(
+                    label = "Паспортная",
+                    value = "${(device.power / 1000.0).format(2)} кВт",
+                    modifier = Modifier.weight(1f)
+                )
+                DeviceMetric(
+                    label = "Расчётная",
+                    value = "${(calculatedPowerW / 1000.0).format(2)} кВт",
+                    modifier = Modifier.weight(1f)
+                )
+                DeviceMetric(
+                    label = "Ток расч.",
+                    value = "${calculatedCurrentA.format(2)} А",
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (device.requiresDedicatedCircuit) Pill("Выделенная линия")
+                Pill(if (device.requiresSocketConnection) "Розеточное подключение" else "Прямое подключение")
+                if (device.hasMotor) Pill("Двигательная нагрузка")
+                if (device.voltage.type == VoltageType.AC_3PHASE) Pill("3-фазное устройство")
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Вклад в нагрузку комнаты", style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+                    Text("${(contribution * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = t.textSecondary)
+                }
+                LinearProgressIndicator(
+                    progress = { contribution.toFloat() },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = t.primary,
+                    trackColor = t.surface
+                )
+            }
         }
+    }
+
+    if (showDetails) {
+        DeviceEngineeringSheet(
+            device = device,
+            calculatedPowerW = calculatedPowerW,
+            calculatedCurrentA = calculatedCurrentA,
+            contribution = contribution,
+            onDismiss = { showDetails = false },
+            onEdit = {
+                showDetails = false
+                onEditClick(device.id)
+            }
+        )
     }
 
     // лист пояснений остаётся без изменений по структуре/логике
@@ -237,6 +250,113 @@ fun CardDevice(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun DeviceMetric(label: String, value: String, modifier: Modifier = Modifier) {
+    val t = VhColors.tokens
+    Surface(modifier = modifier, shape = RoundedCornerShape(12.dp), color = t.surface) {
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(label, style = MaterialTheme.typography.labelSmall, color = t.textMuted, maxLines = 1)
+            Text(value, style = MaterialTheme.typography.labelLarge, color = t.textPrimary, maxLines = 1)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DeviceEngineeringSheet(
+    device: Device,
+    calculatedPowerW: Double,
+    calculatedCurrentA: Double,
+    contribution: Double,
+    onDismiss: () -> Unit,
+    onEdit: () -> Unit
+) {
+    val t = VhColors.tokens
+    val context = LocalContext.current
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                DeviceAvatar(device.deviceType, Modifier.size(48.dp))
+                Column(Modifier.padding(start = 12.dp)) {
+                    Text(
+                        device.name,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = t.textPrimary,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(device.deviceType.label(context), style = MaterialTheme.typography.bodyMedium, color = t.textSecondary)
+                }
+            }
+
+            Surface(shape = RoundedCornerShape(18.dp), color = t.primarySurface) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text("Расчётный вклад", style = MaterialTheme.typography.labelMedium, color = t.textSecondary)
+                        Text("${(calculatedPowerW / 1000.0).format(2)} кВт", style = MaterialTheme.typography.headlineSmall, color = t.textPrimary)
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text("Расчётный ток", style = MaterialTheme.typography.labelMedium, color = t.textSecondary)
+                        Text("${calculatedCurrentA.format(2)} А", style = MaterialTheme.typography.headlineSmall, color = t.primary)
+                    }
+                }
+            }
+
+            DeviceDetailRow("Установленная мощность", "${device.power} Вт")
+            DeviceDetailRow("Коэффициент спроса", device.demandRatio.format(2))
+            DeviceDetailRow("Коэффициент мощности", device.powerFactor.format(2))
+            DeviceDetailRow("Питание", device.voltage.toReadableLabel())
+            DeviceDetailRow("Вклад в комнату", "${(contribution * 100).toInt()}% расчётной нагрузки")
+            DeviceDetailRow("Подключение", if (device.requiresSocketConnection) "Через розетку" else "Прямое")
+            DeviceDetailRow("Линия", if (device.requiresDedicatedCircuit) "Выделенная" else "Допускается групповая")
+
+            Text(
+                "Расчётная мощность получена из паспортной мощности с учётом коэффициента спроса. " +
+                    "Ток дополнительно учитывает напряжение и коэффициент мощности.",
+                style = MaterialTheme.typography.bodySmall,
+                color = t.textSecondary
+            )
+            androidx.compose.material3.OutlinedButton(
+                onClick = onEdit,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Rounded.Edit, contentDescription = null)
+                Text("Изменить параметры", Modifier.padding(start = 8.dp))
+            }
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+@Composable
+private fun DeviceDetailRow(label: String, value: String) {
+    val t = VhColors.tokens
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = t.textSecondary)
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = t.textPrimary,
+            modifier = Modifier.padding(start = 16.dp),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -292,7 +412,7 @@ private fun Pill(text: String, onClick: (() -> Unit)? = null) {
     }
 }
 
-private fun Double.format(d: Int) = "%.${d}f".format(this).replace(',', '.')
+private fun Double.format(d: Int) = "%.${d}f".format(this).replace('.', ',')
 
 private fun Voltage.toReadableLabel(): String {
     val phase = when (this.type) {

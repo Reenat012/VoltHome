@@ -13,8 +13,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.DragIndicator
+import androidx.compose.material.icons.outlined.Cable
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.rounded.AccountTree
+import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
@@ -52,9 +54,13 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import ru.mugalimov.volthome.R
-import ru.mugalimov.volthome.data.billing.pending.PendingConfirmCoordinator
+import ru.mugalimov.volthome.BuildConfig
+import ru.mugalimov.volthome.core.analytics.AnalyticsEvent
+import ru.mugalimov.volthome.core.analytics.AnalyticsRuntimeEntryPoint
+import ru.mugalimov.volthome.core.analytics.PaywallSource
 import ru.mugalimov.volthome.data.ownership.OwnershipOverridesCleaner
 import ru.mugalimov.volthome.data.repository.ManualEditSessionRepository
 import ru.mugalimov.volthome.domain.model.PlanCapabilities
@@ -65,6 +71,8 @@ import ru.mugalimov.volthome.ui.manual.LocalManualModeGuard
 import ru.mugalimov.volthome.ui.manual.ManualModeGuard
 import ru.mugalimov.volthome.ui.manual.ManualModeGuardDialog
 import ru.mugalimov.volthome.ui.model.LocalUserPlan
+import ru.mugalimov.volthome.ui.model.ManualModeControlAvailability
+import ru.mugalimov.volthome.ui.model.ManualModeUiPolicy
 import ru.mugalimov.volthome.ui.model.ProjectUi
 import ru.mugalimov.volthome.ui.model.UserProfileUi
 import ru.mugalimov.volthome.ui.navigation.MainBottomNavBar
@@ -81,6 +89,7 @@ import ru.mugalimov.volthome.ui.viewmodel.AuthViewModel
 import ru.mugalimov.volthome.ui.viewmodel.ManualModeAppBarViewModel
 import ru.mugalimov.volthome.ui.viewmodel.ProfileViewModel
 import ru.mugalimov.volthome.ui.viewmodel.ProjectsViewModel
+import ru.mugalimov.volthome.ui.viewmodel.SubscriptionViewModel
 import ru.mugalimov.volthome.ui.viewmodel.UserPlanViewModel
 import ru.mugalimov.volthome.ui.onboarding.hints.BaseHints
 import ru.mugalimov.volthome.ui.onboarding.model.ProjectsOnboardingFacts
@@ -93,27 +102,36 @@ fun MainApp(
     val appNavController = rememberNavController()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
 
+    // При каждом запуске сверяем локальный PRO с активной подпиской RuStore.
+    // Временная ошибка RuStore не сбрасывает сохранённое локальное право.
+    val subscriptionVm: SubscriptionViewModel = hiltViewModel()
+    LaunchedEffect(subscriptionVm) {
+        // Локальное право доступно сразу. Сетевую/DRM-инициализацию RuStore
+        // не запускаем одновременно с построением первого интерактивного экрана.
+        if (!BuildConfig.DEBUG) {
+            delay(2_500)
+            subscriptionVm.refreshStatus()
+        }
+    }
+
     // -----------------------------
     // ✅ Глобальные зависимости / шины
     // -----------------------------
     val context = LocalContext.current
     val appContext = context.applicationContext
 
-    val pendingCoordinator = remember {
+    val analyticsRuntime = remember(appContext) {
         EntryPointAccessors.fromApplication(
-            context.applicationContext,
-            BillingPendingEntryPoint::class.java
-        ).pendingConfirmCoordinator()
+            appContext,
+            AnalyticsRuntimeEntryPoint::class.java
+        )
     }
+    val analytics = analyticsRuntime.analyticsTracker()
+    val purchaseAnalyticsContext = analyticsRuntime.purchaseAnalyticsContext()
 
     // ✅ Guard: единая точка запрета действий в manual
     val manualGuard = remember {
         ManualModeGuard.fromApp(appContext)
-    }
-
-    LaunchedEffect(Unit) {
-        // 🔥 cold start replay
-        pendingCoordinator.tryReplay("cold_start")
     }
 
     // ✅ Paywall bus (глобально)
@@ -198,10 +216,12 @@ fun MainApp(
 
     val manualSession = manualSessionFlow.collectAsState(initial = null).value
 
-    val manualChipState = remember(manualSession) {
+    val manualAppBarVm: ManualModeAppBarViewModel = hiltViewModel()
+    val hasManualOverrides = manualAppBarVm.hasManualOverrides.collectAsState().value
+
+    val manualChipState = remember(manualSession, hasManualOverrides) {
         when {
-            manualSession?.manualModeActive != true -> ManualModeChipState.AUTO
-            else -> {
+            manualSession?.manualModeActive == true -> {
                 val isDirty = try {
                     manualSession.draftState != manualSession.baseState
                 } catch (_: Throwable) {
@@ -209,11 +229,14 @@ fun MainApp(
                 }
                 if (isDirty) ManualModeChipState.DIRTY else ManualModeChipState.MANUAL
             }
+            hasManualOverrides -> ManualModeChipState.SAVED_MANUAL
+            else -> ManualModeChipState.AUTO
         }
     }
+    val manualEditorActive = manualChipState == ManualModeChipState.MANUAL ||
+        manualChipState == ManualModeChipState.DIRTY
 
     // ✅ ручной режим (AppBar, глобально на проект)
-    val manualAppBarVm: ManualModeAppBarViewModel = hiltViewModel()
     val isManualMode = manualAppBarVm.isManualMode.collectAsState().value
     // (isManualMode сейчас может быть не использован напрямую — оставляю как было)
 
@@ -255,6 +278,8 @@ fun MainApp(
     // ✅ Paywall logic (capabilities-aware)
     // -----------------------------
     var paywallFeature by remember { mutableStateOf<ProFeature?>(null) }
+    var paywallSource by remember { mutableStateOf(PaywallSource.PRO_SCREEN) }
+    var paywallRequestId by remember { mutableStateOf<Long?>(null) }
 
     // ✅ Единый диалог Save/Cancel/Stay для manual + отложенное действие (pendingProceed)
     var manualExitDialogVisible by remember { mutableStateOf(false) }
@@ -272,10 +297,22 @@ fun MainApp(
 
     LaunchedEffect(paywallBus, userPlan) {
         val caps = userPlan.capabilities
-        paywallBus.events.collect { feature ->
-            if (isFeatureAllowed(feature, caps)) return@collect
-            paywallFeature = feature
+        paywallBus.events.collect { request ->
+            if (isFeatureAllowed(request.feature, caps)) return@collect
+            purchaseAnalyticsContext.begin(request.source)
+            paywallSource = request.source
+            paywallFeature = request.feature
+            paywallRequestId = request.id
         }
+    }
+
+    LaunchedEffect(paywallRequestId) {
+        if (paywallFeature == null || paywallRequestId == null) return@LaunchedEffect
+        purchaseAnalyticsContext
+            .markPaywallShownIfNeeded(paywallSource)
+            ?.let { source ->
+                analytics.track(AnalyticsEvent.PaywallShown(source))
+            }
     }
 
     LaunchedEffect(userPlan, paywallFeature) {
@@ -292,6 +329,56 @@ fun MainApp(
         val feature = paywallFeature!!
 
         when (feature) {
+            ProFeature.PANEL_VISUALIZATION -> {
+                AlertDialog(
+                    onDismissRequest = { paywallFeature = null },
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Rounded.GridView,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Визуализация щита",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    },
+                    text = {
+                        Column {
+                            Text(
+                                text = "Фронтальная компоновка щита доступна в ВольтХом PRO.",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            PaywallBulletItem("аппараты раскладываются по DIN-рейкам")
+                            PaywallBulletItem("видны фазы, занятые модули и резерв")
+                            PaywallBulletItem("по нажатию открываются параметры группы и защиты")
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                paywallFeature = null
+                                appNavController.navigate(Screens.SubscriptionScreen.route) {
+                                    launchSingleTop = true
+                                }
+                            }
+                        ) {
+                            Text("Открыть PRO")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { paywallFeature = null }) {
+                            Text("Не сейчас")
+                        }
+                    }
+                )
+            }
+
             ProFeature.SINGLE_LINE_DIAGRAM -> {
                 AlertDialog(
                     onDismissRequest = { paywallFeature = null },
@@ -506,6 +593,62 @@ fun MainApp(
                 )
             }
 
+            ProFeature.CABLE_LINE_CALCULATION -> {
+                AlertDialog(
+                    onDismissRequest = { paywallFeature = null },
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Outlined.Cable,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Расчёт кабельных линий",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    },
+                    text = {
+                        Column {
+                            Text(
+                                text = "В бесплатной версии виден предварительный профиль кабеля. PRO учитывает фактические условия каждой трассы.",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            PaywallBulletItem("длина, материал и изоляция проводника")
+                            PaywallBulletItem("способ прокладки, температура и группировка")
+                            PaywallBulletItem("проверка допустимого тока Iz и падения напряжения")
+                            PaywallBulletItem("результаты в линиях, схеме и PDF-отчёте")
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "Попробуйте ВольтХом PRO бесплатно в течение 7 дней.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                paywallFeature = null
+                                appNavController.navigate(Screens.SubscriptionScreen.route) {
+                                    launchSingleTop = true
+                                }
+                            }
+                        ) { Text("Попробовать PRO") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { paywallFeature = null }) {
+                            Text("Не сейчас")
+                        }
+                    }
+                )
+            }
+
             ProFeature.DECISION_DETAILS -> {
                 AlertDialog(
                     onDismissRequest = { paywallFeature = null },
@@ -553,18 +696,16 @@ fun MainApp(
         }
     }
 
-    // Подтягиваем профиль, когда авторизация успешна
-    LaunchedEffect(authVm.state.collectAsState().value) {
-        val s = authVm.state.value
-        if (s is AuthViewModel.State.Success) {
-            profileVm.refresh()
+    // Подтягиваем локальный профиль, когда локальная сессия готова.
+    val authState by authVm.state.collectAsState()
 
-            // 🔥 Commit 3 — replay pending после логина
-            pendingCoordinator.tryReplay("login")
+    LaunchedEffect(authState) {
+        if (authState is AuthViewModel.State.Success) {
+            profileVm.refresh()
         }
     }
 
-    val profileFlow: Flow<UserProfileUi?> =
+    val profileFlow: Flow<UserProfileUi?> = remember(profileVm) {
         profileVm.state.map { st ->
             when (st) {
                 is ProfileViewModel.UiState.Data -> {
@@ -586,16 +727,24 @@ fun MainApp(
                 else -> null
             }
         }
+    }
 
     val bottomRoutes = remember {
         setOf(
             Screens.RoomsList.route,
             Screens.LoadsScreen.route,
-            Screens.ExplicationScreen.route
+            Screens.ExplicationScreen.route,
+            Screens.PanelVisualizationScreen.route
         )
     }
     val navBackStackEntry = appNavController.currentBackStackEntryAsState().value
     val currentRoute = navBackStackEntry?.destination?.route
+    val manualModeControlAvailability = remember(currentRoute, manualChipState) {
+        ManualModeUiPolicy.availability(
+            route = currentRoute,
+            manualModeActive = manualChipState != ManualModeChipState.AUTO
+        )
+    }
 
     // -----------------------------
     // ✅ Текущий экран для onboarding host
@@ -608,6 +757,8 @@ fun MainApp(
             currentRoute == Screens.RoomsList.route -> OnboardingScreen.ROOMS
             currentRoute == Screens.LoadsScreen.route -> OnboardingScreen.LOADS
             currentRoute == Screens.ExplicationScreen.route -> OnboardingScreen.EXPLICATION
+            currentRoute == Screens.PanelVisualizationScreen.route ->
+                OnboardingScreen.PANEL_VISUALIZATION
             currentRoute == Screens.AddRoom.route -> OnboardingScreen.ADD_ROOM_SHEET
 
             currentRoute?.startsWith("room_detail/") == true -> OnboardingScreen.ROOM_DETAILS
@@ -626,6 +777,7 @@ fun MainApp(
                 append("ORCH_BEGIN")
                 append(" currentScreen=").append(currentOnboardingScreen?.name ?: "null")
                 append(" projectsCount=").append(projectsOnboardingFacts.projectsCount)
+                append(" isLoading=").append(projectsOnboardingFacts.isLoading)
                 append(" drawerOpen=").append(drawerState.currentValue == DrawerValue.Open)
             }
         )
@@ -689,6 +841,7 @@ fun MainApp(
                 // ✅ Пробрасываем текущий экран вниз,
                 // чтобы чип "Ручной" мог стать anchor именно на Экспликации.
                 manualChipOnboardingScreen = currentOnboardingScreen,
+                manualModeControlAvailability = manualModeControlAvailability,
 
                 manualExitDialogVisible = manualExitDialogVisible,
                 onManualExitDialogDismiss = { dismissManualExitDialog() },
@@ -766,17 +919,28 @@ fun MainApp(
                 },
 
                 onManualModeClick = {
-                    if (manualChipState == ManualModeChipState.AUTO) {
-                        manualAppBarVm.onManualModeClick()
-                    } else {
-                        requestManualExit(proceedAfterExit = null)
+                    when {
+                        manualChipState == ManualModeChipState.MANUAL ||
+                            manualChipState == ManualModeChipState.DIRTY -> {
+                            requestManualExit(proceedAfterExit = null)
+                        }
+                        manualModeControlAvailability == ManualModeControlAvailability.EDITABLE -> {
+                            manualAppBarVm.onManualModeClick()
+                        }
+                        else -> {
+                            scope.launch {
+                                snackbarHostState.showSnackbar(
+                                    "Ручная корректировка доступна на экранах «Нагрузки» и «Щит»"
+                                )
+                            }
+                        }
                     }
                 },
                 manualChipState = manualChipState,
 
                 onLogout = {
                     val proceed = { authVm.signOut() }
-                    if (manualChipState == ManualModeChipState.AUTO) proceed()
+                    if (!manualEditorActive) proceed()
                     else requestManualExit(proceedAfterExit = proceed)
                 },
 
@@ -784,25 +948,21 @@ fun MainApp(
                     val proceed = {
                         projectsVm.selectProject(id)
                         appNavController.navigate(Screens.RoomsList.route) {
-                            popUpTo(appNavController.graph.findStartDestination().id) { saveState = true }
+                            popUpTo(appNavController.graph.findStartDestination().id) { inclusive = false }
                             launchSingleTop = true
-                            restoreState = true
                         }
                     }
-                    if (manualChipState == ManualModeChipState.AUTO) proceed()
+                    if (!manualEditorActive) proceed()
                     else requestManualExit(proceedAfterExit = proceed)
                 },
 
                 onCreateProject = {
                     val proceed = {
-                        projectsVm.createNewProject()
-                        appNavController.navigate(Screens.RoomsList.route) {
-                            popUpTo(appNavController.graph.findStartDestination().id) { saveState = true }
+                        appNavController.navigate(Screens.ProjectWizard.route) {
                             launchSingleTop = true
-                            restoreState = true
                         }
                     }
-                    if (manualChipState == ManualModeChipState.AUTO) proceed()
+                    if (!manualEditorActive) proceed()
                     else requestManualExit(proceedAfterExit = proceed)
                 },
 
@@ -811,40 +971,41 @@ fun MainApp(
                     val proceed = {
                         appNavController.navigate(Screens.SettingsScreen.route) { launchSingleTop = true }
                     }
-                    if (manualChipState == ManualModeChipState.AUTO) proceed()
+                    if (!manualEditorActive) proceed()
                     else requestManualExit(proceedAfterExit = proceed)
                 },
                 onOpenProfile = {
                     val proceed = {
                         appNavController.navigate(Screens.ProfileScreen.route) { launchSingleTop = true }
                     }
-                    if (manualChipState == ManualModeChipState.AUTO) proceed()
+                    if (!manualEditorActive) proceed()
                     else requestManualExit(proceedAfterExit = proceed)
                 },
                 onOpenSubscription = {
                     val proceed = {
+                        purchaseAnalyticsContext.begin(PaywallSource.PRO_MENU)
                         appNavController.navigate(Screens.SubscriptionScreen.route) { launchSingleTop = true }
                     }
-                    if (manualChipState == ManualModeChipState.AUTO) proceed()
+                    if (!manualEditorActive) proceed()
                     else requestManualExit(proceedAfterExit = proceed)
                 },
                 onOpenAbout = {
                     val proceed = {
                         rootNavController.navigate(Screens.AboutScreen.route) { launchSingleTop = true }
                     }
-                    if (manualChipState == ManualModeChipState.AUTO) proceed()
+                    if (!manualEditorActive) proceed()
                     else requestManualExit(proceedAfterExit = proceed)
                 },
 
                 // ✅ Коммит 8: rename/delete тоже не должны обходить ручной режим
                 onRenameProject = { id, newName ->
                     val proceed = { projectsVm.renameProject(id, newName) }
-                    if (manualChipState == ManualModeChipState.AUTO) proceed()
+                    if (!manualEditorActive) proceed()
                     else requestManualExit(proceedAfterExit = proceed)
                 },
                 onDeleteProject = { id ->
                     val proceed = { projectsVm.deleteProject(id) }
-                    if (manualChipState == ManualModeChipState.AUTO) proceed()
+                    if (!manualEditorActive) proceed()
                     else requestManualExit(proceedAfterExit = proceed)
                 },
 
@@ -858,8 +1019,14 @@ fun MainApp(
                     navController = appNavController,
                     modifier = Modifier.fillMaxSize(),
                     padding = PaddingValues(),
-                    showOnboarding = { /* no-op */ },
-                    authVm = authVm
+                    showOnboarding = {
+                        appNavController.navigate(Screens.OnBoardingScreen.route) {
+                            launchSingleTop = true
+                        }
+                    },
+                    authVm = authVm,
+                    paywallBus = paywallBus,
+                    projectName = appBarTitle
                 )
             }
 
@@ -885,6 +1052,8 @@ private fun isFeatureAllowed(feature: ProFeature, caps: PlanCapabilities): Boole
         ProFeature.CALC_WARNINGS -> caps.professionalReportSections
         ProFeature.DECISION_DETAILS -> caps.professionalReportSections
         ProFeature.SINGLE_LINE_DIAGRAM -> caps.pdfExport
+        ProFeature.PANEL_VISUALIZATION -> caps.panelVisualization
+        ProFeature.CABLE_LINE_CALCULATION -> caps.cableLineCalculation
     }
 }
 
@@ -928,10 +1097,4 @@ private fun PaywallBulletItem(text: String) {
             style = MaterialTheme.typography.bodyMedium
         )
     }
-}
-
-@EntryPoint
-@InstallIn(SingletonComponent::class)
-interface BillingPendingEntryPoint {
-    fun pendingConfirmCoordinator(): PendingConfirmCoordinator
 }

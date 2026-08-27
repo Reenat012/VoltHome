@@ -1,29 +1,27 @@
 package ru.mugalimov.volthome.ui.screens.loads
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.outlined.Bolt
-import androidx.compose.material.icons.outlined.Power
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -35,58 +33,61 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ru.mugalimov.volthome.domain.model.DistributionDecision
 import ru.mugalimov.volthome.domain.model.phase_load.PhaseLoadItem
+import ru.mugalimov.volthome.ui.format.UiTextFormat
 
 @Composable
 fun ThreePhaseLoadsSection(
     item: PhaseLoadItem,
     decisionsByGroupNumber: Map<Int, List<DistributionDecision>>,
     modifier: Modifier = Modifier,
-
-    // ✅ теперь не используется (оставлено для совместимости с вызовами)
     onDecisionDetailsClick: (groupNumber: Int) -> Unit = {},
 ) {
+    @Suppress("UNUSED_VARIABLE")
+    val compatibilityClick = onDecisionDetailsClick
     var expanded by remember { mutableStateOf(false) }
 
     Card(
-        modifier = modifier,
+        modifier = modifier.animateContentSize(),
         shape = MaterialTheme.shapes.extraLarge,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
-        Column(Modifier.fillMaxWidth()) {
-
+        Column {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { expanded = !expanded }
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Icon(imageVector = Icons.Outlined.Bolt, contentDescription = null)
-
-                Text(
-                    text = "3-фазные нагрузки",
-                    modifier = Modifier.padding(start = 8.dp),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-
-                Spacer(Modifier.weight(1f))
-
-                AssistChip(
-                    onClick = {},
-                    label = { Text("${item.groups.size}") },
-                    leadingIcon = { Icon(imageVector = Icons.Outlined.Power, contentDescription = null) },
-                    border = AssistChipDefaults.assistChipBorder(false)
-                )
-
+                Box(
+                    modifier = Modifier.size(34.dp)
+                        .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "3Ф",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Трёхфазные нагрузки", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        text = "${UiTextFormat.power(item.totalPower)} · ${UiTextFormat.amperes(item.totalCurrent)} · " +
+                            "${item.groups.size} ${plural(item.groups.size, "группа", "группы", "групп")}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Icon(
                     imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                     contentDescription = if (expanded) "Свернуть" else "Развернуть",
-                    modifier = Modifier.padding(start = 8.dp)
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
@@ -95,129 +96,74 @@ fun ThreePhaseLoadsSection(
                 enter = fadeIn() + expandVertically(),
                 exit = shrinkVertically() + fadeOut()
             ) {
-                Column {
-                    Text(
-                        text = "${item.totalPower.toInt()} Вт • ${"%.2f".format(item.totalCurrent)} A",
-                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp)) {
+                    item.groups.forEachIndexed { index, group ->
+                        var detailsExpanded by remember(group.groupId) { mutableStateOf(false) }
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Text(
+                                text = "Группа ${group.groupNumber} · ${group.roomName}",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = group.devices.joinToString { it.name }.ifBlank { "Без устройств" },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "${UiTextFormat.power(group.totalPower)} · " +
+                                    "расчётный ток ${UiTextFormat.amperes(group.totalCurrent)}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
 
-                    Column(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        item.groups.forEachIndexed { index, group ->
-                            Column {
+                            val decision = decisionsByGroupNumber[group.groupNumber].orEmpty().lastOrNull()
+                            if (decision != null) {
                                 Text(
-                                    text = "Группа №${group.groupNumber} (${group.roomName})",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    fontWeight = FontWeight.Medium
+                                    text = if (detailsExpanded) "Скрыть расчёт" else "Как учтена нагрузка",
+                                    modifier = Modifier.clickable { detailsExpanded = !detailsExpanded },
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary
                                 )
-                                Spacer(Modifier.height(8.dp))
-
-                                val events = decisionsByGroupNumber[group.groupNumber].orEmpty()
-                                val decision = events.lastOrNull()
-
-                                if (decision != null) {
-                                    val ui = decision.toDecisionExplanationUi()
-
-                                    // ✅ Локальное состояние раскрытия "Подробнее" (теперь это B)
-                                    var detailsExpanded by remember(group.groupId) { mutableStateOf(false) }
-
-                                    // A) Заголовок (всегда)
-                                    Text(
-                                        text = ui.levelA_title,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-
-                                    // A) Метрика (всегда, если есть)
-                                    if (ui.levelA_metric.isNotBlank()) {
-                                        Spacer(Modifier.height(2.dp))
-                                        Text(
-                                            text = ui.levelA_metric,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-
-                                    Spacer(Modifier.height(6.dp))
-
-                                    // ✅ "Подробнее" → раскрывает/скрывает уровень B
-                                    Text(
-                                        text = if (detailsExpanded) "Скрыть" else "Подробнее",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.clickable { detailsExpanded = !detailsExpanded }
-                                    )
-
-                                    // ✅ Уровень B показываем только при detailsExpanded
-                                    AnimatedVisibility(
-                                        visible = detailsExpanded,
-                                        enter = fadeIn() + expandVertically(),
-                                        exit = shrinkVertically() + fadeOut()
+                                AnimatedVisibility(detailsExpanded) {
+                                    val explanation = decision.toDecisionExplanationUi()
+                                    Column(
+                                        modifier = Modifier.padding(top = 5.dp),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp)
                                     ) {
-                                        Column(Modifier.padding(top = 6.dp)) {
-
-                                            // B) Причина
-                                            if (ui.levelB_reason.isNotBlank()) {
-                                                Text(
-                                                    text = ui.levelB_reason,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-
-                                            Spacer(Modifier.height(2.dp))
-
-                                            // B) До/После
-                                            Text(
-                                                text = ui.levelB_before,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                            Text(
-                                                text = ui.levelB_after,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
+                                        Text(explanation.levelA_title, style = MaterialTheme.typography.bodySmall)
+                                        if (explanation.levelA_metric.isNotBlank()) {
+                                            Text(explanation.levelA_metric, style = MaterialTheme.typography.bodySmall)
+                                        }
+                                        if (explanation.levelB_reason.isNotBlank()) {
+                                            Text(explanation.levelB_reason, style = MaterialTheme.typography.bodySmall)
                                         }
                                     }
-
-                                    Spacer(Modifier.height(8.dp))
-                                }
-
-                                FlowRow(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    group.devices.forEach { device ->
-                                        AssistChip(
-                                            onClick = {},
-                                            label = { Text(device.name) },
-                                            border = AssistChipDefaults.assistChipBorder(false)
-                                        )
-                                    }
-                                }
-
-                                Spacer(Modifier.height(8.dp))
-                                Text(
-                                    text = "${group.totalPower.toInt()} Вт • ${"%.2f".format(group.totalCurrent)} A",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-
-                                if (index != item.groups.lastIndex) {
-                                    Spacer(Modifier.height(12.dp))
-                                    Divider()
                                 }
                             }
                         }
+                        if (index != item.groups.lastIndex) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
                 }
             }
         }
+    }
+}
+
+private fun plural(value: Int, one: String, few: String, many: String): String {
+    val mod100 = value % 100
+    val mod10 = value % 10
+    return when {
+        mod100 in 11..14 -> many
+        mod10 == 1 -> one
+        mod10 in 2..4 -> few
+        else -> many
     }
 }
